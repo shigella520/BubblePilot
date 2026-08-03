@@ -19,15 +19,23 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
   <a href="doc/目标需求.md">Requirements</a> ·
   <a href="doc/概要设计.md">Architecture</a> ·
   <a href="doc/部署与运维.md">Operations</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/shigella520/BubblePilot/actions/workflows/ci.yml"><img src="https://github.com/shigella520/BubblePilot/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5" /></a>
+  <a href="https://fastify.dev/"><img src="https://img.shields.io/badge/Fastify-5-000000?logo=fastify&logoColor=white" alt="Fastify 5" /></a>
+  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
+</p>
+
 ## Status
 
-BubblePilot is currently in the architecture and documentation phase. The first implementation will deliver message ingestion, archiving, event matching, workflow execution, AI interaction, and Web administration incrementally.
+BubblePilot is now in active development. The runnable M1 ingestion and archive slice supports BlueBubbles `new-message` webhooks, chat-scope filtering, idempotent PostgreSQL archiving, health checks, and a token-protected minimal query API. Event matching and basic actions are next.
 
 ## Core capabilities
 
@@ -55,14 +63,27 @@ Each external event is processed with a stable idempotency key. The message is n
 
 ## Getting started
 
-There is no runnable application image yet. Start with:
+Docker and Docker Compose are required. Copy the environment template, replace every `CHANGE_ME` value—especially the database password, API token, and webhook secret—and add the BlueBubbles Chat GUIDs to archive to `MONITORED_CHAT_IDS`:
+
+```bash
+cp .env.example .env
+docker compose config
+docker compose up -d --build
+curl --fail http://127.0.0.1:8080/health/ready
+```
+
+Subscribe to `New Messages` in BlueBubbles Server and configure this webhook URL:
+
+```text
+https://your-domain.example/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_WEBHOOK_SECRET>
+```
+
+Production deployments must use HTTPS or a private network and must disable reverse-proxy query-string access logs for this path. See [deployment and operations](doc/部署与运维.md) for complete configuration, verification, and query examples. Design entry points:
 
 1. [Requirements](doc/目标需求.md)
 2. [Architecture](doc/概要设计.md)
 3. [Event and workflow design](doc/事件与工作流设计.md)
 4. [BlueBubbles integration](doc/BlueBubbles集成说明.md)
-
-Once the M1 ingestion and archiving slice is implemented, this README and the [deployment guide](doc/部署与运维.md) will include a copy-paste Compose setup.
 
 ## Documentation
 
@@ -70,6 +91,7 @@ Once the M1 ingestion and archiving slice is implemented, this README and the [d
 | --- | --- |
 | Product scope and acceptance | [目标需求](doc/目标需求.md) |
 | Roadmap and non-goals | [产品路线图](doc/产品路线图.md) |
+| Current stack, rationale, and review triggers | [技术选型](doc/技术选型.md) |
 | Modules and evolution | [概要设计](doc/概要设计.md) |
 | Repository layout | [仓库目录规划](doc/仓库目录规划.md) |
 | Entities, state, and idempotency | [数据模型与生命周期](doc/数据模型与生命周期.md) |

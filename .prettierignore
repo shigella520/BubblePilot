@@ -1,0 +1,5 @@
+assets/
+dist/
+node_modules/
+pnpm-lock.yaml
+doc/*.svg

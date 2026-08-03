@@ -2,42 +2,69 @@
 
 ## 1. 集成边界
 
-BubblePilot 通过 BlueBubbles 的 Webhook 接收事件，通过 BlueBubbles REST API 发送回复。BlueBubbles 的供应商字段、认证方式和网络错误被封装在 `BlueBubblesAdapter` 中，业务模块只依赖内部接口。
+BubblePilot 通过 BlueBubbles Webhook 接收事件，后续通过 BlueBubbles REST API 发送回复。供应商字段、认证方式和网络错误封装在 `modules/integrations/bluebubbles/` 中，归档和自动化模块只依赖内部 `MessageEnvelope`。
 
-## 2. 入站 Webhook 流程
+M1 已实现 `new-message` 入站与归档；REST 回复适配器在 M2 实现。
+
+## 2. BlueBubbles Webhook 行为
+
+BlueBubbles Server 将事件按以下外层结构 POST 到配置 URL：
+
+```json
+{
+  "type": "new-message",
+  "data": {}
+}
+```
+
+BlueBubbles 当前不会附加签名或共享密钥请求头，只能配置目标 URL。BubblePilot 因此支持：
+
+```text
+https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_WEBHOOK_SECRET>
+```
+
+应在反向代理中关闭该路径的查询串访问日志，并使用 HTTPS 或私有网络。若调用方支持自定义请求头，优先使用 `X-BubblePilot-Webhook-Secret`，避免密钥出现在 URL。
+
+## 3. 入站流程
 
 ```text
 HTTP request
   ↓
-来源与签名验证
+共享密钥与请求大小校验
   ↓
-提取 provider event id
+解析 type / data 并计算 Payload Hash
   ↓
-幂等登记
+使用 new-message:<message-guid> 登记幂等事件
   ↓
 转换 MessageEnvelope
   ↓
-按监听配置归档和匹配
+按 MONITORED_CHAT_IDS 判断监听范围
+  ↓
+在同一数据库事务中更新 Chat、Message 和 InboundEvent
 ```
 
-适配器必须保留足够的原始事件摘要用于排障，但默认不把完整敏感 Payload 写入普通日志。
+合法但尚未支持的事件类型进入 `ignored` 状态；无效的 `new-message` 返回 `400 INVALID_WEBHOOK`；认证失败返回 `401 INVALID_WEBHOOK_SECRET`。
 
-## 3. 规范化映射
+## 4. M1 字段映射
 
-至少映射以下信息：
+| BlueBubbles 字段 | BubblePilot 字段 | 说明 |
+| --- | --- | --- |
+| `type` + `data.guid` | `eventId` | `new-message:<message-guid>` |
+| `data.guid` | `message.providerMessageId` | 消息归档唯一键的一部分 |
+| `data.chats[0].guid` | `chat.providerChatId` | 聊天监听匹配键 |
+| `data.chats[0].style` | `chat.type` | `43` 为群聊，`45` 为一对一，其他为 `unknown` |
+| `data.chats[0].displayName` | `chat.displayName` | 可为空 |
+| `data.handle.address` | `message.senderId` | 自己发送时使用内部值 `self` |
+| `data.dateCreated` | `message.sentAt` | 毫秒时间戳转换为 UTC ISO 8601 |
+| `data.text` | `message.text` | 仅监听范围内落库 |
+| `data.isFromMe` | `message.isFromMe` | 后续用于阻止 Bot 自触发循环 |
+| `data.attachments[]` | `message.attachments[]` | 只保存 GUID、MIME、文件名和字节数 |
 
-- 外部事件标识和事件类型；
-- 聊天或群聊标识、类型和显示名称；
-- 消息标识、发送者标识、发送时间和文本；
-- 附件类型、大小、外部标识等元数据；
-- 供应商重试或重放信息；
-- 原始 Payload 哈希和适配器版本。
+原始 Payload 只计算稳定 SHA-256，不整包保存，也不写入普通日志。机器合同见 `contracts/bluebubbles-webhook.schema.json` 和 `contracts/message-envelope.schema.json`。
 
-BlueBubbles 新增字段时，优先扩展适配器映射和内部 Schema，不让业务节点直接读取供应商原始 JSON。
+## 5. 出站回复
 
-## 4. 出站回复
-
-回复命令至少包含：
+M2 的回复命令至少包含：
 
 ```text
 chatId
@@ -49,30 +76,26 @@ correlationId
 
 适配器应区分：请求已确认、请求超时、明确失败、限流和未知结果。未知结果不能直接再次发送，必须先通过幂等键或供应商查询确认状态。
 
-## 5. 重试和幂等
+## 6. 重试和幂等
 
-- Webhook 重复投递不能重复归档或启动重复执行。
-- 回复发送使用 `executionId + replyNodeId` 作为内部幂等键。
-- 网络超时采用有限次数重试和指数退避。
-- 供应商返回限流时遵守 `Retry-After` 或适配器定义的退避策略。
-- 适配器重试不应绕过工作流执行记录。
-
-## 6. 网络与安全要求
-
-- BlueBubbles Server URL 和访问令牌只从 Secret 或环境变量读取。
-- Webhook 入口必须有来源验证、请求大小限制和超时。
-- 生产环境优先通过反向代理或私有网络暴露 Webhook，不直接暴露数据库。
-- 日志中对 URL、令牌、手机号、联系人和消息正文脱敏。
-- 连接健康状态可在管理页面查看，但不显示令牌。
+- 入站事件唯一约束：`provider + external_event_id`。
+- 消息唯一约束：`provider + provider_message_id`。
+- 事件认领、Chat Upsert、消息写入和最终状态更新位于同一事务。
+- 已完成或已忽略事件的重复投递返回 `duplicate`。
+- 失败事件保留脱敏错误摘要，并允许下一次同键投递重新认领。
+- M2 回复发送使用 `executionId + replyNodeId` 作为内部幂等键。
 
 ## 7. 兼容性测试
 
-适配器测试至少覆盖：
+当前自动化测试覆盖：
 
-- 一对一消息；
-- 群聊消息；
+- 一对一文本消息；
+- 群聊与附件元数据；
+- 自己发送的消息；
 - 重复 Webhook；
-- 缺少可选字段；
-- 非文本或带附件消息；
-- 发送成功、超时、限流和明确失败；
-- 供应商事件版本变化时的拒绝或降级行为。
+- 监听范围过滤；
+- 无效 Payload 与错误共享密钥；
+- 未支持事件的可观测忽略；
+- PostgreSQL 事务、唯一约束和只读查询。
+
+BlueBubbles 供应商字段变化必须先更新适配器 Fixture 和契约，再调整内部映射，不能让业务模块直接兼容原始 JSON。

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bubblepilot.local/contracts/message-envelope.schema.json",
+  "title": "BubblePilot MessageEnvelope",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "correlationId",
+    "provider",
+    "chat",
+    "message",
+    "metadata"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "eventId": { "type": "string", "minLength": 1 },
+    "correlationId": { "type": "string", "format": "uuid" },
+    "provider": { "const": "bluebubbles" },
+    "chat": {
+      "type": "object",
+      "required": ["providerChatId", "type", "displayName"],
+      "properties": {
+        "providerChatId": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["direct", "group", "unknown"] },
+        "displayName": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "message": {
+      "type": "object",
+      "required": [
+        "providerMessageId",
+        "senderId",
+        "sentAt",
+        "text",
+        "contentType",
+        "isFromMe",
+        "attachments",
+        "contentHash"
+      ],
+      "properties": {
+        "providerMessageId": { "type": "string", "minLength": 1 },
+        "senderId": { "type": ["string", "null"] },
+        "sentAt": { "type": "string", "format": "date-time" },
+        "text": { "type": ["string", "null"] },
+        "contentType": { "enum": ["text", "attachment", "mixed", "unknown"] },
+        "isFromMe": { "type": "boolean" },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "providerAttachmentId",
+              "mimeType",
+              "fileName",
+              "sizeBytes"
+            ],
+            "properties": {
+              "providerAttachmentId": { "type": "string", "minLength": 1 },
+              "mimeType": { "type": ["string", "null"] },
+              "fileName": { "type": ["string", "null"] },
+              "sizeBytes": { "type": ["integer", "null"], "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "contentHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["isReplay", "payloadHash", "eventType", "adapterVersion"],
+      "properties": {
+        "isReplay": { "type": "boolean" },
+        "payloadHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "eventType": { "type": "string" },
+        "adapterVersion": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

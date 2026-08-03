@@ -1,0 +1,12 @@
+.env*
+.git
+.github
+assets
+backups
+data
+dist
+doc
+logs
+node_modules
+tests
+*.local

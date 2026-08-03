@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bubblepilot.local/contracts/bluebubbles-webhook.schema.json",
+  "title": "BlueBubbles new-message webhook",
+  "type": "object",
+  "required": ["type", "data"],
+  "properties": {
+    "type": { "const": "new-message" },
+    "data": {
+      "type": "object",
+      "required": ["guid", "dateCreated", "isFromMe", "chats"],
+      "properties": {
+        "guid": { "type": "string", "minLength": 1 },
+        "text": { "type": ["string", "null"] },
+        "dateCreated": { "type": "integer", "minimum": 0 },
+        "isFromMe": { "type": "boolean" },
+        "handle": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["address"],
+              "properties": { "address": { "type": "string", "minLength": 1 } },
+              "additionalProperties": true
+            }
+          ]
+        },
+        "chats": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["guid"],
+            "properties": {
+              "guid": { "type": "string", "minLength": 1 },
+              "style": { "type": "integer" },
+              "displayName": { "type": ["string", "null"] },
+              "chatIdentifier": { "type": ["string", "null"] }
+            },
+            "additionalProperties": true
+          }
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["guid"],
+            "properties": {
+              "guid": { "type": "string", "minLength": 1 },
+              "mimeType": { "type": ["string", "null"] },
+              "transferName": { "type": ["string", "null"] },
+              "totalBytes": { "type": ["integer", "null"], "minimum": 0 }
+            },
+            "additionalProperties": true
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

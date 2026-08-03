@@ -10,7 +10,6 @@
   <a href="README.zh-TW.md">繁體中文</a>
 </p>
 
-
 <p align="center">
   <strong>让 BlueBubbles 对话自动运转。</strong>
 </p>
@@ -20,15 +19,23 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
   <a href="doc/目标需求.md">需求文档</a> ·
   <a href="doc/概要设计.md">架构设计</a> ·
   <a href="doc/部署与运维.md">部署与运维</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/shigella520/BubblePilot/actions/workflows/ci.yml"><img src="https://github.com/shigella520/BubblePilot/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5" /></a>
+  <a href="https://fastify.dev/"><img src="https://img.shields.io/badge/Fastify-5-000000?logo=fastify&logoColor=white" alt="Fastify 5" /></a>
+  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
+</p>
+
 ## 项目状态
 
-BubblePilot 目前处于架构和文档建设阶段，首个实现版本将按路线图逐步完成消息接入、归档、事件匹配、工作流执行、AI 交互和 Web 管理。
+BubblePilot 已进入编码阶段。M1 消息接入与归档闭环现已可运行：支持 BlueBubbles `new-message` Webhook、监听范围过滤、PostgreSQL 幂等归档、健康检查和受 Token 保护的最小查询 API。下一阶段是事件匹配与基础动作。
 
 ## 核心能力
 
@@ -56,14 +63,27 @@ BubblePilot 将消息接入、归档、事件匹配、工作流编排和外部�
 
 ## 快速开始
 
-当前仓库还没有可运行的应用镜像。建议先阅读：
+需要 Docker 与 Docker Compose。复制配置并替换所有 `CHANGE_ME`，尤其是数据库密码、API Token 和 Webhook Secret；再把需要归档的 BlueBubbles Chat GUID 写入 `MONITORED_CHAT_IDS`：
+
+```bash
+cp .env.example .env
+docker compose config
+docker compose up -d --build
+curl --fail http://127.0.0.1:8080/health/ready
+```
+
+在 BlueBubbles Server 中订阅 `New Messages`，Webhook URL 设置为：
+
+```text
+https://你的域名/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_WEBHOOK_SECRET>
+```
+
+生产环境必须使用 HTTPS 或私有网络，并关闭反向代理对该路径查询串的访问日志。完整配置、验证与查询示例见[部署与运维](doc/部署与运维.md)。设计入口：
 
 1. [目标需求](doc/目标需求.md)
 2. [概要设计](doc/概要设计.md)
 3. [事件与工作流设计](doc/事件与工作流设计.md)
 4. [BlueBubbles 集成说明](doc/BlueBubbles集成说明.md)
-
-M1 消息接入与归档闭环完成后，会在本 README 和[部署与运维](doc/部署与运维.md)中补充可复制的 Compose 启动步骤。
 
 ## 文档导航
 
@@ -71,6 +91,7 @@ M1 消息接入与归档闭环完成后，会在本 README 和[部署与运维](
 | --- | --- |
 | 产品目标、范围和验收标准 | [目标需求](doc/目标需求.md) |
 | 阶段目标和非目标 | [产品路线图](doc/产品路线图.md) |
+| 当前技术栈、选型理由和重评条件 | [技术选型](doc/技术选型.md) |
 | 模块边界和演进方式 | [概要设计](doc/概要设计.md) |
 | 仓库目录和依赖方向 | [仓库目录规划](doc/仓库目录规划.md) |
 | 实体、状态和幂等规则 | [数据模型与生命周期](doc/数据模型与生命周期.md) |

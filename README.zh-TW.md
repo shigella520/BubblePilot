@@ -19,15 +19,23 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
   <a href="doc/目标需求.md">需求文件</a> ·
   <a href="doc/概要设计.md">架構設計</a> ·
   <a href="doc/部署与运维.md">部署與運維</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/shigella520/BubblePilot/actions/workflows/ci.yml"><img src="https://github.com/shigella520/BubblePilot/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5" /></a>
+  <a href="https://fastify.dev/"><img src="https://img.shields.io/badge/Fastify-5-000000?logo=fastify&logoColor=white" alt="Fastify 5" /></a>
+  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
+</p>
+
 ## 專案狀態
 
-BubblePilot 目前處於架構與文件建設階段，首個實作版本會逐步完成訊息接入、歸檔、事件匹配、工作流執行、AI 互動與 Web 管理。
+BubblePilot 已進入開發階段。可執行的 M1 訊息接入與歸檔閉環已支援 BlueBubbles `new-message` Webhook、監聽範圍過濾、PostgreSQL 冪等歸檔、健康檢查及 Token 保護的最小查詢 API。下一階段會實作事件匹配與基礎動作。
 
 ## 核心能力
 
@@ -55,14 +63,27 @@ BlueBubbles 只負責訊息閘道，應用程式資料庫保存 BubblePilot 的�
 
 ## 快速開始
 
-目前倉庫尚未提供可執行的應用映像。建議先閱讀：
+需要 Docker 與 Docker Compose。複製設定範本並替換所有 `CHANGE_ME`，尤其是資料庫密碼、API Token 與 Webhook Secret；再把需要歸檔的 BlueBubbles Chat GUID 寫入 `MONITORED_CHAT_IDS`：
+
+```bash
+cp .env.example .env
+docker compose config
+docker compose up -d --build
+curl --fail http://127.0.0.1:8080/health/ready
+```
+
+在 BlueBubbles Server 訂閱 `New Messages`，Webhook URL 設定為：
+
+```text
+https://你的網域/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_WEBHOOK_SECRET>
+```
+
+正式環境必須使用 HTTPS 或私有網路，並關閉反向代理對此路徑查詢字串的存取記錄。完整設定、驗證與查詢範例請見[部署與運維](doc/部署与运维.md)。設計入口：
 
 1. [目標需求](doc/目标需求.md)
 2. [概要設計](doc/概要设计.md)
 3. [事件與工作流設計](doc/事件与工作流设计.md)
 4. [BlueBubbles 整合說明](doc/BlueBubbles集成说明.md)
-
-M1 訊息接入與歸檔閉環完成後，會在本 README 和[部署與運維](doc/部署与运维.md)中補充可直接使用的 Compose 啟動步驟。
 
 ## 文件導航
 
@@ -70,6 +91,7 @@ M1 訊息接入與歸檔閉環完成後，會在本 README 和[部署與運維](
 | --- | --- |
 | 產品目標、範圍與驗收標準 | [目標需求](doc/目标需求.md) |
 | 階段目標與非目標 | [產品路線圖](doc/产品路线图.md) |
+| 當前技術棧、選型理由與重評條件 | [技術選型](doc/技术选型.md) |
 | 模組邊界與演進方式 | [概要設計](doc/概要设计.md) |
 | 實體、狀態與幂等規則 | [資料模型與生命週期](doc/数据模型与生命周期.md) |
 | 觸發器、節點與執行策略 | [事件與工作流設計](doc/事件与工作流设计.md) |

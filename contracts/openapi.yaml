@@ -1,0 +1,125 @@
+openapi: 3.1.0
+info:
+  title: BubblePilot API
+  version: 0.1.0
+  description: M1 消息接入、健康检查与只读归档查询接口。
+servers:
+  - url: http://localhost:8080
+paths:
+  /health/live:
+    get:
+      operationId: getLiveness
+      responses:
+        "200":
+          description: 应用进程存活。
+  /health/ready:
+    get:
+      operationId: getReadiness
+      responses:
+        "200":
+          description: 应用和数据库可用。
+        "503":
+          description: 数据库不可用。
+  /api/v1/webhooks/bluebubbles:
+    post:
+      operationId: receiveBlueBubblesWebhook
+      description: >-
+        BlueBubbles 可在 URL 中使用 token 查询参数；支持自定义请求头的调用方应优先使用
+        X-BubblePilot-Webhook-Secret。查询参数不会写入应用请求日志。
+      parameters:
+        - in: query
+          name: token
+          schema:
+            type: string
+            minLength: 32
+        - in: header
+          name: X-BubblePilot-Webhook-Secret
+          schema:
+            type: string
+            minLength: 32
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ./bluebubbles-webhook.schema.json
+      responses:
+        "202":
+          description: 事件已归档、被监听范围忽略或判定为重复。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+  /api/v1/chats:
+    get:
+      operationId: listChats
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: 已启用监听的聊天列表。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/chats/{chatId}/messages:
+    get:
+      operationId: listChatMessages
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: chatId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: 指定聊天的归档消息，按发送时间倒序。
+        "401":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    Limit:
+      in: query
+      name: limit
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Cursor:
+      in: query
+      name: cursor
+      schema:
+        type: string
+  responses:
+    Error:
+      description: 请求失败。
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message, correlationId]
+                properties:
+                  code:
+                    type: string
+                  message:
+                    type: string
+                  correlationId:
+                    type: string
+                    format: uuid

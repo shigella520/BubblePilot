@@ -1,0 +1,45 @@
+{
+  "name": "bubblepilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A self-hosted automation, archiving, and AI bot platform for BlueBubbles.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "db:migrate": "tsx app/migrate.ts",
+    "db:migrate:local": "tsx --env-file=.env.local app/migrate.ts",
+    "dev": "tsx watch app/main.ts",
+    "dev:local": "tsx --env-file=.env.local watch app/main.ts",
+    "format": "prettier --check app modules tests contracts *.json *.js *.ts *.yaml",
+    "format:write": "prettier --write app modules tests contracts *.json *.js *.ts *.yaml",
+    "lint": "eslint .",
+    "start": "node dist/app/main.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "fastify": "^5.6.0",
+    "pg": "^8.16.3",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@types/node": "^24.3.0",
+    "@types/pg": "^8.15.5",
+    "eslint": "^9.34.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.3.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.41.0",
+    "vitest": "^3.2.4"
+  }
+}
