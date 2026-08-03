@@ -1,0 +1,28 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+
+# Runtime data and local databases
+data/
+backups/
+*.db
+*.sqlite
+*.sqlite3
+logs/
+
+# Build and tool output
+dist/
+build/
+target/
+node_modules/
+.venv/
+__pycache__/
+.pytest_cache/
+
+# IDE and OS files
+.DS_Store
+.idea/
+.vscode/
