@@ -1,0 +1,297 @@
+import { z } from "zod";
+
+const parameterValueSchema = z.union([
+  z.string().max(1_000),
+  z.number().finite(),
+  z.boolean(),
+]);
+
+export const aiProviderConfigurationSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  apiKind: z.enum(["chat-completions", "responses"]),
+  baseUrl: z
+    .string()
+    .url()
+    .max(2_000)
+    .refine(
+      (value) => ["http:", "https:"].includes(new URL(value).protocol),
+      "The AI provider base URL must use HTTP or HTTPS.",
+    ),
+  model: z.string().trim().min(1).max(200),
+  secretRef: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/),
+  parameters: z
+    .record(
+      z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/),
+      parameterValueSchema,
+    )
+    .refine((value) => Object.keys(value).length <= 20, {
+      message: "A provider can define at most 20 parameters.",
+    })
+    .default({}),
+  requestTimeoutMs: z.number().int().min(1_000).max(120_000).default(30_000),
+  enabled: z.boolean().default(true),
+});
+
+export const aiProviderUpdateSchema = aiProviderConfigurationSchema.extend({
+  expectedVersion: z.number().int().positive(),
+});
+
+export const aiProviderEnabledSchema = z.object({
+  enabled: z.boolean(),
+  expectedVersion: z.number().int().positive(),
+});
+
+export const aiProviderReorderSchema = z.object({
+  providers: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        expectedVersion: z.number().int().positive(),
+      }),
+    )
+    .min(1)
+    .max(100),
+});
+
+export const aiRouteRetryPolicySchema = z.object({
+  maxRounds: z.number().int().min(1).max(5).default(2),
+  initialDelayMs: z.number().int().min(0).max(10_000).default(500),
+});
+
+export const aiRouteDegradePolicySchema = z.object({
+  failureThreshold: z.number().int().min(1).max(100).default(3),
+  cooldownMs: z.number().int().min(1_000).max(3_600_000).default(60_000),
+});
+
+export const aiRouteConfigurationSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  providerIds: z.array(z.string().uuid()).max(100).default([]),
+  fallbackEnabled: z.boolean().default(true),
+  retryPolicy: aiRouteRetryPolicySchema.default({
+    maxRounds: 2,
+    initialDelayMs: 500,
+  }),
+  degradePolicy: aiRouteDegradePolicySchema.default({
+    failureThreshold: 3,
+    cooldownMs: 60_000,
+  }),
+  enabled: z.boolean().default(true),
+});
+
+export const aiRouteUpdateSchema = aiRouteConfigurationSchema.extend({
+  expectedVersion: z.number().int().positive(),
+});
+
+export const aiRouteEnabledSchema = z.object({
+  enabled: z.boolean(),
+  expectedVersion: z.number().int().positive(),
+});
+
+export type AiApiKind = "chat-completions" | "responses";
+export type AiProviderParameters = Readonly<
+  Record<string, string | number | boolean>
+>;
+export type AiProviderHealthState = "healthy" | "degraded" | "half-open";
+
+export interface AiProviderConfiguration {
+  name: string;
+  apiKind: AiApiKind;
+  baseUrl: string;
+  model: string;
+  secretRef: string;
+  parameters: AiProviderParameters;
+  requestTimeoutMs: number;
+  enabled: boolean;
+}
+
+export interface AiProviderRecord extends AiProviderConfiguration {
+  id: string;
+  sortOrder: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiProviderHealth {
+  providerId: string;
+  state: AiProviderHealthState;
+  consecutiveFailures: number;
+  degradedUntil: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastErrorCode: string | null;
+  version: number;
+  updatedAt: string;
+}
+
+export interface AiProviderView extends Omit<AiProviderRecord, "secretRef"> {
+  secretRef: string;
+  secretConfigured: boolean;
+  health: AiProviderHealth;
+}
+
+export interface AiRouteRetryPolicy {
+  maxRounds: number;
+  initialDelayMs: number;
+}
+
+export interface AiRouteDegradePolicy {
+  failureThreshold: number;
+  cooldownMs: number;
+}
+
+export interface AiRouteConfiguration {
+  name: string;
+  providerIds: readonly string[];
+  fallbackEnabled: boolean;
+  retryPolicy: AiRouteRetryPolicy;
+  degradePolicy: AiRouteDegradePolicy;
+  enabled: boolean;
+}
+
+export interface AiProviderRouteRecord extends AiRouteConfiguration {
+  id: string;
+  versionId: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiProviderRouteView extends AiProviderRouteRecord {
+  configuredProviderIds: readonly string[];
+  effectiveProviderIds: readonly string[];
+  unavailableProviderIds: readonly string[];
+}
+
+export interface AiProviderTestResult {
+  success: boolean;
+  providerId: string;
+  model: string;
+  durationMs: number;
+  errorCode: string | null;
+  message: string;
+}
+
+export interface AiRouteSnapshot {
+  route: AiProviderRouteRecord;
+  providers: readonly AiProviderRecord[];
+}
+
+export interface AiCandidate {
+  provider: AiProviderRecord;
+  healthState: AiProviderHealthState;
+}
+
+export interface AiCandidateSelection {
+  candidates: readonly AiCandidate[];
+  nextAvailableAt: string | null;
+}
+
+export interface AiChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+export interface AiChatRequest {
+  messages: readonly AiChatMessage[];
+  maxOutputTokens: number;
+  temperature: number | null;
+  timeoutMs: number;
+}
+
+export type AiFailureCategory =
+  | "timeout"
+  | "connection"
+  | "rate-limit"
+  | "server-error"
+  | "authentication"
+  | "model"
+  | "invalid-response"
+  | "empty-output"
+  | "content-safety"
+  | "configuration";
+
+export interface AiCallFailure {
+  status: "failed";
+  category: AiFailureCategory;
+  code: string;
+  summary: string;
+  retryable: boolean;
+  fallbackAllowed: boolean;
+  countsForDegrade: boolean;
+  durationMs: number;
+}
+
+export type AiCallResult =
+  | {
+      status: "succeeded";
+      text: string;
+      durationMs: number;
+    }
+  | AiCallFailure;
+
+export interface AiAttemptRecordInput {
+  executionId: string;
+  nodeId: string;
+  routeId: string;
+  routeVersion: number;
+  providerId: string;
+  providerName: string;
+  providerVersion: number;
+  model: string;
+  round: number;
+  sequence: number;
+  status: "succeeded" | "failed";
+  selectionHealthState: AiProviderHealthState;
+  healthState: AiProviderHealthState;
+  durationMs: number;
+  errorCategory: AiFailureCategory | null;
+  errorCode: string | null;
+  retryable: boolean | null;
+  fallbackAllowed: boolean | null;
+}
+
+export interface AiProviderAttemptView extends AiAttemptRecordInput {
+  id: string;
+  createdAt: string;
+}
+
+export interface AiRouteSuccess {
+  status: "succeeded";
+  text: string;
+  providerId: string;
+  providerName: string;
+  providerVersion: number;
+  model: string;
+  routeVersion: number;
+  round: number;
+  attemptCount: number;
+  durationMs: number;
+}
+
+export interface AiRouteFailure {
+  status: "failed";
+  code: string;
+  summary: string;
+  retryable: boolean;
+  attemptCount: number;
+}
+
+export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
+
+export interface AiRouteRequest {
+  executionId: string;
+  nodeId: string;
+  routeId: string;
+  messages: readonly AiChatMessage[];
+  maxOutputTokens: number;
+  temperature: number | null;
+  timeoutMs: number;
+  maxOutputCharacters: number;
+  outputFormat: "text" | "json";
+  protectedPrompt: string | null;
+}
+
+export function normalizeAiBaseUrl(value: string): string {
+  return value.replace(/\/+$/u, "");
+}

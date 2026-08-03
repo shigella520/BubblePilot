@@ -1,0 +1,22 @@
+:root {
+  color-scheme: light;
+  --bubblepilot-bg: #f4f2ec;
+  --bubblepilot-bg-soft: #fbfaf8;
+  --bubblepilot-surface: #ffffff;
+  --bubblepilot-text: #171717;
+  --bubblepilot-muted: #6f6b66;
+  --bubblepilot-line: rgba(24, 24, 24, 0.08);
+  --bubblepilot-accent: #0a84ff;
+  --bubblepilot-warm: #f97316;
+  --bubblepilot-success: #13a474;
+  --bubblepilot-danger: #e34b43;
+  --bubblepilot-glass: rgba(255, 255, 255, 0.7);
+  --bubblepilot-shadow: 0 30px 90px rgba(16, 19, 23, 0.08);
+  --bubblepilot-shadow-soft: 0 16px 34px rgba(16, 19, 23, 0.06);
+  --bubblepilot-radius-sm: 15px;
+  --bubblepilot-radius-md: 22px;
+  --bubblepilot-radius-lg: 29px;
+  --bubblepilot-radius-xl: 38px;
+  --bubblepilot-font:
+    "Avenir Next", "SF Pro Display", "Helvetica Neue", "PingFang SC", sans-serif;
+}

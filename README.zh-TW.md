@@ -30,12 +30,14 @@
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5" /></a>
   <a href="https://fastify.dev/"><img src="https://img.shields.io/badge/Fastify-5-000000?logo=fastify&logoColor=white" alt="Fastify 5" /></a>
+  <a href="https://vuejs.org/"><img src="https://img.shields.io/badge/Vue.js-3-42B883?logo=vuedotjs&logoColor=white" alt="Vue.js 3" /></a>
+  <a href="https://vite.dev/"><img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" alt="Vite 7" /></a>
   <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
 </p>
 
 ## 專案狀態
 
-BubblePilot 已進入開發階段。可執行的 M1 訊息接入與歸檔閉環已支援 BlueBubbles `new-message` Webhook、監聽範圍過濾、PostgreSQL 冪等歸檔、健康檢查及 Token 保護的最小查詢 API。下一階段會實作事件匹配與基礎動作。
+BubblePilot 已完成 M0-M4：訊息歸檔、事件匹配、可編排工作流、多 AI Provider、Web 管理、搜尋、二次驗證與受控匯出均已形成閉環。M5 的執行可靠性功能與運維工具已經實作，包括容量保護、失敗恢復、診斷與備份校驗；目前僅剩在目標環境完成 Compose 備份恢復及升級回滾演練。
 
 ## 核心能力
 
@@ -43,13 +45,13 @@ BubblePilot 已進入開發階段。可執行的 M1 訊息接入與歸檔閉環�
 - 按聊天範圍獨立保存並搜尋訊息內容。
 - 使用關鍵詞、正規表示式、發送者與訊息類型匹配 Bot 事件。
 - 透過可配置工作流編排條件、變數、AI 與回覆節點。
-- 接入 OpenAI 相容格式的 AI 服務。
+- 管理多個 OpenAI 相容 AI Provider，並按策略執行 Retry、Fallback 與自動降級。
 - 透過 Web 登入和敏感操作二次驗證保護聊天資料。
 - 使用 Docker Compose 自託管部署。
 
 ## 架構概覽
 
-BubblePilot 將訊息接入、歸檔、事件匹配、工作流編排和外部服務適配拆分為清晰的模組。首期採用模組化單體和程序內佇列；節點、適配器與執行器均透過明確契約擴充，為未來獨立 Worker 或外部訊息佇列保留邊界。
+BubblePilot 將訊息接入、歸檔、事件匹配、工作流編排和外部服務適配拆分為清晰的模組。首期採用模組化單體和程序內調度；節點、適配器與執行器均透過明確契約擴充，為未來獨立 Worker 或外部訊息佇列保留邊界。
 
 ![BubblePilot 總體架構](doc/architecture-overview.svg)
 
@@ -63,7 +65,7 @@ BlueBubbles 只負責訊息閘道，應用程式資料庫保存 BubblePilot 的�
 
 ## 快速開始
 
-需要 Docker 與 Docker Compose。複製設定範本並替換所有 `CHANGE_ME`，尤其是資料庫密碼、API Token 與 Webhook Secret；再把需要歸檔的 BlueBubbles Chat GUID 寫入 `MONITORED_CHAT_IDS`：
+需要 Docker 與 Docker Compose。複製設定範本並替換所有 `CHANGE_ME`，尤其是資料庫密碼、API Token、Webhook Secret、BlueBubbles Server URL、存取令牌和 AI Key；再把需要歸檔的 BlueBubbles Chat GUID 寫入 `MONITORED_CHAT_IDS`。AI 服務位址、模型與對應環境變數名稱透過受保護 API 設定：
 
 ```bash
 cp .env.example .env
@@ -90,7 +92,9 @@ https://你的網域/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_WEBHOOK_SECR
 | 想了解什麼 | 閱讀 |
 | --- | --- |
 | 產品目標、範圍與驗收標準 | [目標需求](doc/目标需求.md) |
+| 典型使用者互動、異常路徑與驗收故事 | [典型使用者互動故事](doc/典型用户交互故事.md) |
 | 階段目標與非目標 | [產品路線圖](doc/产品路线图.md) |
+| 當前開發狀態與短週期記錄 | [開發進度](doc/开发进度.md) |
 | 當前技術棧、選型理由與重評條件 | [技術選型](doc/技术选型.md) |
 | 模組邊界與演進方式 | [概要設計](doc/概要设计.md) |
 | 實體、狀態與幂等規則 | [資料模型與生命週期](doc/数据模型与生命周期.md) |

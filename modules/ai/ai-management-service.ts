@@ -1,0 +1,286 @@
+import type { AiClient } from "./openai-compatible-client.js";
+import type { AiMutationResult, AiRepository } from "./ai-repository.js";
+import {
+  normalizeAiBaseUrl,
+  type AiProviderConfiguration,
+  type AiProviderRecord,
+  type AiProviderRouteRecord,
+  type AiProviderRouteView,
+  type AiProviderTestResult,
+  type AiProviderView,
+  type AiRouteConfiguration,
+} from "./ai-types.js";
+import type { SecretResolver } from "./secret-resolver.js";
+
+export class AiManagementService {
+  constructor(
+    private readonly repository: AiRepository,
+    private readonly client: AiClient,
+    private readonly secrets: SecretResolver,
+  ) {}
+
+  async listProviders(): Promise<readonly AiProviderView[]> {
+    return Promise.all(
+      (await this.repository.listProviders()).map((provider) =>
+        this.providerView(provider),
+      ),
+    );
+  }
+
+  async getProvider(providerId: string): Promise<AiProviderView | null> {
+    const provider = await this.repository.getProvider(providerId);
+    return provider === null ? null : this.providerView(provider);
+  }
+
+  async createProvider(
+    configuration: AiProviderConfiguration,
+  ): Promise<AiMutationResult<AiProviderView>> {
+    return this.mapProviderMutation(
+      await this.repository.createProvider(
+        this.normalizeProvider(configuration),
+      ),
+    );
+  }
+
+  async updateProvider(
+    providerId: string,
+    expectedVersion: number,
+    configuration: AiProviderConfiguration,
+  ): Promise<AiMutationResult<AiProviderView>> {
+    return this.mapProviderMutation(
+      await this.repository.updateProvider(
+        providerId,
+        expectedVersion,
+        this.normalizeProvider(configuration),
+      ),
+    );
+  }
+
+  async setProviderEnabled(
+    providerId: string,
+    expectedVersion: number,
+    enabled: boolean,
+  ): Promise<AiMutationResult<AiProviderView>> {
+    return this.mapProviderMutation(
+      await this.repository.setProviderEnabled(
+        providerId,
+        expectedVersion,
+        enabled,
+      ),
+    );
+  }
+
+  async reorderProviders(
+    providers: readonly { id: string; expectedVersion: number }[],
+  ): Promise<AiMutationResult<readonly AiProviderView[]>> {
+    const result = await this.repository.reorderProviders(providers);
+    if (result.status !== "ok") {
+      return result;
+    }
+    return {
+      status: "ok",
+      value: await Promise.all(
+        result.value.map((provider) => this.providerView(provider)),
+      ),
+    };
+  }
+
+  async deleteProvider(
+    providerId: string,
+    expectedVersion: number,
+  ): Promise<AiMutationResult<AiProviderView>> {
+    return this.mapProviderMutation(
+      await this.repository.deleteProvider(providerId, expectedVersion),
+    );
+  }
+
+  async resetProviderHealth(
+    providerId: string,
+  ): Promise<AiProviderView | null> {
+    const health = await this.repository.resetProviderHealth(providerId);
+    if (health === null) {
+      return null;
+    }
+    return this.getProvider(providerId);
+  }
+
+  async testProvider(providerId: string): Promise<AiProviderTestResult | null> {
+    const provider = await this.repository.getProvider(providerId);
+    if (provider === null) {
+      return null;
+    }
+    const result = await this.client.call(provider, {
+      messages: [
+        {
+          role: "user",
+          content: "Connectivity test. Reply with the single word OK.",
+        },
+      ],
+      maxOutputTokens: 16,
+      temperature: 0,
+      timeoutMs: provider.requestTimeoutMs,
+    });
+    return result.status === "succeeded"
+      ? {
+          success: true,
+          providerId,
+          model: provider.model,
+          durationMs: result.durationMs,
+          errorCode: null,
+          message: "The AI provider connection succeeded.",
+        }
+      : {
+          success: false,
+          providerId,
+          model: provider.model,
+          durationMs: result.durationMs,
+          errorCode: result.code,
+          message: result.summary,
+        };
+  }
+
+  async listRoutes(): Promise<readonly AiProviderRouteView[]> {
+    return Promise.all(
+      (await this.repository.listRoutes()).map((route) =>
+        this.routeView(route),
+      ),
+    );
+  }
+
+  async getRoute(routeId: string): Promise<AiProviderRouteView | null> {
+    const route = await this.repository.getRoute(routeId);
+    return route === null ? null : this.routeView(route);
+  }
+
+  async isRoutePublishable(routeId: string): Promise<boolean> {
+    const route = await this.repository.getRoute(routeId);
+    if (route === null || !route.enabled) {
+      return false;
+    }
+    const providers = await this.repository.listProviders();
+    const configured =
+      route.providerIds.length === 0
+        ? providers
+        : route.providerIds.flatMap((providerId) => {
+            const provider = providers.find(
+              (candidate) => candidate.id === providerId,
+            );
+            return provider === undefined ? [] : [provider];
+          });
+    return configured.some(
+      (provider) =>
+        provider.enabled && this.secrets.isConfigured(provider.secretRef),
+    );
+  }
+
+  async createRoute(
+    configuration: AiRouteConfiguration,
+  ): Promise<AiMutationResult<AiProviderRouteView>> {
+    return this.mapRouteMutation(
+      await this.repository.createRoute(configuration),
+    );
+  }
+
+  async updateRoute(
+    routeId: string,
+    expectedVersion: number,
+    configuration: AiRouteConfiguration,
+  ): Promise<AiMutationResult<AiProviderRouteView>> {
+    return this.mapRouteMutation(
+      await this.repository.updateRoute(
+        routeId,
+        expectedVersion,
+        configuration,
+      ),
+    );
+  }
+
+  async setRouteEnabled(
+    routeId: string,
+    expectedVersion: number,
+    enabled: boolean,
+  ): Promise<AiMutationResult<AiProviderRouteView>> {
+    return this.mapRouteMutation(
+      await this.repository.setRouteEnabled(routeId, expectedVersion, enabled),
+    );
+  }
+
+  async deleteRoute(
+    routeId: string,
+    expectedVersion: number,
+  ): Promise<AiMutationResult<AiProviderRouteView>> {
+    return this.mapRouteMutation(
+      await this.repository.deleteRoute(routeId, expectedVersion),
+    );
+  }
+
+  private normalizeProvider(
+    configuration: AiProviderConfiguration,
+  ): AiProviderConfiguration {
+    return {
+      ...configuration,
+      baseUrl: normalizeAiBaseUrl(configuration.baseUrl),
+    };
+  }
+
+  private async providerView(
+    provider: AiProviderRecord,
+  ): Promise<AiProviderView> {
+    const health = await this.repository.getProviderHealth(provider.id);
+    if (health === null) {
+      throw new Error(`AI provider health '${provider.id}' does not exist.`);
+    }
+    return {
+      ...provider,
+      secretConfigured: this.secrets.isConfigured(provider.secretRef),
+      health,
+    };
+  }
+
+  private async routeView(
+    route: AiProviderRouteRecord,
+  ): Promise<AiProviderRouteView> {
+    const providers = await this.repository.listProviders();
+    const configuredProviderIds = [...route.providerIds];
+    const candidateIds =
+      configuredProviderIds.length === 0
+        ? providers.map((provider) => provider.id)
+        : configuredProviderIds;
+    const storedSnapshot = await this.repository.getRouteSnapshot(route.id);
+    const selection =
+      storedSnapshot === null
+        ? null
+        : await this.repository.selectCandidates({
+            ...storedSnapshot,
+            providers: storedSnapshot.providers.filter((provider) =>
+              this.secrets.isConfigured(provider.secretRef),
+            ),
+          });
+    const effectiveProviderIds =
+      selection?.candidates.map((candidate) => candidate.provider.id) ?? [];
+    return {
+      ...route,
+      configuredProviderIds,
+      effectiveProviderIds,
+      unavailableProviderIds: candidateIds.filter(
+        (providerId) => !effectiveProviderIds.includes(providerId),
+      ),
+    };
+  }
+
+  private async mapProviderMutation(
+    result: AiMutationResult<AiProviderRecord>,
+  ): Promise<AiMutationResult<AiProviderView>> {
+    return result.status === "ok"
+      ? { status: "ok", value: await this.providerView(result.value) }
+      : result;
+  }
+
+  private async mapRouteMutation(
+    result: AiMutationResult<AiProviderRouteRecord>,
+  ): Promise<AiMutationResult<AiProviderRouteView>> {
+    return result.status === "ok"
+      ? { status: "ok", value: await this.routeView(result.value) }
+      : result;
+  }
+}

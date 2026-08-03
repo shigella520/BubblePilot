@@ -30,12 +30,14 @@
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5" /></a>
   <a href="https://fastify.dev/"><img src="https://img.shields.io/badge/Fastify-5-000000?logo=fastify&logoColor=white" alt="Fastify 5" /></a>
+  <a href="https://vuejs.org/"><img src="https://img.shields.io/badge/Vue.js-3-42B883?logo=vuedotjs&logoColor=white" alt="Vue.js 3" /></a>
+  <a href="https://vite.dev/"><img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" alt="Vite 7" /></a>
   <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
 </p>
 
 ## Status
 
-BubblePilot is now in active development. The runnable M1 ingestion and archive slice supports BlueBubbles `new-message` webhooks, chat-scope filtering, idempotent PostgreSQL archiving, health checks, and a token-protected minimal query API. Event matching and basic actions are next.
+BubblePilot has completed M0-M4: message archiving, event matching, composable workflows, multi-provider AI, Web administration, search, secondary verification, and controlled exports now form an end-to-end flow. M5 runtime reliability features and operational tooling are implemented, including capacity protection, failure recovery, diagnostics, and backup verification; Compose backup/restore and upgrade rollback rehearsals still need to be completed in the target environment.
 
 ## Core capabilities
 
@@ -43,13 +45,13 @@ BubblePilot is now in active development. The runnable M1 ingestion and archive 
 - Archive and search messages by configured chat scope.
 - Match bot events using chats, senders, keywords, regular expressions, and message types.
 - Orchestrate conditions, variables, AI calls, and replies through configurable workflows.
-- Connect to OpenAI-compatible AI services.
+- Manage multiple OpenAI-compatible AI providers with bounded retries, fallback, and automatic degradation.
 - Protect chat data with Web login and an additional guard for sensitive operations.
 - Deploy privately with Docker Compose.
 
 ## Architecture overview
 
-BubblePilot separates message ingestion, archiving, event matching, workflow orchestration, and external service adapters. The first runtime is a modular monolith with an in-process queue. Nodes, adapters, and executors use explicit contracts so independent workers or an external message broker can be introduced later without changing workflow semantics.
+BubblePilot separates message ingestion, archiving, event matching, workflow orchestration, and external service adapters. The first runtime is a modular monolith with in-process dispatch. Nodes, adapters, and executors use explicit contracts so independent workers or an external message broker can be introduced later without changing workflow semantics.
 
 ![BubblePilot architecture](doc/architecture-overview.svg)
 
@@ -63,7 +65,7 @@ Each external event is processed with a stable idempotency key. The message is n
 
 ## Getting started
 
-Docker and Docker Compose are required. Copy the environment template, replace every `CHANGE_ME` value—especially the database password, API token, and webhook secret—and add the BlueBubbles Chat GUIDs to archive to `MONITORED_CHAT_IDS`:
+Docker and Docker Compose are required. Copy the environment template, replace every `CHANGE_ME` value—especially the database password, API token, webhook secret, BlueBubbles Server URL, access token, and AI keys—and add the BlueBubbles Chat GUIDs to archive to `MONITORED_CHAT_IDS`. Provider endpoints, models, and their environment-variable names are configured through the protected API:
 
 ```bash
 cp .env.example .env
@@ -90,7 +92,9 @@ Production deployments must use HTTPS or a private network and must disable reve
 | Topic | Read |
 | --- | --- |
 | Product scope and acceptance | [目标需求](doc/目标需求.md) |
+| Typical interactions, failure paths, and acceptance stories | [典型用户交互故事](doc/典型用户交互故事.md) |
 | Roadmap and non-goals | [产品路线图](doc/产品路线图.md) |
+| Current implementation status and iteration log | [开发进度](doc/开发进度.md) |
 | Current stack, rationale, and review triggers | [技术选型](doc/技术选型.md) |
 | Modules and evolution | [概要设计](doc/概要设计.md) |
 | Repository layout | [仓库目录规划](doc/仓库目录规划.md) |

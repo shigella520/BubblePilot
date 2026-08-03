@@ -3,6 +3,12 @@ import type {
   IngestionResult,
 } from "../archive/archive-repository.js";
 import type { BlueBubblesWebhookAdapter } from "../integrations/bluebubbles/webhook-adapter.js";
+import type { MessageEnvelope } from "./message-envelope.js";
+
+export interface IngestionOutcome {
+  result: IngestionResult;
+  automationEnvelope: MessageEnvelope | null;
+}
 
 export class IngestionService {
   constructor(
@@ -14,15 +20,32 @@ export class IngestionService {
   async ingest(
     payload: unknown,
     correlationId: string,
-  ): Promise<IngestionResult> {
+  ): Promise<IngestionOutcome> {
     const normalized = this.adapter.normalize(payload, correlationId);
     if (normalized.kind === "ignored") {
-      return this.repository.recordIgnoredEvent(normalized.event);
+      return {
+        result: await this.repository.recordIgnoredEvent(normalized.event),
+        automationEnvelope: null,
+      };
     }
 
-    const archiveEnabled = this.monitoredChatIds.has(
-      normalized.envelope.chat.providerChatId,
+    const providerChatId = normalized.envelope.chat.providerChatId;
+    const persistedMonitoringState =
+      await this.repository.getChatMonitoringState(providerChatId);
+    const archiveEnabled =
+      persistedMonitoringState ?? this.monitoredChatIds.has(providerChatId);
+    const result = await this.repository.ingestMessage(
+      normalized.envelope,
+      archiveEnabled,
     );
-    return this.repository.ingestMessage(normalized.envelope, archiveEnabled);
+    return {
+      result,
+      automationEnvelope:
+        archiveEnabled &&
+        (result.status === "archived" ||
+          result.automationOutcome === "evaluation-pending")
+          ? normalized.envelope
+          : null,
+    };
   }
 }

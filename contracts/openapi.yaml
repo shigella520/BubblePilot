@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: BubblePilot API
   version: 0.1.0
-  description: M1 消息接入、健康检查与只读归档查询接口。
+  description: M4 管理会话、二次验证、审计、消息归档、版本化工作流与多 AI Provider 路由接口。
 servers:
   - url: http://localhost:8080
 paths:
@@ -20,6 +20,75 @@ paths:
           description: 应用和数据库可用。
         "503":
           description: 数据库不可用。
+  /api/v1/auth/session:
+    post:
+      operationId: createAdminSession
+      description: 使用登录密码建立服务端管理会话；会话 Token 仅通过 HttpOnly Cookie 返回。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordInput"
+      responses:
+        "201":
+          description: 管理会话已建立。
+        "401":
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: getAdminSession
+      security:
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 当前管理会话与二次验证有效期。
+        "401":
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteAdminSession
+      security:
+        - sessionAuth: []
+      responses:
+        "204":
+          description: 当前管理会话已撤销，Cookie 已清除。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/sensitive:
+    post:
+      operationId: verifySensitiveOperation
+      description: 使用独立密码为当前管理会话建立短时效二次验证授权。
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordInput"
+      responses:
+        "200":
+          description: 二次验证授权已绑定当前会话。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/audit-events:
+    get:
+      operationId: listAuditEvents
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: 按时间倒序返回脱敏审计事件。
+        "401":
+          $ref: "#/components/responses/Error"
   /api/v1/webhooks/bluebubbles:
     post:
       operationId: receiveBlueBubblesWebhook
@@ -45,18 +114,55 @@ paths:
               $ref: ./bluebubbles-webhook.schema.json
       responses:
         "202":
-          description: 事件已归档、被监听范围忽略或判定为重复。
+          description: >-
+            事件已归档、被监听范围忽略或判定为重复；响应同时返回自动化判定、
+            匹配的触发器和执行 ID。只有首次调度未完成且仍为 evaluation-pending
+            的重复事件会安全恢复判定；其他重复事件不再次执行。
         "400":
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
         "413":
           $ref: "#/components/responses/Error"
+  /api/v1/inbound-events:
+    get:
+      operationId: listInboundEvents
+      description: >-
+        按接收时间倒序返回入站事件及自动化判定状态。只包含安全元数据，
+        不返回消息正文、原始 Webhook、Payload 哈希、Prompt 或凭据。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: 最近的入站事件和自动化判定状态。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InboundEventSummary"
+                  page:
+                    type: object
+                    required: [nextCursor]
+                    properties:
+                      nextCursor:
+                        type: [string, "null"]
+        "401":
+          $ref: "#/components/responses/Error"
   /api/v1/chats:
     get:
       operationId: listChats
       security:
         - bearerAuth: []
+        - sessionAuth: []
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
@@ -70,6 +176,7 @@ paths:
       operationId: listChatMessages
       security:
         - bearerAuth: []
+        - sessionAuth: []
       parameters:
         - in: path
           name: chatId
@@ -81,7 +188,803 @@ paths:
         - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
-          description: 指定聊天的归档消息，按发送时间倒序。
+          description: 指定聊天的归档消息，按发送时间倒序；已清理内容通过 contentRedactedAt、空 body 和空 attachments 明确表示。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/v1/chat-monitoring:
+    get:
+      operationId: listChatMonitoring
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: 返回已发现聊天的监听状态、乐观版本和消息数量，不返回正文。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/chat-monitoring/{chatId}:
+    patch:
+      operationId: setChatMonitoring
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: chatId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, expectedVersion]
+              properties:
+                enabled:
+                  type: boolean
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+              additionalProperties: false
+      responses:
+        "200":
+          description: 监听状态已更新；只影响后续到达的消息，不回填或删除历史。
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/messages/search:
+    get:
+      operationId: searchMessages
+      description: 只在当前已启用监听的聊天中搜索正文；未知或不可用聊天返回空列表。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - in: query
+          name: chatId
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: q
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - in: query
+          name: senderId
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 500
+        - in: query
+          name: sentFrom
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: sentTo
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: >-
+            按发送时间倒序返回符合聊天、关键词、发送者和时间范围的消息，并附带
+            可跳转的关联执行、工作流版本、状态和 correlationId 摘要；已清理内容
+            通过 contentRedactedAt、空 body 和空 attachments 明确表示。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+  /api/v1/exports:
+    get:
+      operationId: listDataExports
+      description: 只返回当前管理会话或 API Token 所有者创建的导出任务。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: 导出任务按创建时间倒序返回，过期状态由服务端动态计算。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/exports/preview:
+    post:
+      operationId: previewDataExport
+      description: >-
+        为单个当前已监听聊天创建冻结快照预览。时间范围最长 31 天，记录上限
+        10,000 条，预估大小上限 25 MB；预览 5 分钟内有效。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DataExportScope"
+      responses:
+        "201":
+          description: 返回冻结时间、消息/执行数量、预估大小和确认期限，不生成临时正文文件。
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+  /api/v1/exports/{exportId}/confirm:
+    post:
+      operationId: confirmDataExport
+      description: 二次验证后，使用预览返回的记录数与冻结时间显式确认导出。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DataExportId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DataExportConfirmation"
+      responses:
+        "200":
+          description: 导出进入 ready 状态，下载窗口从确认时起有效 10 分钟。
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
+  /api/v1/exports/{exportId}/download:
+    get:
+      operationId: downloadDataExport
+      description: >-
+        二次验证后按冻结快照动态生成 JSON Lines；下载时仍要求聊天处于监听状态，
+        且不包含 Secret、完整 Prompt、原始 Webhook Payload 或未选择的数据类型。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DataExportId"
+      responses:
+        "200":
+          description: 第一行为 manifest，后续每行为 message 或 execution 记录。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
+  /api/v1/exports/{exportId}:
+    delete:
+      operationId: revokeDataExport
+      description: 二次验证后撤销属于当前所有者且尚未过期的导出任务。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DataExportId"
+      responses:
+        "200":
+          description: 导出任务已撤销；重复撤销保持幂等。
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
+  /api/v1/workflows:
+    get:
+      operationId: listWorkflows
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 工作流及当前发布版本列表。
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createWorkflow
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, definition]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                definition:
+                  $ref: ./workflow.schema.json
+      responses:
+        "201":
+          description: 已创建并校验版本 1，尚未发布。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/workflows/{workflowId}/versions:
+    get:
+      operationId: listWorkflowVersions
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkflowId"
+      responses:
+        "200":
+          description: 按版本号倒序返回工作流的全部不可变版本。
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createWorkflowVersion
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkflowId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition:
+                  $ref: ./workflow.schema.json
+      responses:
+        "201":
+          description: 已创建新的已校验不可变候选版本。
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/workflows/{workflowId}/versions/{version}/publish:
+    post:
+      operationId: publishWorkflowVersion
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkflowId"
+        - in: path
+          name: version
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: >-
+            版本已发布并设为活动版本；绑定旧发布版本的触发器原子切换到该版本。
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/workflows/{workflowId}/enabled:
+    patch:
+      operationId: setWorkflowEnabled
+      description: >-
+        二次验证后整体停止或恢复已发布工作流的新执行；不取消进行中的执行，
+        不修改触发器启停配置，也不追溯处理停用期间的消息。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkflowId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+              additionalProperties: false
+      responses:
+        "200":
+          description: 工作流的新执行接收状态已更新。
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/triggers:
+    get:
+      operationId: listTriggers
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: Bot 触发器列表。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TriggerView"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createTrigger
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTrigger"
+      responses:
+        "201":
+          description: 已创建触发器。
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/triggers/preview:
+    post:
+      operationId: previewTrigger
+      description: 仅返回逐项匹配结果，不创建执行或调用有副作用的节点。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TriggerPreview"
+      responses:
+        "200":
+          description: 可解释的条件匹配结果。
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/v1/triggers/{triggerId}:
+    patch:
+      operationId: setTriggerEnabled
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: triggerId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: 触发器启停状态已更新。
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/ai/providers:
+    get:
+      operationId: listAiProviders
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 按管理员固定顺序返回 Provider、Secret 配置状态和运行时健康状态。
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createAiProvider
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AiProviderConfiguration"
+              unevaluatedProperties: false
+      responses:
+        "201":
+          description: Provider 已创建；响应不包含 Secret 明文。
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/ai/providers/reorder:
+    put:
+      operationId: reorderAiProviders
+      description: 请求必须包含当前全部 Provider ID 和版本，防止过期管理页面覆盖新配置。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [providers]
+              properties:
+                providers:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [id, expectedVersion]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      expectedVersion:
+                        type: integer
+                        minimum: 1
+                    additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: 固定 Provider 顺序已更新。
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/ai/providers/{providerId}:
+    get:
+      operationId: getAiProvider
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AiProviderId"
+      responses:
+        "200":
+          description: Provider 配置元数据和健康状态。
+        "404":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: updateAiProvider
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AiProviderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AiProviderConfiguration"
+                - type: object
+                  required: [expectedVersion]
+                  properties:
+                    expectedVersion:
+                      type: integer
+                      minimum: 1
+              unevaluatedProperties: false
+      responses:
+        "200":
+          description: Provider 已更新。
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteAiProvider
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AiProviderId"
+        - $ref: "#/components/parameters/ExpectedVersion"
+      responses:
+        "200":
+          description: 未被活动路由引用的 Provider 已软删除。
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/ai/providers/{providerId}/enabled:
+    patch:
+      operationId: setAiProviderEnabled
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AiProviderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VersionedEnabled"
+      responses:
+        "200":
+          description: Provider 人工启停状态已更新。
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/ai/providers/{providerId}/test:
+    post:
+      operationId: testAiProvider
+      description: 只调用指定 Provider，使用固定虚构输入，不走 Fallback 且不修改生产健康计数。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AiProviderId"
+      responses:
+        "200":
+          description: 返回成功状态、耗时和脱敏错误码。
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/ai/providers/{providerId}/health/reset:
+    post:
+      operationId: resetAiProviderHealth
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AiProviderId"
+      responses:
+        "200":
+          description: Provider 运行时健康状态已人工恢复为 healthy。
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/ai/routes:
+    get:
+      operationId: listAiProviderRoutes
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 返回版本化路由、固定候选顺序、当前有效顺序和不可用候选。
+    post:
+      operationId: createAiProviderRoute
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AiRouteConfiguration"
+              unevaluatedProperties: false
+      responses:
+        "201":
+          description: AI Provider 路由版本 1 已创建；有效候选使用与运行时一致的 Secret 和健康筛选。
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/ai/routes/{routeId}:
+    get:
+      operationId: getAiProviderRoute
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AiRouteId"
+      responses:
+        "200":
+          description: AI Provider 路由详情；configuredProviderIds 保留固定顺序，effectiveProviderIds 是当前可调用或可探测候选，unavailableProviderIds 解释其余候选。
+        "404":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: updateAiProviderRoute
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AiRouteId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AiRouteConfiguration"
+                - type: object
+                  required: [expectedVersion]
+                  properties:
+                    expectedVersion:
+                      type: integer
+                      minimum: 1
+              unevaluatedProperties: false
+      responses:
+        "200":
+          description: 已创建新的不可变路由版本并切换当前版本。
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteAiProviderRoute
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AiRouteId"
+        - $ref: "#/components/parameters/ExpectedVersion"
+      responses:
+        "200":
+          description: 未被工作流版本引用的路由已软删除。
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/ai/routes/{routeId}/enabled:
+    patch:
+      operationId: setAiProviderRouteEnabled
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AiRouteId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VersionedEnabled"
+      responses:
+        "200":
+          description: 已通过新路由版本更新启停状态。
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/executions:
+    get:
+      operationId: listExecutions
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - in: query
+          name: status
+          description: 逗号分隔的执行状态；最多八种，用于恢复队列等受控筛选。
+          schema:
+            type: string
+            maxLength: 200
+            pattern: "^\\s*(created|running|retrying|succeeded|skipped|failed|dead-lettered|closed)(\\s*,\\s*(created|running|retrying|succeeded|skipped|failed|dead-lettered|closed))*\\s*$"
+      responses:
+        "200":
+          description: 最近的工作流执行列表。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/executions/{executionId}:
+    get:
+      operationId: getExecution
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: executionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 执行、节点尝试、含稳定错误类别的 AI Provider Attempt 和出站发送的完整脱敏轨迹。
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/executions/{executionId}/retry:
+    post:
+      operationId: retryExecution
+      description: 创建关联原执行的新恢复执行；retrying 只有超过 STALE_RETRY_SECONDS 后才允许恢复，未知、发送中或已确认的出站结果禁止重发。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+      responses:
+        "201":
+          description: 新恢复执行已创建并完成当前进程内调度；返回与执行详情接口一致的节点、Provider Attempt 和出站轨迹。
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/executions/{executionId}/close:
+    post:
+      operationId: closeExecution
+      description: 人工关闭 retrying、failed 或 dead-lettered 执行，不删除既有轨迹。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+      responses:
+        "200":
+          description: 执行已标记为 closed；返回与执行详情接口一致的完整脱敏轨迹。
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/operations/status:
+    get:
+      operationId: getOperationsStatus
+      description: 汇总失败队列、未知出站、工作流容量、AI Provider 降级和消息内容保留任务告警，不返回正文或 Secret。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 当前运行状态和稳定告警码。
         "401":
           $ref: "#/components/responses/Error"
 components:
@@ -89,6 +992,10 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: bubblepilot_session
   parameters:
     Limit:
       in: query
@@ -103,6 +1010,402 @@ components:
       name: cursor
       schema:
         type: string
+    WorkflowId:
+      in: path
+      name: workflowId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AiProviderId:
+      in: path
+      name: providerId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AiRouteId:
+      in: path
+      name: routeId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ExecutionId:
+      in: path
+      name: executionId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DataExportId:
+      in: path
+      name: exportId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ExpectedVersion:
+      in: query
+      name: expectedVersion
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  schemas:
+    InboundEventSummary:
+      type: object
+      required:
+        - id
+        - provider
+        - eventId
+        - correlationId
+        - eventType
+        - ingestionStatus
+        - automationOutcome
+        - receivedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+        eventId:
+          type: string
+        correlationId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+        ingestionStatus:
+          enum: [accepted, ignored, completed, failed]
+        automationOutcome:
+          enum:
+            - unsupported-event
+            - chat-not-monitored
+            - evaluation-pending
+            - not-evaluated
+            - no-active-triggers
+            - no-trigger-match
+            - matched
+        receivedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    PasswordInput:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          writeOnly: true
+      additionalProperties: false
+    DataExportScope:
+      type: object
+      required: [chatId, sentFrom, sentTo, types]
+      properties:
+        chatId:
+          type: string
+          format: uuid
+        sentFrom:
+          type: string
+          format: date-time
+        sentTo:
+          type: string
+          format: date-time
+        types:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            enum: [messages, executions]
+      additionalProperties: false
+    DataExportConfirmation:
+      type: object
+      required: [expectedRecordCount, expectedSnapshotAt]
+      properties:
+        expectedRecordCount:
+          type: integer
+          minimum: 0
+          maximum: 10000
+        expectedSnapshotAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AiProviderConfiguration:
+      type: object
+      required: [name, apiKind, baseUrl, model, secretRef]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        apiKind:
+          enum: [chat-completions, responses]
+        baseUrl:
+          type: string
+          format: uri
+          maxLength: 2000
+          pattern: ^https?://
+        model:
+          type: string
+          minLength: 1
+          maxLength: 200
+        secretRef:
+          type: string
+          pattern: ^[A-Z][A-Z0-9_]{0,127}$
+        parameters:
+          type: object
+          maxProperties: 20
+          propertyNames:
+            pattern: ^[a-zA-Z][a-zA-Z0-9_]{0,63}$
+          additionalProperties:
+            oneOf:
+              - type: string
+                maxLength: 1000
+              - type: number
+              - type: boolean
+        requestTimeoutMs:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+          default: 30000
+        enabled:
+          type: boolean
+          default: true
+    AiRouteConfiguration:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        providerIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+        fallbackEnabled:
+          type: boolean
+          default: true
+        retryPolicy:
+          type: object
+          properties:
+            maxRounds:
+              type: integer
+              minimum: 1
+              maximum: 5
+              default: 2
+            initialDelayMs:
+              type: integer
+              minimum: 0
+              maximum: 10000
+              default: 500
+          additionalProperties: false
+        degradePolicy:
+          type: object
+          properties:
+            failureThreshold:
+              type: integer
+              minimum: 1
+              maximum: 100
+              default: 3
+            cooldownMs:
+              type: integer
+              minimum: 1000
+              maximum: 3600000
+              default: 60000
+          additionalProperties: false
+        enabled:
+          type: boolean
+          default: true
+    VersionedEnabled:
+      type: object
+      required: [enabled, expectedVersion]
+      properties:
+        enabled:
+          type: boolean
+        expectedVersion:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    TriggerConditions:
+      type: object
+      properties:
+        chatIds:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+        senderIds:
+          type: array
+          maxItems: 100
+          items:
+            type: string
+            minLength: 1
+        contentTypes:
+          type: array
+          maxItems: 4
+          items:
+            enum: [text, attachment, mixed, unknown]
+        text:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [kind, value]
+              properties:
+                kind:
+                  enum: [keyword, prefix, regex]
+                value:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                caseSensitive:
+                  type: boolean
+                  default: false
+              additionalProperties: false
+        timeWindow:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [timeZone, daysOfWeek, start, end]
+              properties:
+                timeZone:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                  description: IANA 时区名称，例如 Asia/Shanghai。
+                daysOfWeek:
+                  type: array
+                  minItems: 1
+                  maxItems: 7
+                  uniqueItems: true
+                  items:
+                    enum:
+                      - monday
+                      - tuesday
+                      - wednesday
+                      - thursday
+                      - friday
+                      - saturday
+                      - sunday
+                start:
+                  type: string
+                  pattern: "^([01]\\d|2[0-3]):[0-5]\\d$"
+                end:
+                  type: string
+                  pattern: "^([01]\\d|2[0-3]):[0-5]\\d$"
+              additionalProperties: false
+      additionalProperties: false
+    TriggerView:
+      type: object
+      required:
+        - id
+        - name
+        - workflowId
+        - workflowVersionId
+        - workflowVersion
+        - conditions
+        - includeFromMe
+        - enabled
+        - conflictingTriggerIds
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        workflowId:
+          type: string
+          format: uuid
+        workflowVersionId:
+          type: string
+          format: uuid
+        workflowVersion:
+          type: integer
+          minimum: 1
+        conditions:
+          $ref: "#/components/schemas/TriggerConditions"
+        includeFromMe:
+          type: boolean
+        enabled:
+          type: boolean
+        conflictingTriggerIds:
+          type: array
+          description: 与当前活动触发器可能同时命中的其他活动触发器 ID；仅作警告，不阻止启用。
+          items:
+            type: string
+            format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CreateTrigger:
+      type: object
+      required: [name, workflowId, workflowVersion, conditions]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        workflowId:
+          type: string
+          format: uuid
+        workflowVersion:
+          type: integer
+          minimum: 1
+        conditions:
+          $ref: "#/components/schemas/TriggerConditions"
+        includeFromMe:
+          type: boolean
+          const: false
+          default: false
+        enabled:
+          type: boolean
+          default: false
+      additionalProperties: false
+    TriggerPreview:
+      type: object
+      required: [conditions, sample]
+      properties:
+        conditions:
+          $ref: "#/components/schemas/TriggerConditions"
+        includeFromMe:
+          type: boolean
+          default: false
+        sample:
+          type: object
+          required: [providerChatId, senderId, contentType, text]
+          properties:
+            providerChatId:
+              type: string
+            senderId:
+              type: [string, "null"]
+            sentAt:
+              type: string
+              format: date-time
+              description: 可选的虚构样本时间；省略时使用服务端当前时间。
+            contentType:
+              enum: [text, attachment, mixed, unknown]
+            text:
+              type: [string, "null"]
+            isFromMe:
+              type: boolean
+              default: false
+          additionalProperties: false
+      additionalProperties: false
   responses:
     Error:
       description: 请求失败。

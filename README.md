@@ -30,12 +30,14 @@
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5" /></a>
   <a href="https://fastify.dev/"><img src="https://img.shields.io/badge/Fastify-5-000000?logo=fastify&logoColor=white" alt="Fastify 5" /></a>
+  <a href="https://vuejs.org/"><img src="https://img.shields.io/badge/Vue.js-3-42B883?logo=vuedotjs&logoColor=white" alt="Vue.js 3" /></a>
+  <a href="https://vite.dev/"><img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" alt="Vite 7" /></a>
   <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
 </p>
 
 ## 项目状态
 
-BubblePilot 已进入编码阶段。M1 消息接入与归档闭环现已可运行：支持 BlueBubbles `new-message` Webhook、监听范围过滤、PostgreSQL 幂等归档、健康检查和受 Token 保护的最小查询 API。下一阶段是事件匹配与基础动作。
+BubblePilot 已完成 M0-M4：消息归档、事件匹配、可编排工作流、多 AI Provider、Web 管理、搜索、二次验证和受控导出均已形成闭环。M5 的运行可靠性功能与运维工具已经实现，包括容量保护、失败恢复、诊断和备份校验；当前剩余目标环境的 Compose 备份恢复与升级回滚演练。
 
 ## 核心能力
 
@@ -43,13 +45,13 @@ BubblePilot 已进入编码阶段。M1 消息接入与归档闭环现已可运�
 - 按聊天范围独立保存并搜索消息内容。
 - 使用关键词、正则、发送者和消息类型匹配 Bot 事件。
 - 通过可配置工作流编排条件、变量、AI 和回复节点。
-- 接入 OpenAI 兼容格式的 AI 服务。
+- 管理多个 OpenAI 兼容 AI Provider，并按策略执行 Retry、Fallback 和自动降级。
 - 通过 Web 登录和敏感操作二次验证保护聊天数据。
 - 使用 Docker Compose 自托管部署。
 
 ## 架构概览
 
-BubblePilot 将消息接入、归档、事件匹配、工作流编排和外部服务适配拆成清晰的模块。首期采用模块化单体和进程内队列；节点、适配器和执行器均通过稳定合同扩展，为未来独立 Worker 或外部消息队列保留边界。
+BubblePilot 将消息接入、归档、事件匹配、工作流编排和外部服务适配拆成清晰的模块。首期采用模块化单体和进程内调度；节点、适配器和执行器均通过稳定合同扩展，为未来独立 Worker 或外部消息队列保留边界。
 
 ![BubblePilot 总体架构](doc/architecture-overview.svg)
 
@@ -63,7 +65,7 @@ BubblePilot 将消息接入、归档、事件匹配、工作流编排和外部�
 
 ## 快速开始
 
-需要 Docker 与 Docker Compose。复制配置并替换所有 `CHANGE_ME`，尤其是数据库密码、API Token 和 Webhook Secret；再把需要归档的 BlueBubbles Chat GUID 写入 `MONITORED_CHAT_IDS`：
+需要 Docker 与 Docker Compose。复制配置并替换所有 `CHANGE_ME`，尤其是数据库密码、API Token、Webhook Secret、BlueBubbles Server URL、访问令牌和 AI Key；再把需要归档的 BlueBubbles Chat GUID 写入 `MONITORED_CHAT_IDS`。AI 服务地址、模型和对应的环境变量名通过受保护 API 配置：
 
 ```bash
 cp .env.example .env
@@ -90,7 +92,9 @@ https://你的域名/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_WEBHOOK_SECR
 | 想了解什么 | 阅读 |
 | --- | --- |
 | 产品目标、范围和验收标准 | [目标需求](doc/目标需求.md) |
+| 典型用户交互、异常路径和验收故事 | [典型用户交互故事](doc/典型用户交互故事.md) |
 | 阶段目标和非目标 | [产品路线图](doc/产品路线图.md) |
+| 当前开发状态和短周期记录 | [开发进度](doc/开发进度.md) |
 | 当前技术栈、选型理由和重评条件 | [技术选型](doc/技术选型.md) |
 | 模块边界和演进方式 | [概要设计](doc/概要设计.md) |
 | 仓库目录和依赖方向 | [仓库目录规划](doc/仓库目录规划.md) |

@@ -10,21 +10,29 @@
   },
   "packageManager": "pnpm@11.9.0",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "auth:hash": "tsx app/hash-password.ts",
+    "build": "pnpm build:server && pnpm build:web",
+    "build:server": "tsc -p tsconfig.build.json",
+    "build:web": "pnpm --dir apps/web build",
+    "contracts:check": "node scripts/check-openapi-routes.mjs && node scripts/check-config-contract.mjs",
     "db:migrate": "tsx app/migrate.ts",
     "db:migrate:local": "tsx --env-file=.env.local app/migrate.ts",
     "dev": "tsx watch app/main.ts",
     "dev:local": "tsx --env-file=.env.local watch app/main.ts",
-    "format": "prettier --check app modules tests contracts *.json *.js *.ts *.yaml",
-    "format:write": "prettier --write app modules tests contracts *.json *.js *.ts *.yaml",
+    "dev:web": "pnpm --dir apps/web dev",
+    "docs:check": "node scripts/check-markdown-links.mjs",
+    "format": "prettier --check app modules tests contracts apps/web/src apps/web/*.json apps/web/*.ts apps/web/*.html scripts/*.mjs *.json *.js *.ts *.yaml",
+    "format:write": "prettier --write app modules tests contracts apps/web/src apps/web/*.json apps/web/*.ts apps/web/*.html scripts/*.mjs *.json *.js *.ts *.yaml",
     "lint": "eslint .",
+    "ops:check": "sh -n scripts/*.sh && node scripts/check-ops-contract.mjs",
     "start": "node dist/app/main.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm ops:check && pnpm contracts:check && pnpm docs:check && pnpm build"
   },
   "dependencies": {
+    "@fastify/static": "^8.3.0",
     "fastify": "^5.6.0",
     "pg": "^8.16.3",
     "zod": "^4.1.5"
@@ -35,11 +43,14 @@
     "@types/pg": "^8.15.5",
     "eslint": "^9.34.0",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.10.0",
     "globals": "^16.3.0",
     "prettier": "^3.6.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.41.0",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "vue-eslint-parser": "^10.4.1",
+    "yaml": "^2.9.0"
   }
 }

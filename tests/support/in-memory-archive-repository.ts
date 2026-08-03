@@ -3,8 +3,16 @@ import { randomUUID } from "node:crypto";
 import type {
   ArchiveRepository,
   ArchivedMessage,
+  AutomationOutcome,
+  ChatMonitoringMutation,
   ChatSummary,
+  ContextMessage,
+  ContextWindowOptions,
+  InboundEventSummary,
   IngestionResult,
+  MessageSearchOptions,
+  MessageSearchResult,
+  MessageRetentionBatchInput,
   PageOptions,
 } from "../../modules/archive/archive-repository.js";
 import type {
@@ -17,25 +25,39 @@ interface StoredChat extends ChatSummary {
 }
 
 export class InMemoryArchiveRepository implements ArchiveRepository {
-  readonly events = new Set<string>();
+  readonly events = new Map<string, InboundEventSummary>();
   readonly chats = new Map<string, StoredChat>();
 
   async ingestMessage(
     envelope: MessageEnvelope,
     archiveEnabled: boolean,
   ): Promise<IngestionResult> {
-    if (this.events.has(envelope.eventId)) {
+    const existingEvent = this.events.get(envelope.eventId);
+    if (existingEvent !== undefined) {
       return {
         status: "duplicate",
         eventId: envelope.eventId,
         correlationId: envelope.correlationId,
         messageId: null,
+        automationOutcome: existingEvent.automationOutcome,
       };
     }
-    this.events.add(envelope.eventId);
+    const receivedAt = new Date().toISOString();
+    this.events.set(envelope.eventId, {
+      id: randomUUID(),
+      provider: envelope.provider,
+      eventId: envelope.eventId,
+      correlationId: envelope.correlationId,
+      eventType: envelope.metadata.eventType,
+      ingestionStatus: archiveEnabled ? "completed" : "ignored",
+      automationOutcome: archiveEnabled
+        ? "evaluation-pending"
+        : "chat-not-monitored",
+      receivedAt,
+    });
 
     const existing = this.chats.get(envelope.chat.providerChatId);
-    const now = new Date().toISOString();
+    const now = receivedAt;
     const chat: StoredChat = existing ?? {
       id: randomUUID(),
       providerChatId: envelope.chat.providerChatId,
@@ -43,10 +65,10 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
       displayName: envelope.chat.displayName,
       enabled: archiveEnabled,
       messageCount: 0,
+      version: 1,
       updatedAt: now,
       messages: [],
     };
-    chat.enabled = archiveEnabled;
     chat.updatedAt = now;
     this.chats.set(envelope.chat.providerChatId, chat);
 
@@ -56,6 +78,7 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
         eventId: envelope.eventId,
         correlationId: envelope.correlationId,
         messageId: null,
+        automationOutcome: "chat-not-monitored",
       };
     }
 
@@ -66,11 +89,14 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
       ),
     );
     if (duplicateMessage) {
+      const event = this.events.get(envelope.eventId);
+      if (event !== undefined) event.automationOutcome = "not-evaluated";
       return {
         status: "duplicate",
         eventId: envelope.eventId,
         correlationId: envelope.correlationId,
         messageId: null,
+        automationOutcome: "not-evaluated",
       };
     }
 
@@ -83,6 +109,7 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
       contentType: envelope.message.contentType,
       isFromMe: envelope.message.isFromMe,
       attachments: envelope.message.attachments,
+      contentRedactedAt: null,
       createdAt: now,
     };
     chat.messages.push(message);
@@ -92,20 +119,65 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
       eventId: envelope.eventId,
       correlationId: envelope.correlationId,
       messageId: message.id,
+      automationOutcome: "evaluation-pending",
     };
   }
 
   async recordIgnoredEvent(
     event: IgnoredInboundEvent,
   ): Promise<IngestionResult> {
-    const duplicate = this.events.has(event.eventId);
-    this.events.add(event.eventId);
+    const existingEvent = this.events.get(event.eventId);
+    if (existingEvent === undefined) {
+      this.events.set(event.eventId, {
+        id: randomUUID(),
+        provider: event.provider,
+        eventId: event.eventId,
+        correlationId: event.correlationId,
+        eventType: event.eventType,
+        ingestionStatus: "ignored",
+        automationOutcome: "unsupported-event",
+        receivedAt: new Date().toISOString(),
+      });
+    }
     return {
-      status: duplicate ? "duplicate" : "ignored",
+      status: existingEvent === undefined ? "ignored" : "duplicate",
       eventId: event.eventId,
       correlationId: event.correlationId,
       messageId: null,
+      automationOutcome:
+        existingEvent?.automationOutcome ?? "unsupported-event",
     };
+  }
+
+  recordAutomationOutcome(
+    _provider: string,
+    eventId: string,
+    outcome: AutomationOutcome,
+  ): Promise<AutomationOutcome> {
+    const event = this.events.get(eventId);
+    if (event === undefined) {
+      throw new Error("The inbound event does not exist.");
+    }
+    if (event.automationOutcome === "evaluation-pending") {
+      event.automationOutcome = outcome;
+    }
+    return Promise.resolve(event.automationOutcome);
+  }
+
+  listInboundEvents(
+    options: PageOptions,
+  ): Promise<readonly InboundEventSummary[]> {
+    return Promise.resolve(
+      [...this.events.values()]
+        .filter((event) => this.isBefore(event.receivedAt, event.id, options))
+        .sort(
+          (left, right) =>
+            right.receivedAt.localeCompare(left.receivedAt) ||
+            right.id.localeCompare(left.id),
+        )
+        .slice(0, options.limit)
+        .map((event) => ({ ...event })),
+    );
   }
 
   async listChats(options: PageOptions): Promise<readonly ChatSummary[]> {
@@ -127,8 +199,68 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
         displayName: chat.displayName,
         enabled: chat.enabled,
         messageCount: chat.messageCount,
+        version: chat.version,
         updatedAt: chat.updatedAt,
       }));
+  }
+
+  async listChatMonitoring(
+    options: PageOptions,
+  ): Promise<readonly ChatSummary[]> {
+    return [...this.chats.values()]
+      .filter((chat) => this.isBefore(chat.updatedAt, chat.id, options))
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          right.id.localeCompare(left.id),
+      )
+      .slice(0, options.limit)
+      .map((chat) => ({
+        id: chat.id,
+        providerChatId: chat.providerChatId,
+        type: chat.type,
+        displayName: chat.displayName,
+        enabled: chat.enabled,
+        messageCount: chat.messageCount,
+        version: chat.version,
+        updatedAt: chat.updatedAt,
+      }));
+  }
+
+  getChatMonitoringState(providerChatId: string): Promise<boolean | null> {
+    return Promise.resolve(this.chats.get(providerChatId)?.enabled ?? null);
+  }
+
+  setChatMonitoring(input: {
+    chatId: string;
+    enabled: boolean;
+    expectedVersion: number;
+  }): Promise<ChatMonitoringMutation> {
+    const chat = [...this.chats.values()].find(
+      (candidate) => candidate.id === input.chatId,
+    );
+    if (chat === undefined) {
+      return Promise.resolve({ status: "not-found" });
+    }
+    if (chat.version !== input.expectedVersion) {
+      return Promise.resolve({ status: "conflict" });
+    }
+    chat.enabled = input.enabled;
+    chat.version += 1;
+    chat.updatedAt = new Date().toISOString();
+    return Promise.resolve({
+      status: "ok",
+      value: {
+        id: chat.id,
+        providerChatId: chat.providerChatId,
+        type: chat.type,
+        displayName: chat.displayName,
+        enabled: chat.enabled,
+        messageCount: chat.messageCount,
+        version: chat.version,
+        updatedAt: chat.updatedAt,
+      },
+    });
   }
 
   async listMessages(
@@ -150,6 +282,97 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
           right.id.localeCompare(left.id),
       )
       .slice(0, options.limit);
+  }
+
+  searchMessages(
+    options: MessageSearchOptions,
+  ): Promise<readonly MessageSearchResult[]> {
+    const results = [...this.chats.values()]
+      .filter((chat) => chat.enabled)
+      .filter((chat) => options.chatId === null || chat.id === options.chatId)
+      .flatMap((chat) =>
+        chat.messages.map((message) => ({
+          ...message,
+          chatId: chat.id,
+          providerChatId: chat.providerChatId,
+          chatDisplayName: chat.displayName,
+        })),
+      )
+      .filter(
+        (message) =>
+          (options.keyword === null ||
+            (message.body ?? "")
+              .toLocaleLowerCase()
+              .includes(options.keyword.toLocaleLowerCase())) &&
+          (options.senderId === null ||
+            message.senderId === options.senderId) &&
+          (options.sentFrom === null ||
+            message.sentAt >= options.sentFrom.toISOString()) &&
+          (options.sentTo === null ||
+            message.sentAt <= options.sentTo.toISOString()) &&
+          this.isBefore(message.sentAt, message.id, options),
+      )
+      .sort(
+        (left, right) =>
+          right.sentAt.localeCompare(left.sentAt) ||
+          right.id.localeCompare(left.id),
+      )
+      .slice(0, options.limit);
+    return Promise.resolve(results);
+  }
+
+  loadRecentMessages(
+    providerChatId: string,
+    options: ContextWindowOptions,
+  ): Promise<readonly ContextMessage[]> {
+    const messages = this.chats.get(providerChatId)?.messages ?? [];
+    const selected: ContextMessage[] = [];
+    let characters = 0;
+    for (const message of [...messages].reverse()) {
+      if (
+        message.body === null ||
+        message.body.length === 0 ||
+        (!options.includeFromMe && message.isFromMe) ||
+        message.providerMessageId === options.excludeProviderMessageId ||
+        selected.length >= options.limit ||
+        characters + message.body.length > options.maxCharacters
+      ) {
+        continue;
+      }
+      characters += message.body.length;
+      selected.push({
+        providerMessageId: message.providerMessageId,
+        senderId: message.senderId,
+        sentAt: message.sentAt,
+        body: message.body,
+        isFromMe: message.isFromMe,
+      });
+    }
+    return Promise.resolve(selected.reverse());
+  }
+
+  redactExpiredMessageContent(
+    input: MessageRetentionBatchInput,
+  ): Promise<number> {
+    const candidates = [...this.chats.values()]
+      .flatMap((chat) => chat.messages)
+      .filter(
+        (message) =>
+          message.contentRedactedAt === null &&
+          message.createdAt < input.before.toISOString(),
+      )
+      .sort(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.id.localeCompare(right.id),
+      )
+      .slice(0, input.limit);
+    for (const message of candidates) {
+      message.body = null;
+      message.attachments = [];
+      message.contentRedactedAt = input.now.toISOString();
+    }
+    return Promise.resolve(candidates.length);
   }
 
   async isReady(): Promise<boolean> {

@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bubblepilot.local/contracts/workflow.schema.json",
+  "title": "BubblePilot Workflow Definition",
+  "type": "object",
+  "required": ["schemaVersion", "name", "startNodeId", "nodes"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "startNodeId": { "$ref": "#/$defs/nodeId" },
+    "maxSteps": { "type": "integer", "minimum": 1, "maximum": 128 },
+    "maxExecutionMs": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 300000
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/conditionNode" },
+          { "$ref": "#/$defs/logNode" },
+          { "$ref": "#/$defs/setVariableNode" },
+          { "$ref": "#/$defs/loadContextNode" },
+          { "$ref": "#/$defs/aiChatNode" },
+          { "$ref": "#/$defs/replyNode" },
+          { "$ref": "#/$defs/endNode" }
+        ]
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nodeId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "baseNode": {
+      "type": "object",
+      "required": ["id", "type", "version", "config"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nodeId" },
+        "type": {},
+        "config": {},
+        "version": { "const": 1 }
+      }
+    },
+    "conditionNode": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/baseNode" },
+        {
+          "type": "object",
+          "required": ["onTrue", "onFalse"],
+          "properties": {
+            "type": { "const": "condition" },
+            "config": {
+              "type": "object",
+              "required": ["field", "operator"],
+              "properties": {
+                "field": {
+                  "enum": [
+                    "message.text",
+                    "message.senderId",
+                    "message.contentType",
+                    "chat.providerChatId"
+                  ]
+                },
+                "operator": {
+                  "enum": [
+                    "equals",
+                    "contains",
+                    "starts-with",
+                    "matches",
+                    "exists"
+                  ]
+                },
+                "value": { "type": "string", "maxLength": 2000 },
+                "caseSensitive": { "type": "boolean" }
+              },
+              "additionalProperties": false
+            },
+            "onTrue": { "$ref": "#/$defs/nodeId" },
+            "onFalse": { "$ref": "#/$defs/nodeId" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "logNode": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/baseNode" },
+        {
+          "type": "object",
+          "required": ["onSuccess"],
+          "properties": {
+            "type": { "const": "log" },
+            "config": {
+              "type": "object",
+              "required": ["message"],
+              "properties": {
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "additionalProperties": false
+            },
+            "onSuccess": { "$ref": "#/$defs/nodeId" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "setVariableNode": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/baseNode" },
+        {
+          "type": "object",
+          "required": ["onSuccess"],
+          "properties": {
+            "type": { "const": "set-variable" },
+            "config": {
+              "type": "object",
+              "required": ["name", "valueTemplate"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-zA-Z0-9_]{0,63}$"
+                },
+                "valueTemplate": { "type": "string", "maxLength": 4000 }
+              },
+              "additionalProperties": false
+            },
+            "onSuccess": { "$ref": "#/$defs/nodeId" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "loadContextNode": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/baseNode" },
+        {
+          "type": "object",
+          "required": ["onSuccess"],
+          "properties": {
+            "type": { "const": "load-context" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "messageLimit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "characterLimit": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 20000
+                },
+                "includeFromMe": { "type": "boolean" }
+              },
+              "additionalProperties": false
+            },
+            "onSuccess": { "$ref": "#/$defs/nodeId" },
+            "onFailure": { "$ref": "#/$defs/nodeId" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "aiChatNode": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/baseNode" },
+        {
+          "type": "object",
+          "required": ["onSuccess"],
+          "properties": {
+            "type": { "const": "ai-chat" },
+            "config": {
+              "type": "object",
+              "required": ["providerRouteId", "promptTemplate"],
+              "properties": {
+                "providerRouteId": { "type": "string", "format": "uuid" },
+                "systemPrompt": { "type": "string", "maxLength": 12000 },
+                "promptTemplate": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 12000
+                },
+                "includeLoadedContext": { "type": "boolean" },
+                "timeoutMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 120000
+                },
+                "maxOutputTokens": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8192
+                },
+                "maxOutputCharacters": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 12000
+                },
+                "temperature": {
+                  "type": ["number", "null"],
+                  "minimum": 0,
+                  "maximum": 2
+                },
+                "outputFormat": { "enum": ["text", "json"] },
+                "outputVariable": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-zA-Z0-9_]{0,63}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            "onSuccess": { "$ref": "#/$defs/nodeId" },
+            "onFailure": { "$ref": "#/$defs/nodeId" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "replyNode": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/baseNode" },
+        {
+          "type": "object",
+          "required": ["onSuccess"],
+          "properties": {
+            "type": { "const": "reply" },
+            "config": {
+              "type": "object",
+              "required": ["text"],
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "replyToSourceMessage": { "type": "boolean" },
+                "retry": {
+                  "type": "object",
+                  "required": ["maxAttempts", "initialDelayMs"],
+                  "properties": {
+                    "maxAttempts": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 5
+                    },
+                    "initialDelayMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 5000
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "onSuccess": { "$ref": "#/$defs/nodeId" },
+            "onFailure": { "$ref": "#/$defs/nodeId" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "endNode": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/baseNode" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "end" },
+            "config": {
+              "type": "object",
+              "properties": {
+                "result": { "enum": ["succeeded", "skipped"] }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

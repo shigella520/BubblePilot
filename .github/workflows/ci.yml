@@ -8,7 +8,7 @@ on:
     branches:
       - main
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
   workflow_dispatch:
 
 env:
@@ -39,7 +39,11 @@ jobs:
       TEST_DATABASE_URL: postgresql://bubblepilot:bubblepilot_ci@127.0.0.1:5432/bubblepilot_test
       POSTGRES_PASSWORD: bubblepilot_ci
       API_ACCESS_TOKEN: ci-api-access-token-with-32-characters
+      APP_LOGIN_PASSWORD_HASH: "scrypt$16384$8$1$Y2ktbG9naW4tc2FsdC0wMQ$cjoTa-eh4qqcTaDtBQl8ieVped-f3uxa_Z5sbTw6sUvhZuCdb3fSgLabQcWAl9RroMuq9Se5NIlhY7AoqVuEng"
+      SENSITIVE_OPERATION_PASSWORD_HASH: "scrypt$16384$8$1$Y2ktc3RlcHVwLXNhbHQtMQ$R1rQq4sKbp_2AHvvZvn3H6drMRvn4lio1lvpc0fAU6Zvg66OjhzgdvmtYaOT_nFYElg5xkD2J9dxpI2q2WtBtw"
       BLUEBUBBLES_WEBHOOK_SECRET: ci-webhook-secret-with-32-characters
+      BLUEBUBBLES_SERVER_URL: https://bluebubbles.example.test
+      BLUEBUBBLES_ACCESS_TOKEN: fictional-ci-bluebubbles-token
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,7 +57,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: pnpm
 
       - name: Install dependencies

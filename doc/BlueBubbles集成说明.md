@@ -2,9 +2,9 @@
 
 ## 1. 集成边界
 
-BubblePilot 通过 BlueBubbles Webhook 接收事件，后续通过 BlueBubbles REST API 发送回复。供应商字段、认证方式和网络错误封装在 `modules/integrations/bluebubbles/` 中，归档和自动化模块只依赖内部 `MessageEnvelope`。
+BubblePilot 通过 BlueBubbles Webhook 接收事件，并通过 BlueBubbles REST API 发送回复。供应商字段、认证方式和网络错误封装在 `modules/integrations/bluebubbles/` 中，归档和自动化模块只依赖内部 `MessageEnvelope` 与 `ReplyGateway`。
 
-M1 已实现 `new-message` 入站与归档；REST 回复适配器在 M2 实现。
+M1 已实现 `new-message` 入站与归档；M2 已实现 REST 回复适配器、内部发送幂等与结果分类。
 
 ## 2. BlueBubbles Webhook 行为
 
@@ -57,14 +57,14 @@ HTTP request
 | `data.handle.address` | `message.senderId` | 自己发送时使用内部值 `self` |
 | `data.dateCreated` | `message.sentAt` | 毫秒时间戳转换为 UTC ISO 8601 |
 | `data.text` | `message.text` | 仅监听范围内落库 |
-| `data.isFromMe` | `message.isFromMe` | 后续用于阻止 Bot 自触发循环 |
+| `data.isFromMe` | `message.isFromMe` | 默认阻止 Bot 自身消息再次触发 |
 | `data.attachments[]` | `message.attachments[]` | 只保存 GUID、MIME、文件名和字节数 |
 
 原始 Payload 只计算稳定 SHA-256，不整包保存，也不写入普通日志。机器合同见 `contracts/bluebubbles-webhook.schema.json` 和 `contracts/message-envelope.schema.json`。
 
 ## 5. 出站回复
 
-M2 的回复命令至少包含：
+M2 的回复命令包含：
 
 ```text
 chatId
@@ -74,7 +74,9 @@ idempotencyKey
 correlationId
 ```
 
-适配器应区分：请求已确认、请求超时、明确失败、限流和未知结果。未知结果不能直接再次发送，必须先通过幂等键或供应商查询确认状态。
+适配器调用 `POST /api/v1/message/text?password=<token>`，把内部命令映射为 `chatGuid`、`message`、`method`、`tempGuid`，可选回复目标映射为 `selectedMessageGuid` 与 `partIndex`。`BLUEBUBBLES_SEND_METHOD` 可选择 `private-api` 或 `apple-script`。
+
+适配器区分请求已确认、明确失败、限流和未知结果。HTTP `429` 与 `5xx` 属于明确可重试失败；超时或网络异常无法证明请求未生效，因此记录为 `unknown` 并进入人工恢复状态，不直接再次发送。
 
 ## 6. 重试和幂等
 
@@ -83,7 +85,7 @@ correlationId
 - 事件认领、Chat Upsert、消息写入和最终状态更新位于同一事务。
 - 已完成或已忽略事件的重复投递返回 `duplicate`。
 - 失败事件保留脱敏错误摘要，并允许下一次同键投递重新认领。
-- M2 回复发送使用 `executionId + replyNodeId` 作为内部幂等键。
+- 回复发送使用 `executionId + replyNodeId` 作为内部幂等键，并把稳定的 `providerTempGuid` 保存在 `outbound_deliveries`。
 
 ## 7. 兼容性测试
 
