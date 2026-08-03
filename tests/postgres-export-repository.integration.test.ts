@@ -165,6 +165,11 @@ describe.runIf(testDatabaseUrl !== undefined)(
         ],
       );
 
+      // PostgreSQL supplies created_at from its own clock. Capture the export
+      // snapshot only after all fixtures have been committed so clock skew or
+      // a few milliseconds of insertion time cannot exclude the fixtures.
+      currentTime = new Date();
+
       const service = new DataExportService(repository, () => currentTime);
       const owner = {
         actorType: "session" as const,
