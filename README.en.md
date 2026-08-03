@@ -90,6 +90,7 @@ Production deployments must use HTTPS or a private network and must disable reve
 | Topic | Read |
 | --- | --- |
 | Product scope and acceptance | [目标需求](doc/目标需求.md) |
+| Typical interactions, failure paths, and acceptance stories | [典型用户交互故事](doc/典型用户交互故事.md) |
 | Roadmap and non-goals | [产品路线图](doc/产品路线图.md) |
 | Current stack, rationale, and review triggers | [技术选型](doc/技术选型.md) |
 | Modules and evolution | [概要设计](doc/概要设计.md) |
