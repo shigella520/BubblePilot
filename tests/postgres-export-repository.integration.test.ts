@@ -142,7 +142,7 @@ describe.runIf(testDatabaseUrl !== undefined)(
       await pool.query(
         `INSERT INTO bot_triggers (
            id, name, workflow_version_id, conditions, enabled
-         ) VALUES ($1, $2, $3, '{}'::jsonb, TRUE)`,
+         ) VALUES ($1, $2, $3, '{}'::jsonb, FALSE)`,
         [ids.trigger, `Export trigger ${suffix}`, ids.workflowVersion],
       );
       await pool.query(
