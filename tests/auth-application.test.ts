@@ -51,10 +51,12 @@ describe("Web admin authentication", () => {
       port: 8080,
       databaseUrl: "postgresql://unused.example.test/bubblepilot",
       apiAccessToken: "fictional-api-access-token-32-chars-long",
+      settingsEncryptionKey: "fictional-settings-encryption-key-32-chars",
       loginPasswordHash,
       sensitiveOperationPasswordHash,
       adminSessionTtlSeconds: 43_200,
       sensitiveOperationTtlSeconds: 300,
+      sessionCookieSecure: "auto",
       blueBubblesWebhookSecret: "fictional-webhook-secret-32-chars-long",
       blueBubblesServerUrl: "https://bluebubbles.example.test",
       blueBubblesAccessToken: "fictional-bluebubbles-token",
@@ -119,6 +121,7 @@ describe("Web admin authentication", () => {
     expect(cookie).toContain("bubblepilot_session=");
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("SameSite=Strict");
+    expect(cookie).not.toContain("Secure");
     expect([...authRepository.sessions.values()][0]?.tokenHash).not.toContain(
       cookie,
     );
@@ -126,6 +129,17 @@ describe("Web admin authentication", () => {
       "succeeded",
       "failed",
     ]);
+  });
+
+  it("adds Secure only when auto mode observes HTTPS", async () => {
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      headers: { "x-forwarded-proto": "https" },
+      payload: { password: loginPassword },
+    });
+    expect(login.statusCode).toBe(201);
+    expect(login.headers["set-cookie"]).toContain("Secure");
   });
 
   it("requires a short-lived session-bound grant for message content", async () => {

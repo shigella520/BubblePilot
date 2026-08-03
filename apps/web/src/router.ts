@@ -6,6 +6,7 @@ import DashboardView from "./views/DashboardView.vue";
 import ExecutionsView from "./views/ExecutionsView.vue";
 import LoginView from "./views/LoginView.vue";
 import MessagesView from "./views/MessagesView.vue";
+import SettingsView from "./views/SettingsView.vue";
 
 export default createRouter({
   history: createWebHashHistory(),
@@ -16,5 +17,6 @@ export default createRouter({
     { path: "/automation", component: AutomationView },
     { path: "/ai", component: AiView },
     { path: "/executions", component: ExecutionsView },
+    { path: "/settings", component: SettingsView },
   ],
 });

@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LogOut,
   MessagesSquare,
+  Settings,
   ShieldCheck,
   X,
 } from "@lucide/vue";
@@ -50,6 +51,7 @@ async function logout() {
       <RouterLink to="/executions"
         ><ShieldCheck :size="16" />执行与审计</RouterLink
       >
+      <RouterLink to="/settings"><Settings :size="16" />设置</RouterLink>
     </nav>
     <div class="topbar-meta">
       <span class="connection-pill online">
