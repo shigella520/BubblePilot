@@ -43,7 +43,7 @@ BubblePilot is now in active development. The runnable M1 ingestion and archive 
 - Archive and search messages by configured chat scope.
 - Match bot events using chats, senders, keywords, regular expressions, and message types.
 - Orchestrate conditions, variables, AI calls, and replies through configurable workflows.
-- Connect to OpenAI-compatible AI services.
+- Manage multiple OpenAI-compatible AI providers with bounded retries, fallback, and automatic degradation.
 - Protect chat data with Web login and an additional guard for sensitive operations.
 - Deploy privately with Docker Compose.
 
