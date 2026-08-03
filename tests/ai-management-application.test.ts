@@ -17,11 +17,13 @@ const config: AppConfig = {
   port: 8080,
   databaseUrl: "postgresql://unused.example.test/bubblepilot",
   apiAccessToken,
+  settingsEncryptionKey: "fictional-settings-encryption-key-32-chars",
   loginPasswordHash: "scrypt$16384$8$1$fictional-salt$fictional-key",
   sensitiveOperationPasswordHash:
     "scrypt$16384$8$1$fictional-salt$fictional-key",
   adminSessionTtlSeconds: 43_200,
   sensitiveOperationTtlSeconds: 300,
+  sessionCookieSecure: "auto",
   blueBubblesWebhookSecret: "fictional-webhook-secret-32-chars-long",
   blueBubblesServerUrl: "https://bluebubbles.example.test",
   blueBubblesAccessToken: "fictional-bluebubbles-token",

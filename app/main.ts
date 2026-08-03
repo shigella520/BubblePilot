@@ -14,7 +14,10 @@ import {
   MessageRetentionService,
   MessageRetentionWorker,
 } from "../modules/archive/message-retention-service.js";
-import { BlueBubblesRestReplyGateway } from "../modules/integrations/bluebubbles/rest-reply-gateway.js";
+import { ManagedBlueBubblesReplyGateway } from "../modules/integrations/bluebubbles/managed-reply-gateway.js";
+import { PostgresBlueBubblesSettingsRepository } from "../modules/integrations/bluebubbles/postgres-settings-repository.js";
+import { SettingsCipher } from "../modules/integrations/bluebubbles/settings-cipher.js";
+import { BlueBubblesSettingsService } from "../modules/integrations/bluebubbles/settings-service.js";
 import { createDefaultNodeRegistry } from "../modules/workflow/node-registry.js";
 import { InProcessWorkflowExecutionDispatcher } from "../modules/workflow/execution-dispatcher.js";
 import { PostgresWorkflowRepository } from "../modules/workflow/postgres-workflow-repository.js";
@@ -27,6 +30,20 @@ const aiRepository = new PostgresAiRepository(config.databaseUrl);
 const authRepository = new PostgresAuthRepository(config.databaseUrl);
 const dataExportRepository = new PostgresDataExportRepository(
   config.databaseUrl,
+);
+const blueBubblesSettingsRepository = new PostgresBlueBubblesSettingsRepository(
+  config.databaseUrl,
+);
+const blueBubblesSettings = new BlueBubblesSettingsService(
+  blueBubblesSettingsRepository,
+  new SettingsCipher(config.settingsEncryptionKey),
+  {
+    serverUrl: config.blueBubblesServerUrl,
+    accessToken: config.blueBubblesAccessToken,
+    webhookSecret: config.blueBubblesWebhookSecret,
+    sendMethod: config.blueBubblesSendMethod,
+    requestTimeoutMs: config.blueBubblesRequestTimeoutMs,
+  },
 );
 const messageRetention =
   config.messageRetentionDays > 0
@@ -48,12 +65,7 @@ const aiManagement = new AiManagementService(
   aiClient,
   secretResolver,
 );
-const replyGateway = new BlueBubblesRestReplyGateway({
-  serverUrl: config.blueBubblesServerUrl,
-  accessToken: config.blueBubblesAccessToken,
-  method: config.blueBubblesSendMethod,
-  timeoutMs: config.blueBubblesRequestTimeoutMs,
-});
+const replyGateway = new ManagedBlueBubblesReplyGateway(blueBubblesSettings);
 const workflowEngine = new WorkflowEngine(
   workflowRepository,
   createDefaultNodeRegistry(workflowRepository, replyGateway, {
@@ -81,6 +93,7 @@ const application = buildApplication(config, repository, {
     repository: dataExportRepository,
     service: new DataExportService(dataExportRepository),
   },
+  blueBubbles: { settings: blueBubblesSettings },
   ...(messageRetention === undefined ? {} : { messageRetention }),
 });
 

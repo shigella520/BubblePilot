@@ -70,6 +70,58 @@ paths:
           description: 二次验证授权已绑定当前会话。
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/integrations/bluebubbles:
+    get:
+      operationId: getBlueBubblesSettings
+      description: 返回 BlueBubbles 非敏感配置和凭据是否已配置的状态，不返回 Secret 原文。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 当前 BlueBubbles 运行时配置。
+        "401":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: updateBlueBubblesSettings
+      description: 更新 BlueBubbles 运行时配置；Access Token 和 Webhook Secret 仅在提交时接收并加密保存。
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                [serverUrl, sendMethod, requestTimeoutMs, expectedVersion]
+              properties:
+                serverUrl:
+                  type: string
+                  format: uri
+                accessToken:
+                  type: string
+                  minLength: 1
+                webhookSecret:
+                  type: string
+                  minLength: 32
+                sendMethod:
+                  type: string
+                  enum: [private-api, apple-script]
+                requestTimeoutMs:
+                  type: integer
+                  minimum: 1000
+                  maximum: 120000
+                expectedVersion:
+                  type: integer
+                  minimum: 0
+      responses:
+        "200":
+          description: 配置已保存并立即生效。
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/v1/audit-events:
     get:
       operationId: listAuditEvents

@@ -45,6 +45,8 @@ import {
   type DataExportReadResult,
 } from "../modules/export/export-types.js";
 import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/webhook-adapter.js";
+import type { BlueBubblesSettingsService } from "../modules/integrations/bluebubbles/settings-service.js";
+import { blueBubblesSettingsUpdateSchema } from "../modules/integrations/bluebubbles/settings-types.js";
 import { IngestionService } from "../modules/ingestion/ingestion-service.js";
 import { FixedWindowRateLimiter } from "../modules/reliability/rate-limiter.js";
 import { WorkflowCapacityError } from "../modules/workflow/execution-gate.js";
@@ -184,6 +186,9 @@ export interface ApplicationOptions {
   dataExport?: {
     repository: DataExportRepository;
     service: DataExportService;
+  };
+  blueBubbles?: {
+    settings: BlueBubblesSettingsService;
   };
   messageRetention?: MessageRetentionWorker;
 }
@@ -334,13 +339,34 @@ function readCookie(
   return undefined;
 }
 
-function sessionCookie(config: AppConfig, token: string): string {
-  const secure = config.nodeEnv === "production" ? "; Secure" : "";
+function secureSessionCookie(
+  config: AppConfig,
+  request: FastifyRequest,
+): boolean {
+  if (config.sessionCookieSecure !== "auto") {
+    return config.sessionCookieSecure === "true";
+  }
+  const forwardedProtocol = firstHeader(request.headers["x-forwarded-proto"])
+    ?.split(",")[0]
+    ?.trim()
+    .toLowerCase();
+  return forwardedProtocol === "https" || request.protocol === "https";
+}
+
+function sessionCookie(
+  config: AppConfig,
+  request: FastifyRequest,
+  token: string,
+): string {
+  const secure = secureSessionCookie(config, request) ? "; Secure" : "";
   return `${adminSessionCookieName}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${config.adminSessionTtlSeconds}${secure}`;
 }
 
-function expiredSessionCookie(config: AppConfig): string {
-  const secure = config.nodeEnv === "production" ? "; Secure" : "";
+function expiredSessionCookie(
+  config: AppConfig,
+  request: FastifyRequest,
+): string {
+  const secure = secureSessionCookie(config, request) ? "; Secure" : "";
   return `${adminSessionCookieName}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`;
 }
 
@@ -528,6 +554,8 @@ export function buildApplication(
       options.workflow?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.repository.isReady() ?? Promise.resolve(true),
       options.dataExport?.repository.isReady() ?? Promise.resolve(true),
+      options.blueBubbles?.settings.repository.isReady() ??
+        Promise.resolve(true),
     ]);
     const ready = states.every(Boolean);
     return reply
@@ -537,7 +565,13 @@ export function buildApplication(
 
   application.post("/api/v1/webhooks/bluebubbles", async (request, reply) => {
     enforceRateLimit(request, webhookRateLimiter);
-    if (!secretsEqual(webhookToken(request), config.blueBubblesWebhookSecret)) {
+    const webhookAuthenticated =
+      options.blueBubbles === undefined
+        ? secretsEqual(webhookToken(request), config.blueBubblesWebhookSecret)
+        : await options.blueBubbles.settings.verifyWebhookSecret(
+            webhookToken(request),
+          );
+    if (!webhookAuthenticated) {
       throw new ApplicationError(
         "INVALID_WEBHOOK_SECRET",
         "Webhook authentication failed.",
@@ -724,6 +758,43 @@ export function buildApplication(
     );
   };
 
+  if (options.blueBubbles !== undefined) {
+    application.get(
+      "/api/v1/integrations/bluebubbles",
+      { preHandler: requireAdmin },
+      async () => ({ data: await options.blueBubbles?.settings.view() }),
+    );
+
+    application.put(
+      "/api/v1/integrations/bluebubbles",
+      {
+        preHandler: requireSensitive(
+          "integration.bluebubbles.update",
+          "integration-settings",
+        ),
+      },
+      async (request) => {
+        const body = blueBubblesSettingsUpdateSchema.parse(request.body);
+        const result = await options.blueBubbles?.settings.update(body);
+        if (result === undefined) {
+          throw new ApplicationError(
+            "BLUEBUBBLES_SETTINGS_UNAVAILABLE",
+            "BlueBubbles settings are unavailable.",
+            503,
+          );
+        }
+        if (result.status === "conflict") {
+          throw new ApplicationError(
+            "BLUEBUBBLES_SETTINGS_CONFLICT",
+            "BlueBubbles settings changed; refresh before retrying.",
+            409,
+          );
+        }
+        return { data: result.value };
+      },
+    );
+  }
+
   application.addHook("onResponse", async (request, reply) => {
     const context = sensitiveAudits.get(request);
     if (context === undefined) {
@@ -782,7 +853,7 @@ export function buildApplication(
         { clientFingerprint: fingerprint(request) },
       );
       return reply
-        .header("set-cookie", sessionCookie(config, result.token))
+        .header("set-cookie", sessionCookie(config, request, result.token))
         .status(201)
         .send({ data: result.session });
     });
@@ -810,7 +881,7 @@ export function buildApplication(
           );
         }
         return reply
-          .header("set-cookie", expiredSessionCookie(config))
+          .header("set-cookie", expiredSessionCookie(config, request))
           .status(204)
           .send();
       },
@@ -1870,6 +1941,7 @@ export function buildApplication(
       options.workflow?.repository.close() ?? Promise.resolve(),
       options.ai?.repository.close() ?? Promise.resolve(),
       options.dataExport?.repository.close() ?? Promise.resolve(),
+      options.blueBubbles?.settings.repository.close() ?? Promise.resolve(),
     ]);
   });
 

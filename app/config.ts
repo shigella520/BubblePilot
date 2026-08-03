@@ -42,6 +42,7 @@ const environmentSchema = z
     APP_PORT: z.coerce.number().int().min(1).max(65_535).default(8080),
     DATABASE_URL: z.string().min(1),
     API_ACCESS_TOKEN: runtimeSecretSchema,
+    SETTINGS_ENCRYPTION_KEY: runtimeSecretSchema.optional(),
     APP_LOGIN_PASSWORD_HASH: passwordHashSchema,
     SENSITIVE_OPERATION_PASSWORD_HASH: passwordHashSchema,
     ADMIN_SESSION_TTL_SECONDS: z.coerce
@@ -56,6 +57,7 @@ const environmentSchema = z
       .min(60)
       .max(3_600)
       .default(300),
+    SESSION_COOKIE_SECURE: z.enum(["auto", "true", "false"]).default("auto"),
     BLUEBUBBLES_WEBHOOK_SECRET: runtimeSecretSchema,
     BLUEBUBBLES_SERVER_URL: z.string().url(),
     BLUEBUBBLES_ACCESS_TOKEN: externalSecretSchema,
@@ -140,10 +142,12 @@ export interface AppConfig {
   port: number;
   databaseUrl: string;
   apiAccessToken: string;
+  settingsEncryptionKey: string;
   loginPasswordHash: string;
   sensitiveOperationPasswordHash: string;
   adminSessionTtlSeconds: number;
   sensitiveOperationTtlSeconds: number;
+  sessionCookieSecure: "auto" | "true" | "false";
   blueBubblesWebhookSecret: string;
   blueBubblesServerUrl: string;
   blueBubblesAccessToken: string;
@@ -178,10 +182,13 @@ export function loadConfig(
     port: parsed.APP_PORT,
     databaseUrl: parsed.DATABASE_URL,
     apiAccessToken: parsed.API_ACCESS_TOKEN,
+    settingsEncryptionKey:
+      parsed.SETTINGS_ENCRYPTION_KEY ?? parsed.API_ACCESS_TOKEN,
     loginPasswordHash: parsed.APP_LOGIN_PASSWORD_HASH,
     sensitiveOperationPasswordHash: parsed.SENSITIVE_OPERATION_PASSWORD_HASH,
     adminSessionTtlSeconds: parsed.ADMIN_SESSION_TTL_SECONDS,
     sensitiveOperationTtlSeconds: parsed.SENSITIVE_OPERATION_TTL_SECONDS,
+    sessionCookieSecure: parsed.SESSION_COOKIE_SECURE,
     blueBubblesWebhookSecret: parsed.BLUEBUBBLES_WEBHOOK_SECRET,
     blueBubblesServerUrl: parsed.BLUEBUBBLES_SERVER_URL.replace(/\/$/, ""),
     blueBubblesAccessToken: parsed.BLUEBUBBLES_ACCESS_TOKEN,

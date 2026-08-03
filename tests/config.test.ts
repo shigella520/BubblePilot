@@ -26,6 +26,29 @@ describe("loadConfig", () => {
     expect(config.workflowMaxConcurrency).toBe(4);
     expect(config.workflowQueueCapacity).toBe(64);
     expect(config.adminRateLimitMax).toBe(600);
+    expect(config.sessionCookieSecure).toBe("auto");
+  });
+
+  it("supports explicit session cookie security modes", () => {
+    const environment = {
+      DATABASE_URL: "postgresql://example.test/bubblepilot",
+      API_ACCESS_TOKEN: "a".repeat(32),
+      APP_LOGIN_PASSWORD_HASH:
+        "scrypt$16384$8$1$fictional-salt$fictional-password-key",
+      SENSITIVE_OPERATION_PASSWORD_HASH:
+        "scrypt$16384$8$1$fictional-salt$fictional-sensitive-key",
+      BLUEBUBBLES_WEBHOOK_SECRET: "b".repeat(32),
+      BLUEBUBBLES_SERVER_URL: "https://bluebubbles.example.test",
+      BLUEBUBBLES_ACCESS_TOKEN: "fictional-bluebubbles-token",
+    };
+    expect(
+      loadConfig({ ...environment, SESSION_COOKIE_SECURE: "true" })
+        .sessionCookieSecure,
+    ).toBe("true");
+    expect(
+      loadConfig({ ...environment, SESSION_COOKIE_SECURE: "false" })
+        .sessionCookieSecure,
+    ).toBe("false");
   });
 
   it("allows explicit message retention opt-out and rejects invalid days", () => {
