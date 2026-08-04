@@ -58,10 +58,44 @@ function addBlock(block: Block) {
       x: 80 + nodes.value.length * 30,
       y: 80 + nodes.value.length * 30,
     },
-    data: { label: block.name, block },
+    data: { label: block.name, block, config: defaultConfig(block) },
   });
   selected.value = nodes.value[nodes.value.length - 1];
   config.value = {};
+}
+function defaultConfig(block: Block): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const item of block.config) {
+    if (item.type === "boolean") values[item.name] = false;
+    else if (item.type === "select")
+      values[item.name] = item.options?.[0]?.value ?? "";
+    else
+      values[item.name] =
+        item.name === "promptTemplate" ? "请根据聊天上下文回答当前消息。" : "";
+  }
+  if (block.type === "load-context")
+    Object.assign(values, {
+      messageLimit: 10,
+      characterLimit: 6000,
+      includeFromMe: true,
+    });
+  if (block.type === "ai-chat")
+    Object.assign(values, {
+      timeoutMs: 60000,
+      maxOutputTokens: 1024,
+      maxOutputCharacters: 4000,
+      temperature: null,
+      outputVariable: "aiReply",
+      includeLoadedContext: true,
+    });
+  if (block.type === "reply")
+    Object.assign(values, {
+      text: "{{variables.aiReply}}",
+      replyToSourceMessage: false,
+      retry: { maxAttempts: 2, initialDelayMs: 250 },
+    });
+  if (block.type === "end") values.result = "succeeded";
+  return values;
 }
 function dragStart(event: DragEvent, block: Block) {
   event.dataTransfer?.setData(
@@ -79,28 +113,95 @@ function selectNode(node: any) {
   config.value = { ...(node.data.config ?? {}) };
 }
 function save() {
+  const orderedNodes = nodes.value;
+  const runtimeOrder =
+    orderedNodes[orderedNodes.length - 1]?.data.block.type === "end"
+      ? orderedNodes
+      : [
+          ...orderedNodes,
+          {
+            id: "end",
+            data: { block: { type: "end" }, config: { result: "succeeded" } },
+          },
+        ];
+  const connectedNext = new Map(
+    edges.value.map((edge) => [edge.source, edge.target]),
+  );
+  const next = new Map(
+    runtimeOrder.map((node, index) => [
+      node.id,
+      connectedNext.get(node.id) ?? runtimeOrder[index + 1]?.id ?? null,
+    ]),
+  );
+  const runtimeNodes = runtimeOrder.map((node) => {
+    const nodeConfig = configFor(node);
+    switch (node.data.block.type) {
+      case "load-context":
+        return {
+          id: node.id,
+          type: "load-context",
+          version: 1,
+          config: nodeConfig,
+          onSuccess: next.get(node.id),
+        };
+      case "ai-chat":
+        return {
+          id: node.id,
+          type: "ai-chat",
+          version: 1,
+          config: {
+            providerRouteId: nodeConfig.providerRouteId,
+            systemPrompt: nodeConfig.systemPrompt ?? "",
+            promptTemplate:
+              nodeConfig.promptTemplate ?? "请根据聊天上下文回答当前消息。",
+            includeLoadedContext: true,
+            timeoutMs: nodeConfig.timeoutMs ?? 60000,
+            maxOutputTokens: nodeConfig.maxOutputTokens ?? 1024,
+            maxOutputCharacters: nodeConfig.maxOutputCharacters ?? 4000,
+            temperature: nodeConfig.temperature ?? null,
+            outputFormat: nodeConfig.outputFormat ?? "text",
+            outputVariable: nodeConfig.outputVariable ?? "aiReply",
+          },
+          onSuccess: next.get(node.id),
+          onFailure: null,
+        };
+      case "reply":
+        return {
+          id: node.id,
+          type: "reply",
+          version: 1,
+          config: {
+            text: nodeConfig.text || "{{variables.aiReply}}",
+            replyToSourceMessage: nodeConfig.replyToSourceMessage ?? false,
+            retry: nodeConfig.retry ?? { maxAttempts: 2, initialDelayMs: 250 },
+          },
+          onSuccess: next.get(node.id),
+          onFailure: null,
+        };
+      case "end":
+        return {
+          id: node.id,
+          type: "end",
+          version: 1,
+          config: { result: nodeConfig.result || "succeeded" },
+        };
+      default:
+        return {
+          id: node.id,
+          type: node.data.block.type,
+          version: 1,
+          config: nodeConfig,
+          onSuccess: next.get(node.id),
+        };
+    }
+  });
   const definition = {
     schemaVersion: "1",
     name: name.value || "New workflow",
-    startNodeId: nodes.value[0]?.id ?? "",
+    startNodeId: orderedNodes[0]?.id ?? "",
     maxSteps: 64,
     maxExecutionMs: 60000,
-    nodes: nodes.value.map((node) => ({
-      id: node.id,
-      type: node.data.block.type,
-      version: node.data.block.version,
-      position: node.position,
-      config: configFor(node),
-      inputs: node.data.inputs ?? {},
-    })),
-    edges: edges.value.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      sourcePort: edge.sourceHandle ?? "success",
-      target: edge.target,
-      targetPort: edge.targetHandle ?? "success",
-      kind: "data",
-    })),
+    nodes: runtimeNodes,
   };
   if (props.definition) emit("version", name.value, definition);
   else emit("create", name.value, definition);

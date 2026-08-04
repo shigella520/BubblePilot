@@ -297,9 +297,20 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         description: "受保护的系统提示词。",
       },
       {
+        name: "promptTemplate",
+        label: "提示词",
+        type: "text",
+        required: true,
+        description: "发送给 AI 的任务提示词。",
+      },
+      {
         name: "outputFormat",
         label: "输出格式",
         type: "select",
+        options: [
+          { value: "text", label: "文本" },
+          { value: "json", label: "JSON" },
+        ],
         description: "文本或 JSON。",
       },
     ],

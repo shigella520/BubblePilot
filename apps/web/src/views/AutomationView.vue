@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 import {
   Boxes,
   GitBranch,
@@ -156,6 +156,24 @@ async function load() {
         apiRequest<AiRoute[]>("/api/v1/ai/routes"),
         apiRequest<any[]>("/api/v1/workflows/action-blocks"),
       ]);
+    actionBlocks.value = actionBlocks.value.map((block) =>
+      block.type === "ai-chat"
+        ? {
+            ...block,
+            config: block.config.map((item: any) =>
+              item.name === "providerRouteId"
+                ? {
+                    ...item,
+                    options: aiRoutes.value.map((route) => ({
+                      value: route.id,
+                      label: route.name,
+                    })),
+                  }
+                : item,
+            ),
+          }
+        : block,
+    );
     if (!aiFlowForm.providerRouteId) {
       aiFlowForm.providerRouteId =
         aiRoutes.value.find(
