@@ -43,6 +43,13 @@ function updateJson(name: string, raw: string) {
       .filter(Boolean);
   }
 }
+function firstArrayValue(name: string): string {
+  const value = props.config[name];
+  return Array.isArray(value) && value.length > 0 ? String(value[0]) : "";
+}
+function updateSingleArray(name: string, value: string) {
+  props.config[name] = value ? [value] : [];
+}
 </script>
 <template>
   <aside v-if="node" class="workflow-node-inspector">
@@ -100,6 +107,24 @@ function updateJson(name: string, raw: string) {
           v-if="item.type === 'select'"
           v-model="props.config[item.name]"
         >
+          <option
+            v-for="option in item.options ?? []"
+            :key="option.value"
+            :value="option.value"
+          >
+            {{ option.label }}
+          </option></select
+        ><select
+          v-else-if="item.type === 'select-array'"
+          :value="firstArrayValue(item.name)"
+          @change="
+            updateSingleArray(
+              item.name,
+              ($event.target as HTMLSelectElement).value,
+            )
+          "
+        >
+          <option value="">{{ item.emptyLabel ?? "不限" }}</option>
           <option
             v-for="option in item.options ?? []"
             :key="option.value"

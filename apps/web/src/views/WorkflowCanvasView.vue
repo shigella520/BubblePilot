@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call */
 import { ArrowLeft, Check, LoaderCircle, Power, TestTube2 } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -28,6 +28,47 @@ const message = ref("");
 const messageIsError = ref(false);
 const saveState = ref<"saved" | "dirty" | "saving" | "error">("saved");
 
+interface AiRouteOption {
+  id: string;
+  name: string;
+}
+
+interface ChatOption {
+  providerChatId: string;
+  displayName: string;
+}
+
+function enrichActionBlocks(
+  actionBlocks: any[],
+  aiRoutes: AiRouteOption[],
+  chats: ChatOption[],
+) {
+  return actionBlocks.map((block) => ({
+    ...block,
+    config: block.config.map((item: any) => {
+      if (block.type === "ai-chat" && item.name === "providerRouteId") {
+        return {
+          ...item,
+          options: aiRoutes.map((aiRoute) => ({
+            value: aiRoute.id,
+            label: aiRoute.name,
+          })),
+        };
+      }
+      if (block.type === "message-trigger" && item.name === "chatIds") {
+        return {
+          ...item,
+          options: chats.map((chat) => ({
+            value: chat.providerChatId,
+            label: chat.displayName || chat.providerChatId,
+          })),
+        };
+      }
+      return item;
+    }),
+  }));
+}
+
 const versionDefinition = async () => {
   if (isNew.value) return;
   const versions = await apiRequest<any[]>(
@@ -45,7 +86,12 @@ const versionDefinition = async () => {
 async function load() {
   busy.value = true;
   try {
-    blocks.value = await apiRequest<any[]>("/api/v1/workflows/action-blocks");
+    const [actionBlocks, aiRoutes, chats] = await Promise.all([
+      apiRequest<any[]>("/api/v1/workflows/action-blocks"),
+      apiRequest<AiRouteOption[]>("/api/v1/ai/routes"),
+      apiRequest<ChatOption[]>("/api/v1/chats?limit=100"),
+    ]);
+    blocks.value = enrichActionBlocks(actionBlocks, aiRoutes, chats);
     if (!isNew.value) {
       const workflows = await apiRequest<any[]>("/api/v1/workflows");
       const workflow = workflows.find((item) => item.id === workflowId.value);

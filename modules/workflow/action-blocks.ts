@@ -14,9 +14,10 @@ export interface ActionPortDefinition {
 export interface ActionConfigDefinition {
   name: string;
   label: string;
-  type: "text" | "number" | "boolean" | "select" | "json";
+  type: "text" | "number" | "boolean" | "select" | "select-array" | "json";
   required?: boolean;
   options?: readonly { value: string; label: string }[];
+  emptyLabel?: string;
   description: string;
 }
 
@@ -59,7 +60,8 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
       {
         name: "chatIds",
         label: "聊天范围",
-        type: "json",
+        type: "select-array",
+        emptyLabel: "全部聊天",
         description: "指定聊天，留空表示全部聊天。",
       },
       {
@@ -77,8 +79,14 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
       {
         name: "contentTypes",
         label: "内容类型",
-        type: "json",
-        description: '例如 ["text"]，留空表示全部类型。',
+        type: "select-array",
+        emptyLabel: "全部类型",
+        options: [
+          { value: "text", label: "文本" },
+          { value: "attachment", label: "附件" },
+          { value: "mixed", label: "混合" },
+        ],
+        description: "指定消息内容类型，留空表示全部类型。",
       },
       {
         name: "enabled",
