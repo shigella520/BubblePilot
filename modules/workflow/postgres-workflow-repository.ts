@@ -623,9 +623,24 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       [triggerId],
     );
     if (references.rows[0]?.referenced === true) return "referenced";
-    await this.pool.query("DELETE FROM bot_triggers WHERE id = $1", [
-      triggerId,
-    ]);
+    try {
+      await this.pool.query("DELETE FROM bot_triggers WHERE id = $1", [
+        triggerId,
+      ]);
+    } catch (error) {
+      // A new execution may be inserted after the advisory check and acquire
+      // the foreign-key reference before this delete runs. Treat that race as
+      // the same protected-reference conflict instead of leaking a 500.
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "23503"
+      ) {
+        return "referenced";
+      }
+      throw error;
+    }
     return "deleted";
   }
 
