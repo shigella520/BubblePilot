@@ -281,10 +281,16 @@ function updateInput(port: string, value: any) {
   if (!selected.value) return;
   recordHistory();
   const targetId = selected.value.id;
-  selected.value.data.inputs = {
+  const nextInputs = {
     ...(selected.value.data.inputs ?? {}),
     [port]: value,
   };
+  nodes.value = nodes.value.map((node) =>
+    node.id === targetId
+      ? { ...node, data: { ...node.data, inputs: nextInputs } }
+      : node,
+  );
+  selected.value = nodes.value.find((node) => node.id === targetId) ?? null;
   edges.value = edges.value.filter(
     (edge) =>
       !(
