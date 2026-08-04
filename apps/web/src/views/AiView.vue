@@ -70,6 +70,9 @@ interface ProviderForm {
 }
 
 const session = useSessionStore();
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+}
 const providers = ref<Provider[]>([]);
 const routes = ref<AiRoute[]>([]);
 const message = ref("");
@@ -528,8 +531,16 @@ onMounted(load);
         <h2>Provider 管理</h2>
       </div>
       <nav>
-        <a class="active" href="#providers"><Bot :size="18" />Provider</a
-        ><a href="#routes"><Route :size="18" />路由策略</a>
+        <button
+          class="active"
+          type="button"
+          @click="scrollToSection('providers')"
+        >
+          <Bot :size="18" />Provider
+        </button>
+        <button type="button" @click="scrollToSection('routes')">
+          <Route :size="18" />路由策略
+        </button>
       </nav>
       <div class="sidebar-note">
         固定顺序由管理员配置；自动降级只影响当前有效顺序，不会改写人工排序。

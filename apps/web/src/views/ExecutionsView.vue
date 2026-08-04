@@ -93,6 +93,9 @@ const detailLoadingId = ref<string | null>(null);
 let inspectRequestId = 0;
 const route = useRoute();
 const session = useSessionStore();
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+}
 const providerHealthLabels: Record<string, string> = {
   healthy: "健康",
   degraded: "已降级",
@@ -220,8 +223,16 @@ onMounted(loadSelected);
         <h2>执行与审计</h2>
       </div>
       <nav>
-        <a class="active" href="#executions"><FileClock :size="18" />执行记录</a
-        ><a href="#audit"><ShieldCheck :size="18" />审计事件</a>
+        <button
+          class="active"
+          type="button"
+          @click="scrollToSection('executions')"
+        >
+          <FileClock :size="18" />执行记录
+        </button>
+        <button type="button" @click="scrollToSection('audit')">
+          <ShieldCheck :size="18" />审计事件
+        </button>
       </nav>
       <div class="sidebar-note">
         轨迹只保存输入输出摘要、错误码和哈希，不保存完整 Prompt、AI 输出或
