@@ -36,14 +36,10 @@ const aiProviderConfigurationBaseSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
-export const aiProviderConfigurationSchema =
-  aiProviderConfigurationBaseSchema.refine(
-    (value) => value.secret !== undefined || value.secretRef !== undefined,
-    {
-      message: "Provide an API key or an environment variable reference.",
-      path: ["secret"],
-    },
-  );
+// API keys are optional: local OpenAI-compatible servers such as Ollama do
+// not require authentication. Remote providers can still provide secret or
+// secretRef as usual.
+export const aiProviderConfigurationSchema = aiProviderConfigurationBaseSchema;
 
 export const aiProviderUpdateSchema = aiProviderConfigurationBaseSchema.extend({
   expectedVersion: z.number().int().positive(),

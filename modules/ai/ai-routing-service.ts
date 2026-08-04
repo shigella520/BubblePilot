@@ -114,8 +114,10 @@ export class AiRoutingService {
         ? null
         : {
             ...storedSnapshot,
-            providers: storedSnapshot.providers.filter((provider) =>
-              isProviderSecretConfigured(provider, this.secrets),
+            providers: storedSnapshot.providers.filter(
+              (provider) =>
+                provider.enabled &&
+                isProviderSecretConfigured(provider, this.secrets),
             ),
           };
     if (snapshot === null || snapshot.providers.length === 0) {

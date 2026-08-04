@@ -713,12 +713,12 @@ onMounted(load);
               ><span>模型</span
               ><input v-model.trim="providerForm.model" required /></label
             ><label
-              ><span>API Key / Secret</span
+              ><span>API Key / Secret（Ollama 可留空）</span
               ><input
                 v-model="providerForm.secret"
                 type="password"
                 autocomplete="new-password"
-                placeholder="例如 sk-…；留空则保留当前值" /></label
+                placeholder="例如 sk-…；本地 Ollama 无需填写" /></label
             ><label
               ><span>超时（毫秒）</span
               ><input

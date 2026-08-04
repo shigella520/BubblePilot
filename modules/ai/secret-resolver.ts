@@ -13,10 +13,21 @@ export function resolveProviderSecret(
 }
 
 export function isProviderSecretConfigured(
-  provider: Pick<AiProviderRecord, "secret" | "secretRef">,
+  provider: Pick<AiProviderRecord, "secret" | "secretRef" | "baseUrl">,
   resolver: SecretResolver,
 ): boolean {
-  return resolveProviderSecret(provider, resolver) !== null;
+  if (resolveProviderSecret(provider, resolver) !== null) return true;
+  try {
+    const host = new URL(provider.baseUrl).hostname.toLowerCase();
+    return (
+      host === "ollama" ||
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1"
+    );
+  } catch {
+    return false;
+  }
 }
 
 export class EnvironmentSecretResolver implements SecretResolver {

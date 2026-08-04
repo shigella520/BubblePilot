@@ -125,6 +125,13 @@ function providerHealthLabel(state: string) {
 }
 
 async function load(): Promise<boolean> {
+  // Sensitive endpoints must never be requested before the unlock grant.
+  if (!session.sensitiveActive) {
+    executions.value = [];
+    audits.value = [];
+    busy.value = false;
+    return false;
+  }
   busy.value = true;
   message.value = "";
   messageIsError.value = false;
@@ -147,6 +154,7 @@ async function load(): Promise<boolean> {
   }
 }
 async function inspect(id: string) {
+  if (!session.sensitiveActive) return;
   const requestId = ++inspectRequestId;
   detailLoadingId.value = id;
   message.value = "";
@@ -212,7 +220,20 @@ watch(
     if (typeof executionId === "string") void inspect(executionId);
   },
 );
-onMounted(loadSelected);
+onMounted(() => {
+  if (session.sensitiveActive) void loadSelected();
+});
+watch(
+  () => session.sensitiveActive,
+  (active) => {
+    if (active) void loadSelected();
+    else {
+      executions.value = [];
+      audits.value = [];
+      clearDetail();
+    }
+  },
+);
 </script>
 
 <template>

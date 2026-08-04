@@ -8,6 +8,7 @@ import type {
   AiProviderRecord,
 } from "./ai-types.js";
 import {
+  isProviderSecretConfigured,
   resolveProviderSecret,
   type SecretResolver,
 } from "./secret-resolver.js";
@@ -215,7 +216,7 @@ export class OpenAiCompatibleClient implements AiClient {
   ): Promise<AiCallResult> {
     const startedAt = Date.now();
     const secret = resolveProviderSecret(provider, this.secrets);
-    if (secret === null) {
+    if (!isProviderSecretConfigured(provider, this.secrets)) {
       return failure({
         category: "configuration",
         code: "AI_PROVIDER_SECRET_NOT_CONFIGURED",
@@ -226,7 +227,6 @@ export class OpenAiCompatibleClient implements AiClient {
         durationMs: elapsed(startedAt),
       });
     }
-
     const endpoint = new URL(
       provider.apiKind === "chat-completions"
         ? "chat/completions"
@@ -256,7 +256,7 @@ export class OpenAiCompatibleClient implements AiClient {
       const response = await this.fetchImplementation(endpoint, {
         method: "POST",
         headers: {
-          authorization: `Bearer ${secret}`,
+          ...(secret === null ? {} : { authorization: `Bearer ${secret}` }),
           "content-type": "application/json",
         },
         body: JSON.stringify(payload),

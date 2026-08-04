@@ -62,9 +62,16 @@ interface AiRoute {
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
+function editWorkflow(workflow: Workflow) {
+  selectedWorkflowId.value = workflow.id;
+  createForm.name = workflow.name;
+  void loadVersions();
+  scrollToSection("workflows");
+}
 const workflows = ref<Workflow[]>([]);
 const versions = ref<WorkflowVersion[]>([]);
 const triggers = ref<Trigger[]>([]);
+const chats = ref<Array<{ providerChatId: string; displayName: string }>>([]);
 const aiRoutes = ref<AiRoute[]>([]);
 const actionBlocks = ref<any[]>([]);
 const selectedWorkflowId = ref("");
@@ -80,11 +87,38 @@ const triggerToggleBusyIds = reactive(new Set<string>());
 let versionsRequestId = 0;
 const createForm = reactive({ name: "", definition: "" });
 const versionDefinition = ref("");
+const selectedDefinition = computed(() => {
+  try {
+    return versionDefinition.value
+      ? JSON.parse(versionDefinition.value)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+});
 const triggerForm = reactive({
   name: "",
   workflowId: "",
-  conditions: '{\n  "chatIds": [],\n  "text": null,\n  "timeWindow": null\n}',
+  chatId: "",
+  textKind: "prefix",
+  textValue: "",
+  contentType: "text",
 });
+function triggerConditions() {
+  return {
+    chatIds: triggerForm.chatId ? [triggerForm.chatId] : [],
+    senderIds: [],
+    contentTypes: triggerForm.contentType ? [triggerForm.contentType] : [],
+    text: triggerForm.textValue
+      ? {
+          kind: triggerForm.textKind,
+          value: triggerForm.textValue,
+          caseSensitive: false,
+        }
+      : null,
+    timeWindow: null,
+  };
+}
 const localDateTimeValue = (date: Date) => {
   const offsetMs = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
@@ -143,19 +177,39 @@ function conflictingTriggerNames(trigger: Trigger): string {
     .map((id) => triggerNames.value.get(id) ?? id.slice(0, 8))
     .join("、");
 }
+function conditionSummary(conditions: any): string {
+  const chat = conditions?.chatIds?.length
+    ? `指定聊天 ${conditions.chatIds.length} 个`
+    : "所有聊天";
+  const text = conditions?.text?.value
+    ? `${conditions.text.kind}: ${conditions.text.value}`
+    : "任意文本";
+  const types = conditions?.contentTypes?.length
+    ? conditions.contentTypes.join("、")
+    : "全部消息类型";
+  return `${chat} · ${text} · ${types}`;
+}
 
 async function load() {
   busy.value = true;
   message.value = "";
   messageIsError.value = false;
   try {
-    [workflows.value, triggers.value, aiRoutes.value, actionBlocks.value] =
-      await Promise.all([
-        apiRequest<Workflow[]>("/api/v1/workflows"),
-        apiRequest<Trigger[]>("/api/v1/triggers"),
-        apiRequest<AiRoute[]>("/api/v1/ai/routes"),
-        apiRequest<any[]>("/api/v1/workflows/action-blocks"),
-      ]);
+    [
+      workflows.value,
+      triggers.value,
+      aiRoutes.value,
+      actionBlocks.value,
+      chats.value,
+    ] = await Promise.all([
+      apiRequest<Workflow[]>("/api/v1/workflows"),
+      apiRequest<Trigger[]>("/api/v1/triggers"),
+      apiRequest<AiRoute[]>("/api/v1/ai/routes"),
+      apiRequest<any[]>("/api/v1/workflows/action-blocks"),
+      apiRequest<Array<{ providerChatId: string; displayName: string }>>(
+        "/api/v1/chats?limit=100",
+      ),
+    ]);
     actionBlocks.value = actionBlocks.value.map((block) =>
       block.type === "ai-chat"
         ? {
@@ -325,11 +379,27 @@ async function createWorkflow() {
       method: "POST",
       body: jsonBody({ name: createForm.name, definition }),
     });
+    const activated = await apiRequest<WorkflowVersion>(
+      `/api/v1/workflows/${created.workflowId}/versions/${created.version}/publish`,
+      { method: "POST" },
+    );
     createForm.name = "";
     createForm.definition = "";
     await load();
     selectedWorkflowId.value = created.workflowId;
-    message.value = `已创建工作流「${created.workflowName}」及候选版本 v${created.version}。`;
+    versions.value = [activated];
+    versionDefinition.value = JSON.stringify(activated.definition, null, 2);
+    workflows.value = workflows.value.map((item) =>
+      item.id === activated.workflowId
+        ? {
+            ...item,
+            status: "active",
+            publishedVersion: activated.version,
+            updatedAt: new Date().toISOString(),
+          }
+        : item,
+    );
+    message.value = `已创建并启用工作流「${activated.workflowName}」v${activated.version}。`;
     messageIsError.value = false;
   } catch (cause) {
     message.value = errorMessage(cause);
@@ -354,9 +424,23 @@ async function createVersion() {
         }),
       },
     );
-    versions.value = [created, ...versions.value];
-    versionDefinition.value = JSON.stringify(created.definition, null, 2);
-    message.value = `已创建工作流「${created.workflowName}」候选版本 v${created.version}。`;
+    const activated = await apiRequest<WorkflowVersion>(
+      `/api/v1/workflows/${created.workflowId}/versions/${created.version}/publish`,
+      { method: "POST" },
+    );
+    versions.value = [activated, ...versions.value];
+    versionDefinition.value = JSON.stringify(activated.definition, null, 2);
+    workflows.value = workflows.value.map((item) =>
+      item.id === activated.workflowId
+        ? {
+            ...item,
+            status: "active",
+            publishedVersion: activated.version,
+            updatedAt: new Date().toISOString(),
+          }
+        : item,
+    );
+    message.value = `工作流「${activated.workflowName}」已保存并生效（v${activated.version}）。`;
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
@@ -434,7 +518,7 @@ async function previewTrigger() {
       {
         method: "POST",
         body: jsonBody({
-          conditions: parseJsonObject(triggerForm.conditions),
+          conditions: triggerConditions(),
           includeFromMe: false,
           sample: {
             providerChatId: triggerPreviewForm.providerChatId,
@@ -468,7 +552,7 @@ async function createTrigger() {
         name: triggerForm.name,
         workflowId: workflow.id,
         workflowVersion: workflow.publishedVersion,
-        conditions: parseJsonObject(triggerForm.conditions),
+        conditions: triggerConditions(),
         includeFromMe: false,
         enabled: false,
       }),
@@ -546,7 +630,7 @@ onMounted(load);
         </button>
       </nav>
       <div class="sidebar-note">
-        候选版本先校验，完成二次验证后才可发布到生产消息。
+        拖入动作块、连接端口并保存，工作流会立即生效。
       </div>
     </aside>
     <div class="admin-workspace">
@@ -566,6 +650,7 @@ onMounted(load);
         <WorkflowEditor
           :blocks="actionBlocks"
           :workflow-name="createForm.name"
+          :definition="selectedDefinition"
           @create="
             (_name, definition) => {
               createForm.name = _name;
@@ -580,21 +665,6 @@ onMounted(load);
             }
           "
         />
-        <div class="form-actions workflow-publish-actions">
-          <button
-            class="button primary"
-            type="button"
-            :disabled="!latestCandidate || publishBusy"
-            :aria-busy="publishBusy"
-            @click="publish"
-          >
-            <Play :size="16" />{{
-              publishBusy
-                ? "发布中…"
-                : `发布 v${latestCandidate?.version || "-"}`
-            }}
-          </button>
-        </div>
         <form
           v-if="false"
           class="settings-form boxed-form"
@@ -782,6 +852,13 @@ onMounted(load);
                 <td>{{ new Date(workflow.updatedAt).toLocaleString() }}</td>
                 <td>
                   <button
+                    class="button tiny secondary"
+                    type="button"
+                    @click="editWorkflow(workflow)"
+                  >
+                    编辑
+                  </button>
+                  <button
                     class="switch-button"
                     :class="{ active: workflow.status === 'active' }"
                     type="button"
@@ -898,13 +975,39 @@ onMounted(load);
                 {{ workflow.name }} · v{{ workflow.publishedVersion }}
               </option>
             </select></label
-          ><label class="wide-field"
-            ><span>条件（JSON）</span
-            ><textarea
-              v-model="triggerForm.conditions"
-              rows="5"
-              required
-            ></textarea></label
+          ><label
+            ><span>目标聊天</span
+            ><select v-model="triggerForm.chatId">
+              <option value="">所有聊天</option>
+              <option
+                v-for="chat in chats"
+                :key="chat.providerChatId"
+                :value="chat.providerChatId"
+              >
+                {{ chat.displayName }}
+              </option>
+            </select></label
+          ><label
+            ><span>文本匹配</span
+            ><select v-model="triggerForm.textKind">
+              <option value="prefix">以此前缀开头</option>
+              <option value="contains">包含文本</option>
+              <option value="exact">完全匹配</option>
+              <option value="regex">正则表达式</option>
+            </select></label
+          ><label
+            ><span>匹配内容（可选）</span
+            ><input
+              v-model.trim="triggerForm.textValue"
+              placeholder="例如 /sum" /></label
+          ><label
+            ><span>消息类型</span
+            ><select v-model="triggerForm.contentType">
+              <option value="">全部类型</option>
+              <option value="text">文本</option>
+              <option value="attachment">附件</option>
+              <option value="mixed">混合</option>
+            </select></label
           ><button
             class="button primary"
             type="submit"
@@ -941,8 +1044,8 @@ onMounted(load);
                   >
                 </td>
                 <td>v{{ trigger.workflowVersion }}</td>
-                <td class="mono compact-json">
-                  {{ JSON.stringify(trigger.conditions) }}
+                <td>
+                  {{ conditionSummary(trigger.conditions) }}
                 </td>
                 <td>
                   <button
