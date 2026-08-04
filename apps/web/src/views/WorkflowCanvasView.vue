@@ -75,7 +75,9 @@ const versionDefinition = async () => {
     `/api/v1/workflows/${workflowId.value}/versions`,
   );
   const candidate =
-    versions.find((item) => item.status === "validated") ?? versions[0];
+    versions.find((item) => item.version === publishedVersion.value) ??
+    versions.find((item) => item.status === "validated") ??
+    versions[0];
   if (candidate) {
     workflowName.value = candidate.workflowName;
     definition.value = candidate.definition;
