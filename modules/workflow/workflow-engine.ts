@@ -209,7 +209,10 @@ export class WorkflowEngine implements MessageAutomation {
             status: result.status,
             outputSummary: result.outputSummary,
           });
-          outputs[node.id] = { ...result.outputSummary };
+          outputs[node.id] = {
+            ...result.outputSummary,
+            ...(result.outputs ?? {}),
+          };
           if (result.completionStatus !== undefined) {
             await this.repository.finishExecution(
               execution.id,

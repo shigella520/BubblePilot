@@ -280,10 +280,33 @@ function selectNode(node: any) {
 function updateInput(port: string, value: any) {
   if (!selected.value) return;
   recordHistory();
+  const targetId = selected.value.id;
   selected.value.data.inputs = {
     ...(selected.value.data.inputs ?? {}),
     [port]: value,
   };
+  edges.value = edges.value.filter(
+    (edge) =>
+      !(
+        edge.kind === "data" &&
+        edge.target === targetId &&
+        edge.targetHandle === `input:${port}`
+      ),
+  );
+  if (value?.kind === "output") {
+    const source = nodes.value.find((node) => node.id === value.blockId);
+    if (source) {
+      edges.value.push({
+        id: `${source.id}-${targetId}-${port}`,
+        source: source.id,
+        sourceHandle: `output:${value.port}`,
+        target: targetId,
+        targetHandle: `input:${port}`,
+        kind: "data",
+        type: "workflow",
+      });
+    }
+  }
 }
 function removeSelected() {
   if (!selected.value) return;
@@ -489,6 +512,7 @@ function toDefinition() {
     const common = {
       id: node.id,
       version: 1,
+      position: node.position,
       config: nodeConfig,
       inputs: node.data.inputs ?? {},
     };

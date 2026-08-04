@@ -146,9 +146,20 @@ async function saveVersion(name: string, nextDefinition: any) {
       },
     );
     candidateVersion.value = version.version;
+    definition.value = version.definition ?? nextDefinition;
     workflowName.value = name;
+    if (workflowStatus.value === "active") {
+      await apiRequest(
+        `/api/v1/workflows/${workflowId.value}/versions/${version.version}/publish`,
+        { method: "POST" },
+      );
+      publishedVersion.value = version.version;
+    }
     saveState.value = "saved";
-    message.value = "已保存新版本，工作流仍保持当前启用状态。";
+    message.value =
+      workflowStatus.value === "active"
+        ? "已保存并更新当前启用版本。"
+        : "已保存新版本，请在顶部启用。";
     messageIsError.value = false;
   } catch (cause) {
     saveState.value = "error";

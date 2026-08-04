@@ -26,6 +26,11 @@ export interface NodeHandlerResult {
   nextNodeId: string | null;
   completionStatus?: "succeeded" | "skipped";
   outputSummary: Readonly<Record<string, unknown>>;
+  /**
+   * Values available to downstream data references. These stay in memory and
+   * are deliberately kept separate from the redacted execution summary.
+   */
+  outputs?: Readonly<Record<string, unknown>>;
 }
 
 export interface NodeRetryPolicy {
@@ -139,6 +144,52 @@ function renderTemplate(
     /\{\{\s*([a-zA-Z][a-zA-Z0-9._]*)\s*\}\}/gu,
     (_match, key: string) => values[key] ?? "",
   );
+}
+
+function resolveContextPath(
+  path: string,
+  context: NodeExecutionContext,
+): unknown {
+  switch (path) {
+    case "context.event.message.text":
+      return context.envelope.message.text;
+    case "context.event.message.senderId":
+      return context.envelope.message.senderId;
+    case "context.event.chat.providerChatId":
+      return context.envelope.chat.providerChatId;
+    case "context.history.messages":
+      return context.history;
+    case "context.history.count":
+      return context.history.length;
+  }
+  if (path.startsWith("context.variables."))
+    return context.variables[path.slice("context.variables.".length)];
+  if (path.startsWith("context.outputs.")) {
+    const [, , blockId, port] = path.split(".");
+    return blockId && port ? context.outputs[blockId]?.[port] : undefined;
+  }
+  return undefined;
+}
+
+function resolveInput(
+  node: WorkflowNode,
+  inputName: string,
+  context: NodeExecutionContext,
+): unknown {
+  const reference = node.inputs?.[inputName];
+  if (reference === undefined) return undefined;
+  if (reference.kind === "literal") return reference.value;
+  if (reference.kind === "path")
+    return resolveContextPath(reference.path, context);
+  return context.outputs[reference.blockId]?.[reference.port];
+}
+
+function contextText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  return JSON.stringify(value);
 }
 
 function setVariable(
@@ -287,6 +338,7 @@ class LoadContextNodeHandler extends BaseNodeHandler {
           ),
           includesSentMessages: messages.some((message) => message.isFromMe),
         },
+        outputs: { messages, count: messages.length },
       };
     } catch (error) {
       throw new WorkflowExecutionError(
@@ -336,7 +388,20 @@ class AiChatNodeHandler extends BaseNodeHandler {
       );
     }
     const systemPrompt = renderTemplate(node.config.systemPrompt, context);
-    const prompt = renderTemplate(node.config.promptTemplate, context);
+    const inputPrompt = resolveInput(node, "prompt", context);
+    const prompt =
+      typeof inputPrompt === "string" && inputPrompt.length > 0
+        ? inputPrompt
+        : renderTemplate(node.config.promptTemplate, context);
+    const inputHistory = resolveInput(node, "messages", context);
+    const history = Array.isArray(inputHistory)
+      ? inputHistory.filter(
+          (message): message is ContextMessage =>
+            typeof message === "object" &&
+            message !== null &&
+            typeof (message as ContextMessage).body === "string",
+        )
+      : context.history;
     if (prompt.trim().length === 0) {
       throw new WorkflowExecutionError(
         "INVALID_AI_PROMPT",
@@ -349,7 +414,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
       messages.push({ role: "system", content: systemPrompt });
     }
     if (node.config.includeLoadedContext) {
-      messages.push(...context.history.map(historyMessage));
+      messages.push(...history.map(historyMessage));
     }
     messages.push({ role: "user", content: prompt });
 
@@ -384,12 +449,28 @@ class AiChatNodeHandler extends BaseNodeHandler {
       );
     }
     setVariable(context, node.config.outputVariable, result.text);
+    let jsonOutput: unknown;
+    if (node.config.outputFormat === "json") {
+      try {
+        jsonOutput = JSON.parse(result.text);
+      } catch {
+        throw new WorkflowExecutionError(
+          "AI_OUTPUT_INVALID_JSON",
+          "The AI output is not valid JSON.",
+          false,
+        );
+      }
+    }
     return {
       status: "succeeded",
       nextNodeId: node.onSuccess,
       outputSummary: {
         ...this.routing.outputSummary(result),
         outputVariable: node.config.outputVariable,
+      },
+      outputs: {
+        text: result.text,
+        ...(node.config.outputFormat === "json" ? { json: jsonOutput } : {}),
       },
     };
   }
@@ -435,7 +516,11 @@ class ReplyNodeHandler extends BaseNodeHandler {
     context: NodeExecutionContext,
   ): Promise<NodeHandlerResult> {
     this.assertType(node, this.type);
-    const text = renderReplyTemplate(node.config.text, context);
+    const inputText = resolveInput(node, "text", context);
+    const text = renderReplyTemplate(
+      inputText === undefined ? node.config.text : contextText(inputText),
+      context,
+    );
     const idempotencyKey = `${context.executionId}:${node.id}`;
     const claimed = await this.repository.claimDelivery({
       executionId: context.executionId,

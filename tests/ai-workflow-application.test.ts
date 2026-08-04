@@ -198,6 +198,13 @@ describe("AI workflow", () => {
             outputFormat: "text",
             outputVariable: "aiReply",
           },
+          inputs: {
+            messages: {
+              kind: "output",
+              blockId: "load-history",
+              port: "messages",
+            },
+          },
           onSuccess: "reply",
           onFailure: "failed",
         },
@@ -209,6 +216,9 @@ describe("AI workflow", () => {
             text: "{{variables.aiReply}}",
             replyToSourceMessage: true,
             retry: { maxAttempts: 1, initialDelayMs: 0 },
+          },
+          inputs: {
+            text: { kind: "output", blockId: "ask-ai", port: "text" },
           },
           onSuccess: "done",
         },

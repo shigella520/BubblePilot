@@ -1,10 +1,19 @@
 import { z } from "zod";
 
+import { actionBlockDefinitions } from "./action-blocks.js";
+import { valueRefSchema } from "./workflow-graph.js";
+
+const canvasNodeFields = {
+  position: z.object({ x: z.number(), y: z.number() }).optional(),
+  inputs: z.record(z.string(), valueRefSchema).optional(),
+};
+
 const nodeIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
 const nextNodeIdSchema = nodeIdSchema;
 const variableNameSchema = z.string().regex(/^[a-z][a-zA-Z0-9_]{0,63}$/);
 
 const conditionNodeSchema = z.object({
+  ...canvasNodeFields,
   id: nodeIdSchema,
   type: z.literal("condition"),
   version: z.literal(1),
@@ -30,6 +39,7 @@ const conditionNodeSchema = z.object({
 });
 
 const messageTriggerNodeSchema = z.object({
+  ...canvasNodeFields,
   id: z.literal("message-trigger"),
   type: z.literal("message-trigger"),
   version: z.literal(1),
@@ -56,6 +66,7 @@ const messageTriggerNodeSchema = z.object({
 });
 
 const logNodeSchema = z.object({
+  ...canvasNodeFields,
   id: nodeIdSchema,
   type: z.literal("log"),
   version: z.literal(1),
@@ -66,6 +77,7 @@ const logNodeSchema = z.object({
 });
 
 const setVariableNodeSchema = z.object({
+  ...canvasNodeFields,
   id: nodeIdSchema,
   type: z.literal("set-variable"),
   version: z.literal(1),
@@ -77,6 +89,7 @@ const setVariableNodeSchema = z.object({
 });
 
 const loadContextNodeSchema = z.object({
+  ...canvasNodeFields,
   id: nodeIdSchema,
   type: z.literal("load-context"),
   version: z.literal(1),
@@ -90,6 +103,7 @@ const loadContextNodeSchema = z.object({
 });
 
 const aiChatNodeSchema = z.object({
+  ...canvasNodeFields,
   id: nodeIdSchema,
   type: z.literal("ai-chat"),
   version: z.literal(1),
@@ -110,6 +124,7 @@ const aiChatNodeSchema = z.object({
 });
 
 const replyNodeSchema = z.object({
+  ...canvasNodeFields,
   id: nodeIdSchema,
   type: z.literal("reply"),
   version: z.literal(1),
@@ -128,6 +143,7 @@ const replyNodeSchema = z.object({
 });
 
 const endNodeSchema = z.object({
+  ...canvasNodeFields,
   id: nodeIdSchema,
   type: z.literal("end"),
   version: z.literal(1),
@@ -251,6 +267,42 @@ function validateSemantics(definition: WorkflowDefinition): void {
       validateTemplate(node.id, node.config.promptTemplate, "prompt template");
     }
     nodes.set(node.id, node);
+  }
+
+  const blocksByType = new Map(
+    actionBlockDefinitions.map((block) => [block.type, block]),
+  );
+  for (const node of definition.nodes) {
+    for (const [inputName, reference] of Object.entries(node.inputs ?? {})) {
+      if (reference.kind !== "output") continue;
+      const source = nodes.get(reference.blockId);
+      if (!source) {
+        throw new Error(
+          `Node '${node.id}' input '${inputName}' references missing node '${reference.blockId}'.`,
+        );
+      }
+      const sourceBlock = blocksByType.get(source.type);
+      const targetBlock = blocksByType.get(node.type);
+      const sourcePort = sourceBlock?.outputs.find(
+        (port) => port.name === reference.port,
+      );
+      const targetPort = targetBlock?.inputs.find(
+        (port) => port.name === inputName,
+      );
+      if (!sourcePort || !targetPort) {
+        throw new Error(
+          `Node '${node.id}' input '${inputName}' references unknown output '${reference.blockId}.${reference.port}'.`,
+        );
+      }
+      if (
+        sourcePort.type !== targetPort.type &&
+        !(sourcePort.type === "json" && targetPort.type === "string")
+      ) {
+        throw new Error(
+          `Node '${node.id}' input '${inputName}' has an incompatible output reference.`,
+        );
+      }
+    }
   }
 
   if (!nodes.has(definition.startNodeId)) {
