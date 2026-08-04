@@ -21,6 +21,26 @@ const emit = defineEmits<{ (event: "add", handle: string): void }>();
 const controlFailure = ["load-context", "ai-chat", "reply"].includes(
   props.data.block.type,
 );
+function branchHandle(name: string): string {
+  switch (name) {
+    case "onTrue":
+      return "true";
+    case "onFalse":
+      return "false";
+    case "onFailure":
+      return "failure";
+    default:
+      return "success";
+  }
+}
+function branchClass(name: string): string {
+  const handle = branchHandle(name);
+  return handle === "failure" || handle === "false"
+    ? "workflow-handle failure"
+    : handle === "true"
+      ? "workflow-handle branch"
+      : "workflow-handle success";
+}
 </script>
 
 <template>
@@ -85,17 +105,15 @@ const controlFailure = ["load-context", "ai-chat", "reply"].includes(
           <span>{{ branch.label }}</span
           ><em>分支</em>
           <Handle
-            :id="branch.name === 'onTrue' ? 'true' : 'false'"
-            class="workflow-handle branch"
+            :id="branchHandle(branch.name)"
+            :class="branchClass(branch.name)"
             type="source"
             :position="Position.Right"
           />
           <button
             type="button"
             class="workflow-port-add"
-            @click.stop="
-              emit('add', branch.name === 'onTrue' ? 'true' : 'false')
-            "
+            @click.stop="emit('add', branchHandle(branch.name))"
           >
             ＋
           </button>
