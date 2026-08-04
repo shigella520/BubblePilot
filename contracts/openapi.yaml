@@ -511,6 +511,38 @@ paths:
           $ref: "#/components/responses/Error"
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/workflows/action-blocks:
+    get:
+      operationId: listWorkflowActionBlocks
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 当前服务端支持的动作块、输入输出端口和配置描述。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/workflows/validate:
+    post:
+      operationId: validateWorkflowDefinition
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition:
+                  $ref: ./workflow.schema.json
+      responses:
+        "200":
+          description: 工作流定义通过服务端校验。
+        "400":
+          $ref: "#/components/responses/Error"
   /api/v1/workflows/{workflowId}/versions:
     get:
       operationId: listWorkflowVersions

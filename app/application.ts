@@ -50,6 +50,7 @@ import { blueBubblesSettingsUpdateSchema } from "../modules/integrations/bluebub
 import { IngestionService } from "../modules/ingestion/ingestion-service.js";
 import { FixedWindowRateLimiter } from "../modules/reliability/rate-limiter.js";
 import { WorkflowCapacityError } from "../modules/workflow/execution-gate.js";
+import { listActionBlockDefinitions } from "../modules/workflow/action-blocks.js";
 import type { WorkflowExecutionDispatcher } from "../modules/workflow/execution-dispatcher.js";
 import { findPotentialTriggerConflicts } from "../modules/workflow/trigger-conflicts.js";
 import {
@@ -1483,6 +1484,28 @@ export function buildApplication(
 
   if (options.workflow !== undefined) {
     const workflowRepository = options.workflow.repository;
+    application.get(
+      "/api/v1/workflows/action-blocks",
+      { preHandler: requireAdmin },
+      async () => ({ data: listActionBlockDefinitions() }),
+    );
+
+    application.post(
+      "/api/v1/workflows/validate",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const body = workflowVersionBodySchema.parse(request.body);
+        const definition = workflowDefinition(body.definition);
+        return {
+          data: {
+            valid: true,
+            schemaVersion: definition.schemaVersion,
+            nodeCount: definition.nodes.length,
+            startNodeId: definition.startNodeId,
+          },
+        };
+      },
+    );
     const executionDetail = async (executionId: string) => {
       const execution = await workflowRepository.getExecution(executionId);
       return execution === null
