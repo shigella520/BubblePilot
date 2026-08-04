@@ -496,6 +496,48 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     return row === undefined ? null : workflowRecord(row);
   }
 
+  async deleteWorkflow(
+    workflowId: string,
+  ): Promise<"deleted" | "not-found" | "referenced"> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const exists = await client.query(
+        "SELECT 1 FROM workflows WHERE id = $1 FOR UPDATE",
+        [workflowId],
+      );
+      if (exists.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return "not-found";
+      }
+      const refs = await client.query<{ referenced: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM bot_triggers t JOIN workflow_versions v ON v.id = t.workflow_version_id WHERE v.workflow_id = $1)
+           OR EXISTS (SELECT 1 FROM workflow_executions e JOIN workflow_versions v ON v.id = e.workflow_version_id WHERE v.workflow_id = $1) AS referenced`,
+        [workflowId],
+      );
+      if (refs.rows[0]?.referenced === true) {
+        await client.query("ROLLBACK");
+        return "referenced";
+      }
+      await client.query(
+        "UPDATE workflows SET published_version_id = NULL WHERE id = $1",
+        [workflowId],
+      );
+      await client.query(
+        "DELETE FROM workflow_versions WHERE workflow_id = $1",
+        [workflowId],
+      );
+      await client.query("DELETE FROM workflows WHERE id = $1", [workflowId]);
+      await client.query("COMMIT");
+      return "deleted";
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async createTrigger(input: {
     name: string;
     workflowId: string;

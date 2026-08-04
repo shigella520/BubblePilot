@@ -543,6 +543,26 @@ paths:
           description: 工作流定义通过服务端校验。
         "400":
           $ref: "#/components/responses/Error"
+  /api/v1/workflows/{workflowId}:
+    delete:
+      operationId: deleteWorkflow
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: workflowId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 工作流已删除。
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/v1/workflows/{workflowId}/versions:
     get:
       operationId: listWorkflowVersions

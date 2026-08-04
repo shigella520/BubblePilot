@@ -191,6 +191,9 @@ export interface WorkflowRepository {
     workflowId: string,
     enabled: boolean,
   ): Promise<WorkflowRecord | null>;
+  deleteWorkflow(
+    workflowId: string,
+  ): Promise<"deleted" | "not-found" | "referenced">;
   listWorkflows(): Promise<readonly WorkflowRecord[]>;
   createTrigger(input: {
     name: string;

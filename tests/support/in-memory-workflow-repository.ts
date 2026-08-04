@@ -138,6 +138,25 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return Promise.resolve(structuredClone(workflow));
   }
 
+  async deleteWorkflow(
+    workflowId: string,
+  ): Promise<"deleted" | "not-found" | "referenced"> {
+    const workflow = this.workflows.get(workflowId);
+    if (workflow === undefined) return "not-found";
+    const versionIds = new Set(workflow.versions.map((version) => version.id));
+    if (
+      [...this.triggers.values()].some((trigger) =>
+        versionIds.has(trigger.workflowVersionId),
+      ) ||
+      [...this.executions.values()].some((execution) =>
+        versionIds.has(execution.workflowVersionId),
+      )
+    )
+      return "referenced";
+    this.workflows.delete(workflowId);
+    return "deleted";
+  }
+
   getWorkflowVersion(
     workflowId: string,
     versionNumber: number,

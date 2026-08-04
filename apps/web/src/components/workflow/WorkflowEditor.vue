@@ -196,7 +196,9 @@ function save() {
           version: 1,
           config: nodeConfig,
           onSuccess: next.get(node.id),
-          onFailure: connectedFailure.get(node.id) ?? null,
+          ...(connectedFailure.get(node.id)
+            ? { onFailure: connectedFailure.get(node.id) }
+            : {}),
           inputs: node.data.inputs ?? {},
         };
       case "ai-chat":
@@ -218,7 +220,9 @@ function save() {
             outputVariable: nodeConfig.outputVariable ?? "aiReply",
           },
           onSuccess: next.get(node.id),
-          onFailure: connectedFailure.get(node.id) ?? null,
+          ...(connectedFailure.get(node.id)
+            ? { onFailure: connectedFailure.get(node.id) }
+            : {}),
           inputs: node.data.inputs ?? {},
         };
       case "reply":
@@ -232,7 +236,9 @@ function save() {
             retry: nodeConfig.retry ?? { maxAttempts: 2, initialDelayMs: 250 },
           },
           onSuccess: next.get(node.id),
-          onFailure: connectedFailure.get(node.id) ?? null,
+          ...(connectedFailure.get(node.id)
+            ? { onFailure: connectedFailure.get(node.id) }
+            : {}),
           inputs: node.data.inputs ?? {},
         };
       case "end":
@@ -249,7 +255,9 @@ function save() {
           version: 1,
           config: nodeConfig,
           onSuccess: next.get(node.id),
-          onFailure: connectedFailure.get(node.id) ?? null,
+          ...(connectedFailure.get(node.id)
+            ? { onFailure: connectedFailure.get(node.id) }
+            : {}),
           inputs: node.data.inputs ?? {},
         };
     }

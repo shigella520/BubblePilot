@@ -68,6 +68,29 @@ function editWorkflow(workflow: Workflow) {
   void loadVersions();
   scrollToSection("workflows");
 }
+async function deleteWorkflow(workflow: Workflow) {
+  if (
+    workflowDeleteBusyIds.has(workflow.id) ||
+    !window.confirm(`确认删除工作流「${workflow.name}」？`)
+  )
+    return;
+  workflowDeleteBusyIds.add(workflow.id);
+  try {
+    await apiRequest(`/api/v1/workflows/${workflow.id}`, { method: "DELETE" });
+    workflows.value = workflows.value.filter((item) => item.id !== workflow.id);
+    if (selectedWorkflowId.value === workflow.id) {
+      selectedWorkflowId.value = "";
+      versions.value = [];
+      versionDefinition.value = "";
+    }
+    message.value = `工作流「${workflow.name}」已删除。`;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    workflowDeleteBusyIds.delete(workflow.id);
+  }
+}
 const workflows = ref<Workflow[]>([]);
 const versions = ref<WorkflowVersion[]>([]);
 const triggers = ref<Trigger[]>([]);
@@ -85,6 +108,7 @@ const triggerCreateBusy = ref(false);
 const triggerEditId = ref<string | null>(null);
 const triggerDeleteBusyIds = reactive(new Set<string>());
 const workflowToggleBusyIds = reactive(new Set<string>());
+const workflowDeleteBusyIds = reactive(new Set<string>());
 const triggerToggleBusyIds = reactive(new Set<string>());
 let versionsRequestId = 0;
 const createForm = reactive({ name: "", definition: "" });
@@ -914,6 +938,14 @@ onMounted(load);
                     @click="editWorkflow(workflow)"
                   >
                     编辑
+                  </button>
+                  <button
+                    class="button tiny danger"
+                    type="button"
+                    :disabled="workflowDeleteBusyIds.has(workflow.id)"
+                    @click="deleteWorkflow(workflow)"
+                  >
+                    删除
                   </button>
                   <button
                     class="switch-button"

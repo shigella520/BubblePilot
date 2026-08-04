@@ -1581,6 +1581,30 @@ export function buildApplication(
       },
     );
 
+    application.delete(
+      "/api/v1/workflows/:workflowId",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const parameters = workflowParametersSchema.parse(request.params);
+        const result = await workflowRepository.deleteWorkflow(
+          parameters.workflowId,
+        );
+        if (result === "not-found")
+          throw new ApplicationError(
+            "WORKFLOW_NOT_FOUND",
+            "The workflow does not exist.",
+            404,
+          );
+        if (result === "referenced")
+          throw new ApplicationError(
+            "WORKFLOW_REFERENCED",
+            "The workflow is referenced by triggers or execution records and cannot be deleted.",
+            409,
+          );
+        return { data: { deleted: true } };
+      },
+    );
+
     application.post(
       "/api/v1/workflows/:workflowId/versions/:version/publish",
       {
