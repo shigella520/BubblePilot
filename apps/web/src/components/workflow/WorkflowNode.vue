@@ -31,7 +31,9 @@ const controlFailure = ["load-context", "ai-chat", "reply"].includes(
         <strong>{{ data.label }}</strong>
       </div>
       <small>{{ data.block.description }}</small>
-      <span v-if="data.status" class="workflow-node-status">{{ data.status }}</span>
+      <span v-if="data.status" class="workflow-node-status">{{
+        data.status
+      }}</span>
     </div>
     <div class="workflow-node-ports">
       <div
@@ -57,14 +59,16 @@ const controlFailure = ["load-context", "ai-chat", "reply"].includes(
           type="target"
           :position="Position.Left"
         />
-        <span>{{ port.label }}</span><em>{{ port.type }}</em>
+        <span>{{ port.label }}</span
+        ><em>{{ port.type }}</em>
       </div>
       <div
         v-for="port in data.block.outputs"
         :key="`output-${port.name}`"
         class="workflow-port-row workflow-port-row-output"
       >
-        <span>{{ port.label }}</span><em>{{ port.type }}</em>
+        <span>{{ port.label }}</span
+        ><em>{{ port.type }}</em>
         <Handle
           :id="`output:${port.name}`"
           class="workflow-handle data-output"
@@ -73,22 +77,65 @@ const controlFailure = ["load-context", "ai-chat", "reply"].includes(
         />
       </div>
       <template v-if="data.block.branches?.length">
-        <div v-for="branch in data.block.branches" :key="branch.name" class="workflow-port-row workflow-port-row-output branch-row">
-          <span>{{ branch.label }}</span><em>分支</em>
-          <Handle :id="branch.name === 'onTrue' ? 'true' : 'false'" class="workflow-handle branch" type="source" :position="Position.Right" />
-          <button type="button" class="workflow-port-add" @click.stop="emit('add', branch.name === 'onTrue' ? 'true' : 'false')">＋</button>
+        <div
+          v-for="branch in data.block.branches"
+          :key="branch.name"
+          class="workflow-port-row workflow-port-row-output branch-row"
+        >
+          <span>{{ branch.label }}</span
+          ><em>分支</em>
+          <Handle
+            :id="branch.name === 'onTrue' ? 'true' : 'false'"
+            class="workflow-handle branch"
+            type="source"
+            :position="Position.Right"
+          />
+          <button
+            type="button"
+            class="workflow-port-add"
+            @click.stop="
+              emit('add', branch.name === 'onTrue' ? 'true' : 'false')
+            "
+          >
+            ＋
+          </button>
         </div>
       </template>
       <template v-else>
         <div class="workflow-port-row workflow-port-row-output success-row">
           <span>成功</span><em>控制</em>
-          <Handle id="success" class="workflow-handle success" type="source" :position="Position.Right" />
-          <button type="button" class="workflow-port-add" @click.stop="emit('add', 'success')">＋</button>
+          <Handle
+            id="success"
+            class="workflow-handle success"
+            type="source"
+            :position="Position.Right"
+          />
+          <button
+            type="button"
+            class="workflow-port-add"
+            @click.stop="emit('add', 'success')"
+          >
+            ＋
+          </button>
         </div>
-        <div v-if="controlFailure" class="workflow-port-row workflow-port-row-output failure-row">
+        <div
+          v-if="controlFailure"
+          class="workflow-port-row workflow-port-row-output failure-row"
+        >
           <span>失败</span><em>控制</em>
-          <Handle id="failure" class="workflow-handle failure" type="source" :position="Position.Right" />
-          <button type="button" class="workflow-port-add" @click.stop="emit('add', 'failure')">＋</button>
+          <Handle
+            id="failure"
+            class="workflow-handle failure"
+            type="source"
+            :position="Position.Right"
+          />
+          <button
+            type="button"
+            class="workflow-port-add"
+            @click.stop="emit('add', 'failure')"
+          >
+            ＋
+          </button>
         </div>
       </template>
     </div>

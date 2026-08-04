@@ -171,7 +171,9 @@ watch(
       </button>
     </section>
     <SensitiveUnlock @verified="loadRecentExecutions" />
-    <DismissibleMessage v-if="message" error @close="message = ''">{{ message }}</DismissibleMessage>
+    <DismissibleMessage v-if="message" error @close="message = ''">{{
+      message
+    }}</DismissibleMessage>
     <section class="metric-grid">
       <RouterLink to="/messages" class="metric-card tone-blue"
         ><MessagesSquare :size="23" /><span>监听中的聊天</span

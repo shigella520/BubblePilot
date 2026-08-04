@@ -741,7 +741,9 @@ td .keyline {
   color: #08785b;
   font-size: 11px;
 }
-.workflow-save-state.error { color: #b42318; }
+.workflow-save-state.error {
+  color: #b42318;
+}
 .workflow-canvas-actions {
   display: flex;
   gap: 8px;
@@ -752,9 +754,13 @@ td .keyline {
   min-height: 0;
   padding-top: 14px;
 }
-.workflow-canvas-main .workflow-editor-v2 { min-height: calc(100vh - 180px); }
+.workflow-canvas-main .workflow-editor-v2 {
+  min-height: calc(100vh - 180px);
+}
 .workflow-canvas-main .workflow-stage,
-.workflow-canvas-main .workflow-flow { min-height: calc(100vh - 240px); }
+.workflow-canvas-main .workflow-flow {
+  min-height: calc(100vh - 240px);
+}
 .workflow-toolbar {
   display: flex;
   align-items: center;
@@ -881,14 +887,36 @@ td .keyline {
   background: #fff;
   font-size: 10px;
 }
-.workflow-port-row:last-child { border-bottom: 0; border-radius: 0 0 8px 8px; }
-.workflow-port-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-port-row em { color: #94a3b8; font-size: 9px; font-style: normal; }
-.workflow-port-row-input { padding-left: 18px; }
-.workflow-port-row-output { padding-right: 28px; }
-.workflow-port-row .workflow-handle { top: 50% !important; transform: translateY(-50%); }
-.workflow-port-row-input .workflow-handle { left: -7px !important; }
-.workflow-port-row-output .workflow-handle { right: -7px !important; }
+.workflow-port-row:last-child {
+  border-bottom: 0;
+  border-radius: 0 0 8px 8px;
+}
+.workflow-port-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflow-port-row em {
+  color: #94a3b8;
+  font-size: 9px;
+  font-style: normal;
+}
+.workflow-port-row-input {
+  padding-left: 18px;
+}
+.workflow-port-row-output {
+  padding-right: 28px;
+}
+.workflow-port-row .workflow-handle {
+  top: 50% !important;
+  transform: translateY(-50%);
+}
+.workflow-port-row-input .workflow-handle {
+  left: -7px !important;
+}
+.workflow-port-row-output .workflow-handle {
+  right: -7px !important;
+}
 .workflow-port-add {
   position: absolute;
   right: -31px;
@@ -906,10 +934,18 @@ td .keyline {
   opacity: 0;
   cursor: pointer;
 }
-.workflow-port-row:hover .workflow-port-add { opacity: 1; }
-.control-row { background: #f8fafc; }
-.failure-row { background: #fff8f7; }
-.branch-row { background: #faf8ff; }
+.workflow-port-row:hover .workflow-port-add {
+  opacity: 1;
+}
+.control-row {
+  background: #f8fafc;
+}
+.failure-row {
+  background: #fff8f7;
+}
+.branch-row {
+  background: #faf8ff;
+}
 .workflow-node-title {
   display: flex;
   align-items: center;

@@ -37,7 +37,10 @@ function updateJson(name: string, raw: string) {
     const parsed = JSON.parse(raw);
     props.config[name] = parsed;
   } catch {
-    props.config[name] = raw.split(/\r?\n|,/u).map((item) => item.trim()).filter(Boolean);
+    props.config[name] = raw
+      .split(/\r?\n|,/u)
+      .map((item) => item.trim())
+      .filter(Boolean);
   }
 }
 </script>
@@ -108,8 +111,11 @@ function updateJson(name: string, raw: string) {
           v-else-if="item.type === 'json'"
           :value="jsonValue(item.name)"
           rows="3"
-          @input="updateJson(item.name, ($event.target as HTMLTextAreaElement).value)"
-        ></textarea><input
+          @input="
+            updateJson(item.name, ($event.target as HTMLTextAreaElement).value)
+          "
+        ></textarea
+        ><input
           v-else-if="item.type !== 'boolean'"
           v-model="props.config[item.name]"
           :type="item.type === 'number' ? 'number' : 'text'" /><input

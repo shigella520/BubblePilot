@@ -29,7 +29,8 @@ const versionDefinition = async () => {
   const versions = await apiRequest<any[]>(
     `/api/v1/workflows/${workflowId.value}/versions`,
   );
-  const candidate = versions.find((item) => item.status === "validated") ?? versions[0];
+  const candidate =
+    versions.find((item) => item.status === "validated") ?? versions[0];
   if (candidate) {
     workflowName.value = candidate.workflowName;
     definition.value = candidate.definition;
@@ -63,7 +64,10 @@ async function create(name: string, nextDefinition: any) {
   try {
     const version = await apiRequest<any>("/api/v1/workflows", {
       method: "POST",
-      body: JSON.stringify({ name: name || "新工作流", definition: nextDefinition }),
+      body: JSON.stringify({
+        name: name || "新工作流",
+        definition: nextDefinition,
+      }),
       headers: { "content-type": "application/json" },
     });
     message.value = "工作流已保存，请在顶部启用。";
@@ -83,11 +87,14 @@ async function saveVersion(name: string, nextDefinition: any) {
   if (isNew.value) return create(name, nextDefinition);
   saveState.value = "saving";
   try {
-    const version = await apiRequest<any>(`/api/v1/workflows/${workflowId.value}/versions`, {
-      method: "POST",
-      body: JSON.stringify({ definition: nextDefinition }),
-      headers: { "content-type": "application/json" },
-    });
+    const version = await apiRequest<any>(
+      `/api/v1/workflows/${workflowId.value}/versions`,
+      {
+        method: "POST",
+        body: JSON.stringify({ definition: nextDefinition }),
+        headers: { "content-type": "application/json" },
+      },
+    );
     candidateVersion.value = version.version;
     workflowName.value = name;
     saveState.value = "saved";
@@ -107,17 +114,26 @@ async function toggleEnabled() {
     return;
   }
   try {
-    if (workflowStatus.value !== "active" && candidateVersion.value !== publishedVersion.value) {
-      await apiRequest(`/api/v1/workflows/${workflowId.value}/versions/${candidateVersion.value}/publish`, {
-        method: "POST",
-      });
+    if (
+      workflowStatus.value !== "active" &&
+      candidateVersion.value !== publishedVersion.value
+    ) {
+      await apiRequest(
+        `/api/v1/workflows/${workflowId.value}/versions/${candidateVersion.value}/publish`,
+        {
+          method: "POST",
+        },
+      );
       publishedVersion.value = candidateVersion.value;
     }
-    const next = await apiRequest<any>(`/api/v1/workflows/${workflowId.value}/enabled`, {
-      method: "PATCH",
-      body: JSON.stringify({ enabled: workflowStatus.value !== "active" }),
-      headers: { "content-type": "application/json" },
-    });
+    const next = await apiRequest<any>(
+      `/api/v1/workflows/${workflowId.value}/enabled`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: workflowStatus.value !== "active" }),
+        headers: { "content-type": "application/json" },
+      },
+    );
     workflowStatus.value = next.status;
   } catch (cause) {
     message.value = errorMessage(cause);
@@ -126,7 +142,8 @@ async function toggleEnabled() {
 }
 
 function testWorkflow() {
-  message.value = "测试执行面板将在下一步接入真实节点模拟器。当前可先保存并启用后用测试消息验证。";
+  message.value =
+    "测试执行面板将在下一步接入真实节点模拟器。当前可先保存并启用后用测试消息验证。";
   messageIsError.value = false;
 }
 function scheduleSave(name: string, nextDefinition: any) {
@@ -143,26 +160,55 @@ onMounted(load);
 <template>
   <main class="workflow-canvas-page">
     <header class="workflow-canvas-header">
-      <button class="icon-button" type="button" title="返回工作流列表" @click="router.push('/automation')">
+      <button
+        class="icon-button"
+        type="button"
+        title="返回工作流列表"
+        @click="router.push('/automation')"
+      >
         <ArrowLeft :size="18" />
       </button>
       <div class="workflow-canvas-title">
         <span class="eyebrow">WORKFLOW EDITOR</span>
-        <input v-model="workflowName" maxlength="120" placeholder="未命名工作流" />
+        <input
+          v-model="workflowName"
+          maxlength="120"
+          placeholder="未命名工作流"
+        />
       </div>
       <span class="workflow-save-state" :class="saveState">
         <LoaderCircle v-if="saveState === 'saving'" :size="14" />
         <Check v-else :size="14" />
-        {{ saveState === "saving" ? "保存中" : saveState === "error" ? "保存失败" : "已保存" }}
+        {{
+          saveState === "saving"
+            ? "保存中"
+            : saveState === "error"
+              ? "保存失败"
+              : "已保存"
+        }}
       </span>
       <div class="workflow-canvas-actions">
-        <button class="button secondary" type="button" @click="testWorkflow"><TestTube2 :size="16" />测试执行</button>
-        <button class="button secondary" type="button" :disabled="isNew || candidateVersion === null" @click="toggleEnabled">
-          <Power :size="16" />{{ workflowStatus === "active" ? "停用" : "启用" }}
+        <button class="button secondary" type="button" @click="testWorkflow">
+          <TestTube2 :size="16" />测试执行
+        </button>
+        <button
+          class="button secondary"
+          type="button"
+          :disabled="isNew || candidateVersion === null"
+          @click="toggleEnabled"
+        >
+          <Power :size="16" />{{
+            workflowStatus === "active" ? "停用" : "启用"
+          }}
         </button>
       </div>
     </header>
-    <DismissibleMessage v-if="message" :error="messageIsError" @close="message = ''">{{ message }}</DismissibleMessage>
+    <DismissibleMessage
+      v-if="message"
+      :error="messageIsError"
+      @close="message = ''"
+      >{{ message }}</DismissibleMessage
+    >
     <section v-if="!busy" class="workflow-canvas-main">
       <WorkflowEditor
         :blocks="blocks"

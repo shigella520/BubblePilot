@@ -263,7 +263,12 @@ watch(
     </aside>
     <div class="admin-workspace">
       <SensitiveUnlock />
-      <DismissibleMessage v-if="message" :error="messageIsError" @close="message = ''">{{ message }}</DismissibleMessage>
+      <DismissibleMessage
+        v-if="message"
+        :error="messageIsError"
+        @close="message = ''"
+        >{{ message }}</DismissibleMessage
+      >
       <section id="executions" class="admin-panel">
         <div class="panel-head">
           <div>

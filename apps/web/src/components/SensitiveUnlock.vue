@@ -51,6 +51,8 @@ async function verify() {
     <button class="button primary" type="submit" :disabled="busy">
       {{ busy ? "验证中…" : "解锁" }}
     </button>
-    <DismissibleMessage v-if="message" error @close="message = ''">{{ message }}</DismissibleMessage>
+    <DismissibleMessage v-if="message" error @close="message = ''">{{
+      message
+    }}</DismissibleMessage>
   </form>
 </template>

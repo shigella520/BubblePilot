@@ -151,7 +151,11 @@ function redo() {
   restore(next);
 }
 function addBlock(block: Block, position = creatorPosition.value) {
-  if (block.type === "message-trigger" && nodes.value.some((item) => item.data.block.type === block.type)) return;
+  if (
+    block.type === "message-trigger" &&
+    nodes.value.some((item) => item.data.block.type === block.type)
+  )
+    return;
   recordHistory();
   const id = `${block.type}-${Date.now()}`;
   const node = {
@@ -202,10 +206,21 @@ function openCreatorFromNode(nodeId: string, handle: string) {
     : { x: 180, y: 160 };
   const screenPosition = flowToScreenCoordinate(flowPosition);
   const bounds = stageElement.value?.getBoundingClientRect();
-  openCreator(flowPosition, bounds ? {
-    x: Math.max(12, Math.min(bounds.width - 292, screenPosition.x - bounds.left)),
-    y: Math.max(12, Math.min(bounds.height - 300, screenPosition.y - bounds.top)),
-  } : undefined);
+  openCreator(
+    flowPosition,
+    bounds
+      ? {
+          x: Math.max(
+            12,
+            Math.min(bounds.width - 292, screenPosition.x - bounds.left),
+          ),
+          y: Math.max(
+            12,
+            Math.min(bounds.height - 300, screenPosition.y - bounds.top),
+          ),
+        }
+      : undefined,
+  );
 }
 function openCreatorAt(payload: any) {
   const event = payload?.event as MouseEvent | undefined;
@@ -215,8 +230,20 @@ function openCreatorAt(payload: any) {
       : undefined,
     event && stageElement.value
       ? {
-          x: Math.max(12, Math.min(stageElement.value.clientWidth - 292, event.clientX - stageElement.value.getBoundingClientRect().left)),
-          y: Math.max(12, Math.min(stageElement.value.clientHeight - 300, event.clientY - stageElement.value.getBoundingClientRect().top)),
+          x: Math.max(
+            12,
+            Math.min(
+              stageElement.value.clientWidth - 292,
+              event.clientX - stageElement.value.getBoundingClientRect().left,
+            ),
+          ),
+          y: Math.max(
+            12,
+            Math.min(
+              stageElement.value.clientHeight - 300,
+              event.clientY - stageElement.value.getBoundingClientRect().top,
+            ),
+          ),
         }
       : undefined,
   );
@@ -465,7 +492,8 @@ function toDefinition() {
     schemaVersion: "1",
     name: name.value || "New workflow",
     startNodeId:
-      nodes.value.find((node) => node.data.block.type === "message-trigger")?.id ??
+      nodes.value.find((node) => node.data.block.type === "message-trigger")
+        ?.id ??
       nodes.value[0]?.id ??
       "",
     maxSteps: 64,
@@ -608,7 +636,8 @@ function onKeydown(event: KeyboardEvent) {
     });
   if (event.key === "Delete" || event.key === "Backspace") {
     const target = event.target as HTMLElement | null;
-    if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
+    if (target?.matches("input, textarea, select, [contenteditable='true']"))
+      return;
     if (selectedEdgeId.value) deleteEdge(selectedEdgeId.value);
     else removeSelected();
   }
@@ -664,10 +693,17 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         @connect="connect"
         @pane-click="openCreatorAt"
         @node-click="({ node }) => selectNode(node)"
-        @edge-click="({ edge }) => { selectedEdgeId = edge.id; selected = null; }"
+        @edge-click="
+          ({ edge }) => {
+            selectedEdgeId = edge.id;
+            selected = null;
+          }
+        "
       >
         <template #node-action="{ data, id }"
-          ><WorkflowNode :data="data" @add="(handle) => openCreatorFromNode(id, handle)"
+          ><WorkflowNode
+            :data="data"
+            @add="(handle) => openCreatorFromNode(id, handle)"
         /></template>
         <template #edge-workflow="edgeProps"
           ><WorkflowEdge v-bind="edgeProps" @delete="deleteEdge"
@@ -696,7 +732,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <div class="workflow-empty-icon">＋</div>
         <strong>从一个动作开始</strong>
         <span>点击画布或“添加动作”，把第一个节点放到这里</span>
-        <button class="button secondary" type="button" @click="openCreator()">添加第一个动作</button>
+        <button class="button secondary" type="button" @click="openCreator()">
+          添加第一个动作
+        </button>
       </div>
       <NodeInspector
         :node="selected"

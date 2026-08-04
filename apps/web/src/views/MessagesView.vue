@@ -361,7 +361,12 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
     </aside>
     <div class="admin-workspace">
       <SensitiveUnlock @verified="search" />
-      <DismissibleMessage v-if="message" :error="messageIsError" @close="message = ''">{{ message }}</DismissibleMessage>
+      <DismissibleMessage
+        v-if="message"
+        :error="messageIsError"
+        @close="message = ''"
+        >{{ message }}</DismissibleMessage
+      >
       <section id="monitoring" class="admin-panel">
         <div class="panel-head">
           <div>

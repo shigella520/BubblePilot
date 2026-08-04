@@ -78,7 +78,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         name: "contentTypes",
         label: "内容类型",
         type: "json",
-        description: "例如 [\"text\"]，留空表示全部类型。",
+        description: '例如 ["text"]，留空表示全部类型。',
       },
       {
         name: "enabled",

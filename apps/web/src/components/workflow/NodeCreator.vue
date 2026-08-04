@@ -40,7 +40,9 @@ const filtered = computed(() =>
   <aside
     v-if="open"
     class="workflow-node-creator"
-    :style="position ? { left: `${position.x}px`, top: `${position.y}px` } : undefined"
+    :style="
+      position ? { left: `${position.x}px`, top: `${position.y}px` } : undefined
+    "
   >
     <div class="workflow-node-creator-head">
       <strong>添加动作</strong
