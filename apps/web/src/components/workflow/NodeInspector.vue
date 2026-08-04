@@ -3,7 +3,7 @@
 const props = defineProps<{
   node: any | null;
   config: Record<string, any>;
-  references?: string[];
+  references?: Array<string | { value: string; label: string }>;
 }>();
 const emit = defineEmits<{
   (event: "update:name", value: string): void;
@@ -50,6 +50,14 @@ function firstArrayValue(name: string): string {
 function updateSingleArray(name: string, value: string) {
   props.config[name] = value ? [value] : [];
 }
+function referenceOptionValue(reference: string | { value: string }): string {
+  return typeof reference === "string" ? reference : reference.value;
+}
+function referenceOptionLabel(
+  reference: string | { value: string; label: string },
+): string {
+  return typeof reference === "string" ? reference : reference.label;
+}
 </script>
 <template>
   <aside v-if="node" class="workflow-node-inspector">
@@ -88,10 +96,10 @@ function updateSingleArray(name: string, value: string) {
           <option value="path:context.history.count">历史消息数量</option>
           <option
             v-for="reference in props.references ?? []"
-            :key="reference"
-            :value="reference"
+            :key="referenceOptionValue(reference)"
+            :value="referenceOptionValue(reference)"
           >
-            {{ reference }}
+            {{ referenceOptionLabel(reference) }}
           </option>
         </select></label
       >

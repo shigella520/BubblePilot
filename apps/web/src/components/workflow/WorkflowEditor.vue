@@ -81,9 +81,11 @@ function defaultConfig(block: Block): Record<string, unknown> {
         ? false
         : item.type === "select"
           ? (item.options?.[0]?.value ?? "")
-          : item.name === "promptTemplate"
-            ? "请根据聊天上下文回答当前消息。"
-            : "";
+          : item.type === "select-array"
+            ? []
+            : item.name === "promptTemplate"
+              ? "请根据聊天上下文回答当前消息。"
+              : "";
   if (block.type === "load-context")
     Object.assign(values, {
       messageLimit: 10,
@@ -551,6 +553,7 @@ function save() {
 function hydrate(definition: any) {
   if (!definition || hydratedDefinition.value === JSON.stringify(definition))
     return;
+  if (typeof definition.name === "string") name.value = definition.name;
   const sourceNodes = Array.isArray(definition.nodes) ? definition.nodes : [];
   nodes.value = sourceNodes.map((item: any, index: number) => {
     const block = blockFor(item.type);
@@ -606,6 +609,7 @@ function hydrate(definition: any) {
   edges.value = result;
   ensureControlEdgeSpacing();
   hydratedDefinition.value = JSON.stringify(definition);
+  trackedSnapshot.value = persistedSnapshot();
 }
 watch(
   () => props.workflowName,
@@ -789,9 +793,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           nodes
             .filter((item) => item.id !== selected?.id)
             .flatMap((item) =>
-              item.data.block.outputs.map(
-                (output: any) => `output:${item.id}:${output.name}`,
-              ),
+              item.data.block.outputs.map((output: any) => ({
+                value: `output:${item.id}:${output.name}`,
+                label: `${item.data.label} / ${output.label}`,
+              })),
             )
         "
         @close="selected = null"
