@@ -717,9 +717,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         重做</button
       ><label class="workflow-name-field"
         >工作流名称<input v-model="name" maxlength="120" /></label
-      ><button class="button primary" type="button" @click="save">
-        保存并生效
-      </button>
+      ><button class="button primary" type="button" @click="save">保存</button>
     </div>
     <div ref="stageElement" class="workflow-stage">
       <NodeCreator

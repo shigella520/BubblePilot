@@ -26,8 +26,7 @@ const candidateVersion = ref<number | null>(null);
 const busy = ref(false);
 const message = ref("");
 const messageIsError = ref(false);
-const saveState = ref<"saved" | "saving" | "error">("saved");
-let saveTimer: ReturnType<typeof setTimeout> | undefined;
+const saveState = ref<"saved" | "dirty" | "saving" | "error">("saved");
 
 const versionDefinition = async () => {
   if (isNew.value) return;
@@ -151,12 +150,8 @@ function testWorkflow() {
     "测试执行面板将在下一步接入真实节点模拟器。当前可先保存并启用后用测试消息验证。";
   messageIsError.value = false;
 }
-function scheduleSave(name: string, nextDefinition: any) {
-  saveState.value = "saving";
-  if (saveTimer !== undefined) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    void saveVersion(name, nextDefinition);
-  }, 500);
+function markDirty() {
+  if (saveState.value !== "saving") saveState.value = "dirty";
 }
 
 onMounted(load);
@@ -189,7 +184,9 @@ onMounted(load);
             ? "保存中"
             : saveState === "error"
               ? "保存失败"
-              : "已保存"
+              : saveState === "dirty"
+                ? "有未保存修改"
+                : "已保存"
         }}
       </span>
       <div class="workflow-canvas-actions">
@@ -221,7 +218,7 @@ onMounted(load);
         :definition="definition"
         @create="create"
         @version="saveVersion"
-        @change="scheduleSave"
+        @change="markDirty"
       />
     </section>
     <div v-else class="loading-screen">正在加载工作流…</div>
