@@ -50,6 +50,7 @@ interface WorkflowRow {
   published_version: number | null;
   created_at: Date;
   updated_at: Date;
+  deleted_at: Date | null;
 }
 
 interface TriggerRow {
@@ -162,7 +163,7 @@ INNER JOIN workflows w ON w.id = v.workflow_id`;
 const triggerSelect = `SELECT
   t.id, t.name, v.workflow_id, t.workflow_version_id,
   v.version AS workflow_version, t.conditions, t.include_from_me, t.enabled,
-  t.created_at, t.updated_at`;
+  t.created_at, t.updated_at, t.deleted_at`;
 
 const executionSelect = `SELECT
   e.id, e.provider, e.external_event_id,
@@ -424,7 +425,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         await client.query(
           `UPDATE bot_triggers
            SET workflow_version_id = $2, updated_at = NOW()
-           WHERE workflow_version_id = $1`,
+           WHERE workflow_version_id = $1 AND deleted_at IS NULL`,
           [row.id, selectedId],
         );
       }
@@ -578,7 +579,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       `UPDATE bot_triggers t
        SET enabled = $2, updated_at = NOW()
        FROM workflow_versions v, workflows w
-       WHERE t.id = $1 AND v.id = t.workflow_version_id
+       WHERE t.id = $1 AND t.deleted_at IS NULL AND v.id = t.workflow_version_id
          AND w.id = v.workflow_id
          AND ($2 = FALSE OR (v.status = 'published' AND w.status = 'active'))
        RETURNING t.id`,
@@ -598,7 +599,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   ): Promise<TriggerRecord | null> {
     const result = await this.pool.query<IdentifierRow>(
       `UPDATE bot_triggers SET name = $2, conditions = $3::jsonb, include_from_me = $4, updated_at = NOW()
-       WHERE id = $1 RETURNING id`,
+       WHERE id = $1 AND deleted_at IS NULL RETURNING id`,
       [
         triggerId,
         input.name,
@@ -614,33 +615,14 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     triggerId: string,
   ): Promise<"deleted" | "not-found" | "referenced"> {
     const exists = await this.pool.query(
-      "SELECT 1 FROM bot_triggers WHERE id = $1",
+      "SELECT 1 FROM bot_triggers WHERE id = $1 AND deleted_at IS NULL",
       [triggerId],
     );
     if (exists.rowCount === 0) return "not-found";
-    const references = await this.pool.query<{ referenced: boolean }>(
-      "SELECT EXISTS (SELECT 1 FROM workflow_executions WHERE trigger_id = $1) AS referenced",
+    await this.pool.query(
+      "UPDATE bot_triggers SET enabled = FALSE, deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
       [triggerId],
     );
-    if (references.rows[0]?.referenced === true) return "referenced";
-    try {
-      await this.pool.query("DELETE FROM bot_triggers WHERE id = $1", [
-        triggerId,
-      ]);
-    } catch (error) {
-      // A new execution may be inserted after the advisory check and acquire
-      // the foreign-key reference before this delete runs. Treat that race as
-      // the same protected-reference conflict instead of leaking a 500.
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        error.code === "23503"
-      ) {
-        return "referenced";
-      }
-      throw error;
-    }
     return "deleted";
   }
 
@@ -649,6 +631,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       `${triggerSelect}
        FROM bot_triggers t
        INNER JOIN workflow_versions v ON v.id = t.workflow_version_id
+       WHERE t.deleted_at IS NULL
        ORDER BY t.updated_at DESC, t.id DESC`,
     );
     return result.rows.map(triggerRecord);
@@ -660,7 +643,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
        FROM bot_triggers t
        INNER JOIN workflow_versions v ON v.id = t.workflow_version_id
        INNER JOIN workflows w ON w.id = v.workflow_id
-       WHERE t.enabled = TRUE AND v.status = 'published' AND w.status = 'active'
+       WHERE t.enabled = TRUE AND t.deleted_at IS NULL AND v.status = 'published' AND w.status = 'active'
        ORDER BY t.created_at, t.id`,
     );
     return result.rows.map((row) => ({
@@ -1255,7 +1238,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       `${triggerSelect}
        FROM bot_triggers t
        INNER JOIN workflow_versions v ON v.id = t.workflow_version_id
-       WHERE t.id = $1`,
+       WHERE t.id = $1 AND t.deleted_at IS NULL`,
       [triggerId],
     );
     const row = result.rows[0];

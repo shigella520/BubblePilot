@@ -37,6 +37,7 @@ interface StoredExecution extends WorkflowExecutionRecord {
 export class InMemoryWorkflowRepository implements WorkflowRepository {
   readonly workflows = new Map<string, StoredWorkflow>();
   readonly triggers = new Map<string, TriggerRecord>();
+  readonly deletedTriggerIds = new Set<string>();
   readonly executions = new Map<string, StoredExecution>();
   readonly deliveries = new Map<string, OutboundDeliveryRecord>();
 
@@ -232,7 +233,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     enabled: boolean,
   ): Promise<TriggerRecord | null> {
     const trigger = this.triggers.get(triggerId);
-    if (trigger === undefined) {
+    if (trigger === undefined || this.deletedTriggerIds.has(triggerId)) {
       return null;
     }
     const workflow = this.workflows.get(trigger.workflowId);
@@ -259,7 +260,8 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     },
   ): Promise<TriggerRecord | null> {
     const trigger = this.triggers.get(triggerId);
-    if (trigger === undefined) return null;
+    if (trigger === undefined || this.deletedTriggerIds.has(triggerId))
+      return null;
     trigger.name = input.name;
     trigger.conditions = input.conditions;
     trigger.includeFromMe = input.includeFromMe;
@@ -270,26 +272,29 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   async deleteTrigger(
     triggerId: string,
   ): Promise<"deleted" | "not-found" | "referenced"> {
-    if (!this.triggers.has(triggerId)) return "not-found";
-    if (
-      [...this.executions.values()].some(
-        (execution) => execution.triggerId === triggerId,
-      )
-    )
-      return "referenced";
-    this.triggers.delete(triggerId);
+    if (!this.triggers.has(triggerId) || this.deletedTriggerIds.has(triggerId))
+      return "not-found";
+    this.deletedTriggerIds.add(triggerId);
+    const trigger = this.triggers.get(triggerId);
+    if (trigger) {
+      trigger.enabled = false;
+      trigger.updatedAt = new Date().toISOString();
+    }
     return "deleted";
   }
 
   listTriggers(): Promise<readonly TriggerRecord[]> {
     return Promise.resolve(
-      [...this.triggers.values()].map((trigger) => structuredClone(trigger)),
+      [...this.triggers.values()]
+        .filter((trigger) => !this.deletedTriggerIds.has(trigger.id))
+        .map((trigger) => structuredClone(trigger)),
     );
   }
 
   listActiveTriggerBindings(): Promise<readonly TriggerBinding[]> {
     const bindings: TriggerBinding[] = [];
     for (const trigger of this.triggers.values()) {
+      if (this.deletedTriggerIds.has(trigger.id)) continue;
       const workflow = this.workflows.get(trigger.workflowId);
       const version = workflow?.versions.find(
         (candidate) => candidate.id === trigger.workflowVersionId,
