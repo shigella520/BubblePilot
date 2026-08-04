@@ -946,7 +946,7 @@ export function buildApplication(
 
     application.get(
       "/api/v1/audit-events",
-      { preHandler: requireAdmin },
+      { preHandler: requireSensitive("audit.events.view", "audit") },
       async (request) => {
         const query = auditQuerySchema.parse(request.query);
         return {
@@ -1720,7 +1720,7 @@ export function buildApplication(
 
     application.get(
       "/api/v1/executions",
-      { preHandler: requireAdmin },
+      { preHandler: requireSensitive("execution.list", "workflow-execution") },
       async (request) => {
         const query = executionListQuerySchema.parse(request.query);
         return {
@@ -1850,7 +1850,12 @@ export function buildApplication(
 
     application.get(
       "/api/v1/executions/:executionId",
-      { preHandler: requireAdmin },
+      {
+        preHandler: requireSensitive(
+          "execution.detail.view",
+          "workflow-execution",
+        ),
+      },
       async (request) => {
         const parameters = executionParametersSchema.parse(request.params);
         const execution = await executionDetail(parameters.executionId);
