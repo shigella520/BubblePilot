@@ -5,7 +5,11 @@ import { buildApplication } from "../app/application.js";
 import type { AppConfig } from "../app/config.js";
 import { AiManagementService } from "../modules/ai/ai-management-service.js";
 import type { AiClient } from "../modules/ai/openai-compatible-client.js";
-import type { AiCallResult, AiProviderRecord } from "../modules/ai/ai-types.js";
+import type {
+  AiCallResult,
+  AiChatRequest,
+  AiProviderRecord,
+} from "../modules/ai/ai-types.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
@@ -44,9 +48,14 @@ const config: AppConfig = {
 
 class SuccessfulAiClient implements AiClient {
   readonly calls: AiProviderRecord[] = [];
+  readonly requests: AiChatRequest[] = [];
 
-  call(provider: AiProviderRecord): Promise<AiCallResult> {
+  call(
+    provider: AiProviderRecord,
+    request: AiChatRequest,
+  ): Promise<AiCallResult> {
     this.calls.push(provider);
+    this.requests.push(request);
     return Promise.resolve({
       status: "succeeded",
       text: "OK",
@@ -182,6 +191,10 @@ describe("AI management API", () => {
       healthBeforeTest,
     );
     expect(client.calls).toHaveLength(1);
+    expect(client.requests[0]).toMatchObject({
+      maxOutputTokens: 128,
+      temperature: 0,
+    });
 
     const route = await request({
       method: "POST",

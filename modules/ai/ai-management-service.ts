@@ -119,7 +119,10 @@ export class AiManagementService {
           content: "Connectivity test. Reply with the single word OK.",
         },
       ],
-      maxOutputTokens: 16,
+      // Reasoning-capable OpenAI-compatible models may consume the first
+      // tokens internally before producing assistant content. Keep the
+      // connectivity probe small, but large enough to receive its final OK.
+      maxOutputTokens: 128,
       temperature: 0,
       timeoutMs: provider.requestTimeoutMs,
     });
