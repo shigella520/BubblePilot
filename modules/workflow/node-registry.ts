@@ -18,6 +18,7 @@ export interface NodeExecutionContext {
   deadlineAt: number;
   variables: Record<string, string>;
   history: ContextMessage[];
+  outputs: Record<string, Record<string, unknown>>;
 }
 
 export interface NodeHandlerResult {

@@ -234,7 +234,7 @@ describe("Web admin authentication", () => {
     );
   });
 
-  it("requires a session-bound grant for provider changes and audits both outcomes", async () => {
+  it("allows provider changes after login and audits the outcome", async () => {
     const login = await application.inject({
       method: "POST",
       url: "/api/v1/auth/session",
@@ -246,24 +246,8 @@ describe("Web admin authentication", () => {
       apiKind: "chat-completions",
       baseUrl: "https://ai.example.test/v1/",
       model: "fictional-model",
-      secretRef: "PREVIEW_AI_KEY",
+      secret: "sk-preview-provider",
     };
-
-    const denied = await application.inject({
-      method: "POST",
-      url: "/api/v1/ai/providers",
-      headers: { cookie },
-      payload: provider,
-    });
-    expect(denied.statusCode).toBe(403);
-
-    const verified = await application.inject({
-      method: "POST",
-      url: "/api/v1/auth/sensitive",
-      headers: { cookie },
-      payload: { password: sensitivePassword },
-    });
-    expect(verified.statusCode).toBe(200);
 
     const created = await application.inject({
       method: "POST",
@@ -272,13 +256,9 @@ describe("Web admin authentication", () => {
       payload: provider,
     });
     expect(created.statusCode).toBe(201);
-    expect(created.body).not.toContain("fictional-server-secret");
+    expect(created.body).not.toContain("sk-preview-provider");
     expect(authRepository.auditEvents).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          action: "ai.provider.create",
-          outcome: "denied",
-        }),
         expect.objectContaining({
           action: "ai.provider.create",
           outcome: "succeeded",

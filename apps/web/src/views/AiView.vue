@@ -14,14 +14,12 @@ import {
 } from "@lucide/vue";
 import { computed, onMounted, reactive, ref } from "vue";
 
-import SensitiveUnlock from "../components/SensitiveUnlock.vue";
 import {
   apiRequest,
   errorMessage,
   jsonBody,
   parseJsonObject,
 } from "../services/api";
-import { useSessionStore } from "../stores/session";
 
 interface Provider {
   id: string;
@@ -68,7 +66,6 @@ interface ProviderForm {
   enabled: boolean;
 }
 
-const session = useSessionStore();
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
@@ -197,7 +194,7 @@ function editProvider(item: Provider) {
     ?.scrollIntoView({ behavior: "smooth" });
 }
 async function saveProvider() {
-  if (!session.sensitiveActive || providerFormBusy.value) return;
+  if (providerFormBusy.value) return;
   const isUpdate = providerForm.id !== "";
   providerFormBusy.value = true;
   message.value = "";
@@ -240,7 +237,6 @@ async function providerAction(
   item: Provider,
   action: "toggle" | "test" | "reset" | "delete",
 ) {
-  if (!session.sensitiveActive) return;
   if (action === "toggle" && providerToggleBusyIds.has(item.id)) return;
   if (action === "test" && providerTestBusyIds.has(item.id)) return;
   if (action === "reset" && providerResetBusyIds.has(item.id)) return;
@@ -341,7 +337,6 @@ async function providerAction(
 }
 async function dropProvider(targetId: string) {
   if (
-    !session.sensitiveActive ||
     providerOrderBusy.value ||
     draggedId.value === null ||
     draggedId.value === targetId
@@ -359,7 +354,7 @@ async function dropProvider(targetId: string) {
 }
 
 async function moveProvider(providerId: string, offset: -1 | 1) {
-  if (!session.sensitiveActive || providerOrderBusy.value) return;
+  if (providerOrderBusy.value) return;
   const ordered = [...providers.value];
   const source = ordered.findIndex((item) => item.id === providerId);
   const target = source + offset;
@@ -427,7 +422,7 @@ function editRoute(item: AiRoute) {
   });
 }
 async function saveRoute() {
-  if (!session.sensitiveActive || routeFormBusy.value) return;
+  if (routeFormBusy.value) return;
   const isUpdate = routeForm.id !== "";
   routeFormBusy.value = true;
   message.value = "";
@@ -467,7 +462,7 @@ async function saveRoute() {
   }
 }
 async function toggleRoute(item: AiRoute) {
-  if (!session.sensitiveActive || routeToggleBusyIds.has(item.id)) return;
+  if (routeToggleBusyIds.has(item.id)) return;
   routeToggleBusyIds.add(item.id);
   message.value = "";
   messageIsError.value = false;
@@ -495,7 +490,6 @@ async function toggleRoute(item: AiRoute) {
 }
 async function deleteRoute(item: AiRoute) {
   if (
-    !session.sensitiveActive ||
     routeDeleteBusyIds.has(item.id) ||
     !window.confirm(`确认删除 Provider 路由「${item.name}」？`)
   )
@@ -546,7 +540,6 @@ onMounted(load);
       </div>
     </aside>
     <div class="admin-workspace">
-      <SensitiveUnlock />
       <p v-if="message" class="form-message" :class="{ error: messageIsError }">
         {{ message }}
       </p>
@@ -568,7 +561,7 @@ onMounted(load);
           <article
             v-for="item in providers"
             :key="item.id"
-            :draggable="session.sensitiveActive && !providerOrderBusy"
+            :draggable="!providerOrderBusy"
             @dragstart="draggedId = item.id"
             @dragover.prevent
             @drop="dropProvider(item.id)"
@@ -578,11 +571,7 @@ onMounted(load);
               <button
                 class="icon-button"
                 type="button"
-                :disabled="
-                  !session.sensitiveActive ||
-                  providerOrderBusy ||
-                  providers[0]?.id === item.id
-                "
+                :disabled="providerOrderBusy || providers[0]?.id === item.id"
                 :aria-label="`上移 ${item.name}`"
                 :title="`上移 ${item.name}`"
                 @click="moveProvider(item.id, -1)"
@@ -593,7 +582,6 @@ onMounted(load);
                 class="icon-button"
                 type="button"
                 :disabled="
-                  !session.sensitiveActive ||
                   providerOrderBusy ||
                   providers[providers.length - 1]?.id === item.id
                 "
@@ -629,9 +617,7 @@ onMounted(load);
             <div class="row-actions">
               <button
                 class="button tiny secondary provider-test-action"
-                :disabled="
-                  !session.sensitiveActive || providerTestBusyIds.has(item.id)
-                "
+                :disabled="providerTestBusyIds.has(item.id)"
                 :aria-busy="providerTestBusyIds.has(item.id)"
                 @click="providerAction(item, 'test')"
               >
@@ -645,9 +631,7 @@ onMounted(load);
                 编辑</button
               ><button
                 class="button tiny secondary provider-reset-action"
-                :disabled="
-                  !session.sensitiveActive || providerResetBusyIds.has(item.id)
-                "
+                :disabled="providerResetBusyIds.has(item.id)"
                 :aria-busy="providerResetBusyIds.has(item.id)"
                 @click="providerAction(item, 'reset')"
               >
@@ -657,9 +641,7 @@ onMounted(load);
               ><button
                 class="button tiny"
                 :class="item.enabled ? 'danger-ghost' : 'secondary'"
-                :disabled="
-                  !session.sensitiveActive || providerToggleBusyIds.has(item.id)
-                "
+                :disabled="providerToggleBusyIds.has(item.id)"
                 :aria-busy="providerToggleBusyIds.has(item.id)"
                 @click="providerAction(item, 'toggle')"
               >
@@ -674,9 +656,7 @@ onMounted(load);
                 }}</button
               ><button
                 class="icon-button danger"
-                :disabled="
-                  !session.sensitiveActive || providerDeleteBusyIds.has(item.id)
-                "
+                :disabled="providerDeleteBusyIds.has(item.id)"
                 :aria-busy="providerDeleteBusyIds.has(item.id)"
                 :aria-label="
                   providerDeleteBusyIds.has(item.id)
@@ -762,7 +742,7 @@ onMounted(load);
               取消</button
             ><button
               class="button primary"
-              :disabled="!session.sensitiveActive || providerFormBusy"
+              :disabled="providerFormBusy"
               :aria-busy="providerFormBusy"
             >
               <Save :size="16" />{{
@@ -790,9 +770,7 @@ onMounted(load);
               <button
                 class="switch-button"
                 :class="{ active: item.enabled }"
-                :disabled="
-                  !session.sensitiveActive || routeToggleBusyIds.has(item.id)
-                "
+                :disabled="routeToggleBusyIds.has(item.id)"
                 :aria-busy="routeToggleBusyIds.has(item.id)"
                 @click="toggleRoute(item)"
               >
@@ -837,9 +815,7 @@ onMounted(load);
                 编辑策略</button
               ><button
                 class="icon-button danger"
-                :disabled="
-                  !session.sensitiveActive || routeDeleteBusyIds.has(item.id)
-                "
+                :disabled="routeDeleteBusyIds.has(item.id)"
                 :aria-busy="routeDeleteBusyIds.has(item.id)"
                 :aria-label="
                   routeDeleteBusyIds.has(item.id)
@@ -952,7 +928,7 @@ onMounted(load);
               取消</button
             ><button
               class="button primary"
-              :disabled="!session.sensitiveActive || routeFormBusy"
+              :disabled="routeFormBusy"
               :aria-busy="routeFormBusy"
             >
               <Save :size="16" />{{ routeFormBusy ? "保存中…" : "保存路由" }}
