@@ -710,6 +710,7 @@ td .keyline {
 .workflow-node-inspector { position: absolute; z-index: 20; top: 0; right: 0; width: 300px; height: 100%; overflow: auto; padding: 18px; border-left: 1px solid #dbe3ef; background: rgba(255,255,255,.97); box-shadow: -12px 0 30px rgba(15,23,42,.1); }
 .workflow-inspector-head small { color: #64748b; font-size: 10px; }.workflow-inspector-head h3 { margin: 4px 0 14px; }
 .workflow-inspector-description { color: #64748b; font-size: 11px; line-height: 1.5; }
+.workflow-inspector-inputs { display: grid; gap: 8px; margin: 12px 0 16px; padding: 10px; border-radius: 9px; background: #f8fafc; }.workflow-inspector-inputs strong { color: #334155; font-size: 11px; }.workflow-inspector-inputs label { display: grid; gap: 4px; color: #64748b; font-size: 10px; }.workflow-inspector-inputs select { width: 100%; }
 .workflow-inspector-field { margin: 13px 0; }.workflow-inspector-field > label { display: block; }.workflow-inspector-field small { color: #94a3b8; font-size: 9px; }.workflow-inspector-field input, .workflow-inspector-field select { width: 100%; margin-top: 5px; }
 .workflow-inspector-refs { display: grid; gap: 6px; margin: 14px 0; padding: 9px; border-radius: 9px; background: #f8fafc; color: #64748b; font-size: 10px; }.workflow-inspector-refs strong { color: #334155; }
 .workflow-edge-delete { display: none; border: 0; border-radius: 999px; color: #9d2d26; background: #fff; box-shadow: 0 2px 8px rgba(15,23,42,.16); cursor: pointer; }.vue-flow__edge:hover .workflow-edge-delete { display: block; }

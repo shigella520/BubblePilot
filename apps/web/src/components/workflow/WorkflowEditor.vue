@@ -56,6 +56,7 @@ function openCreatorAt(payload: any) {
   openCreator(event ? { x: event.offsetX, y: event.offsetY } : undefined);
 }
 function selectNode(node: any) { selected.value = node; config.value = { ...(node.data.config ?? {}) }; }
+function updateInput(port: string, value: any) { if (!selected.value) return; recordHistory(); selected.value.data.inputs = { ...(selected.value.data.inputs ?? {}), [port]: value }; }
 function removeSelected() { if (!selected.value) return; recordHistory(); const id = selected.value.id; nodes.value = nodes.value.filter((node) => node.id !== id); edges.value = edges.value.filter((edge) => edge.source !== id && edge.target !== id); selected.value = null; config.value = {}; }
 function portType(node: any, handle: string | null | undefined): string { if (!handle) return "control"; if (handle === "control" || handle === "success" || handle === "failure" || handle === "true" || handle === "false") return "control"; const [mode, name] = handle.split(":"); const port = mode === "input" ? node.data.block.inputs.find((item: Port) => item.name === name) : node.data.block.outputs.find((item: Port) => item.name === name); return port?.type ?? "control"; }
 function hasPath(from: string, target: string, visited = new Set<string>()): boolean { if (from === target) return true; if (visited.has(from)) return false; visited.add(from); return edges.value.filter((edge) => edge.source === from && edge.kind !== "data").some((edge) => hasPath(edge.target, target, visited)); }
@@ -106,7 +107,7 @@ window.addEventListener("keydown", onKeydown); onBeforeUnmount(() => window.remo
         <Background pattern-color="#cbd5e1" :gap="24" /><Controls /><MiniMap pannable zoomable />
         <svg><defs><marker id="workflow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" /></marker></defs></svg>
       </VueFlow>
-      <NodeInspector :node="selected" :config="config" @close="selected = null" @remove="removeSelected" @update:name="(value) => { if (selected) selected.data.label = value; }" />
+      <NodeInspector :node="selected" :config="config" :references="nodes.filter((item) => item.id !== selected?.id).flatMap((item) => item.data.block.outputs.map((output: any) => `output:${item.id}:${output.name}`))" @close="selected = null" @remove="removeSelected" @update:input="updateInput" @update:name="(value) => { if (selected) selected.data.label = value; }" />
     </div>
   </div>
 </template>
