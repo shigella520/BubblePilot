@@ -610,12 +610,23 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     return id === undefined ? null : this.getTrigger(id);
   }
 
-  async deleteTrigger(triggerId: string): Promise<boolean> {
-    const result = await this.pool.query(
-      "DELETE FROM bot_triggers WHERE id = $1",
+  async deleteTrigger(
+    triggerId: string,
+  ): Promise<"deleted" | "not-found" | "referenced"> {
+    const exists = await this.pool.query(
+      "SELECT 1 FROM bot_triggers WHERE id = $1",
       [triggerId],
     );
-    return (result.rowCount ?? 0) > 0;
+    if (exists.rowCount === 0) return "not-found";
+    const references = await this.pool.query<{ referenced: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM workflow_executions WHERE trigger_id = $1) AS referenced",
+      [triggerId],
+    );
+    if (references.rows[0]?.referenced === true) return "referenced";
+    await this.pool.query("DELETE FROM bot_triggers WHERE id = $1", [
+      triggerId,
+    ]);
+    return "deleted";
   }
 
   async listTriggers(): Promise<readonly TriggerRecord[]> {

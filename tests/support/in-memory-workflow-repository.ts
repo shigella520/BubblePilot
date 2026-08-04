@@ -267,8 +267,18 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return trigger;
   }
 
-  async deleteTrigger(triggerId: string): Promise<boolean> {
-    return this.triggers.delete(triggerId);
+  async deleteTrigger(
+    triggerId: string,
+  ): Promise<"deleted" | "not-found" | "referenced"> {
+    if (!this.triggers.has(triggerId)) return "not-found";
+    if (
+      [...this.executions.values()].some(
+        (execution) => execution.triggerId === triggerId,
+      )
+    )
+      return "referenced";
+    this.triggers.delete(triggerId);
+    return "deleted";
   }
 
   listTriggers(): Promise<readonly TriggerRecord[]> {

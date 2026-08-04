@@ -1805,11 +1805,21 @@ export function buildApplication(
       { preHandler: requireAdmin },
       async (request) => {
         const parameters = triggerParametersSchema.parse(request.params);
-        if (!(await workflowRepository.deleteTrigger(parameters.triggerId))) {
+        const result = await workflowRepository.deleteTrigger(
+          parameters.triggerId,
+        );
+        if (result === "not-found") {
           throw new ApplicationError(
             "TRIGGER_NOT_FOUND",
             "The trigger does not exist.",
             404,
+          );
+        }
+        if (result === "referenced") {
+          throw new ApplicationError(
+            "TRIGGER_REFERENCED",
+            "The trigger is referenced by execution records and cannot be deleted.",
+            409,
           );
         }
         return { data: { deleted: true } };

@@ -246,8 +246,14 @@ function save() {
   const next = new Map(
     runtimeOrder.map((node) => [node.id, connectedNext.get(node.id) ?? null]),
   );
-  const runtimeNodes = runtimeOrder.map((node) => {
+  const runtimeNodes: any[] = runtimeOrder.map((node) => {
     const nodeConfig = configFor(node);
+    const controlLinks = {
+      ...(next.get(node.id) ? { onSuccess: next.get(node.id) } : {}),
+      ...(connectedFailure.get(node.id)
+        ? { onFailure: connectedFailure.get(node.id) }
+        : {}),
+    };
     switch (node.data.block.type) {
       case "load-context":
         return {
@@ -255,10 +261,7 @@ function save() {
           type: "load-context",
           version: 1,
           config: nodeConfig,
-          onSuccess: next.get(node.id),
-          ...(connectedFailure.get(node.id)
-            ? { onFailure: connectedFailure.get(node.id) }
-            : {}),
+          ...controlLinks,
           inputs: node.data.inputs ?? {},
         };
       case "ai-chat":
@@ -279,10 +282,7 @@ function save() {
             outputFormat: nodeConfig.outputFormat ?? "text",
             outputVariable: nodeConfig.outputVariable ?? "aiReply",
           },
-          onSuccess: next.get(node.id),
-          ...(connectedFailure.get(node.id)
-            ? { onFailure: connectedFailure.get(node.id) }
-            : {}),
+          ...controlLinks,
           inputs: node.data.inputs ?? {},
         };
       case "reply":
@@ -295,10 +295,7 @@ function save() {
             replyToSourceMessage: nodeConfig.replyToSourceMessage ?? false,
             retry: nodeConfig.retry ?? { maxAttempts: 2, initialDelayMs: 250 },
           },
-          onSuccess: next.get(node.id),
-          ...(connectedFailure.get(node.id)
-            ? { onFailure: connectedFailure.get(node.id) }
-            : {}),
+          ...controlLinks,
           inputs: node.data.inputs ?? {},
         };
       case "end":
@@ -315,8 +312,12 @@ function save() {
             type: "condition",
             version: 1,
             config: nodeConfig,
-            onTrue: connectedTrue.get(node.id),
-            onFalse: connectedFalse.get(node.id),
+            ...(connectedTrue.get(node.id)
+              ? { onTrue: connectedTrue.get(node.id) }
+              : {}),
+            ...(connectedFalse.get(node.id)
+              ? { onFalse: connectedFalse.get(node.id) }
+              : {}),
           };
         }
         return {
@@ -324,18 +325,19 @@ function save() {
           type: node.data.block.type,
           version: 1,
           config: nodeConfig,
-          onSuccess: next.get(node.id),
-          ...(connectedFailure.get(node.id)
-            ? { onFailure: connectedFailure.get(node.id) }
-            : {}),
+          ...controlLinks,
           inputs: node.data.inputs ?? {},
         };
     }
   });
   for (const runtimeNode of runtimeNodes) {
     if (runtimeNode.type === "condition") {
-      runtimeNode.onTrue = connectedTrue.get(runtimeNode.id);
-      runtimeNode.onFalse = connectedFalse.get(runtimeNode.id);
+      if (connectedTrue.get(runtimeNode.id))
+        runtimeNode.onTrue = connectedTrue.get(runtimeNode.id);
+      else delete runtimeNode.onTrue;
+      if (connectedFalse.get(runtimeNode.id))
+        runtimeNode.onFalse = connectedFalse.get(runtimeNode.id);
+      else delete runtimeNode.onFalse;
     }
   }
   const definition = {
@@ -431,7 +433,12 @@ watch(
       >
         <template #node-action="{ data }">
           <div class="action-node">
-            <Handle id="control" type="target" :position="Position.Left" />
+            <Handle
+              id="control"
+              class="control-input-handle"
+              type="target"
+              :position="Position.Left"
+            />
             <strong>{{ data.label }}</strong>
             <small class="node-hint">拖端口连接下一动作</small>
             <div
@@ -442,6 +449,7 @@ watch(
             >
               <Handle
                 :id="`input:${input.name}`"
+                class="data-input-handle"
                 type="target"
                 :position="Position.Left"
               />{{ input.label }}
@@ -454,6 +462,7 @@ watch(
             >
               <Handle
                 :id="`output:${output.name}`"
+                class="data-output-handle"
                 type="source"
                 :position="Position.Right"
               />{{ output.label }}
@@ -467,6 +476,7 @@ watch(
               >
                 <Handle
                   :id="branch.name === 'onTrue' ? 'true' : 'false'"
+                  class="branch-handle"
                   type="source"
                   :position="Position.Right"
                 />{{ branch.label }}
@@ -476,6 +486,7 @@ watch(
               <small class="port-label control-port success-port"
                 ><Handle
                   id="success"
+                  class="success-handle"
                   type="source"
                   :position="Position.Right"
                 />成功</small
@@ -487,6 +498,7 @@ watch(
                 class="port-label control-port failure-port"
                 ><Handle
                   id="failure"
+                  class="failure-handle"
                   type="source"
                   :position="Position.Right"
                 />失败</small
@@ -646,6 +658,29 @@ watch(
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.action-node :deep(.vue-flow__handle) {
+  z-index: 4;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #fff;
+  box-shadow:
+    0 0 0 1px #64748b66,
+    0 2px 5px #0f172a33;
+}
+.action-node :deep(.control-input-handle),
+.action-node :deep(.success-handle) {
+  background: #0a84ff;
+}
+.action-node :deep(.failure-handle) {
+  background: #e35a52;
+}
+.action-node :deep(.data-input-handle),
+.action-node :deep(.data-output-handle) {
+  background: #14a477;
+}
+.action-node :deep(.branch-handle) {
+  background: #8b5cf6;
 }
 .node-hint {
   display: block;

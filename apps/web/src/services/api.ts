@@ -91,9 +91,16 @@ export function parseJsonObject(value: string): Record<string, unknown> {
 
 export function errorMessage(cause: unknown): string {
   if (cause instanceof ApiError) {
+    const knownMessages: Record<string, string> = {
+      TRIGGER_REFERENCED:
+        "该触发器已有执行记录引用，不能直接删除。请先停用它；执行历史会保留以确保审计完整。",
+      TRIGGER_NOT_FOUND: "触发器不存在，可能已被删除。",
+      INVALID_WORKFLOW_DEFINITION: "工作流配置无效，请检查节点连接和必填项。",
+    };
+    const message = knownMessages[cause.code] ?? cause.message;
     return cause.correlationId === null
-      ? cause.message
-      : `${cause.message}（${cause.code} · ${cause.correlationId}）`;
+      ? message
+      : `${message}（${cause.code} · ${cause.correlationId}）`;
   }
   return cause instanceof Error ? cause.message : "请求未能完成。";
 }

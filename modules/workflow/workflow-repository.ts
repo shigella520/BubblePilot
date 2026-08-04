@@ -215,7 +215,9 @@ export interface WorkflowRepository {
       includeFromMe: boolean;
     },
   ): Promise<TriggerRecord | null>;
-  deleteTrigger(triggerId: string): Promise<boolean>;
+  deleteTrigger(
+    triggerId: string,
+  ): Promise<"deleted" | "not-found" | "referenced">;
   listTriggers(): Promise<readonly TriggerRecord[]>;
   listActiveTriggerBindings(): Promise<readonly TriggerBinding[]>;
   createExecution(input: {
