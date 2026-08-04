@@ -25,97 +25,72 @@ const controlFailure = ["load-context", "ai-chat", "reply"].includes(
 
 <template>
   <div class="workflow-node-card" :data-node-type="data.block.type">
-    <Handle
-      id="control"
-      class="workflow-handle control-input"
-      type="target"
-      :position="Position.Left"
-    />
-    <div class="workflow-node-title">
-      <span class="workflow-node-dot"></span>
-      <strong>{{ data.label }}</strong>
+    <div class="workflow-node-head">
+      <div class="workflow-node-title">
+        <span class="workflow-node-dot"></span>
+        <strong>{{ data.label }}</strong>
+      </div>
+      <small>{{ data.block.description }}</small>
+      <span v-if="data.status" class="workflow-node-status">{{ data.status }}</span>
     </div>
-    <small class="workflow-node-type">{{ data.block.description }}</small>
-    <span v-if="data.status" class="workflow-node-status">{{
-      data.status
-    }}</span>
-
-    <div
-      v-for="(port, index) in data.block.inputs"
-      :key="`input-${port.name}`"
-      class="workflow-port-label workflow-port-input"
-      :style="{ top: `${42 + Number(index) * 16}%` }"
-    >
-      <Handle
-        :id="`input:${port.name}`"
-        class="workflow-handle data-input"
-        type="target"
-        :position="Position.Left"
-      />
-      <span>{{ port.label }}</span>
-    </div>
-    <div
-      v-for="(port, index) in data.block.outputs"
-      :key="`output-${port.name}`"
-      class="workflow-port-label workflow-port-output"
-      :style="{ top: `${42 + Number(index) * 16}%` }"
-    >
-      <span>{{ port.label }}</span>
-      <Handle
-        :id="`output:${port.name}`"
-        class="workflow-handle data-output"
-        type="source"
-        :position="Position.Right"
-      />
-    </div>
-    <template v-if="data.block.branches?.length">
+    <div class="workflow-node-ports">
       <div
-        v-for="(branch, index) in data.block.branches"
-        :key="branch.name"
-        class="workflow-port-label workflow-port-output workflow-port-branch"
-        :style="{ top: `${78 + Number(index) * 17}%` }"
+        v-if="data.block.type !== 'message-trigger'"
+        class="workflow-port-row workflow-port-row-input control-row"
       >
-        <span>{{ branch.label }}</span>
         <Handle
-          :id="branch.name === 'onTrue' ? 'true' : 'false'"
-          class="workflow-handle branch"
-          type="source"
-          :position="Position.Right"
+          id="control"
+          class="workflow-handle control-input"
+          type="target"
+          :position="Position.Left"
         />
-      </div>
-    </template>
-    <template v-else>
-      <div
-        class="workflow-port-label workflow-port-output workflow-port-control"
-      >
-        <span>成功</span
-        ><Handle
-          id="success"
-          class="workflow-handle success"
-          type="source"
-          :position="Position.Right"
-        />
+        <span>流程输入</span><em>控制</em>
       </div>
       <div
-        v-if="controlFailure"
-        class="workflow-port-label workflow-port-output workflow-port-control workflow-port-failure"
+        v-for="port in data.block.inputs"
+        :key="`input-${port.name}`"
+        class="workflow-port-row workflow-port-row-input"
       >
-        <span>失败</span
-        ><Handle
-          id="failure"
-          class="workflow-handle failure"
+        <Handle
+          :id="`input:${port.name}`"
+          class="workflow-handle data-input"
+          type="target"
+          :position="Position.Left"
+        />
+        <span>{{ port.label }}</span><em>{{ port.type }}</em>
+      </div>
+      <div
+        v-for="port in data.block.outputs"
+        :key="`output-${port.name}`"
+        class="workflow-port-row workflow-port-row-output"
+      >
+        <span>{{ port.label }}</span><em>{{ port.type }}</em>
+        <Handle
+          :id="`output:${port.name}`"
+          class="workflow-handle data-output"
           type="source"
           :position="Position.Right"
         />
       </div>
-    </template>
-    <button
-      class="workflow-node-add"
-      type="button"
-      title="从此端口添加动作"
-      @click.stop="emit('add', 'success')"
-    >
-      ＋
-    </button>
+      <template v-if="data.block.branches?.length">
+        <div v-for="branch in data.block.branches" :key="branch.name" class="workflow-port-row workflow-port-row-output branch-row">
+          <span>{{ branch.label }}</span><em>分支</em>
+          <Handle :id="branch.name === 'onTrue' ? 'true' : 'false'" class="workflow-handle branch" type="source" :position="Position.Right" />
+          <button type="button" class="workflow-port-add" @click.stop="emit('add', branch.name === 'onTrue' ? 'true' : 'false')">＋</button>
+        </div>
+      </template>
+      <template v-else>
+        <div class="workflow-port-row workflow-port-row-output success-row">
+          <span>成功</span><em>控制</em>
+          <Handle id="success" class="workflow-handle success" type="source" :position="Position.Right" />
+          <button type="button" class="workflow-port-add" @click.stop="emit('add', 'success')">＋</button>
+        </div>
+        <div v-if="controlFailure" class="workflow-port-row workflow-port-row-output failure-row">
+          <span>失败</span><em>控制</em>
+          <Handle id="failure" class="workflow-handle failure" type="source" :position="Position.Right" />
+          <button type="button" class="workflow-port-add" @click.stop="emit('add', 'failure')">＋</button>
+        </div>
+      </template>
+    </div>
   </div>
 </template>

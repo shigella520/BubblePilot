@@ -28,6 +28,18 @@ function updateReference(port: string, value: string) {
     emit("update:input", port, { kind: "output", blockId, port: outputPort });
   }
 }
+function jsonValue(name: string): string {
+  const value = props.config[name];
+  return Array.isArray(value) ? value.join("\n") : JSON.stringify(value ?? []);
+}
+function updateJson(name: string, raw: string) {
+  try {
+    const parsed = JSON.parse(raw);
+    props.config[name] = parsed;
+  } catch {
+    props.config[name] = raw.split(/\r?\n|,/u).map((item) => item.trim()).filter(Boolean);
+  }
+}
 </script>
 <template>
   <aside v-if="node" class="workflow-node-inspector">
@@ -92,7 +104,12 @@ function updateReference(port: string, value: string) {
           >
             {{ option.label }}
           </option></select
-        ><input
+        ><textarea
+          v-else-if="item.type === 'json'"
+          :value="jsonValue(item.name)"
+          rows="3"
+          @input="updateJson(item.name, ($event.target as HTMLTextAreaElement).value)"
+        ></textarea><input
           v-else-if="item.type !== 'boolean'"
           v-model="props.config[item.name]"
           :type="item.type === 'number' ? 'number' : 'text'" /><input

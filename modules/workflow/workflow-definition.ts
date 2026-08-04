@@ -29,6 +29,32 @@ const conditionNodeSchema = z.object({
   onFalse: nextNodeIdSchema,
 });
 
+const messageTriggerNodeSchema = z.object({
+  id: z.literal("message-trigger"),
+  type: z.literal("message-trigger"),
+  version: z.literal(1),
+  config: z.object({
+    provider: z.string().max(64).default(""),
+    chatIds: z.array(z.string().max(200)).max(50).default([]),
+    senderIds: z.array(z.string().max(200)).max(50).default([]),
+    contentTypes: z
+      .array(z.enum(["text", "attachment", "mixed", "unknown"]))
+      .max(4)
+      .default([]),
+    includeFromMe: z.boolean().default(false),
+    enabled: z.boolean().default(false),
+    text: z
+      .object({
+        kind: z.enum(["keyword", "prefix", "regex"]),
+        value: z.string().max(2_000),
+        caseSensitive: z.boolean().default(false),
+      })
+      .nullable()
+      .default(null),
+  }),
+  onSuccess: nextNodeIdSchema.optional(),
+});
+
 const logNodeSchema = z.object({
   id: nodeIdSchema,
   type: z.literal("log"),
@@ -111,6 +137,7 @@ const endNodeSchema = z.object({
 });
 
 export const workflowNodeSchema = z.discriminatedUnion("type", [
+  messageTriggerNodeSchema,
   conditionNodeSchema,
   logNodeSchema,
   setVariableNodeSchema,
@@ -134,6 +161,8 @@ export type WorkflowDefinition = z.infer<typeof rawWorkflowDefinitionSchema>;
 
 function targets(node: WorkflowNode): readonly string[] {
   switch (node.type) {
+    case "message-trigger":
+      return node.onSuccess === undefined ? [] : [node.onSuccess];
     case "condition":
       return [node.onTrue, node.onFalse];
     case "log":

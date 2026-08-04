@@ -16,7 +16,11 @@ interface Block {
   outputs: Port[];
   config: any[];
 }
-const props = defineProps<{ blocks: Block[]; open: boolean }>();
+const props = defineProps<{
+  blocks: Block[];
+  open: boolean;
+  position?: { x: number; y: number };
+}>();
 const emit = defineEmits<{
   (event: "select", block: Block): void;
   (event: "close"): void;
@@ -33,7 +37,11 @@ const filtered = computed(() =>
 );
 </script>
 <template>
-  <aside v-if="open" class="workflow-node-creator">
+  <aside
+    v-if="open"
+    class="workflow-node-creator"
+    :style="position ? { left: `${position.x}px`, top: `${position.y}px` } : undefined"
+  >
     <div class="workflow-node-creator-head">
       <strong>添加动作</strong
       ><button type="button" @click="emit('close')">×</button>

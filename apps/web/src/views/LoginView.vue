@@ -4,6 +4,7 @@ import { ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { errorMessage } from "../services/api";
+import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { useSessionStore } from "../stores/session";
 
 const session = useSessionStore();
@@ -50,7 +51,7 @@ async function login() {
         <button class="button primary large" type="submit" :disabled="busy">
           {{ busy ? "登录中…" : "进入管理台" }}<ArrowRight :size="18" />
         </button>
-        <p v-if="message" class="form-message error">{{ message }}</p>
+        <DismissibleMessage v-if="message" error @close="message = ''">{{ message }}</DismissibleMessage>
       </form>
     </section>
   </main>

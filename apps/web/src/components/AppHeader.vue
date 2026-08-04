@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {
-  AlertCircle,
   Bot,
   Boxes,
   Code2,
@@ -9,13 +8,13 @@ import {
   MessagesSquare,
   Settings,
   ShieldCheck,
-  X,
 } from "@lucide/vue";
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
+import DismissibleMessage from "./DismissibleMessage.vue";
 
 const session = useSessionStore();
 const router = useRouter();
@@ -38,7 +37,7 @@ async function logout() {
 </script>
 
 <template>
-  <header class="topbar" :class="{ 'has-alert': logoutError }">
+  <header class="topbar">
     <RouterLink class="brand-mark" to="/" aria-label="BubblePilot 管理台">
       <img class="brand-icon" src="/bubblepilot-icon.png" alt="" />
       <span class="brand-text">BubblePilot</span>
@@ -78,18 +77,8 @@ async function logout() {
         <LogOut :size="18" />
       </button>
     </div>
-    <div v-if="logoutError" class="topbar-alert" role="alert">
-      <AlertCircle :size="17" aria-hidden="true" />
-      <span>{{ logoutError }} 请检查网络或服务状态后重试。</span>
-      <button
-        class="icon-button"
-        type="button"
-        aria-label="关闭退出失败提示"
-        title="关闭提示"
-        @click="logoutError = ''"
-      >
-        <X :size="15" />
-      </button>
-    </div>
+    <DismissibleMessage v-if="logoutError" error @close="logoutError = ''">
+      {{ logoutError }} 请检查网络或服务状态后重试。
+    </DismissibleMessage>
   </header>
 </template>

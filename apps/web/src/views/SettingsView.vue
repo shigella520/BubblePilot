@@ -11,6 +11,7 @@ import {
 import { onMounted, reactive, ref } from "vue";
 
 import SensitiveUnlock from "../components/SensitiveUnlock.vue";
+import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { apiRequest, errorMessage, jsonBody } from "../services/api";
 import { useSessionStore } from "../stores/session";
 
@@ -149,9 +150,7 @@ onMounted(load);
 
     <div class="admin-workspace">
       <SensitiveUnlock />
-      <p v-if="message" class="form-message" :class="{ error: messageIsError }">
-        {{ message }}
-      </p>
+      <DismissibleMessage v-if="message" :error="messageIsError" @close="message = ''">{{ message }}</DismissibleMessage>
 
       <section id="bluebubbles" class="admin-panel">
         <div class="panel-head">

@@ -113,6 +113,23 @@ function templateValues(context: NodeExecutionContext): Record<string, string> {
   };
 }
 
+class MessageTriggerNodeHandler extends BaseNodeHandler {
+  readonly type = "message-trigger" as const;
+
+  execute(
+    node: WorkflowNode,
+    _context: NodeExecutionContext,
+  ): Promise<NodeHandlerResult> {
+    void _context;
+    this.assertType(node, this.type);
+    return Promise.resolve({
+      status: "succeeded",
+      nextNodeId: node.onSuccess ?? null,
+      outputSummary: { matched: true },
+    });
+  }
+}
+
 function renderTemplate(
   template: string,
   context: NodeExecutionContext,
@@ -564,6 +581,7 @@ export function createDefaultNodeRegistry(
   },
 ): NodeRegistry {
   const registry = new NodeRegistry();
+  registry.register(new MessageTriggerNodeHandler());
   registry.register(new ConditionNodeHandler());
   registry.register(new LogNodeHandler());
   registry.register(new SetVariableNodeHandler());

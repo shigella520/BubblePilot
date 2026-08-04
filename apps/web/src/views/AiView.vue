@@ -20,6 +20,7 @@ import {
   jsonBody,
   parseJsonObject,
 } from "../services/api";
+import DismissibleMessage from "../components/DismissibleMessage.vue";
 
 interface Provider {
   id: string;
@@ -540,9 +541,7 @@ onMounted(load);
       </div>
     </aside>
     <div class="admin-workspace">
-      <p v-if="message" class="form-message" :class="{ error: messageIsError }">
-        {{ message }}
-      </p>
+      <DismissibleMessage v-if="message" :error="messageIsError" @close="message = ''">{{ message }}</DismissibleMessage>
       <section id="providers" class="admin-panel">
         <div class="panel-head">
           <div>

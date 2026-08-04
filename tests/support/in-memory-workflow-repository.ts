@@ -36,6 +36,7 @@ interface StoredExecution extends WorkflowExecutionRecord {
 
 export class InMemoryWorkflowRepository implements WorkflowRepository {
   readonly workflows = new Map<string, StoredWorkflow>();
+  readonly deletedWorkflowIds = new Set<string>();
   readonly triggers = new Map<string, TriggerRecord>();
   readonly deletedTriggerIds = new Set<string>();
   readonly executions = new Map<string, StoredExecution>();
@@ -74,7 +75,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     definition: WorkflowDefinition,
   ): Promise<WorkflowVersionRecord | null> {
     const workflow = this.workflows.get(workflowId);
-    if (workflow === undefined) {
+    if (workflow === undefined || this.deletedWorkflowIds.has(workflowId)) {
       return null;
     }
     const version: WorkflowVersionRecord = {
@@ -96,6 +97,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     versionNumber: number,
   ): Promise<WorkflowVersionRecord | null> {
     const workflow = this.workflows.get(workflowId);
+    if (this.deletedWorkflowIds.has(workflowId)) return null;
     const version = workflow?.versions.find(
       (candidate) => candidate.version === versionNumber,
     );
@@ -131,6 +133,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     enabled: boolean,
   ): Promise<WorkflowRecord | null> {
     const workflow = this.workflows.get(workflowId);
+    if (this.deletedWorkflowIds.has(workflowId)) return Promise.resolve(null);
     if (workflow === undefined || workflow.publishedVersion === null) {
       return Promise.resolve(null);
     }
@@ -143,18 +146,14 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     workflowId: string,
   ): Promise<"deleted" | "not-found" | "referenced"> {
     const workflow = this.workflows.get(workflowId);
-    if (workflow === undefined) return "not-found";
+    if (workflow === undefined || this.deletedWorkflowIds.has(workflowId)) return "not-found";
     const versionIds = new Set(workflow.versions.map((version) => version.id));
-    if (
-      [...this.triggers.values()].some((trigger) =>
-        versionIds.has(trigger.workflowVersionId),
-      ) ||
-      [...this.executions.values()].some((execution) =>
-        versionIds.has(execution.workflowVersionId),
-      )
-    )
-      return "referenced";
-    this.workflows.delete(workflowId);
+    this.deletedWorkflowIds.add(workflowId);
+    workflow.status = "inactive";
+    workflow.publishedVersion = null;
+    for (const trigger of this.triggers.values()) {
+      if (versionIds.has(trigger.workflowVersionId)) this.deletedTriggerIds.add(trigger.id);
+    }
     return "deleted";
   }
 
@@ -165,6 +164,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     const version = this.workflows
       .get(workflowId)
       ?.versions.find((candidate) => candidate.version === versionNumber);
+    if (this.deletedWorkflowIds.has(workflowId)) return Promise.resolve(null);
     return Promise.resolve(
       version === undefined ? null : structuredClone(version),
     );
@@ -173,6 +173,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   listWorkflowVersions(
     workflowId: string,
   ): Promise<readonly WorkflowVersionRecord[]> {
+    if (this.deletedWorkflowIds.has(workflowId)) return Promise.resolve([]);
     const versions = this.workflows.get(workflowId)?.versions ?? [];
     return Promise.resolve(
       structuredClone(
@@ -183,7 +184,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
 
   listWorkflows(): Promise<readonly WorkflowRecord[]> {
     return Promise.resolve(
-      [...this.workflows.values()].map((workflow) => ({
+      [...this.workflows.values()].filter((workflow) => !this.deletedWorkflowIds.has(workflow.id)).map((workflow) => ({
         id: workflow.id,
         name: workflow.name,
         status: workflow.status,

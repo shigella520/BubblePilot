@@ -11,7 +11,9 @@ import {
   ToggleLeft,
 } from "@lucide/vue";
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import WorkflowEditor from "../components/workflow/WorkflowEditor.vue";
+import DismissibleMessage from "../components/DismissibleMessage.vue";
 
 import {
   apiRequest,
@@ -62,21 +64,12 @@ interface AiRoute {
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
+const router = useRouter();
 function editWorkflow(workflow: Workflow) {
-  selectedWorkflowId.value = workflow.id;
-  createForm.name = workflow.name;
-  void loadVersions();
-  scrollToSection("workflows");
+  void router.push(`/automation/${workflow.id}`);
 }
 function startNewWorkflow() {
-  versionsRequestId += 1;
-  selectedWorkflowId.value = "";
-  versions.value = [];
-  versionDefinition.value = "";
-  createForm.name = "";
-  createForm.definition = "";
-  message.value = "已切换到新建模式，请从左侧动作块面板添加节点。";
-  messageIsError.value = false;
+  void router.push("/automation/new");
 }
 async function deleteWorkflow(workflow: Workflow) {
   if (
@@ -724,9 +717,7 @@ onMounted(load);
       </div>
     </aside>
     <div class="admin-workspace">
-      <p v-if="message" class="form-message" :class="{ error: messageIsError }">
-        {{ message }}
-      </p>
+      <DismissibleMessage v-if="message" :error="messageIsError" @close="message = ''">{{ message }}</DismissibleMessage>
       <section id="workflows" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -745,6 +736,7 @@ onMounted(load);
           </button>
         </div>
         <WorkflowEditor
+          v-if="false"
           :blocks="actionBlocks"
           :workflow-name="createForm.name"
           :definition="selectedDefinition"
@@ -989,7 +981,7 @@ onMounted(load);
           </table>
         </div>
       </section>
-      <section id="triggers" class="admin-panel">
+      <section v-show="false" id="triggers" class="admin-panel">
         <div class="panel-head">
           <div>
             <p class="card-kicker">BOT EVENTS</p>

@@ -42,6 +42,70 @@ const noInputs: readonly ActionPortDefinition[] = [];
 
 export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
   {
+    type: "message-trigger",
+    version: 1,
+    name: "收到消息",
+    description: "当 BlueBubbles 收到符合条件的消息时启动工作流。",
+    category: "message",
+    inputs: [],
+    outputs: [],
+    config: [
+      {
+        name: "provider",
+        label: "消息 Provider",
+        type: "text",
+        description: "留空使用默认消息 Provider。",
+      },
+      {
+        name: "chatIds",
+        label: "聊天范围",
+        type: "json",
+        description: "指定聊天，留空表示全部聊天。",
+      },
+      {
+        name: "includeFromMe",
+        label: "包含自己消息",
+        type: "boolean",
+        description: "是否接收自己发送的消息。",
+      },
+      {
+        name: "senderIds",
+        label: "发送者范围",
+        type: "json",
+        description: "指定发送者，留空表示全部发送者。",
+      },
+      {
+        name: "contentTypes",
+        label: "内容类型",
+        type: "json",
+        description: "例如 [\"text\"]，留空表示全部类型。",
+      },
+      {
+        name: "enabled",
+        label: "启用触发器",
+        type: "boolean",
+        description: "启用工作流后是否接收匹配消息。",
+      },
+      {
+        name: "textValue",
+        label: "消息匹配内容",
+        type: "text",
+        description: "留空表示不限制消息文本。",
+      },
+      {
+        name: "textKind",
+        label: "匹配方式",
+        type: "select",
+        options: [
+          { value: "prefix", label: "前缀" },
+          { value: "keyword", label: "包含关键词" },
+          { value: "regex", label: "正则表达式" },
+        ],
+        description: "消息文本匹配方式。",
+      },
+    ],
+  },
+  {
     type: "condition",
     version: 1,
     name: "条件判断",

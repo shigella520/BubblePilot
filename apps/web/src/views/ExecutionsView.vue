@@ -12,6 +12,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import SensitiveUnlock from "../components/SensitiveUnlock.vue";
+import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { apiRequest, errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
 
@@ -262,9 +263,7 @@ watch(
     </aside>
     <div class="admin-workspace">
       <SensitiveUnlock />
-      <p v-if="message" class="form-message" :class="{ error: messageIsError }">
-        {{ message }}
-      </p>
+      <DismissibleMessage v-if="message" :error="messageIsError" @close="message = ''">{{ message }}</DismissibleMessage>
       <section id="executions" class="admin-panel">
         <div class="panel-head">
           <div>

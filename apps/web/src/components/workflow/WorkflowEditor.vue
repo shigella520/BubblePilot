@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unused-expressions, vue/no-unused-vars */
-import { onBeforeUnmount, ref, watch } from "vue";
-import { VueFlow, type Connection } from "@vue-flow/core";
+import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { VueFlow, type Connection, useVueFlow } from "@vue-flow/core";
 import { MarkerType } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
@@ -38,18 +38,25 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "create", name: string, definition: any): void;
   (event: "version", name: string, definition: any): void;
+  (event: "change", name: string, definition: any): void;
 }>();
 const name = ref(props.workflowName ?? "");
 const nodes = ref<any[]>([]);
 const edges = ref<any[]>([]);
 const selected = ref<any | null>(null);
+const selectedEdgeId = ref("");
 const config = ref<Record<string, any>>({});
 const creatorOpen = ref(false);
 const creatorPosition = ref({ x: 120, y: 120 });
+const creatorPanelPosition = ref({ x: 12, y: 12 });
+const stageElement = ref<HTMLElement | null>(null);
 const hydratedDefinition = ref("");
 const copiedNode = ref<any | null>(null);
 const history = ref<string[]>([]);
 const future = ref<string[]>([]);
+const pendingConnection = ref<{ source: string; handle: string } | null>(null);
+const changeTrackingReady = ref(false);
+const { flowToScreenCoordinate, screenToFlowCoordinate } = useVueFlow();
 
 function blockFor(type: string): Block {
   return (
@@ -98,6 +105,17 @@ function defaultConfig(block: Block): Record<string, unknown> {
       retry: { maxAttempts: 2, initialDelayMs: 250 },
     });
   if (block.type === "end") values.result = "succeeded";
+  if (block.type === "message-trigger")
+    Object.assign(values, {
+      provider: "",
+      chatIds: [],
+      senderIds: [],
+      contentTypes: [],
+      includeFromMe: false,
+      enabled: false,
+      textKind: "prefix",
+      textValue: "",
+    });
   return values;
 }
 function snapshot() {
@@ -133,6 +151,7 @@ function redo() {
   restore(next);
 }
 function addBlock(block: Block, position = creatorPosition.value) {
+  if (block.type === "message-trigger" && nodes.value.some((item) => item.data.block.type === block.type)) return;
   recordHistory();
   const id = `${block.type}-${Date.now()}`;
   const node = {
@@ -147,19 +166,63 @@ function addBlock(block: Block, position = creatorPosition.value) {
     },
   };
   nodes.value.push(node);
+  if (pendingConnection.value) {
+    const pending = pendingConnection.value;
+    const source = nodes.value.find((item) => item.id === pending.source);
+    if (source) {
+      edges.value.push({
+        id: `${pending.source}-${id}-${pending.handle}`,
+        source: pending.source,
+        sourceHandle: pending.handle,
+        target: id,
+        targetHandle: "control",
+        kind: pending.handle === "failure" ? "failure" : "success",
+        type: "workflow",
+      });
+    }
+    pendingConnection.value = null;
+  }
   selected.value = node;
   config.value = { ...node.data.config };
   creatorOpen.value = false;
 }
-function openCreator(position = { x: 180, y: 160 }) {
+function openCreator(
+  position = { x: 180, y: 160 },
+  panelPosition?: { x: number; y: number },
+) {
   creatorPosition.value = position;
+  if (panelPosition) creatorPanelPosition.value = panelPosition;
   creatorOpen.value = true;
+}
+function openCreatorFromNode(nodeId: string, handle: string) {
+  const source = nodes.value.find((item) => item.id === nodeId);
+  pendingConnection.value = { source: nodeId, handle };
+  const flowPosition = source
+    ? { x: source.position.x + 320, y: source.position.y }
+    : { x: 180, y: 160 };
+  const screenPosition = flowToScreenCoordinate(flowPosition);
+  const bounds = stageElement.value?.getBoundingClientRect();
+  openCreator(flowPosition, bounds ? {
+    x: Math.max(12, Math.min(bounds.width - 292, screenPosition.x - bounds.left)),
+    y: Math.max(12, Math.min(bounds.height - 300, screenPosition.y - bounds.top)),
+  } : undefined);
 }
 function openCreatorAt(payload: any) {
   const event = payload?.event as MouseEvent | undefined;
-  openCreator(event ? { x: event.offsetX, y: event.offsetY } : undefined);
+  openCreator(
+    event
+      ? screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
+      : undefined,
+    event && stageElement.value
+      ? {
+          x: Math.max(12, Math.min(stageElement.value.clientWidth - 292, event.clientX - stageElement.value.getBoundingClientRect().left)),
+          y: Math.max(12, Math.min(stageElement.value.clientHeight - 300, event.clientY - stageElement.value.getBoundingClientRect().top)),
+        }
+      : undefined,
+  );
 }
 function selectNode(node: any) {
+  selectedEdgeId.value = "";
   selected.value = node;
   config.value = { ...(node.data.config ?? {}) };
 }
@@ -173,6 +236,7 @@ function updateInput(port: string, value: any) {
 }
 function removeSelected() {
   if (!selected.value) return;
+  if (selected.value.data.block.type === "message-trigger") return;
   recordHistory();
   const id = selected.value.id;
   nodes.value = nodes.value.filter((node) => node.id !== id);
@@ -350,12 +414,38 @@ function toDefinition() {
       .map((edge) => [edge.source, edge.target]),
   );
   const runtimeNodes = nodes.value.map((node) => {
+    const nodeConfig = configFor(node);
     const common = {
       id: node.id,
       version: 1,
-      config: configFor(node),
+      config: nodeConfig,
       inputs: node.data.inputs ?? {},
     };
+    if (node.data.block.type === "message-trigger")
+      return {
+        ...common,
+        type: "message-trigger",
+        config: {
+          provider: nodeConfig.provider ?? "",
+          chatIds: Array.isArray(nodeConfig.chatIds) ? nodeConfig.chatIds : [],
+          senderIds: Array.isArray(nodeConfig.senderIds)
+            ? nodeConfig.senderIds
+            : [],
+          contentTypes: Array.isArray(nodeConfig.contentTypes)
+            ? nodeConfig.contentTypes
+            : [],
+          includeFromMe: Boolean(nodeConfig.includeFromMe),
+          enabled: Boolean(nodeConfig.enabled),
+          text: nodeConfig.textValue
+            ? {
+                kind: nodeConfig.textKind ?? "prefix",
+                value: nodeConfig.textValue,
+                caseSensitive: false,
+              }
+            : null,
+        },
+        ...(next.get(node.id) ? { onSuccess: next.get(node.id) } : {}),
+      };
     if (node.data.block.type === "condition")
       return {
         ...common,
@@ -374,7 +464,10 @@ function toDefinition() {
   return {
     schemaVersion: "1",
     name: name.value || "New workflow",
-    startNodeId: nodes.value[0]?.id ?? "",
+    startNodeId:
+      nodes.value.find((node) => node.data.block.type === "message-trigger")?.id ??
+      nodes.value[0]?.id ??
+      "",
     maxSteps: 64,
     maxExecutionMs: 60000,
     nodes: runtimeNodes,
@@ -398,7 +491,14 @@ function hydrate(definition: any) {
       data: {
         label: block.name,
         block,
-        config: { ...(item.config ?? {}) },
+        config:
+          item.type === "message-trigger"
+            ? {
+                ...(item.config ?? {}),
+                textKind: item.config?.text?.kind ?? "prefix",
+                textValue: item.config?.text?.value ?? "",
+              }
+            : { ...(item.config ?? {}) },
         inputs: item.inputs ?? {},
       },
     };
@@ -446,7 +546,20 @@ watch(
   () => props.definition,
   (definition) => {
     if (definition === undefined) {
-      nodes.value = [];
+      const block = blockFor("message-trigger");
+      nodes.value = [
+        {
+          id: "message-trigger",
+          type: "action",
+          position: { x: 100, y: 220 },
+          data: {
+            label: block.name,
+            block,
+            config: defaultConfig(block),
+            inputs: {},
+          },
+        },
+      ];
       edges.value = [];
       selected.value = null;
       hydratedDefinition.value = "";
@@ -455,6 +568,16 @@ watch(
     hydrate(definition);
   },
   { immediate: true, deep: true },
+);
+void nextTick(() => {
+  changeTrackingReady.value = true;
+});
+watch(
+  [nodes, edges, name],
+  () => {
+    if (changeTrackingReady.value) emit("change", name.value, toDefinition());
+  },
+  { deep: true },
 );
 watch(
   config,
@@ -483,6 +606,12 @@ function onKeydown(event: KeyboardEvent) {
       x: copiedNode.value.position.x + 40,
       y: copiedNode.value.position.y + 40,
     });
+  if (event.key === "Delete" || event.key === "Backspace") {
+    const target = event.target as HTMLElement | null;
+    if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
+    if (selectedEdgeId.value) deleteEdge(selectedEdgeId.value);
+    else removeSelected();
+  }
 }
 window.addEventListener("keydown", onKeydown);
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
@@ -515,10 +644,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         保存并生效
       </button>
     </div>
-    <div class="workflow-stage">
+    <div ref="stageElement" class="workflow-stage">
       <NodeCreator
         :blocks="props.blocks"
         :open="creatorOpen"
+        :position="creatorPanelPosition"
         @close="creatorOpen = false"
         @select="(block) => addBlock(block)"
       />
@@ -527,14 +657,17 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         v-model:edges="edges"
         class="workflow-flow"
         fit-view-on-init
+        selection-on-drag
+        :multi-selection-key-code="'Shift'"
         :connection-line-options="{ markerEnd: MarkerType.ArrowClosed }"
         :is-valid-connection="isValidConnection"
         @connect="connect"
         @pane-click="openCreatorAt"
         @node-click="({ node }) => selectNode(node)"
+        @edge-click="({ edge }) => { selectedEdgeId = edge.id; selected = null; }"
       >
         <template #node-action="{ data, id }"
-          ><WorkflowNode :data="data" @add="() => openCreator()"
+          ><WorkflowNode :data="data" @add="(handle) => openCreatorFromNode(id, handle)"
         /></template>
         <template #edge-workflow="edgeProps"
           ><WorkflowEdge v-bind="edgeProps" @delete="deleteEdge"
@@ -559,6 +692,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           </defs>
         </svg>
       </VueFlow>
+      <div v-if="!nodes.length && !creatorOpen" class="workflow-empty-state">
+        <div class="workflow-empty-icon">＋</div>
+        <strong>从一个动作开始</strong>
+        <span>点击画布或“添加动作”，把第一个节点放到这里</span>
+        <button class="button secondary" type="button" @click="openCreator()">添加第一个动作</button>
+      </div>
       <NodeInspector
         :node="selected"
         :config="config"

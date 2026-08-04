@@ -1648,6 +1648,41 @@ export function buildApplication(
             409,
           );
         }
+        const triggerNode = version.definition.nodes.find(
+          (node) => node.type === "message-trigger",
+        );
+        if (triggerNode?.type === "message-trigger") {
+          const conditions = triggerConditions({
+            chatIds: triggerNode.config.chatIds,
+            senderIds: triggerNode.config.senderIds,
+            contentTypes: triggerNode.config.contentTypes,
+            text: triggerNode.config.text,
+            timeWindow: null,
+          });
+          const existing = (await workflowRepository.listTriggers()).find(
+            (trigger) => trigger.workflowId === parameters.workflowId,
+          );
+          if (existing === undefined) {
+            await workflowRepository.createTrigger({
+              name: `${version.workflowName} · 收到消息`,
+              workflowId: parameters.workflowId,
+              workflowVersion: version.version,
+              conditions,
+              includeFromMe: triggerNode.config.includeFromMe,
+              enabled: triggerNode.config.enabled,
+            });
+          } else {
+            await workflowRepository.updateTrigger(existing.id, {
+              name: `${version.workflowName} · 收到消息`,
+              conditions,
+              includeFromMe: triggerNode.config.includeFromMe,
+            });
+            await workflowRepository.updateTriggerEnabled(
+              existing.id,
+              triggerNode.config.enabled,
+            );
+          }
+        }
         return { data: version };
       },
     );

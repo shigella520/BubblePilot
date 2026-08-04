@@ -3,6 +3,7 @@ import { KeyRound, ShieldCheck } from "@lucide/vue";
 import { ref } from "vue";
 
 import { errorMessage } from "../services/api";
+import DismissibleMessage from "./DismissibleMessage.vue";
 import { useSessionStore } from "../stores/session";
 
 const emit = defineEmits<{ verified: [] }>();
@@ -50,6 +51,6 @@ async function verify() {
     <button class="button primary" type="submit" :disabled="busy">
       {{ busy ? "验证中…" : "解锁" }}
     </button>
-    <p v-if="message" class="form-message error">{{ message }}</p>
+    <DismissibleMessage v-if="message" error @close="message = ''">{{ message }}</DismissibleMessage>
   </form>
 </template>

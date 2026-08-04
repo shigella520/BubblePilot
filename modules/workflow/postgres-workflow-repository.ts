@@ -340,7 +340,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     try {
       await client.query("BEGIN");
       const workflow = await client.query<IdentifierRow>(
-        "SELECT id FROM workflows WHERE id = $1 FOR UPDATE",
+        "SELECT id FROM workflows WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
         [workflowId],
       );
       if (workflow.rowCount === 0) {
@@ -389,6 +389,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         `SELECT id FROM workflow_versions
          WHERE workflow_id = $1 AND version = $2
            AND status IN ('validated', 'published')
+           AND EXISTS (SELECT 1 FROM workflows w WHERE w.id = workflow_versions.workflow_id AND w.deleted_at IS NULL)
          FOR UPDATE`,
         [workflowId, version],
       );
@@ -449,7 +450,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     version: number,
   ): Promise<WorkflowVersionRecord | null> {
     const result = await this.pool.query<WorkflowVersionRow>(
-      `${versionSelect} WHERE v.workflow_id = $1 AND v.version = $2`,
+      `${versionSelect} WHERE v.workflow_id = $1 AND v.version = $2 AND w.deleted_at IS NULL`,
       [workflowId, version],
     );
     const row = result.rows[0];
@@ -461,7 +462,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   ): Promise<readonly WorkflowVersionRecord[]> {
     const result = await this.pool.query<WorkflowVersionRow>(
       `${versionSelect}
-       WHERE v.workflow_id = $1
+       WHERE v.workflow_id = $1 AND w.deleted_at IS NULL
        ORDER BY v.version DESC`,
       [workflowId],
     );
@@ -474,6 +475,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
               w.created_at, w.updated_at
        FROM workflows w
        LEFT JOIN workflow_versions v ON v.id = w.published_version_id
+       WHERE w.deleted_at IS NULL
        ORDER BY w.updated_at DESC, w.id DESC`,
     );
     return result.rows.map(workflowRecord);
@@ -488,7 +490,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
        SET status = CASE WHEN $2 THEN 'active' ELSE 'inactive' END,
            updated_at = NOW()
        FROM workflow_versions v
-       WHERE w.id = $1 AND w.published_version_id = v.id
+       WHERE w.id = $1 AND w.deleted_at IS NULL AND w.published_version_id = v.id
        RETURNING w.id, w.name, w.status, v.version AS published_version,
                  w.created_at, w.updated_at`,
       [workflowId, enabled],
@@ -504,31 +506,26 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     try {
       await client.query("BEGIN");
       const exists = await client.query(
-        "SELECT 1 FROM workflows WHERE id = $1 FOR UPDATE",
+        "SELECT 1 FROM workflows WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
         [workflowId],
       );
       if (exists.rowCount === 0) {
         await client.query("ROLLBACK");
         return "not-found";
       }
-      const refs = await client.query<{ referenced: boolean }>(
-        `SELECT EXISTS (SELECT 1 FROM bot_triggers t JOIN workflow_versions v ON v.id = t.workflow_version_id WHERE v.workflow_id = $1)
-           OR EXISTS (SELECT 1 FROM workflow_executions e JOIN workflow_versions v ON v.id = e.workflow_version_id WHERE v.workflow_id = $1) AS referenced`,
-        [workflowId],
-      );
-      if (refs.rows[0]?.referenced === true) {
-        await client.query("ROLLBACK");
-        return "referenced";
-      }
       await client.query(
-        "UPDATE workflows SET published_version_id = NULL WHERE id = $1",
+        `UPDATE bot_triggers t
+         SET enabled = FALSE, deleted_at = COALESCE(t.deleted_at, NOW()), updated_at = NOW()
+         FROM workflow_versions v
+         WHERE t.workflow_version_id = v.id
+           AND v.workflow_id = $1
+           AND t.deleted_at IS NULL`,
         [workflowId],
       );
       await client.query(
-        "DELETE FROM workflow_versions WHERE workflow_id = $1",
+        "UPDATE workflows SET status = 'inactive', published_version_id = NULL, deleted_at = NOW(), updated_at = NOW() WHERE id = $1",
         [workflowId],
       );
-      await client.query("DELETE FROM workflows WHERE id = $1", [workflowId]);
       await client.query("COMMIT");
       return "deleted";
     } catch (error) {

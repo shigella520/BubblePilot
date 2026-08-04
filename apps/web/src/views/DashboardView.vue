@@ -11,6 +11,7 @@ import {
 import { onMounted, reactive, ref, watch } from "vue";
 
 import SensitiveUnlock from "../components/SensitiveUnlock.vue";
+import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { apiRequest, errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
 
@@ -170,7 +171,7 @@ watch(
       </button>
     </section>
     <SensitiveUnlock @verified="loadRecentExecutions" />
-    <p v-if="message" class="form-message error">{{ message }}</p>
+    <DismissibleMessage v-if="message" error @close="message = ''">{{ message }}</DismissibleMessage>
     <section class="metric-grid">
       <RouterLink to="/messages" class="metric-card tone-blue"
         ><MessagesSquare :size="23" /><span>监听中的聊天</span

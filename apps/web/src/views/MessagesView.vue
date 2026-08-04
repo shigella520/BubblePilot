@@ -11,6 +11,7 @@ import {
 import { onMounted, reactive, ref, watch } from "vue";
 
 import SensitiveUnlock from "../components/SensitiveUnlock.vue";
+import DismissibleMessage from "../components/DismissibleMessage.vue";
 import {
   apiRequest,
   downloadFile,
@@ -360,9 +361,7 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
     </aside>
     <div class="admin-workspace">
       <SensitiveUnlock @verified="search" />
-      <p v-if="message" class="form-message" :class="{ error: messageIsError }">
-        {{ message }}
-      </p>
+      <DismissibleMessage v-if="message" :error="messageIsError" @close="message = ''">{{ message }}</DismissibleMessage>
       <section id="monitoring" class="admin-panel">
         <div class="panel-head">
           <div>
