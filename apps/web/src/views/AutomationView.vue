@@ -2,7 +2,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 import {
   Boxes,
-  GitBranch,
   Play,
   Plus,
   RefreshCw,
@@ -61,9 +60,6 @@ interface AiRoute {
   effectiveProviderIds: string[];
 }
 
-function scrollToSection(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-}
 const router = useRouter();
 function editWorkflow(workflow: Workflow) {
   void router.push(`/automation/${workflow.id}`);
@@ -698,19 +694,10 @@ onMounted(load);
     <aside class="admin-sidebar">
       <div>
         <p class="eyebrow">AUTOMATION</p>
-        <h2>流程与触发器</h2>
+        <h2>流程编排</h2>
       </div>
       <nav>
-        <button
-          class="active"
-          type="button"
-          @click="scrollToSection('workflows')"
-        >
-          <Boxes :size="18" />工作流
-        </button>
-        <button type="button" @click="scrollToSection('triggers')">
-          <GitBranch :size="18" />触发器
-        </button>
+        <button class="active" type="button"><Boxes :size="18" />工作流</button>
       </nav>
       <div class="sidebar-note">
         拖入动作块、连接端口并保存，工作流会立即生效。
