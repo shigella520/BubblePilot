@@ -56,6 +56,7 @@ const history = ref<string[]>([]);
 const future = ref<string[]>([]);
 const pendingConnection = ref<{ source: string; handle: string } | null>(null);
 const changeTrackingReady = ref(false);
+const trackedSnapshot = ref("");
 const { flowToScreenCoordinate, screenToFlowCoordinate } = useVueFlow();
 
 function blockFor(type: string): Block {
@@ -123,6 +124,27 @@ function snapshot() {
     nodes: nodes.value,
     edges: edges.value,
     name: name.value,
+  });
+}
+function persistedSnapshot() {
+  return JSON.stringify({
+    name: name.value,
+    nodes: nodes.value.map((node) => ({
+      id: node.id,
+      position: node.position,
+      label: node.data.label,
+      type: node.data.block.type,
+      config: node.data.config,
+      inputs: node.data.inputs,
+    })),
+    edges: edges.value.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      sourceHandle: edge.sourceHandle,
+      target: edge.target,
+      targetHandle: edge.targetHandle,
+      kind: edge.kind,
+    })),
   });
 }
 function recordHistory() {
@@ -598,12 +620,17 @@ watch(
   { immediate: true, deep: true },
 );
 void nextTick(() => {
+  trackedSnapshot.value = persistedSnapshot();
   changeTrackingReady.value = true;
 });
 watch(
   [nodes, edges, name],
   () => {
-    if (changeTrackingReady.value) emit("change", name.value, toDefinition());
+    if (!changeTrackingReady.value) return;
+    const nextSnapshot = persistedSnapshot();
+    if (nextSnapshot === trackedSnapshot.value) return;
+    trackedSnapshot.value = nextSnapshot;
+    emit("change", name.value, toDefinition());
   },
   { deep: true },
 );
