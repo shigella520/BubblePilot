@@ -579,6 +579,21 @@ onMounted(load);
             }
           "
         />
+        <div class="form-actions workflow-publish-actions">
+          <button
+            class="button primary"
+            type="button"
+            :disabled="!latestCandidate || publishBusy"
+            :aria-busy="publishBusy"
+            @click="publish"
+          >
+            <Play :size="16" />{{
+              publishBusy
+                ? "发布中…"
+                : `发布 v${latestCandidate?.version || "-"}`
+            }}
+          </button>
+        </div>
         <form
           v-if="false"
           class="settings-form boxed-form"

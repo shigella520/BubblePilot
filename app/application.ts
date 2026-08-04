@@ -1579,7 +1579,7 @@ export function buildApplication(
     application.post(
       "/api/v1/workflows/:workflowId/versions/:version/publish",
       {
-        preHandler: requireAuditedAdmin("workflow.version.publish", "workflow"),
+        preHandler: requireAdmin,
       },
       async (request) => {
         const parameters = workflowVersionParametersSchema.parse(
@@ -1626,7 +1626,7 @@ export function buildApplication(
     application.patch(
       "/api/v1/workflows/:workflowId/enabled",
       {
-        preHandler: requireAuditedAdmin("workflow.enabled.update", "workflow"),
+        preHandler: requireAdmin,
       },
       async (request) => {
         const parameters = workflowParametersSchema.parse(request.params);
@@ -1708,7 +1708,7 @@ export function buildApplication(
 
     application.post(
       "/api/v1/triggers",
-      { preHandler: requireAuditedAdmin("trigger.create", "trigger") },
+      { preHandler: requireAdmin },
       async (request, reply) => {
         const body = triggerBodySchema.parse(request.body);
         const trigger = await workflowRepository.createTrigger({
