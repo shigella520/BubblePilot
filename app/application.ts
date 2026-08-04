@@ -1488,13 +1488,13 @@ export function buildApplication(
     application.get(
       "/api/v1/workflows/action-blocks",
       { preHandler: requireAdmin },
-      async () => ({ data: listActionBlockDefinitions() }),
+      () => ({ data: listActionBlockDefinitions() }),
     );
 
     application.post(
       "/api/v1/workflows/validate",
       { preHandler: requireAdmin },
-      async (request) => {
+      (request) => {
         const body = workflowVersionBodySchema.parse(request.body);
         const definition =
           typeof body.definition === "object" &&

@@ -1,13 +1,7 @@
 <script setup lang="ts">
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-redundant-type-constituents */
 import { computed, ref, watch } from "vue";
-import {
-  VueFlow,
-  Handle,
-  Position,
-  type Connection,
-  type Edge,
-  type Node,
-} from "@vue-flow/core";
+import { VueFlow, Handle, Position, type Connection } from "@vue-flow/core";
 import "@vue-flow/core/dist/style.css";
 
 interface Block {
@@ -108,11 +102,10 @@ function save() {
       kind: "data",
     })),
   };
-  props.definition
-    ? emit("version", name.value, definition)
-    : emit("create", name.value, definition);
+  if (props.definition) emit("version", name.value, definition);
+  else emit("create", name.value, definition);
 }
-function configFor(node: Node) {
+function configFor(node: any) {
   return node.id === selected.value?.id
     ? config.value
     : (node.data.config ?? {});
