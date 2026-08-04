@@ -184,6 +184,7 @@ async function load() {
     }
     if (!selectedWorkflowId.value && workflows.value[0])
       selectedWorkflowId.value = workflows.value[0].id;
+    if (selectedWorkflowId.value) await loadVersions();
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
