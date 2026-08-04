@@ -163,7 +163,6 @@ function save() {
             outputVariable: nodeConfig.outputVariable ?? "aiReply",
           },
           onSuccess: next.get(node.id),
-          onFailure: null,
         };
       case "reply":
         return {
@@ -176,7 +175,6 @@ function save() {
             retry: nodeConfig.retry ?? { maxAttempts: 2, initialDelayMs: 250 },
           },
           onSuccess: next.get(node.id),
-          onFailure: null,
         };
       case "end":
         return {
