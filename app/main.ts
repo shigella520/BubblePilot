@@ -26,7 +26,10 @@ import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
 const config = loadConfig();
 const repository = new PostgresArchiveRepository(config.databaseUrl);
 const workflowRepository = new PostgresWorkflowRepository(config.databaseUrl);
-const aiRepository = new PostgresAiRepository(config.databaseUrl);
+const aiRepository = new PostgresAiRepository(
+  config.databaseUrl,
+  config.settingsEncryptionKey,
+);
 const authRepository = new PostgresAuthRepository(config.databaseUrl);
 const dataExportRepository = new PostgresDataExportRepository(
   config.databaseUrl,

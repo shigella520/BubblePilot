@@ -7,7 +7,10 @@ import type {
   AiChatRequest,
   AiProviderRecord,
 } from "./ai-types.js";
-import type { SecretResolver } from "./secret-resolver.js";
+import {
+  resolveProviderSecret,
+  type SecretResolver,
+} from "./secret-resolver.js";
 
 const errorResponseSchema = z
   .object({
@@ -211,7 +214,7 @@ export class OpenAiCompatibleClient implements AiClient {
     request: AiChatRequest,
   ): Promise<AiCallResult> {
     const startedAt = Date.now();
-    const secret = this.secrets.resolve(provider.secretRef);
+    const secret = resolveProviderSecret(provider, this.secrets);
     if (secret === null) {
       return failure({
         category: "configuration",

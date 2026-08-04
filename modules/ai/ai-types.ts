@@ -6,7 +6,7 @@ const parameterValueSchema = z.union([
   z.boolean(),
 ]);
 
-export const aiProviderConfigurationSchema = z.object({
+const aiProviderConfigurationBaseSchema = z.object({
   name: z.string().trim().min(1).max(120),
   apiKind: z.enum(["chat-completions", "responses"]),
   baseUrl: z
@@ -18,7 +18,11 @@ export const aiProviderConfigurationSchema = z.object({
       "The AI provider base URL must use HTTP or HTTPS.",
     ),
   model: z.string().trim().min(1).max(200),
-  secretRef: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/),
+  secretRef: z
+    .string()
+    .regex(/^[A-Z][A-Z0-9_]{0,127}$/)
+    .optional(),
+  secret: z.string().min(1).max(4_096).optional(),
   parameters: z
     .record(
       z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/),
@@ -32,7 +36,16 @@ export const aiProviderConfigurationSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
-export const aiProviderUpdateSchema = aiProviderConfigurationSchema.extend({
+export const aiProviderConfigurationSchema =
+  aiProviderConfigurationBaseSchema.refine(
+    (value) => value.secret !== undefined || value.secretRef !== undefined,
+    {
+      message: "Provide an API key or an environment variable reference.",
+      path: ["secret"],
+    },
+  );
+
+export const aiProviderUpdateSchema = aiProviderConfigurationBaseSchema.extend({
   expectedVersion: z.number().int().positive(),
 });
 
@@ -98,13 +111,15 @@ export interface AiProviderConfiguration {
   apiKind: AiApiKind;
   baseUrl: string;
   model: string;
-  secretRef: string;
+  secretRef?: string | undefined;
+  secret?: string | null | undefined;
   parameters: AiProviderParameters;
   requestTimeoutMs: number;
   enabled: boolean;
 }
 
 export interface AiProviderRecord extends AiProviderConfiguration {
+  secret?: string | null | undefined;
   id: string;
   sortOrder: number;
   version: number;
@@ -124,8 +139,10 @@ export interface AiProviderHealth {
   updatedAt: string;
 }
 
-export interface AiProviderView extends Omit<AiProviderRecord, "secretRef"> {
-  secretRef: string;
+export interface AiProviderView extends Omit<
+  AiProviderRecord,
+  "secret" | "secretRef"
+> {
   secretConfigured: boolean;
   health: AiProviderHealth;
 }

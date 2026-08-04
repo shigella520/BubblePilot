@@ -29,7 +29,6 @@ interface Provider {
   apiKind: "chat-completions" | "responses";
   baseUrl: string;
   model: string;
-  secretRef: string;
   secretConfigured: boolean;
   parameters: Record<string, string | number | boolean>;
   requestTimeoutMs: number;
@@ -63,7 +62,7 @@ interface ProviderForm {
   apiKind: Provider["apiKind"];
   baseUrl: string;
   model: string;
-  secretRef: string;
+  secret: string;
   parameters: string;
   requestTimeoutMs: number;
   enabled: boolean;
@@ -95,7 +94,7 @@ const providerForm = reactive<ProviderForm>({
   apiKind: "chat-completions",
   baseUrl: "",
   model: "",
-  secretRef: "",
+  secret: "",
   parameters: "{}",
   requestTimeoutMs: 30000,
   enabled: true,
@@ -174,7 +173,7 @@ function resetProvider() {
     apiKind: "chat-completions",
     baseUrl: "",
     model: "",
-    secretRef: "",
+    secret: "",
     parameters: "{}",
     requestTimeoutMs: 30000,
     enabled: true,
@@ -188,7 +187,7 @@ function editProvider(item: Provider) {
     apiKind: item.apiKind,
     baseUrl: item.baseUrl,
     model: item.model,
-    secretRef: item.secretRef,
+    secret: "",
     parameters: JSON.stringify(item.parameters, null, 2),
     requestTimeoutMs: item.requestTimeoutMs,
     enabled: item.enabled,
@@ -209,7 +208,7 @@ async function saveProvider() {
       apiKind: providerForm.apiKind,
       baseUrl: providerForm.baseUrl,
       model: providerForm.model,
-      secretRef: providerForm.secretRef,
+      ...(providerForm.secret ? { secret: providerForm.secret } : {}),
       parameters: parseJsonObject(providerForm.parameters),
       requestTimeoutMs: providerForm.requestTimeoutMs,
       enabled: providerForm.enabled,
@@ -562,8 +561,8 @@ onMounted(load);
           </button>
         </div>
         <p class="panel-description">
-          拖拽或使用上下按钮改变固定顺序，启停和连通性测试即时反馈；Secret
-          仅保存环境变量引用，运行时降级不会改写人工排序。
+          拖拽或使用上下按钮改变固定顺序，启停和连通性测试即时反馈；Secret API
+          Key 会在服务端加密保存，列表和接口不会回显原值。
         </p>
         <div class="provider-list">
           <article
@@ -620,9 +619,7 @@ onMounted(load);
                 <span>{{ item.model }}</span
                 ><span>{{ item.requestTimeoutMs / 1000 }}s</span
                 ><span>{{
-                  item.secretConfigured
-                    ? `Secret: ${item.secretRef}`
-                    : `未配置: ${item.secretRef}`
+                  item.secretConfigured ? "API Key 已配置" : "API Key 未配置"
                 }}</span
                 ><span v-if="item.health.lastErrorCode">{{
                   item.health.lastErrorCode
@@ -736,11 +733,12 @@ onMounted(load);
               ><span>模型</span
               ><input v-model.trim="providerForm.model" required /></label
             ><label
-              ><span>Secret 引用</span
+              ><span>API Key / Secret</span
               ><input
-                v-model.trim="providerForm.secretRef"
-                pattern="[A-Z][A-Z0-9_]*"
-                required /></label
+                v-model="providerForm.secret"
+                type="password"
+                autocomplete="new-password"
+                placeholder="例如 sk-…；留空则保留当前值" /></label
             ><label
               ><span>超时（毫秒）</span
               ><input

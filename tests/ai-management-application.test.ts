@@ -120,10 +120,10 @@ describe("AI management API", () => {
     const primary = await createProvider("Primary", "PRIMARY_AI_KEY");
     const backup = await createProvider("Backup", "BACKUP_AI_KEY");
     expect(primary).toMatchObject({
-      secretRef: "PRIMARY_AI_KEY",
       secretConfigured: true,
       sortOrder: 100,
     });
+    expect(primary).not.toHaveProperty("secretRef");
 
     const reordered = await request({
       method: "PUT",
@@ -144,6 +144,19 @@ describe("AI management API", () => {
       primary.id,
     ]);
     const missingSecret = await createProvider("Missing", "MISSING_AI_KEY");
+    const directSecret = await request({
+      method: "POST",
+      url: "/api/v1/ai/providers",
+      payload: {
+        name: "Direct Key",
+        apiKind: "chat-completions",
+        baseUrl: "https://ai.example.test/v1",
+        model: "fictional-model",
+        secret: "sk-direct-provider-secret",
+      },
+    });
+    expect(directSecret.statusCode).toBe(201);
+    expect(directSecret.body).not.toContain("sk-direct-provider-secret");
 
     await repository.recordProviderFailure({
       providerId: primary.id,

@@ -9,7 +9,11 @@ import type {
   AiRouteSnapshot,
 } from "./ai-types.js";
 import type { AiClient } from "./openai-compatible-client.js";
-import type { SecretResolver } from "./secret-resolver.js";
+import {
+  isProviderSecretConfigured,
+  resolveProviderSecret,
+  type SecretResolver,
+} from "./secret-resolver.js";
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -81,7 +85,7 @@ function validateOutput(
     );
   }
   for (const provider of snapshot.providers) {
-    const secret = secrets.resolve(provider.secretRef);
+    const secret = resolveProviderSecret(provider, secrets);
     if (secret !== null && secret.length >= 8 && text.includes(secret)) {
       return outputFailure(
         "AI_OUTPUT_SECRET_DISCLOSURE",
@@ -111,7 +115,7 @@ export class AiRoutingService {
         : {
             ...storedSnapshot,
             providers: storedSnapshot.providers.filter((provider) =>
-              this.secrets.isConfigured(provider.secretRef),
+              isProviderSecretConfigured(provider, this.secrets),
             ),
           };
     if (snapshot === null || snapshot.providers.length === 0) {
