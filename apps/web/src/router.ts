@@ -10,6 +10,9 @@ import SettingsView from "./views/SettingsView.vue";
 
 export default createRouter({
   history: createWebHashHistory(),
+  scrollBehavior() {
+    return { top: 0 };
+  },
   routes: [
     { path: "/login", component: LoginView },
     { path: "/", component: DashboardView },
@@ -18,5 +21,8 @@ export default createRouter({
     { path: "/ai", component: AiView },
     { path: "/executions", component: ExecutionsView },
     { path: "/settings", component: SettingsView },
+    // Keep stale anchor URLs (for example, #search) from rendering an empty
+    // RouterView after older sidebar links are still present in a browser tab.
+    { path: "/:pathMatch(.*)*", redirect: "/" },
   ],
 });

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 
 import type { AiMutationResult, AiRepository } from "./ai-repository.js";
+import { SettingsCipher } from "../integrations/bluebubbles/settings-cipher.js";
 import {
   aiRouteDegradePolicySchema,
   aiRouteRetryPolicySchema,
@@ -27,6 +28,7 @@ interface ProviderRow {
   base_url: string;
   model: string;
   secret_ref: string;
+  encrypted_secret: string | null;
   parameters: Record<string, string | number | boolean>;
   request_timeout_ms: number;
   enabled: boolean;
@@ -87,7 +89,7 @@ interface AttemptRow {
 }
 
 const providerSelect = `SELECT
-  id, name, api_kind, base_url, model, secret_ref, parameters,
+  id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
   request_timeout_ms, enabled, sort_order, version, created_at, updated_at
 FROM ai_providers`;
 
@@ -104,7 +106,10 @@ FROM ai_provider_routes r
 INNER JOIN ai_provider_route_versions rv ON rv.id = r.current_version_id
 LEFT JOIN ai_provider_route_members m ON m.route_version_id = rv.id`;
 
-function providerRecord(row: ProviderRow): AiProviderRecord {
+function providerRecord(
+  row: ProviderRow,
+  cipher: SettingsCipher,
+): AiProviderRecord {
   return {
     id: row.id,
     name: row.name,
@@ -112,6 +117,10 @@ function providerRecord(row: ProviderRow): AiProviderRecord {
     baseUrl: row.base_url,
     model: row.model,
     secretRef: row.secret_ref,
+    secret:
+      row.encrypted_secret === null
+        ? null
+        : cipher.decrypt(row.encrypted_secret),
     parameters: row.parameters,
     requestTimeoutMs: row.request_timeout_ms,
     enabled: row.enabled,
@@ -192,9 +201,15 @@ function conflict<T>(reason: string): AiMutationResult<T> {
 
 export class PostgresAiRepository implements AiRepository {
   private readonly pool: Pool;
+  private readonly cipher: SettingsCipher;
 
-  constructor(databaseUrl: string) {
+  constructor(databaseUrl: string, settingsEncryptionKey?: string) {
     this.pool = new Pool({ connectionString: databaseUrl, max: 10 });
+    this.cipher = new SettingsCipher(
+      settingsEncryptionKey ??
+        process.env.API_ACCESS_TOKEN ??
+        "legacy-ai-provider-key",
+    );
   }
 
   async listProviders(): Promise<readonly AiProviderRecord[]> {
@@ -203,7 +218,7 @@ export class PostgresAiRepository implements AiRepository {
        WHERE deleted_at IS NULL
        ORDER BY sort_order, id`,
     );
-    return result.rows.map(providerRecord);
+    return result.rows.map((row) => providerRecord(row, this.cipher));
   }
 
   async getProvider(providerId: string): Promise<AiProviderRecord | null> {
@@ -212,7 +227,7 @@ export class PostgresAiRepository implements AiRepository {
       [providerId],
     );
     const row = result.rows[0];
-    return row === undefined ? null : providerRecord(row);
+    return row === undefined ? null : providerRecord(row, this.cipher);
   }
 
   async createProvider(
@@ -237,16 +252,19 @@ export class PostgresAiRepository implements AiRepository {
       const id = randomUUID();
       await client.query(
         `INSERT INTO ai_providers (
-           id, name, api_kind, base_url, model, secret_ref, parameters,
+           id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
            request_timeout_ms, enabled, sort_order
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)`,
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
         [
           id,
           configuration.name,
           configuration.apiKind,
           configuration.baseUrl,
           configuration.model,
-          configuration.secretRef,
+          configuration.secretRef ?? "",
+          configuration.secret === undefined || configuration.secret === null
+            ? null
+            : this.cipher.encrypt(configuration.secret),
           JSON.stringify(configuration.parameters),
           configuration.requestTimeoutMs,
           configuration.enabled,
@@ -283,11 +301,11 @@ export class PostgresAiRepository implements AiRepository {
       const result = await this.pool.query<ProviderRow>(
         `UPDATE ai_providers SET
            name = $3, api_kind = $4, base_url = $5, model = $6,
-           secret_ref = $7, parameters = $8::jsonb,
+           secret_ref = $7, encrypted_secret = COALESCE($11, encrypted_secret), parameters = $8::jsonb,
            request_timeout_ms = $9, enabled = $10,
            version = version + 1, updated_at = NOW()
          WHERE id = $1 AND version = $2 AND deleted_at IS NULL
-         RETURNING id, name, api_kind, base_url, model, secret_ref, parameters,
+        RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
                    request_timeout_ms, enabled, sort_order, version,
                    created_at, updated_at`,
         [
@@ -297,15 +315,18 @@ export class PostgresAiRepository implements AiRepository {
           configuration.apiKind,
           configuration.baseUrl,
           configuration.model,
-          configuration.secretRef,
+          configuration.secretRef ?? "",
           JSON.stringify(configuration.parameters),
           configuration.requestTimeoutMs,
           configuration.enabled,
+          configuration.secret === undefined || configuration.secret === null
+            ? null
+            : this.cipher.encrypt(configuration.secret),
         ],
       );
       const row = result.rows[0];
       if (row !== undefined) {
-        return { status: "ok", value: providerRecord(row) };
+        return { status: "ok", value: providerRecord(row, this.cipher) };
       }
       return this.providerMutationMiss(providerId);
     } catch (error) {
@@ -325,7 +346,7 @@ export class PostgresAiRepository implements AiRepository {
       `UPDATE ai_providers
        SET enabled = $3, version = version + 1, updated_at = NOW()
        WHERE id = $1 AND version = $2 AND deleted_at IS NULL
-       RETURNING id, name, api_kind, base_url, model, secret_ref, parameters,
+       RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
                  request_timeout_ms, enabled, sort_order, version,
                  created_at, updated_at`,
       [providerId, expectedVersion, enabled],
@@ -333,7 +354,7 @@ export class PostgresAiRepository implements AiRepository {
     const row = result.rows[0];
     return row === undefined
       ? this.providerMutationMiss(providerId)
-      : { status: "ok", value: providerRecord(row) };
+      : { status: "ok", value: providerRecord(row, this.cipher) };
   }
 
   async reorderProviders(
@@ -370,7 +391,10 @@ export class PostgresAiRepository implements AiRepository {
          WHERE deleted_at IS NULL ORDER BY sort_order, id`,
       );
       await client.query("COMMIT");
-      return { status: "ok", value: reordered.rows.map(providerRecord) };
+      return {
+        status: "ok",
+        value: reordered.rows.map((row) => providerRecord(row, this.cipher)),
+      };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -413,7 +437,7 @@ export class PostgresAiRepository implements AiRepository {
          SET enabled = FALSE, deleted_at = NOW(), updated_at = NOW(),
              version = version + 1
          WHERE id = $1
-         RETURNING id, name, api_kind, base_url, model, secret_ref, parameters,
+         RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
                    request_timeout_ms, enabled, sort_order, version,
                    created_at, updated_at`,
         [providerId],
@@ -422,7 +446,7 @@ export class PostgresAiRepository implements AiRepository {
       const row = deleted.rows[0];
       return {
         status: "ok",
-        value: row === undefined ? existing : providerRecord(row),
+        value: row === undefined ? existing : providerRecord(row, this.cipher),
       };
     } catch (error) {
       await client.query("ROLLBACK");
@@ -909,7 +933,7 @@ export class PostgresAiRepository implements AiRepository {
     try {
       const result = await this.pool.query<{ ready: boolean }>(
         `SELECT EXISTS (
-           SELECT 1 FROM schema_migrations WHERE name = '0008_ai_attempt_error_category.sql'
+           SELECT 1 FROM schema_migrations WHERE name = '0011_ai_provider_secrets.sql'
          ) AS ready`,
       );
       return result.rows[0]?.ready === true;
@@ -941,7 +965,7 @@ export class PostgresAiRepository implements AiRepository {
       [providerId],
     );
     const row = result.rows[0];
-    return row === undefined ? null : providerRecord(row);
+    return row === undefined ? null : providerRecord(row, this.cipher);
   }
 
   private async providersByIds(
@@ -953,7 +977,7 @@ export class PostgresAiRepository implements AiRepository {
       [providerIds],
     );
     const byId = new Map(
-      result.rows.map((row) => [row.id, providerRecord(row)]),
+      result.rows.map((row) => [row.id, providerRecord(row, this.cipher)]),
     );
     return providerIds.flatMap((id) => {
       const provider = byId.get(id);

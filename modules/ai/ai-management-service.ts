@@ -10,7 +10,10 @@ import {
   type AiProviderView,
   type AiRouteConfiguration,
 } from "./ai-types.js";
-import type { SecretResolver } from "./secret-resolver.js";
+import {
+  isProviderSecretConfigured,
+  type SecretResolver,
+} from "./secret-resolver.js";
 
 export class AiManagementService {
   constructor(
@@ -169,7 +172,7 @@ export class AiManagementService {
           });
     return configured.some(
       (provider) =>
-        provider.enabled && this.secrets.isConfigured(provider.secretRef),
+        provider.enabled && isProviderSecretConfigured(provider, this.secrets),
     );
   }
 
@@ -230,9 +233,12 @@ export class AiManagementService {
     if (health === null) {
       throw new Error(`AI provider health '${provider.id}' does not exist.`);
     }
+    const safeProvider = { ...provider };
+    delete safeProvider.secret;
+    delete safeProvider.secretRef;
     return {
-      ...provider,
-      secretConfigured: this.secrets.isConfigured(provider.secretRef),
+      ...safeProvider,
+      secretConfigured: isProviderSecretConfigured(provider, this.secrets),
       health,
     };
   }
@@ -253,7 +259,7 @@ export class AiManagementService {
         : await this.repository.selectCandidates({
             ...storedSnapshot,
             providers: storedSnapshot.providers.filter((provider) =>
-              this.secrets.isConfigured(provider.secretRef),
+              isProviderSecretConfigured(provider, this.secrets),
             ),
           });
     const effectiveProviderIds =
