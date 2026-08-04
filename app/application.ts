@@ -793,6 +793,19 @@ export function buildApplication(
         return { data: result.value };
       },
     );
+
+    application.post(
+      "/api/v1/integrations/bluebubbles/test",
+      {
+        preHandler: requireSensitive(
+          "integration.bluebubbles.test",
+          "integration-settings",
+        ),
+      },
+      async () => ({
+        data: await options.blueBubbles?.settings.testConnection(),
+      }),
+    );
   }
 
   application.addHook("onResponse", async (request, reply) => {
