@@ -286,7 +286,12 @@ watch(
             </button>
           </div>
         </div>
-        <div class="table-shell">
+        <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
+          <FileClock :size="24" />
+          <strong>执行记录已遮蔽</strong>
+          <span>完成二次验证后才能查看工作流执行轨迹。</span>
+        </div>
+        <div v-else class="table-shell">
           <table>
             <thead>
               <tr>
@@ -467,7 +472,12 @@ watch(
           </div>
           <span class="state-badge">不含正文与 Secret</span>
         </div>
-        <div class="table-shell">
+        <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
+          <ShieldCheck :size="24" />
+          <strong>审计事件已遮蔽</strong>
+          <span>完成二次验证后才能查看审计事件。</span>
+        </div>
+        <div v-else class="table-shell">
           <table>
             <thead>
               <tr>

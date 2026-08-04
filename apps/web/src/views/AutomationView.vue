@@ -69,6 +69,7 @@ function editWorkflow(workflow: Workflow) {
   scrollToSection("workflows");
 }
 function startNewWorkflow() {
+  versionsRequestId += 1;
   selectedWorkflowId.value = "";
   versions.value = [];
   versionDefinition.value = "";

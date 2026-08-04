@@ -56,6 +56,14 @@ const grouped = computed(() =>
     {} as Record<string, Block[]>,
   ),
 );
+const categoryLabels: Record<string, string> = {
+  control: "控制",
+  data: "数据处理",
+  context: "聊天上下文",
+  ai: "AI",
+  message: "消息",
+  observe: "观测",
+};
 function addBlock(block: Block) {
   const id = `${block.type}-${Date.now()}`;
   nodes.value.push({
@@ -388,8 +396,9 @@ watch(
   <div class="workflow-editor">
     <aside class="action-palette">
       <h3>动作块</h3>
+      <p class="palette-hint">点击添加，或拖到中间画布。</p>
       <section v-for="(items, category) in grouped" :key="category">
-        <h4>{{ category }}</h4>
+        <h4>{{ categoryLabels[String(category)] ?? category }}</h4>
         <button
           v-for="block in items"
           :key="`${block.type}@${block.version}`"
@@ -402,6 +411,17 @@ watch(
       </section>
     </aside>
     <div class="workflow-canvas" @dragover.prevent @drop="drop">
+      <div class="canvas-guide">
+        <strong>连接方法</strong>
+        <span
+          ><i class="guide-dot control-dot"></i
+          >从“成功/失败”圆点拖到下一个动作左侧圆点</span
+        >
+        <span
+          ><i class="guide-dot data-dot"></i
+          >从输出圆点拖到下游对应输入圆点</span
+        >
+      </div>
       <VueFlow
         v-model:nodes="nodes"
         v-model:edges="edges"
@@ -519,7 +539,7 @@ watch(
       <p v-else class="editor-empty-hint">
         从左侧点击或拖入动作块，然后用端口连接执行顺序和数据引用。
       </p>
-      ><button class="button primary" type="button" @click="save">
+      <button class="button primary" type="button" @click="save">
         保存并生效
       </button>
     </aside>
@@ -543,6 +563,12 @@ watch(
 .action-palette section {
   margin: 12px 0;
 }
+.palette-hint {
+  margin: 4px 0 14px;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.5;
+}
 .action-palette button {
   display: block;
   width: 100%;
@@ -551,8 +577,46 @@ watch(
   text-align: left;
 }
 .workflow-canvas {
+  position: relative;
   min-height: 560px;
   background: #f7f9fc;
+}
+.canvas-guide {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #64748b;
+  font-size: 9px;
+  transform: translateX(-50%);
+  box-shadow: 0 4px 12px #0f172a0d;
+  white-space: nowrap;
+}
+.canvas-guide strong {
+  color: #334155;
+}
+.canvas-guide span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.guide-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.control-dot {
+  background: #0a84ff;
+}
+.data-dot {
+  background: #14a477;
 }
 .node-inspector label {
   display: block;
@@ -566,12 +630,22 @@ watch(
 }
 .action-node {
   position: relative;
-  min-width: 150px;
-  padding: 12px;
+  min-width: 210px;
+  min-height: 118px;
+  padding: 18px 34px;
   border: 1px solid #94a3b8;
   border-radius: 9px;
   background: white;
   box-shadow: 0 4px 12px #0f172a18;
+}
+.action-node > strong {
+  display: block;
+  max-width: 150px;
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .node-hint {
   display: block;
@@ -580,7 +654,9 @@ watch(
   font-size: 9px;
 }
 .control-port {
-  right: 8px;
+  right: -88px;
+  width: 78px;
+  text-align: left;
 }
 .success-port {
   top: 78%;
@@ -589,7 +665,9 @@ watch(
   top: 90%;
 }
 .branch-port {
-  right: 8px;
+  right: -108px;
+  width: 98px;
+  text-align: left;
 }
 .node-description {
   margin: 4px 0 14px;
@@ -623,16 +701,21 @@ watch(
 }
 .port-label {
   position: absolute;
-  font-size: 10px;
+  z-index: 2;
+  font-size: 9px;
   color: #64748b;
   white-space: nowrap;
 }
 .input-port {
-  left: 8px;
+  left: -90px;
+  width: 80px;
+  text-align: right;
   transform: translateY(-50%);
 }
 .output-port {
-  right: 8px;
+  right: -90px;
+  width: 80px;
+  text-align: left;
   transform: translateY(-50%);
 }
 </style>

@@ -103,6 +103,12 @@ function localDateTime(value: Date) {
   const offset = value.getTimezoneOffset() * 60_000;
   return new Date(value.getTime() - offset).toISOString().slice(0, 16);
 }
+function isLongMessage(body: string | null): boolean {
+  return (body?.length ?? 0) > 600;
+}
+function messagePreview(body: string): string {
+  return `${body.slice(0, 600)}…`;
+}
 
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
@@ -494,13 +500,17 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
               <strong>{{ item.chatDisplayName || item.providerChatId }}</strong
               ><span>{{ new Date(item.sentAt).toLocaleString() }}</span>
             </header>
-            <p>
-              {{
-                item.contentRedactedAt
-                  ? "【内容已按保留策略清理】"
-                  : item.body || `【${item.contentType}】`
-              }}
-            </p>
+            <p v-if="item.contentRedactedAt">【内容已按保留策略清理】</p>
+            <template v-else-if="item.body && isLongMessage(item.body)">
+              <p class="message-body-collapsed">
+                {{ messagePreview(item.body) }}
+              </p>
+              <details class="message-body-details">
+                <summary>展开全文（{{ item.body.length }} 字符）</summary>
+                <p>{{ item.body }}</p>
+              </details>
+            </template>
+            <p v-else>{{ item.body || `【${item.contentType}】` }}</p>
             <footer>
               <span>{{
                 item.isFromMe ? "我发送" : item.senderId || "未知发送者"

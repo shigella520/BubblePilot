@@ -8,9 +8,11 @@ import {
   PlayCircle,
   RefreshCw,
 } from "@lucide/vue";
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, reactive, ref, watch } from "vue";
 
+import SensitiveUnlock from "../components/SensitiveUnlock.vue";
 import { apiRequest, errorMessage } from "../services/api";
+import { useSessionStore } from "../stores/session";
 
 const counts = reactive({
   chats: 0,
@@ -73,6 +75,23 @@ const operations = ref<{
 } | null>(null);
 const busy = ref(false);
 const message = ref("");
+const session = useSessionStore();
+
+async function loadRecentExecutions() {
+  if (!session.sensitiveActive) {
+    recent.value = [];
+    counts.executions = 0;
+    return;
+  }
+  try {
+    recent.value = await apiRequest<typeof recent.value>(
+      "/api/v1/executions?limit=8",
+    );
+    counts.executions = recent.value.length;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+  }
+}
 
 async function load() {
   busy.value = true;
@@ -91,7 +110,7 @@ async function load() {
       chats: chats.length,
       workflows: workflows.length,
       providers: providers.length,
-      executions: 0,
+      executions: counts.executions,
     });
     operations.value = runtime;
     inboundEvents.value = events;
@@ -100,6 +119,7 @@ async function load() {
   } finally {
     busy.value = false;
   }
+  await loadRecentExecutions();
 }
 
 const outcomeLabels: Record<AutomationOutcome, string> = {
@@ -120,6 +140,16 @@ function outcomeClass(outcome: AutomationOutcome): string {
 }
 
 onMounted(load);
+watch(
+  () => session.sensitiveActive,
+  (active) => {
+    if (active) void loadRecentExecutions();
+    else {
+      recent.value = [];
+      counts.executions = 0;
+    }
+  },
+);
 </script>
 
 <template>
@@ -139,6 +169,7 @@ onMounted(load);
         <RefreshCw :size="17" />刷新状态
       </button>
     </section>
+    <SensitiveUnlock @verified="loadRecentExecutions" />
     <p v-if="message" class="form-message error">{{ message }}</p>
     <section class="metric-grid">
       <RouterLink to="/messages" class="metric-card tone-blue"
@@ -283,7 +314,12 @@ onMounted(load);
         </div>
         <RouterLink class="state-badge" to="/executions">查看全部</RouterLink>
       </div>
-      <div class="table-shell">
+      <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
+        <PlayCircle :size="24" />
+        <strong>最近执行已遮蔽</strong>
+        <span>完成二次验证后才能查看工作流执行记录。</span>
+      </div>
+      <div v-else class="table-shell">
         <table>
           <thead>
             <tr>
