@@ -89,6 +89,35 @@ describe("OpenAiCompatibleClient", () => {
     });
   });
 
+  it("supports a LAN Ollama endpoint without an API key", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({ choices: [{ message: { content: "LAN answer" } }] }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver(),
+      fetchImplementation,
+    );
+    await expect(
+      client.call(
+        {
+          ...provider,
+          baseUrl: "http://192.168.31.42:11434/v1",
+          secretRef: undefined,
+        },
+        request,
+      ),
+    ).resolves.toMatchObject({ status: "succeeded", text: "LAN answer" });
+    expect(fetchImplementation.mock.calls[0]?.[1]?.headers).toEqual({
+      "content-type": "application/json",
+    });
+  });
+
   it("uses the Responses contract and extracts nested output text", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
