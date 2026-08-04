@@ -481,6 +481,19 @@ watch(
       ><template v-if="selected"
         ><h3>{{ selected.data.label }}</h3>
         <p class="node-description">{{ selected.data.block.description }}</p>
+        <div
+          v-if="selected.data.block.inputs.length"
+          class="input-reference-list"
+        >
+          <strong>输入连接</strong>
+          <span v-for="input in selected.data.block.inputs" :key="input.name">
+            {{ input.label }}：{{
+              selected.data.inputs?.[input.name]?.kind === "output"
+                ? `${selected.data.inputs[input.name].blockId} / ${selected.data.inputs[input.name].port}`
+                : "未连接"
+            }}
+          </span>
+        </div>
         <label v-for="item in selected.data.block.config" :key="item.name"
           ><span>{{ item.label }}</span
           ><select v-if="item.type === 'select'" v-model="config[item.name]">
@@ -588,6 +601,20 @@ watch(
   color: #64748b;
   font-size: 12px;
   line-height: 1.6;
+}
+.input-reference-list {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0 14px;
+  padding: 9px;
+  border-radius: 9px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 10px;
+}
+.input-reference-list strong {
+  color: #334155;
+  font-size: 11px;
 }
 .action-node small {
   display: block;
