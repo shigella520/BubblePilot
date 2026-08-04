@@ -1236,7 +1236,7 @@ export function buildApplication(
 
     application.post(
       "/api/v1/ai/providers",
-      { preHandler: requireSensitive("ai.provider.create", "ai-provider") },
+      { preHandler: requireAuditedAdmin("ai.provider.create", "ai-provider") },
       async (request, reply) => {
         const provider = aiMutationValue(
           await ai.createProvider(
@@ -1251,7 +1251,7 @@ export function buildApplication(
 
     application.put(
       "/api/v1/ai/providers/reorder",
-      { preHandler: requireSensitive("ai.provider.reorder", "ai-provider") },
+      { preHandler: requireAuditedAdmin("ai.provider.reorder", "ai-provider") },
       async (request) => {
         const body = aiProviderReorderSchema.parse(request.body);
         return {
@@ -1283,7 +1283,7 @@ export function buildApplication(
 
     application.put(
       "/api/v1/ai/providers/:providerId",
-      { preHandler: requireSensitive("ai.provider.update", "ai-provider") },
+      { preHandler: requireAuditedAdmin("ai.provider.update", "ai-provider") },
       async (request) => {
         const parameters = aiProviderParametersSchema.parse(request.params);
         const body = aiProviderUpdateSchema.parse(request.body);
@@ -1305,7 +1305,7 @@ export function buildApplication(
     application.patch(
       "/api/v1/ai/providers/:providerId/enabled",
       {
-        preHandler: requireSensitive(
+        preHandler: requireAuditedAdmin(
           "ai.provider.enabled.update",
           "ai-provider",
         ),
@@ -1329,7 +1329,7 @@ export function buildApplication(
 
     application.delete(
       "/api/v1/ai/providers/:providerId",
-      { preHandler: requireSensitive("ai.provider.delete", "ai-provider") },
+      { preHandler: requireAuditedAdmin("ai.provider.delete", "ai-provider") },
       async (request) => {
         const parameters = aiProviderParametersSchema.parse(request.params);
         const query = expectedVersionQuerySchema.parse(request.query);
@@ -1348,7 +1348,7 @@ export function buildApplication(
 
     application.post(
       "/api/v1/ai/providers/:providerId/test",
-      { preHandler: requireSensitive("ai.provider.test", "ai-provider") },
+      { preHandler: requireAuditedAdmin("ai.provider.test", "ai-provider") },
       async (request) => {
         const parameters = aiProviderParametersSchema.parse(request.params);
         const result = await ai.testProvider(parameters.providerId);
@@ -1366,7 +1366,10 @@ export function buildApplication(
     application.post(
       "/api/v1/ai/providers/:providerId/health/reset",
       {
-        preHandler: requireSensitive("ai.provider.health.reset", "ai-provider"),
+        preHandler: requireAuditedAdmin(
+          "ai.provider.health.reset",
+          "ai-provider",
+        ),
       },
       async (request) => {
         const parameters = aiProviderParametersSchema.parse(request.params);
@@ -1390,7 +1393,7 @@ export function buildApplication(
 
     application.post(
       "/api/v1/ai/routes",
-      { preHandler: requireSensitive("ai.route.create", "ai-route") },
+      { preHandler: requireAuditedAdmin("ai.route.create", "ai-route") },
       async (request, reply) => {
         const route = aiMutationValue(
           await ai.createRoute(aiRouteConfigurationSchema.parse(request.body)),
@@ -1420,7 +1423,7 @@ export function buildApplication(
 
     application.put(
       "/api/v1/ai/routes/:routeId",
-      { preHandler: requireSensitive("ai.route.update", "ai-route") },
+      { preHandler: requireAuditedAdmin("ai.route.update", "ai-route") },
       async (request) => {
         const parameters = aiRouteParametersSchema.parse(request.params);
         const body = aiRouteUpdateSchema.parse(request.body);
@@ -1442,7 +1445,7 @@ export function buildApplication(
     application.patch(
       "/api/v1/ai/routes/:routeId/enabled",
       {
-        preHandler: requireSensitive("ai.route.enabled.update", "ai-route"),
+        preHandler: requireAuditedAdmin("ai.route.enabled.update", "ai-route"),
       },
       async (request) => {
         const parameters = aiRouteParametersSchema.parse(request.params);
@@ -1463,7 +1466,7 @@ export function buildApplication(
 
     application.delete(
       "/api/v1/ai/routes/:routeId",
-      { preHandler: requireSensitive("ai.route.delete", "ai-route") },
+      { preHandler: requireAuditedAdmin("ai.route.delete", "ai-route") },
       async (request) => {
         const parameters = aiRouteParametersSchema.parse(request.params);
         const query = expectedVersionQuerySchema.parse(request.query);
@@ -1547,7 +1550,7 @@ export function buildApplication(
     application.post(
       "/api/v1/workflows/:workflowId/versions/:version/publish",
       {
-        preHandler: requireSensitive("workflow.version.publish", "workflow"),
+        preHandler: requireAuditedAdmin("workflow.version.publish", "workflow"),
       },
       async (request) => {
         const parameters = workflowVersionParametersSchema.parse(
@@ -1593,7 +1596,9 @@ export function buildApplication(
 
     application.patch(
       "/api/v1/workflows/:workflowId/enabled",
-      { preHandler: requireSensitive("workflow.enabled.update", "workflow") },
+      {
+        preHandler: requireAuditedAdmin("workflow.enabled.update", "workflow"),
+      },
       async (request) => {
         const parameters = workflowParametersSchema.parse(request.params);
         const body = triggerStatusBodySchema.parse(request.body);
@@ -1674,7 +1679,7 @@ export function buildApplication(
 
     application.post(
       "/api/v1/triggers",
-      { preHandler: requireSensitive("trigger.create", "trigger") },
+      { preHandler: requireAuditedAdmin("trigger.create", "trigger") },
       async (request, reply) => {
         const body = triggerBodySchema.parse(request.body);
         const trigger = await workflowRepository.createTrigger({
@@ -1694,7 +1699,7 @@ export function buildApplication(
 
     application.patch(
       "/api/v1/triggers/:triggerId",
-      { preHandler: requireSensitive("trigger.enabled.update", "trigger") },
+      { preHandler: requireAuditedAdmin("trigger.enabled.update", "trigger") },
       async (request) => {
         const parameters = triggerParametersSchema.parse(request.params);
         const body = triggerStatusBodySchema.parse(request.body);

@@ -11,14 +11,12 @@ import {
 } from "@lucide/vue";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 
-import SensitiveUnlock from "../components/SensitiveUnlock.vue";
 import {
   apiRequest,
   errorMessage,
   jsonBody,
   parseJsonObject,
 } from "../services/api";
-import { useSessionStore } from "../stores/session";
 
 interface Workflow {
   id: string;
@@ -52,14 +50,20 @@ interface TriggerPreviewResult {
     matched: boolean;
   }>;
 }
+interface AiRoute {
+  id: string;
+  name: string;
+  enabled: boolean;
+  effectiveProviderIds: string[];
+}
 
-const session = useSessionStore();
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
 const workflows = ref<Workflow[]>([]);
 const versions = ref<WorkflowVersion[]>([]);
 const triggers = ref<Trigger[]>([]);
+const aiRoutes = ref<AiRoute[]>([]);
 const selectedWorkflowId = ref("");
 const busy = ref(false);
 const message = ref("");
@@ -91,6 +95,15 @@ const triggerPreviewForm = reactive({
   isFromMe: false,
 });
 const triggerPreview = ref<TriggerPreviewResult | null>(null);
+const aiFlowForm = reactive({
+  providerRouteId: "",
+  messageLimit: 10,
+  characterLimit: 6000,
+  includeFromMe: true,
+  systemPrompt: "你是群聊助手，请严格根据提供的聊天上下文回答。",
+  promptTemplate: "请根据前面的聊天记录执行以下任务：\n{{message.text}}",
+  replyTemplate: "{{variables.aiReply}}",
+});
 
 const defaultDefinition = (name: string) =>
   JSON.stringify(
@@ -133,10 +146,19 @@ async function load() {
   message.value = "";
   messageIsError.value = false;
   try {
-    [workflows.value, triggers.value] = await Promise.all([
+    [workflows.value, triggers.value, aiRoutes.value] = await Promise.all([
       apiRequest<Workflow[]>("/api/v1/workflows"),
       apiRequest<Trigger[]>("/api/v1/triggers"),
+      apiRequest<AiRoute[]>("/api/v1/ai/routes"),
     ]);
+    if (!aiFlowForm.providerRouteId) {
+      aiFlowForm.providerRouteId =
+        aiRoutes.value.find(
+          (route) => route.enabled && route.effectiveProviderIds.length > 0,
+        )?.id ??
+        aiRoutes.value[0]?.id ??
+        "";
+    }
     if (!selectedWorkflowId.value && workflows.value[0])
       selectedWorkflowId.value = workflows.value[0].id;
   } catch (cause) {
@@ -144,6 +166,96 @@ async function load() {
     messageIsError.value = true;
   } finally {
     busy.value = false;
+  }
+}
+
+function aiConversationDefinition(name: string) {
+  if (!aiFlowForm.providerRouteId) {
+    throw new Error("请先在 AI 服务中创建并选择一个 Provider 路由。");
+  }
+  return {
+    schemaVersion: "1",
+    name: name || "AI conversation workflow",
+    startNodeId: "load-context",
+    maxSteps: 16,
+    maxExecutionMs: 120000,
+    nodes: [
+      {
+        id: "load-context",
+        type: "load-context",
+        version: 1,
+        config: {
+          messageLimit: aiFlowForm.messageLimit,
+          characterLimit: aiFlowForm.characterLimit,
+          includeFromMe: aiFlowForm.includeFromMe,
+        },
+        onSuccess: "ask-ai",
+        onFailure: "failed",
+      },
+      {
+        id: "ask-ai",
+        type: "ai-chat",
+        version: 1,
+        config: {
+          providerRouteId: aiFlowForm.providerRouteId,
+          systemPrompt: aiFlowForm.systemPrompt,
+          promptTemplate: aiFlowForm.promptTemplate,
+          includeLoadedContext: true,
+          timeoutMs: 60000,
+          maxOutputTokens: 1024,
+          maxOutputCharacters: 4000,
+          temperature: null,
+          outputFormat: "text",
+          outputVariable: "aiReply",
+        },
+        onSuccess: "send-reply",
+        onFailure: "failed",
+      },
+      {
+        id: "send-reply",
+        type: "reply",
+        version: 1,
+        config: {
+          text: aiFlowForm.replyTemplate,
+          replyToSourceMessage: false,
+          retry: { maxAttempts: 2, initialDelayMs: 250 },
+        },
+        onSuccess: "completed",
+        onFailure: "failed",
+      },
+      {
+        id: "completed",
+        type: "end",
+        version: 1,
+        config: { result: "succeeded" },
+      },
+      {
+        id: "failed",
+        type: "end",
+        version: 1,
+        config: { result: "skipped" },
+      },
+    ],
+  };
+}
+
+function fillAiConversationDefinition(target: "create" | "version") {
+  try {
+    const selectedName =
+      workflows.value.find((item) => item.id === selectedWorkflowId.value)
+        ?.name ?? "AI conversation workflow";
+    const definition = aiConversationDefinition(
+      target === "create" ? createForm.name : selectedName,
+    );
+    const value = JSON.stringify(definition, null, 2);
+    if (target === "create") createForm.definition = value;
+    else versionDefinition.value = value;
+    message.value =
+      "已生成“聊天上下文 → AI → 群聊回复”定义，可继续编辑 JSON 或直接保存。";
+    messageIsError.value = false;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
   }
 }
 
@@ -230,8 +342,7 @@ async function createVersion() {
 }
 
 async function publish() {
-  if (!latestCandidate.value || !session.sensitiveActive || publishBusy.value)
-    return;
+  if (!latestCandidate.value || publishBusy.value) return;
   const candidate = latestCandidate.value;
   publishBusy.value = true;
   message.value = "";
@@ -265,7 +376,6 @@ async function publish() {
 
 async function toggleWorkflow(workflow: Workflow) {
   if (
-    !session.sensitiveActive ||
     workflow.publishedVersion === null ||
     workflowToggleBusyIds.has(workflow.id)
   )
@@ -319,7 +429,7 @@ async function previewTrigger() {
 }
 
 async function createTrigger() {
-  if (!session.sensitiveActive || triggerCreateBusy.value) return;
+  if (triggerCreateBusy.value) return;
   const workflow = workflows.value.find(
     (item) => item.id === triggerForm.workflowId,
   );
@@ -357,7 +467,7 @@ async function createTrigger() {
 }
 
 async function toggleTrigger(trigger: Trigger) {
-  if (!session.sensitiveActive || triggerToggleBusyIds.has(trigger.id)) return;
+  if (triggerToggleBusyIds.has(trigger.id)) return;
   triggerToggleBusyIds.add(trigger.id);
   message.value = "";
   messageIsError.value = false;
@@ -416,7 +526,6 @@ onMounted(load);
       </div>
     </aside>
     <div class="admin-workspace">
-      <SensitiveUnlock />
       <p v-if="message" class="form-message" :class="{ error: messageIsError }">
         {{ message }}
       </p>
@@ -430,6 +539,82 @@ onMounted(load);
             <RefreshCw :size="16" />刷新
           </button>
         </div>
+        <form
+          class="settings-form boxed-form"
+          @submit.prevent="fillAiConversationDefinition('create')"
+        >
+          <h3><GitBranch :size="18" />AI 对话流程生成器</h3>
+          <p class="panel-description">
+            生成“读取当前聊天最近消息 → 将上下文和提示词交给 AI → 把 AI
+            输出发送回当前群聊”的可执行工作流。聊天记录会作为独立消息注入 AI
+            上下文，提示词还可使用
+            <code>&#123;&#123;message.text&#125;&#125;</code>
+            等触发消息变量。
+          </p>
+          <div class="field-grid">
+            <label
+              ><span>AI Provider 路由</span
+              ><select v-model="aiFlowForm.providerRouteId" required>
+                <option value="">请先配置路由</option>
+                <option
+                  v-for="route in aiRoutes"
+                  :key="route.id"
+                  :value="route.id"
+                >
+                  {{ route.name }}{{ route.enabled ? "" : "（已停用）" }}
+                </option>
+              </select></label
+            ><label
+              ><span>最近消息条数</span
+              ><input
+                v-model.number="aiFlowForm.messageLimit"
+                type="number"
+                min="1"
+                max="50"
+                required /></label
+            ><label
+              ><span>上下文字数上限</span
+              ><input
+                v-model.number="aiFlowForm.characterLimit"
+                type="number"
+                min="100"
+                max="20000"
+                required /></label
+            ><label class="checkbox-field"
+              ><input v-model="aiFlowForm.includeFromMe" type="checkbox" /><span
+                >包含自己/机器人发送的消息</span
+              ></label
+            ><label class="wide-field"
+              ><span>System Prompt</span
+              ><textarea v-model="aiFlowForm.systemPrompt" rows="3"></textarea>
+            </label>
+            <label class="wide-field"
+              ><span>任务提示词</span
+              ><textarea
+                v-model="aiFlowForm.promptTemplate"
+                rows="4"
+                required
+              ></textarea>
+            </label>
+            <label class="wide-field"
+              ><span>发送消息模板</span
+              ><input v-model="aiFlowForm.replyTemplate" required
+            /></label>
+          </div>
+          <div class="form-actions">
+            <button class="button secondary" type="submit">
+              填充到新工作流
+            </button>
+            <button
+              class="button secondary"
+              type="button"
+              :disabled="!selectedWorkflowId"
+              @click="fillAiConversationDefinition('version')"
+            >
+              填充到当前候选版本
+            </button>
+          </div>
+        </form>
         <div class="two-column-forms">
           <form class="settings-form" @submit.prevent="createWorkflow">
             <h3><Plus :size="18" />新建工作流</h3>
@@ -492,9 +677,7 @@ onMounted(load);
               ><button
                 class="button primary"
                 type="button"
-                :disabled="
-                  !session.sensitiveActive || !latestCandidate || publishBusy
-                "
+                :disabled="!latestCandidate || publishBusy"
                 :aria-busy="publishBusy"
                 @click="publish"
               >
@@ -546,7 +729,6 @@ onMounted(load);
                     :class="{ active: workflow.status === 'active' }"
                     type="button"
                     :disabled="
-                      !session.sensitiveActive ||
                       workflow.publishedVersion === null ||
                       workflowToggleBusyIds.has(workflow.id)
                     "
@@ -669,7 +851,7 @@ onMounted(load);
           ><button
             class="button primary"
             type="submit"
-            :disabled="!session.sensitiveActive || triggerCreateBusy"
+            :disabled="triggerCreateBusy"
             :aria-busy="triggerCreateBusy"
           >
             <Plus :size="16" />{{
@@ -709,10 +891,7 @@ onMounted(load);
                   <button
                     class="switch-button"
                     :class="{ active: trigger.enabled }"
-                    :disabled="
-                      !session.sensitiveActive ||
-                      triggerToggleBusyIds.has(trigger.id)
-                    "
+                    :disabled="triggerToggleBusyIds.has(trigger.id)"
                     :aria-busy="triggerToggleBusyIds.has(trigger.id)"
                     @click="toggleTrigger(trigger)"
                   >
