@@ -58,6 +58,7 @@ import {
   parseTriggerConditions,
 } from "../modules/workflow/trigger-matcher.js";
 import { parseWorkflowDefinition } from "../modules/workflow/workflow-definition.js";
+import { validateWorkflowGraph } from "../modules/workflow/workflow-graph.js";
 import type { MessageAutomation } from "../modules/workflow/workflow-engine.js";
 import type {
   ExecutionRecoveryClaim,
@@ -1495,7 +1496,12 @@ export function buildApplication(
       { preHandler: requireAdmin },
       async (request) => {
         const body = workflowVersionBodySchema.parse(request.body);
-        const definition = workflowDefinition(body.definition);
+        const definition =
+          typeof body.definition === "object" &&
+          body.definition !== null &&
+          (body.definition as { schemaVersion?: unknown }).schemaVersion === "1"
+            ? validateWorkflowGraph(body.definition)
+            : workflowDefinition(body.definition);
         return {
           data: {
             valid: true,

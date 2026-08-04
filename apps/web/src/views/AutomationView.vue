@@ -10,6 +10,7 @@ import {
   ToggleLeft,
 } from "@lucide/vue";
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import WorkflowEditor from "../components/workflow/WorkflowEditor.vue";
 
 import {
   apiRequest,
@@ -64,6 +65,7 @@ const workflows = ref<Workflow[]>([]);
 const versions = ref<WorkflowVersion[]>([]);
 const triggers = ref<Trigger[]>([]);
 const aiRoutes = ref<AiRoute[]>([]);
+const actionBlocks = ref<any[]>([]);
 const selectedWorkflowId = ref("");
 const busy = ref(false);
 const message = ref("");
@@ -146,10 +148,11 @@ async function load() {
   message.value = "";
   messageIsError.value = false;
   try {
-    [workflows.value, triggers.value, aiRoutes.value] = await Promise.all([
+    [workflows.value, triggers.value, aiRoutes.value, actionBlocks.value] = await Promise.all([
       apiRequest<Workflow[]>("/api/v1/workflows"),
       apiRequest<Trigger[]>("/api/v1/triggers"),
       apiRequest<AiRoute[]>("/api/v1/ai/routes"),
+      apiRequest<any[]>("/api/v1/workflows/action-blocks"),
     ]);
     if (!aiFlowForm.providerRouteId) {
       aiFlowForm.providerRouteId =
@@ -539,7 +542,13 @@ onMounted(load);
             <RefreshCw :size="16" />刷新
           </button>
         </div>
-        <form
+        <WorkflowEditor
+          :blocks="actionBlocks"
+          :workflow-name="createForm.name"
+          @create="(_name, definition) => { createForm.name = _name; createForm.definition = JSON.stringify(definition); createWorkflow(); }"
+          @version="(_name, definition) => { versionDefinition = JSON.stringify(definition); createVersion(); }"
+        />
+        <form v-if="false"
           class="settings-form boxed-form"
           @submit.prevent="fillAiConversationDefinition('create')"
         >
@@ -615,7 +624,7 @@ onMounted(load);
             </button>
           </div>
         </form>
-        <div class="two-column-forms">
+        <div v-if="false" class="two-column-forms">
           <form class="settings-form" @submit.prevent="createWorkflow">
             <h3><Plus :size="18" />新建工作流</h3>
             <label

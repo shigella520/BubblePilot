@@ -138,6 +138,7 @@ export class WorkflowEngine implements MessageAutomation {
     const deadline = Date.now() + definition.maxExecutionMs;
     const variables: Record<string, string> = {};
     const history: ContextMessage[] = [];
+    const outputs: Record<string, Record<string, unknown>> = {};
     let currentNodeId: string | null = definition.startNodeId;
     let steps = 0;
 
@@ -201,12 +202,14 @@ export class WorkflowEngine implements MessageAutomation {
             deadlineAt: deadline,
             variables,
             history,
+            outputs,
           });
           await this.repository.finishNodeExecution({
             nodeExecutionId,
             status: result.status,
             outputSummary: result.outputSummary,
           });
+          outputs[node.id] = { ...result.outputSummary };
           if (result.completionStatus !== undefined) {
             await this.repository.finishExecution(
               execution.id,
