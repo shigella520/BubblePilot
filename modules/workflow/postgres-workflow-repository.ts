@@ -546,6 +546,36 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     return id === undefined ? null : this.getTrigger(id);
   }
 
+  async updateTrigger(
+    triggerId: string,
+    input: {
+      name: string;
+      conditions: TriggerConditions;
+      includeFromMe: boolean;
+    },
+  ): Promise<TriggerRecord | null> {
+    const result = await this.pool.query<IdentifierRow>(
+      `UPDATE bot_triggers SET name = $2, conditions = $3::jsonb, include_from_me = $4, updated_at = NOW()
+       WHERE id = $1 RETURNING id`,
+      [
+        triggerId,
+        input.name,
+        JSON.stringify(input.conditions),
+        input.includeFromMe,
+      ],
+    );
+    const id = result.rows[0]?.id;
+    return id === undefined ? null : this.getTrigger(id);
+  }
+
+  async deleteTrigger(triggerId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "DELETE FROM bot_triggers WHERE id = $1",
+      [triggerId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
   async listTriggers(): Promise<readonly TriggerRecord[]> {
     const result = await this.pool.query<TriggerRow>(
       `${triggerSelect}

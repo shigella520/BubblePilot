@@ -82,6 +82,8 @@ const workflowCreateBusy = ref(false);
 const versionCreateBusy = ref(false);
 const publishBusy = ref(false);
 const triggerCreateBusy = ref(false);
+const triggerEditId = ref<string | null>(null);
+const triggerDeleteBusyIds = reactive(new Set<string>());
 const workflowToggleBusyIds = reactive(new Set<string>());
 const triggerToggleBusyIds = reactive(new Set<string>());
 let versionsRequestId = 0;
@@ -104,6 +106,25 @@ const triggerForm = reactive({
   textValue: "",
   contentType: "text",
 });
+function startTriggerEdit(trigger: Trigger) {
+  const conditions = (trigger.conditions ?? {}) as any;
+  triggerEditId.value = trigger.id;
+  triggerForm.name = trigger.name;
+  triggerForm.workflowId = trigger.workflowId;
+  triggerForm.chatId = conditions.chatIds?.[0] ?? "";
+  triggerForm.textKind = conditions.text?.kind ?? "prefix";
+  triggerForm.textValue = conditions.text?.value ?? "";
+  triggerForm.contentType = conditions.contentTypes?.[0] ?? "";
+}
+function cancelTriggerEdit() {
+  triggerEditId.value = null;
+  triggerForm.name = "";
+  triggerForm.workflowId = "";
+  triggerForm.chatId = "";
+  triggerForm.textValue = "";
+  triggerForm.textKind = "prefix";
+  triggerForm.contentType = "text";
+}
 function triggerConditions() {
   return {
     chatIds: triggerForm.chatId ? [triggerForm.chatId] : [],
@@ -546,17 +567,33 @@ async function createTrigger() {
   message.value = "";
   messageIsError.value = false;
   try {
-    const created = await apiRequest<Trigger>("/api/v1/triggers", {
-      method: "POST",
-      body: jsonBody({
-        name: triggerForm.name,
-        workflowId: workflow.id,
-        workflowVersion: workflow.publishedVersion,
-        conditions: triggerConditions(),
-        includeFromMe: false,
-        enabled: false,
-      }),
-    });
+    const payload = {
+      name: triggerForm.name,
+      workflowId: workflow.id,
+      workflowVersion: workflow.publishedVersion,
+      conditions: triggerConditions(),
+      includeFromMe: false,
+      enabled: false,
+    };
+    const created = triggerEditId.value
+      ? await apiRequest<Trigger>(`/api/v1/triggers/${triggerEditId.value}`, {
+          method: "PUT",
+          body: jsonBody(payload),
+        })
+      : await apiRequest<Trigger>("/api/v1/triggers", {
+          method: "POST",
+          body: jsonBody(payload),
+        });
+    if (triggerEditId.value) {
+      triggers.value = triggers.value.map((item) =>
+        item.id === created.id
+          ? { ...created, conflictingTriggerIds: item.conflictingTriggerIds }
+          : item,
+      );
+      message.value = `触发器「${created.name}」已更新。`;
+      cancelTriggerEdit();
+      return;
+    }
     triggers.value = [
       {
         ...created,
@@ -571,6 +608,26 @@ async function createTrigger() {
     messageIsError.value = true;
   } finally {
     triggerCreateBusy.value = false;
+  }
+}
+
+async function deleteTrigger(trigger: Trigger) {
+  if (
+    triggerDeleteBusyIds.has(trigger.id) ||
+    !window.confirm(`确认删除触发器「${trigger.name}」？`)
+  )
+    return;
+  triggerDeleteBusyIds.add(trigger.id);
+  try {
+    await apiRequest(`/api/v1/triggers/${trigger.id}`, { method: "DELETE" });
+    triggers.value = triggers.value.filter((item) => item.id !== trigger.id);
+    if (triggerEditId.value === trigger.id) cancelTriggerEdit();
+    message.value = `触发器「${trigger.name}」已删除。`;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    triggerDeleteBusyIds.delete(trigger.id);
   }
 }
 
@@ -892,181 +949,226 @@ onMounted(load);
           </div>
           <span class="state-badge">AND 条件组合</span>
         </div>
-        <form
-          class="settings-form boxed-form trigger-preview-form"
-          @submit.prevent="previewTrigger"
-        >
-          <h3><ShieldAlert :size="18" />条件预览（无副作用）</h3>
-          <p class="panel-description">
-            使用下方待保存条件和一条虚构样本解释每一项匹配结果，不创建执行、不调用节点。
-          </p>
-          <div class="field-grid">
-            <label
-              ><span>样本聊天 GUID</span
-              ><input v-model.trim="triggerPreviewForm.providerChatId" required
-            /></label>
-            <label
-              ><span>样本发送者</span
-              ><input v-model.trim="triggerPreviewForm.senderId"
-            /></label>
-            <label
-              ><span>样本时间</span
-              ><input
-                v-model="triggerPreviewForm.sentAt"
-                type="datetime-local"
-                required
-            /></label>
-            <label
-              ><span>消息类型</span
-              ><select v-model="triggerPreviewForm.contentType">
-                <option value="text">text</option>
-                <option value="attachment">attachment</option>
-                <option value="mixed">mixed</option>
-                <option value="unknown">unknown</option>
-              </select></label
+        <div class="trigger-layout">
+          <div class="trigger-create-column">
+            <form
+              class="settings-form boxed-form trigger-preview-form"
+              @submit.prevent="previewTrigger"
             >
-            <label class="wide-field"
-              ><span>样本文本</span><input v-model="triggerPreviewForm.text"
-            /></label>
-          </div>
-          <label class="checkbox-field"
-            ><input
-              v-model="triggerPreviewForm.isFromMe"
-              type="checkbox"
-            /><span
-              >样本由 Bot 自己发送（生产规则仍固定拒绝自触发）</span
-            ></label
-          >
-          <div class="form-actions trigger-preview-actions">
-            <div
-              v-if="triggerPreview"
-              class="trigger-preview-result"
-              :class="{ matched: triggerPreview.matched }"
-            >
-              <strong>{{ triggerPreview.matched ? "匹配" : "不匹配" }}</strong>
-              <span
-                v-for="check in triggerPreview.checks"
-                :key="check.field"
-                :class="{ passed: check.matched }"
-                >{{ check.field }} {{ check.matched ? "✓" : "×" }}</span
+              <h3><ShieldAlert :size="18" />条件预览（无副作用）</h3>
+              <p class="panel-description">
+                使用下方待保存条件和一条虚构样本解释每一项匹配结果，不创建执行、不调用节点。
+              </p>
+              <div class="field-grid">
+                <label
+                  ><span>样本聊天 GUID</span
+                  ><input
+                    v-model.trim="triggerPreviewForm.providerChatId"
+                    required
+                /></label>
+                <label
+                  ><span>样本发送者</span
+                  ><input v-model.trim="triggerPreviewForm.senderId"
+                /></label>
+                <label
+                  ><span>样本时间</span
+                  ><input
+                    v-model="triggerPreviewForm.sentAt"
+                    type="datetime-local"
+                    required
+                /></label>
+                <label
+                  ><span>消息类型</span
+                  ><select v-model="triggerPreviewForm.contentType">
+                    <option value="text">text</option>
+                    <option value="attachment">attachment</option>
+                    <option value="mixed">mixed</option>
+                    <option value="unknown">unknown</option>
+                  </select></label
+                >
+                <label class="wide-field"
+                  ><span>样本文本</span
+                  ><input v-model="triggerPreviewForm.text"
+                /></label>
+              </div>
+              <label class="checkbox-field"
+                ><input
+                  v-model="triggerPreviewForm.isFromMe"
+                  type="checkbox"
+                /><span
+                  >样本由 Bot 自己发送（生产规则仍固定拒绝自触发）</span
+                ></label
               >
-            </div>
-            <button class="button secondary" type="submit">
-              <Play :size="16" />预览条件
-            </button>
-          </div>
-        </form>
-        <form class="inline-create-form" @submit.prevent="createTrigger">
-          <label
-            ><span>名称</span
-            ><input
-              v-model.trim="triggerForm.name"
-              maxlength="120"
-              required /></label
-          ><label
-            ><span>已发布工作流</span
-            ><select v-model="triggerForm.workflowId" required>
-              <option value="">请选择</option>
-              <option
-                v-for="workflow in activeWorkflows"
-                :key="workflow.id"
-                :value="workflow.id"
-              >
-                {{ workflow.name }} · v{{ workflow.publishedVersion }}
-              </option>
-            </select></label
-          ><label
-            ><span>目标聊天</span
-            ><select v-model="triggerForm.chatId">
-              <option value="">所有聊天</option>
-              <option
-                v-for="chat in chats"
-                :key="chat.providerChatId"
-                :value="chat.providerChatId"
-              >
-                {{ chat.displayName }}
-              </option>
-            </select></label
-          ><label
-            ><span>文本匹配</span
-            ><select v-model="triggerForm.textKind">
-              <option value="prefix">以此前缀开头</option>
-              <option value="contains">包含文本</option>
-              <option value="exact">完全匹配</option>
-              <option value="regex">正则表达式</option>
-            </select></label
-          ><label
-            ><span>匹配内容（可选）</span
-            ><input
-              v-model.trim="triggerForm.textValue"
-              placeholder="例如 /sum" /></label
-          ><label
-            ><span>消息类型</span
-            ><select v-model="triggerForm.contentType">
-              <option value="">全部类型</option>
-              <option value="text">文本</option>
-              <option value="attachment">附件</option>
-              <option value="mixed">混合</option>
-            </select></label
-          ><button
-            class="button primary"
-            type="submit"
-            :disabled="triggerCreateBusy"
-            :aria-busy="triggerCreateBusy"
-          >
-            <Plus :size="16" />{{
-              triggerCreateBusy ? "创建中…" : "创建停用触发器"
-            }}
-          </button>
-        </form>
-        <div class="table-shell">
-          <table>
-            <thead>
-              <tr>
-                <th>触发器</th>
-                <th>工作流版本</th>
-                <th>条件</th>
-                <th>状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="!triggers.length">
-                <td colspan="4" class="empty-cell">暂无触发器</td>
-              </tr>
-              <tr v-for="trigger in triggers" :key="trigger.id">
-                <td>
-                  <strong>{{ trigger.name }}</strong>
+              <div class="form-actions trigger-preview-actions">
+                <div
+                  v-if="triggerPreview"
+                  class="trigger-preview-result"
+                  :class="{ matched: triggerPreview.matched }"
+                >
+                  <strong>{{
+                    triggerPreview.matched ? "匹配" : "不匹配"
+                  }}</strong>
                   <span
-                    v-if="trigger.conflictingTriggerIds.length"
-                    class="trigger-conflict-note"
-                    ><ShieldAlert :size="13" />可能与
-                    {{ conflictingTriggerNames(trigger) }} 同时匹配</span
+                    v-for="check in triggerPreview.checks"
+                    :key="check.field"
+                    :class="{ passed: check.matched }"
+                    >{{ check.field }} {{ check.matched ? "✓" : "×" }}</span
                   >
-                </td>
-                <td>v{{ trigger.workflowVersion }}</td>
-                <td>
-                  {{ conditionSummary(trigger.conditions) }}
-                </td>
-                <td>
-                  <button
-                    class="switch-button"
-                    :class="{ active: trigger.enabled }"
-                    :disabled="triggerToggleBusyIds.has(trigger.id)"
-                    :aria-busy="triggerToggleBusyIds.has(trigger.id)"
-                    @click="toggleTrigger(trigger)"
+                </div>
+                <button class="button secondary" type="submit">
+                  <Play :size="16" />预览条件
+                </button>
+              </div>
+            </form>
+            <form
+              class="inline-create-form trigger-create-form"
+              @submit.prevent="createTrigger"
+            >
+              <label
+                ><span>名称</span
+                ><input
+                  v-model.trim="triggerForm.name"
+                  maxlength="120"
+                  required /></label
+              ><label
+                ><span>已发布工作流</span
+                ><select v-model="triggerForm.workflowId" required>
+                  <option value="">请选择</option>
+                  <option
+                    v-for="workflow in activeWorkflows"
+                    :key="workflow.id"
+                    :value="workflow.id"
                   >
-                    <ToggleLeft :size="16" />{{
-                      triggerToggleBusyIds.has(trigger.id)
-                        ? "处理中…"
-                        : trigger.enabled
-                          ? "已启用"
-                          : "已停用"
-                    }}
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                    {{ workflow.name }} · v{{ workflow.publishedVersion }}
+                  </option>
+                </select></label
+              ><label
+                ><span>目标聊天</span
+                ><select v-model="triggerForm.chatId">
+                  <option value="">所有聊天</option>
+                  <option
+                    v-for="chat in chats"
+                    :key="chat.providerChatId"
+                    :value="chat.providerChatId"
+                  >
+                    {{ chat.displayName }}
+                  </option>
+                </select></label
+              ><label
+                ><span>文本匹配</span
+                ><select v-model="triggerForm.textKind">
+                  <option value="prefix">以此前缀开头</option>
+                  <option value="contains">包含文本</option>
+                  <option value="exact">完全匹配</option>
+                  <option value="regex">正则表达式</option>
+                </select></label
+              ><label
+                ><span>匹配内容（可选）</span
+                ><input
+                  v-model.trim="triggerForm.textValue"
+                  placeholder="例如 /sum" /></label
+              ><label
+                ><span>消息类型</span
+                ><select v-model="triggerForm.contentType">
+                  <option value="">全部类型</option>
+                  <option value="text">文本</option>
+                  <option value="attachment">附件</option>
+                  <option value="mixed">混合</option>
+                </select></label
+              ><button
+                class="button primary"
+                type="submit"
+                :disabled="triggerCreateBusy"
+                :aria-busy="triggerCreateBusy"
+              >
+                <Plus :size="16" />{{
+                  triggerCreateBusy
+                    ? triggerEditId
+                      ? "保存中…"
+                      : "创建中…"
+                    : triggerEditId
+                      ? "保存修改"
+                      : "创建停用触发器"
+                }}
+              </button>
+              <button
+                v-if="triggerEditId"
+                class="button secondary"
+                type="button"
+                @click="cancelTriggerEdit"
+              >
+                取消编辑
+              </button>
+            </form>
+          </div>
+          <div class="trigger-manage-column">
+            <div class="table-shell">
+              <table>
+                <thead>
+                  <tr>
+                    <th>触发器</th>
+                    <th>工作流版本</th>
+                    <th>条件</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="!triggers.length">
+                    <td colspan="4" class="empty-cell">暂无触发器</td>
+                  </tr>
+                  <tr v-for="trigger in triggers" :key="trigger.id">
+                    <td>
+                      <strong>{{ trigger.name }}</strong>
+                      <span
+                        v-if="trigger.conflictingTriggerIds.length"
+                        class="trigger-conflict-note"
+                        ><ShieldAlert :size="13" />可能与
+                        {{ conflictingTriggerNames(trigger) }} 同时匹配</span
+                      >
+                    </td>
+                    <td>v{{ trigger.workflowVersion }}</td>
+                    <td>
+                      {{ conditionSummary(trigger.conditions) }}
+                    </td>
+                    <td>
+                      <div class="row-actions">
+                        <button
+                          class="button tiny secondary"
+                          type="button"
+                          @click="startTriggerEdit(trigger)"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          class="button tiny danger"
+                          type="button"
+                          :disabled="triggerDeleteBusyIds.has(trigger.id)"
+                          @click="deleteTrigger(trigger)"
+                        >
+                          删除
+                        </button>
+                      </div>
+                      <button
+                        class="switch-button"
+                        :class="{ active: trigger.enabled }"
+                        :disabled="triggerToggleBusyIds.has(trigger.id)"
+                        :aria-busy="triggerToggleBusyIds.has(trigger.id)"
+                        @click="toggleTrigger(trigger)"
+                      >
+                        <ToggleLeft :size="16" />{{
+                          triggerToggleBusyIds.has(trigger.id)
+                            ? "处理中…"
+                            : trigger.enabled
+                              ? "已启用"
+                              : "已停用"
+                        }}
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
     </div>

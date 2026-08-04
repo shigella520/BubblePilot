@@ -906,6 +906,34 @@ legend {
 .trigger-preview-form .panel-description {
   margin: -4px 0 0;
 }
+.trigger-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 1.2fr);
+  gap: 20px;
+  align-items: start;
+  margin-top: 22px;
+}
+.trigger-create-column {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.trigger-create-column .trigger-create-form {
+  order: 1;
+  margin-top: 0;
+}
+.trigger-create-column .trigger-preview-form {
+  order: 2;
+  margin-top: 0;
+}
+.trigger-manage-column .table-shell {
+  margin-top: 0;
+}
+@media (max-width: 1100px) {
+  .trigger-layout {
+    grid-template-columns: 1fr;
+  }
+}
 .trigger-preview-actions {
   align-items: center;
   justify-content: space-between;

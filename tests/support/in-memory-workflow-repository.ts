@@ -231,6 +231,27 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return trigger;
   }
 
+  async updateTrigger(
+    triggerId: string,
+    input: {
+      name: string;
+      conditions: TriggerConditions;
+      includeFromMe: boolean;
+    },
+  ): Promise<TriggerRecord | null> {
+    const trigger = this.triggers.get(triggerId);
+    if (trigger === undefined) return null;
+    trigger.name = input.name;
+    trigger.conditions = input.conditions;
+    trigger.includeFromMe = input.includeFromMe;
+    trigger.updatedAt = new Date().toISOString();
+    return trigger;
+  }
+
+  async deleteTrigger(triggerId: string): Promise<boolean> {
+    return this.triggers.delete(triggerId);
+  }
+
   listTriggers(): Promise<readonly TriggerRecord[]> {
     return Promise.resolve(
       [...this.triggers.values()].map((trigger) => structuredClone(trigger)),

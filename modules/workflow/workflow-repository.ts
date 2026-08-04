@@ -204,6 +204,15 @@ export interface WorkflowRepository {
     triggerId: string,
     enabled: boolean,
   ): Promise<TriggerRecord | null>;
+  updateTrigger(
+    triggerId: string,
+    input: {
+      name: string;
+      conditions: TriggerConditions;
+      includeFromMe: boolean;
+    },
+  ): Promise<TriggerRecord | null>;
+  deleteTrigger(triggerId: string): Promise<boolean>;
   listTriggers(): Promise<readonly TriggerRecord[]>;
   listActiveTriggerBindings(): Promise<readonly TriggerBinding[]>;
   createExecution(input: {

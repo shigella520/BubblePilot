@@ -159,6 +159,11 @@ const triggerBodySchema = z.object({
 });
 
 const triggerStatusBodySchema = z.object({ enabled: z.boolean() });
+const triggerUpdateBodySchema = triggerBodySchema.pick({
+  name: true,
+  conditions: true,
+  includeFromMe: true,
+});
 
 const triggerPreviewBodySchema = z.object({
   conditions: z.unknown(),
@@ -1744,6 +1749,46 @@ export function buildApplication(
           );
         }
         return { data: trigger };
+      },
+    );
+
+    application.put(
+      "/api/v1/triggers/:triggerId",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const parameters = triggerParametersSchema.parse(request.params);
+        const body = triggerUpdateBodySchema.parse(request.body);
+        const trigger = await workflowRepository.updateTrigger(
+          parameters.triggerId,
+          {
+            name: body.name,
+            conditions: triggerConditions(body.conditions),
+            includeFromMe: body.includeFromMe,
+          },
+        );
+        if (trigger === null)
+          throw new ApplicationError(
+            "TRIGGER_NOT_FOUND",
+            "The trigger does not exist.",
+            404,
+          );
+        return { data: trigger };
+      },
+    );
+
+    application.delete(
+      "/api/v1/triggers/:triggerId",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const parameters = triggerParametersSchema.parse(request.params);
+        if (!(await workflowRepository.deleteTrigger(parameters.triggerId))) {
+          throw new ApplicationError(
+            "TRIGGER_NOT_FOUND",
+            "The trigger does not exist.",
+            404,
+          );
+        }
+        return { data: { deleted: true } };
       },
     );
 
