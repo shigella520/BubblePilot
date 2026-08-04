@@ -112,15 +112,47 @@ function hydrate(definition: any) {
           source: item.id,
           sourceHandle: kind,
           target,
-          targetHandle: "input",
+          targetHandle: "control",
           kind,
         });
+    }
+    for (const [port, reference] of Object.entries(
+      (item.inputs ?? {}) as Record<string, unknown>,
+    )) {
+      if (
+        reference &&
+        typeof reference === "object" &&
+        (reference as any).kind === "output"
+      ) {
+        edgeList.push({
+          id: `${(reference as any).blockId}-output-${(reference as any).port}-${item.id}-${port}`,
+          source: (reference as any).blockId,
+          sourceHandle: `output:${(reference as any).port}`,
+          target: item.id,
+          targetHandle: `input:${port}`,
+          kind: "data",
+        });
+      }
     }
   }
   edges.value = edgeList;
   hydratedDefinition = JSON.stringify(definition);
 }
-watch(() => props.definition, hydrate, { immediate: true, deep: true });
+watch(
+  () => props.definition,
+  (definition) => {
+    if (definition === undefined) {
+      nodes.value = [];
+      edges.value = [];
+      selected.value = null;
+      config.value = {};
+      hydratedDefinition = "";
+      return;
+    }
+    hydrate(definition);
+  },
+  { immediate: true, deep: true },
+);
 function defaultConfig(block: Block): Record<string, unknown> {
   const values: Record<string, unknown> = {};
   for (const item of block.config) {
@@ -170,6 +202,16 @@ function selectNode(node: any) {
   selected.value = node;
   config.value = { ...(node.data.config ?? {}) };
 }
+function removeSelected() {
+  if (!selected.value) return;
+  const id = selected.value.id;
+  nodes.value = nodes.value.filter((node) => node.id !== id);
+  edges.value = edges.value.filter(
+    (edge) => edge.source !== id && edge.target !== id,
+  );
+  selected.value = null;
+  config.value = {};
+}
 function save() {
   const orderedNodes = nodes.value;
   const runtimeOrder = orderedNodes;
@@ -181,6 +223,16 @@ function save() {
   const connectedFailure = new Map(
     edges.value
       .filter((edge) => (edge.kind ?? edge.sourceHandle) === "failure")
+      .map((edge) => [edge.source, edge.target]),
+  );
+  const connectedTrue = new Map(
+    edges.value
+      .filter((edge) => edge.sourceHandle === "true")
+      .map((edge) => [edge.source, edge.target]),
+  );
+  const connectedFalse = new Map(
+    edges.value
+      .filter((edge) => edge.sourceHandle === "false")
       .map((edge) => [edge.source, edge.target]),
   );
   const next = new Map(
@@ -249,6 +301,16 @@ function save() {
           config: { result: nodeConfig.result || "succeeded" },
         };
       default:
+        if (node.data.block.type === "condition") {
+          return {
+            id: node.id,
+            type: "condition",
+            version: 1,
+            config: nodeConfig,
+            onTrue: connectedTrue.get(node.id),
+            onFalse: connectedFalse.get(node.id),
+          };
+        }
         return {
           id: node.id,
           type: node.data.block.type,
@@ -262,6 +324,12 @@ function save() {
         };
     }
   });
+  for (const runtimeNode of runtimeNodes) {
+    if (runtimeNode.type === "condition") {
+      runtimeNode.onTrue = connectedTrue.get(runtimeNode.id);
+      runtimeNode.onFalse = connectedFalse.get(runtimeNode.id);
+    }
+  }
   const definition = {
     schemaVersion: "1",
     name: name.value || "New workflow",
@@ -296,7 +364,15 @@ function connect(connection: Connection) {
   }
   edges.value.push({
     ...connection,
-    kind: connection.sourceHandle === "failure" ? "failure" : "success",
+    kind:
+      connection.sourceHandle === "failure"
+        ? "failure"
+        : connection.sourceHandle === "true" ||
+            connection.sourceHandle === "false"
+          ? "branch"
+          : connection.sourceHandle?.startsWith("output:")
+            ? "data"
+            : "success",
     id: `${connection.source}-${connection.target}-${Date.now()}`,
   });
 }
@@ -332,14 +408,17 @@ watch(
         fit-view-on-init
         @connect="connect"
         @node-click="({ node }) => selectNode(node)"
-        ><template #node-action="{ data }"
-          ><div class="action-node">
+      >
+        <template #node-action="{ data }">
+          <div class="action-node">
+            <Handle id="control" type="target" :position="Position.Left" />
             <strong>{{ data.label }}</strong>
+            <small class="node-hint">拖端口连接下一动作</small>
             <div
               v-for="(input, index) in data.block.inputs"
               :key="`in-${input.name}`"
               class="port-label input-port"
-              :style="{ top: `${30 + Number(index) * 14}%` }"
+              :style="{ top: `${38 + Number(index) * 14}%` }"
             >
               <Handle
                 :id="`input:${input.name}`"
@@ -347,34 +426,61 @@ watch(
                 :position="Position.Left"
               />{{ input.label }}
             </div>
-            ><small
+            <small
               v-for="(output, index) in data.block.outputs"
               :key="output.name"
               class="port-label output-port"
-              :style="{ top: `${30 + Number(index) * 14}%` }"
-              ><Handle
+              :style="{ top: `${38 + Number(index) * 14}%` }"
+            >
+              <Handle
                 :id="`output:${output.name}`"
                 type="source"
                 :position="Position.Right"
-              />{{ output.label }}</small
-            ><Handle
-              id="success"
-              type="source"
-              :position="Position.Right"
-              :style="{ top: '82%' }"
-            />
-            <Handle
-              id="failure"
-              type="source"
-              :position="Position.Right"
-              :style="{ top: '70%' }"
-            /></div></template
-      ></VueFlow>
+              />{{ output.label }}
+            </small>
+            <template v-if="data.block.branches?.length">
+              <small
+                v-for="(branch, index) in data.block.branches"
+                :key="branch.name"
+                class="port-label branch-port"
+                :style="{ top: `${68 + Number(index) * 14}%` }"
+              >
+                <Handle
+                  :id="branch.name === 'onTrue' ? 'true' : 'false'"
+                  type="source"
+                  :position="Position.Right"
+                />{{ branch.label }}
+              </small>
+            </template>
+            <template v-else>
+              <small class="port-label control-port success-port"
+                ><Handle
+                  id="success"
+                  type="source"
+                  :position="Position.Right"
+                />成功</small
+              >
+              <small
+                v-if="
+                  ['load-context', 'ai-chat', 'reply'].includes(data.block.type)
+                "
+                class="port-label control-port failure-port"
+                ><Handle
+                  id="failure"
+                  type="source"
+                  :position="Position.Right"
+                />失败</small
+              >
+            </template>
+          </div>
+        </template>
+      </VueFlow>
     </div>
     <aside class="node-inspector">
       <label>工作流名称<input v-model="name" maxlength="120" /></label
       ><template v-if="selected"
         ><h3>{{ selected.data.label }}</h3>
+        <p class="node-description">{{ selected.data.block.description }}</p>
         <label v-for="item in selected.data.block.config" :key="item.name"
           ><span>{{ item.label }}</span
           ><select v-if="item.type === 'select'" v-model="config[item.name]">
@@ -391,7 +497,15 @@ watch(
             :type="item.type === 'number' ? 'number' : 'text'" /><input
             v-else
             v-model="config[item.name]"
-            type="checkbox" /></label></template
+            type="checkbox"
+        /></label>
+        <button class="button danger" type="button" @click="removeSelected">
+          删除动作块
+        </button>
+      </template>
+      <p v-else class="editor-empty-hint">
+        从左侧点击或拖入动作块，然后用端口连接执行顺序和数据引用。
+      </p>
       ><button class="button primary" type="button" @click="save">
         保存并生效
       </button>
@@ -445,6 +559,35 @@ watch(
   border-radius: 9px;
   background: white;
   box-shadow: 0 4px 12px #0f172a18;
+}
+.node-hint {
+  display: block;
+  margin-top: 5px;
+  color: #94a3b8;
+  font-size: 9px;
+}
+.control-port {
+  right: 8px;
+}
+.success-port {
+  top: 78%;
+}
+.failure-port {
+  top: 90%;
+}
+.branch-port {
+  right: 8px;
+}
+.node-description {
+  margin: 4px 0 14px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.editor-empty-hint {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
 }
 .action-node small {
   display: block;

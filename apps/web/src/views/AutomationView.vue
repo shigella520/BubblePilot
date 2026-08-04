@@ -68,6 +68,15 @@ function editWorkflow(workflow: Workflow) {
   void loadVersions();
   scrollToSection("workflows");
 }
+function startNewWorkflow() {
+  selectedWorkflowId.value = "";
+  versions.value = [];
+  versionDefinition.value = "";
+  createForm.name = "";
+  createForm.definition = "";
+  message.value = "已切换到新建模式，请从左侧动作块面板添加节点。";
+  messageIsError.value = false;
+}
 async function deleteWorkflow(workflow: Workflow) {
   if (
     workflowDeleteBusyIds.has(workflow.id) ||
@@ -281,9 +290,8 @@ async function load() {
         aiRoutes.value[0]?.id ??
         "";
     }
-    if (!selectedWorkflowId.value && workflows.value[0])
-      selectedWorkflowId.value = workflows.value[0].id;
-    if (selectedWorkflowId.value) await loadVersions();
+    // Start in create mode. Existing workflows are loaded only after the user
+    // explicitly clicks “编辑” in the management list.
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
@@ -726,6 +734,13 @@ onMounted(load);
           </div>
           <button class="button secondary" @click="load">
             <RefreshCw :size="16" />刷新
+          </button>
+          <button
+            class="button primary"
+            type="button"
+            @click="startNewWorkflow"
+          >
+            <Plus :size="16" />新建工作流
           </button>
         </div>
         <WorkflowEditor
