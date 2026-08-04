@@ -493,6 +493,25 @@ function configFor(node: any) {
     : (node.data.config ?? {});
 }
 function toDefinition() {
+  const inputsByNode = new Map(
+    nodes.value.map((node) => [node.id, { ...(node.data.inputs ?? {}) }]),
+  );
+  for (const edge of edges.value) {
+    if (
+      edge.kind !== "data" ||
+      !edge.sourceHandle?.startsWith("output:") ||
+      !edge.targetHandle?.startsWith("input:")
+    )
+      continue;
+    const inputs = inputsByNode.get(edge.target);
+    if (inputs) {
+      inputs[edge.targetHandle.slice(6)] = {
+        kind: "output",
+        blockId: edge.source,
+        port: edge.sourceHandle.slice(7),
+      };
+    }
+  }
   const next = new Map(
     edges.value
       .filter((edge) => edge.kind === "success")
@@ -520,7 +539,7 @@ function toDefinition() {
       version: 1,
       position: node.position,
       config: nodeConfig,
-      inputs: node.data.inputs ?? {},
+      inputs: inputsByNode.get(node.id) ?? {},
     };
     if (node.data.block.type === "message-trigger")
       return {
