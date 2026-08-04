@@ -8,18 +8,20 @@ import {
 } from "@vue-flow/core";
 import { computed } from "vue";
 const props = defineProps<
-  EdgeProps & { data?: { kind?: string; label?: string } }
+  EdgeProps & { kind?: string; data?: { kind?: string; label?: string } }
 >();
 const emit = defineEmits<{ (event: "delete", id: string): void }>();
-const [path, labelX, labelY] = getBezierPath(props);
+// Vue Flow updates the edge coordinates when either endpoint moves. Keep the
+// path derived from reactive props so the SVG follows the nodes immediately.
+const pathData = computed(() => getBezierPath(props));
 const edgeClass = computed(
-  () => `workflow-edge-${props.data?.kind ?? "success"}`,
+  () => `workflow-edge-${props.data?.kind ?? props.kind ?? "success"}`,
 );
 </script>
 <template>
   <BaseEdge
     :id="id"
-    :path="path"
+    :path="pathData[0]"
     :class="edgeClass"
     marker-end="url(#workflow-arrow)"
   />
@@ -27,7 +29,7 @@ const edgeClass = computed(
     <span
       class="workflow-edge-label"
       :style="{
-        transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+        transform: `translate(-50%, -50%) translate(${pathData[1]}px,${pathData[2]}px)`,
       }"
       >{{ data.label }}</span
     >
@@ -37,7 +39,7 @@ const edgeClass = computed(
       class="workflow-edge-delete"
       type="button"
       :style="{
-        transform: `translate(-50%, -50%) translate(${labelX}px,${labelY + 16}px)`,
+        transform: `translate(-50%, -50%) translate(${pathData[1]}px,${pathData[2] + 16}px)`,
       }"
       @click.stop="emit('delete', id)"
     >
