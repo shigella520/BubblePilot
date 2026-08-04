@@ -148,12 +148,13 @@ async function load() {
   message.value = "";
   messageIsError.value = false;
   try {
-    [workflows.value, triggers.value, aiRoutes.value, actionBlocks.value] = await Promise.all([
-      apiRequest<Workflow[]>("/api/v1/workflows"),
-      apiRequest<Trigger[]>("/api/v1/triggers"),
-      apiRequest<AiRoute[]>("/api/v1/ai/routes"),
-      apiRequest<any[]>("/api/v1/workflows/action-blocks"),
-    ]);
+    [workflows.value, triggers.value, aiRoutes.value, actionBlocks.value] =
+      await Promise.all([
+        apiRequest<Workflow[]>("/api/v1/workflows"),
+        apiRequest<Trigger[]>("/api/v1/triggers"),
+        apiRequest<AiRoute[]>("/api/v1/ai/routes"),
+        apiRequest<any[]>("/api/v1/workflows/action-blocks"),
+      ]);
     if (!aiFlowForm.providerRouteId) {
       aiFlowForm.providerRouteId =
         aiRoutes.value.find(
@@ -545,10 +546,22 @@ onMounted(load);
         <WorkflowEditor
           :blocks="actionBlocks"
           :workflow-name="createForm.name"
-          @create="(_name, definition) => { createForm.name = _name; createForm.definition = JSON.stringify(definition); createWorkflow(); }"
-          @version="(_name, definition) => { versionDefinition = JSON.stringify(definition); createVersion(); }"
+          @create="
+            (_name, definition) => {
+              createForm.name = _name;
+              createForm.definition = JSON.stringify(definition);
+              createWorkflow();
+            }
+          "
+          @version="
+            (_name, definition) => {
+              versionDefinition = JSON.stringify(definition);
+              createVersion();
+            }
+          "
         />
-        <form v-if="false"
+        <form
+          v-if="false"
           class="settings-form boxed-form"
           @submit.prevent="fillAiConversationDefinition('create')"
         >
