@@ -46,6 +46,10 @@ const form = reactive({
   requestTimeoutMs: 30_000,
 });
 
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+}
+
 function apply(value: BlueBubblesSettings) {
   current.value = value;
   form.serverUrl = value.serverUrl;
@@ -130,9 +134,13 @@ onMounted(load);
         <h2>系统设置</h2>
       </div>
       <nav>
-        <a class="active" href="#bluebubbles"
-          ><Cable :size="18" />BlueBubbles</a
+        <button
+          class="active"
+          type="button"
+          @click="scrollToSection('bluebubbles')"
         >
+          <Cable :size="18" />BlueBubbles
+        </button>
       </nav>
       <div class="sidebar-note">
         运行时配置保存在应用数据库中，修改后无需重新部署容器。

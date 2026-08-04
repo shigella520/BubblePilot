@@ -277,9 +277,15 @@ a {
   display: grid;
   gap: 6px;
 }
-.admin-sidebar nav a {
+.admin-sidebar nav a,
+.admin-sidebar nav button {
   display: flex;
   align-items: center;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
   gap: 9px;
   padding: 11px 13px;
   border-radius: 14px;
@@ -288,7 +294,9 @@ a {
   font-weight: 750;
 }
 .admin-sidebar nav a:hover,
-.admin-sidebar nav a.active {
+.admin-sidebar nav a.active,
+.admin-sidebar nav button:hover,
+.admin-sidebar nav button.active {
   color: var(--bubblepilot-text);
   background: rgba(255, 255, 255, 0.85);
   box-shadow: 0 9px 20px rgba(16, 19, 23, 0.05);
@@ -300,6 +308,21 @@ a {
   background: rgba(10, 132, 255, 0.07);
   font-size: 11px;
   line-height: 1.65;
+}
+.empty-cell .empty-help {
+  display: block;
+  margin-top: 8px;
+  color: var(--bubblepilot-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.inline-link {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--bubblepilot-accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
 }
 .admin-panel,
 .hero-panel,
@@ -1367,7 +1390,8 @@ legend {
   .admin-sidebar nav {
     display: flex;
   }
-  .admin-sidebar nav a {
+  .admin-sidebar nav a,
+  .admin-sidebar nav button {
     white-space: nowrap;
   }
   .two-column-forms,

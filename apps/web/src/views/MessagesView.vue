@@ -104,6 +104,10 @@ function localDateTime(value: Date) {
   return new Date(value.getTime() - offset).toISOString().slice(0, 16);
 }
 
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+}
+
 async function loadChats() {
   busy.value = true;
   message.value = "";
@@ -330,10 +334,19 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
         <h2>聊天与归档</h2>
       </div>
       <nav>
-        <a class="active" href="#monitoring"
-          ><SlidersHorizontal :size="18" />监听范围</a
-        ><a href="#search"><MessageCircle :size="18" />消息搜索</a
-        ><a href="#export"><FileJson2 :size="18" />数据导出</a>
+        <button
+          class="active"
+          type="button"
+          @click="scrollToSection('monitoring')"
+        >
+          <SlidersHorizontal :size="18" />监听范围
+        </button>
+        <button type="button" @click="scrollToSection('search')">
+          <MessageCircle :size="18" />消息搜索
+        </button>
+        <button type="button" @click="scrollToSection('export')">
+          <FileJson2 :size="18" />数据导出
+        </button>
       </nav>
       <div class="sidebar-note">
         监听变更只影响后续消息，不自动回填或删除历史。
@@ -371,7 +384,16 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
             </thead>
             <tbody>
               <tr v-if="!chats.length">
-                <td colspan="5" class="empty-cell">尚未发现聊天</td>
+                <td colspan="5" class="empty-cell">
+                  <strong>尚未发现聊天</strong>
+                  <span class="empty-help"
+                    >聊天列表由 BlueBubbles Webhook 首次投递消息后创建；REST
+                    连接验证成功并不代表 Webhook 已连通。</span
+                  >
+                  <RouterLink class="inline-link" to="/settings"
+                    >前往设置检查 BlueBubbles 配置</RouterLink
+                  >
+                </td>
               </tr>
               <tr v-for="chat in chats" :key="chat.id">
                 <td>

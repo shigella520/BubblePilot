@@ -54,6 +54,9 @@ interface TriggerPreviewResult {
 }
 
 const session = useSessionStore();
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+}
 const workflows = ref<Workflow[]>([]);
 const versions = ref<WorkflowVersion[]>([]);
 const triggers = ref<Trigger[]>([]);
@@ -397,8 +400,16 @@ onMounted(load);
         <h2>流程与触发器</h2>
       </div>
       <nav>
-        <a class="active" href="#workflows"><Boxes :size="18" />工作流</a
-        ><a href="#triggers"><GitBranch :size="18" />触发器</a>
+        <button
+          class="active"
+          type="button"
+          @click="scrollToSection('workflows')"
+        >
+          <Boxes :size="18" />工作流
+        </button>
+        <button type="button" @click="scrollToSection('triggers')">
+          <GitBranch :size="18" />触发器
+        </button>
       </nav>
       <div class="sidebar-note">
         候选版本先校验，完成二次验证后才可发布到生产消息。
