@@ -423,7 +423,7 @@ function tidy() {
   graph.setGraph({ rankdir: "LR", nodesep: 70, ranksep: 130 });
   graph.setDefaultEdgeLabel(() => ({}));
   nodes.value.forEach((node) =>
-    graph.setNode(node.id, { width: 230, height: 150 }),
+    graph.setNode(node.id, { width: 300, height: 190 }),
   );
   edges.value
     .filter((edge) => edge.kind !== "data")
@@ -435,6 +435,26 @@ function tidy() {
       ? { ...node, position: { x: point.x - 115, y: point.y - 75 } }
       : node;
   });
+}
+function ensureControlEdgeSpacing() {
+  const nodeWidth = 260;
+  const gap = 72;
+  const byId = new Map(nodes.value.map((node) => [node.id, node]));
+  // Older saved layouts can place cards directly beside each other. Nudge
+  // only overlapping control targets so their edges remain visible while
+  // preserving any deliberate spacing and vertical arrangement.
+  for (const edge of edges.value) {
+    if (edge.kind === "data") continue;
+    const source = byId.get(edge.source);
+    const target = byId.get(edge.target);
+    if (!source || !target) continue;
+    const requiredX = source.position.x + nodeWidth + gap;
+    if (
+      target.position.x < requiredX &&
+      Math.abs(target.position.y - source.position.y) < 100
+    )
+      target.position.x = requiredX;
+  }
 }
 function configFor(node: any) {
   return node.id === selected.value?.id
@@ -584,6 +604,7 @@ function hydrate(definition: any) {
         });
   }
   edges.value = result;
+  ensureControlEdgeSpacing();
   hydratedDefinition.value = JSON.stringify(definition);
 }
 watch(
