@@ -101,7 +101,7 @@ window.addEventListener("keydown", onKeydown); onBeforeUnmount(() => window.remo
     <div class="workflow-toolbar"><button class="button secondary" type="button" @click="openCreator()">＋ 添加动作</button><button class="button secondary" type="button" @click="tidy">自动整理</button><button class="button secondary" type="button" :disabled="!history.length" @click="undo">撤销</button><button class="button secondary" type="button" :disabled="!future.length" @click="redo">重做</button><label class="workflow-name-field">工作流名称<input v-model="name" maxlength="120" /></label><button class="button primary" type="button" @click="save">保存并生效</button></div>
     <div class="workflow-stage">
       <NodeCreator :blocks="props.blocks" :open="creatorOpen" @close="creatorOpen = false" @select="(block) => addBlock(block)" />
-      <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="workflow-flow" fit-view-on-init :connection-line-options="{ markerEnd: MarkerType.ArrowClosed }" :is-valid-connection="isValidConnection" @connect="connect" @pane-click="openCreatorAt" @node-click="({ node }) => selectNode(node)" @edge-click="({ edge }) => deleteEdge(edge.id)">
+      <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="workflow-flow" fit-view-on-init :connection-line-options="{ markerEnd: MarkerType.ArrowClosed }" :is-valid-connection="isValidConnection" @connect="connect" @pane-click="openCreatorAt" @node-click="({ node }) => selectNode(node)">
         <template #node-action="{ data, id }"><WorkflowNode :data="data" @add="() => openCreator()" /></template>
         <template #edge-workflow="edgeProps"><WorkflowEdge v-bind="edgeProps" @delete="deleteEdge" /></template>
         <Background pattern-color="#cbd5e1" :gap="24" /><Controls /><MiniMap pannable zoomable />
