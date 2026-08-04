@@ -11,7 +11,12 @@ import { apiRequest, errorMessage } from "../services/api";
 const route = useRoute();
 const router = useRouter();
 const workflowId = computed(() => String(route.params.workflowId ?? ""));
-const isNew = computed(() => workflowId.value === "new");
+// `/automation/new` is a static route, so it has no `workflowId` param.
+// Check the full route as well to avoid treating a new workflow as a missing
+// existing workflow and showing a misleading not-found error.
+const isNew = computed(
+  () => route.path === "/automation/new" || workflowId.value === "new",
+);
 const blocks = ref<any[]>([]);
 const workflowName = ref("");
 const definition = ref<any | undefined>(undefined);
