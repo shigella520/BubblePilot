@@ -4,6 +4,7 @@ export function newMessageWebhook(
     chatGuid?: string;
     text?: string | null;
     isFromMe?: boolean;
+    senderAddress?: string;
   } = {},
 ) {
   return {
@@ -16,7 +17,10 @@ export function newMessageWebhook(
           : overrides.text,
       dateCreated: 1_788_000_000_000,
       isFromMe: overrides.isFromMe ?? false,
-      handle: { address: "fictional-user@example.test", service: "iMessage" },
+      handle: {
+        address: overrides.senderAddress ?? "fictional-user@example.test",
+        service: "iMessage",
+      },
       chats: [
         {
           guid: overrides.chatGuid ?? "iMessage;-;fictional-chat",
