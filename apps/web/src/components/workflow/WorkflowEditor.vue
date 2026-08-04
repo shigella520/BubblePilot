@@ -1,756 +1,112 @@
 <script setup lang="ts">
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-redundant-type-constituents */
-import { computed, ref, watch } from "vue";
-import { VueFlow, Handle, Position, type Connection } from "@vue-flow/core";
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unused-expressions, vue/no-unused-vars */
+import { onBeforeUnmount, ref, watch } from "vue";
+import { VueFlow, type Connection } from "@vue-flow/core";
+import { MarkerType } from "@vue-flow/core";
+import { Background } from "@vue-flow/background";
+import { Controls } from "@vue-flow/controls";
+import { MiniMap } from "@vue-flow/minimap";
+import dagre from "@dagrejs/dagre";
+import WorkflowNode from "./WorkflowNode.vue";
+import WorkflowEdge from "./WorkflowEdge.vue";
+import NodeCreator from "./NodeCreator.vue";
+import NodeInspector from "./NodeInspector.vue";
 import "@vue-flow/core/dist/style.css";
 
-interface Block {
-  type: string;
-  version: number;
-  name: string;
-  description: string;
-  category: string;
-  inputs: Array<{
-    name: string;
-    label: string;
-    type: string;
-    required?: boolean;
-  }>;
-  outputs: Array<{ name: string; label: string; type: string }>;
-  config: Array<{
-    name: string;
-    label: string;
-    type: string;
-    required?: boolean;
-    options?: Array<{ value: string; label: string }>;
-  }>;
-  branches?: Array<{ name: string; label: string }>;
-}
-const props = defineProps<{
-  blocks: Block[];
-  workflowName?: string;
-  definition?: any;
-}>();
-const emit = defineEmits<{
-  (e: "create", name: string, definition: any): void;
-  (e: "version", name: string, definition: any): void;
-}>();
+interface Port { name: string; label: string; type: string; required?: boolean }
+interface Block { type: string; version: number; name: string; description: string; category: string; inputs: Port[]; outputs: Port[]; config: any[]; branches?: Array<{ name: string; label: string }> }
+const props = defineProps<{ blocks: Block[]; workflowName?: string; definition?: any }>();
+const emit = defineEmits<{ (event: "create", name: string, definition: any): void; (event: "version", name: string, definition: any): void }>();
 const name = ref(props.workflowName ?? "");
 const nodes = ref<any[]>([]);
 const edges = ref<any[]>([]);
 const selected = ref<any | null>(null);
 const config = ref<Record<string, any>>({});
-let hydratedDefinition = "";
-watch(
-  () => props.workflowName,
-  (value) => {
-    if (value) name.value = value;
-  },
-);
-const grouped = computed(() =>
-  props.blocks.reduce(
-    (map, block) => {
-      (map[block.category] ??= []).push(block);
-      return map;
-    },
-    {} as Record<string, Block[]>,
-  ),
-);
-const categoryLabels: Record<string, string> = {
-  control: "控制",
-  data: "数据处理",
-  context: "聊天上下文",
-  ai: "AI",
-  message: "消息",
-  observe: "观测",
-};
-function addBlock(block: Block) {
-  const id = `${block.type}-${Date.now()}`;
-  nodes.value.push({
-    id,
-    type: "action",
-    position: {
-      x: 80 + nodes.value.length * 30,
-      y: 80 + nodes.value.length * 30,
-    },
-    data: { label: block.name, block, config: defaultConfig(block) },
-  });
-  selected.value = nodes.value[nodes.value.length - 1];
-  config.value = {};
-}
-function hydrate(definition: any) {
-  if (!definition || hydratedDefinition === JSON.stringify(definition)) return;
-  const sourceNodes = (
-    Array.isArray(definition.nodes) ? definition.nodes : []
-  ) as Array<Record<string, any>>;
-  nodes.value = sourceNodes.map((item: any, index: number) => {
-    const block = props.blocks.find(
-      (candidate) => candidate.type === item.type,
-    ) ?? {
-      type: item.type,
-      version: item.version ?? 1,
-      name: item.type,
-      description: "",
-      category: "",
-      inputs: [],
-      outputs: [],
-      config: [],
-    };
-    return {
-      id: item.id,
-      type: "action",
-      position: item.position ?? { x: 80 + index * 220, y: 100 },
-      data: {
-        label: block.name,
-        block,
-        config: { ...(item.config ?? {}) },
-        inputs: item.inputs ?? {},
-      },
-    };
-  });
-  const edgeList: any[] = [];
-  for (const item of sourceNodes) {
-    for (const [kind, target] of [
-      ["success", item.onSuccess],
-      ["failure", item.onFailure],
-    ] as const) {
-      if (typeof target === "string")
-        edgeList.push({
-          id: `${item.id}-${kind}-${target}`,
-          source: item.id,
-          sourceHandle: kind,
-          target,
-          targetHandle: "control",
-          kind,
-        });
-    }
-    for (const [port, reference] of Object.entries(
-      (item.inputs ?? {}) as Record<string, unknown>,
-    )) {
-      if (
-        reference &&
-        typeof reference === "object" &&
-        (reference as any).kind === "output"
-      ) {
-        edgeList.push({
-          id: `${(reference as any).blockId}-output-${(reference as any).port}-${item.id}-${port}`,
-          source: (reference as any).blockId,
-          sourceHandle: `output:${(reference as any).port}`,
-          target: item.id,
-          targetHandle: `input:${port}`,
-          kind: "data",
-        });
-      }
-    }
-  }
-  edges.value = edgeList;
-  hydratedDefinition = JSON.stringify(definition);
-}
-watch(
-  () => props.definition,
-  (definition) => {
-    if (definition === undefined) {
-      nodes.value = [];
-      edges.value = [];
-      selected.value = null;
-      config.value = {};
-      hydratedDefinition = "";
-      return;
-    }
-    hydrate(definition);
-  },
-  { immediate: true, deep: true },
-);
+const creatorOpen = ref(false);
+const creatorPosition = ref({ x: 120, y: 120 });
+const hydratedDefinition = ref("");
+const copiedNode = ref<any | null>(null);
+const history = ref<string[]>([]);
+const future = ref<string[]>([]);
+
+function blockFor(type: string): Block { return props.blocks.find((item) => item.type === type) ?? { type, version: 1, name: type, description: "未知动作", category: "", inputs: [], outputs: [], config: [] }; }
 function defaultConfig(block: Block): Record<string, unknown> {
   const values: Record<string, unknown> = {};
-  for (const item of block.config) {
-    if (item.type === "boolean") values[item.name] = false;
-    else if (item.type === "select")
-      values[item.name] = item.options?.[0]?.value ?? "";
-    else
-      values[item.name] =
-        item.name === "promptTemplate" ? "请根据聊天上下文回答当前消息。" : "";
-  }
-  if (block.type === "load-context")
-    Object.assign(values, {
-      messageLimit: 10,
-      characterLimit: 6000,
-      includeFromMe: true,
-    });
-  if (block.type === "ai-chat")
-    Object.assign(values, {
-      timeoutMs: 60000,
-      maxOutputTokens: 1024,
-      maxOutputCharacters: 4000,
-      temperature: null,
-      outputVariable: "aiReply",
-      includeLoadedContext: true,
-    });
-  if (block.type === "reply")
-    Object.assign(values, {
-      text: "{{variables.aiReply}}",
-      replyToSourceMessage: false,
-      retry: { maxAttempts: 2, initialDelayMs: 250 },
-    });
+  for (const item of block.config) values[item.name] = item.type === "boolean" ? false : item.type === "select" ? item.options?.[0]?.value ?? "" : item.name === "promptTemplate" ? "请根据聊天上下文回答当前消息。" : "";
+  if (block.type === "load-context") Object.assign(values, { messageLimit: 10, characterLimit: 6000, includeFromMe: true });
+  if (block.type === "ai-chat") Object.assign(values, { timeoutMs: 60000, maxOutputTokens: 1024, maxOutputCharacters: 4000, temperature: null, outputVariable: "aiReply", includeLoadedContext: true });
+  if (block.type === "reply") Object.assign(values, { text: "{{variables.aiReply}}", replyToSourceMessage: false, retry: { maxAttempts: 2, initialDelayMs: 250 } });
   if (block.type === "end") values.result = "succeeded";
   return values;
 }
-function dragStart(event: DragEvent, block: Block) {
-  event.dataTransfer?.setData(
-    "application/x-action-block",
-    JSON.stringify(block),
-  );
+function snapshot() { return JSON.stringify({ nodes: nodes.value, edges: edges.value, name: name.value }); }
+function recordHistory() { history.value.push(snapshot()); if (history.value.length > 50) history.value.shift(); future.value = []; }
+function restore(raw: string) { const value = JSON.parse(raw); nodes.value = value.nodes; edges.value = value.edges; name.value = value.name; selected.value = null; config.value = {}; }
+function undo() { const previous = history.value.pop(); if (!previous) return; future.value.push(snapshot()); restore(previous); }
+function redo() { const next = future.value.pop(); if (!next) return; history.value.push(snapshot()); restore(next); }
+function addBlock(block: Block, position = creatorPosition.value) {
+  recordHistory();
+  const id = `${block.type}-${Date.now()}`;
+  const node = { id, type: "action", position: { x: position.x, y: position.y }, data: { label: block.name, block, config: defaultConfig(block), inputs: {} } };
+  nodes.value.push(node); selected.value = node; config.value = { ...node.data.config }; creatorOpen.value = false;
 }
-function drop(event: DragEvent) {
-  const raw = event.dataTransfer?.getData("application/x-action-block");
-  if (!raw) return;
-  addBlock(JSON.parse(raw) as Block);
+function openCreator(position = { x: 180, y: 160 }) { creatorPosition.value = position; creatorOpen.value = true; }
+function openCreatorAt(payload: any) {
+  const event = payload?.event as MouseEvent | undefined;
+  openCreator(event ? { x: event.offsetX, y: event.offsetY } : undefined);
 }
-function selectNode(node: any) {
-  selected.value = node;
-  config.value = { ...(node.data.config ?? {}) };
-}
-function removeSelected() {
-  if (!selected.value) return;
-  const id = selected.value.id;
-  nodes.value = nodes.value.filter((node) => node.id !== id);
-  edges.value = edges.value.filter(
-    (edge) => edge.source !== id && edge.target !== id,
-  );
-  selected.value = null;
-  config.value = {};
-}
-function save() {
-  const orderedNodes = nodes.value;
-  const runtimeOrder = orderedNodes;
-  const connectedNext = new Map(
-    edges.value
-      .filter((edge) => (edge.kind ?? edge.sourceHandle) === "success")
-      .map((edge) => [edge.source, edge.target]),
-  );
-  const connectedFailure = new Map(
-    edges.value
-      .filter((edge) => (edge.kind ?? edge.sourceHandle) === "failure")
-      .map((edge) => [edge.source, edge.target]),
-  );
-  const connectedTrue = new Map(
-    edges.value
-      .filter((edge) => edge.sourceHandle === "true")
-      .map((edge) => [edge.source, edge.target]),
-  );
-  const connectedFalse = new Map(
-    edges.value
-      .filter((edge) => edge.sourceHandle === "false")
-      .map((edge) => [edge.source, edge.target]),
-  );
-  const next = new Map(
-    runtimeOrder.map((node) => [node.id, connectedNext.get(node.id) ?? null]),
-  );
-  const runtimeNodes: any[] = runtimeOrder.map((node) => {
-    const nodeConfig = configFor(node);
-    const controlLinks = {
-      ...(next.get(node.id) ? { onSuccess: next.get(node.id) } : {}),
-      ...(connectedFailure.get(node.id)
-        ? { onFailure: connectedFailure.get(node.id) }
-        : {}),
-    };
-    switch (node.data.block.type) {
-      case "load-context":
-        return {
-          id: node.id,
-          type: "load-context",
-          version: 1,
-          config: nodeConfig,
-          ...controlLinks,
-          inputs: node.data.inputs ?? {},
-        };
-      case "ai-chat":
-        return {
-          id: node.id,
-          type: "ai-chat",
-          version: 1,
-          config: {
-            providerRouteId: nodeConfig.providerRouteId,
-            systemPrompt: nodeConfig.systemPrompt ?? "",
-            promptTemplate:
-              nodeConfig.promptTemplate ?? "请根据聊天上下文回答当前消息。",
-            includeLoadedContext: true,
-            timeoutMs: nodeConfig.timeoutMs ?? 60000,
-            maxOutputTokens: nodeConfig.maxOutputTokens ?? 1024,
-            maxOutputCharacters: nodeConfig.maxOutputCharacters ?? 4000,
-            temperature: nodeConfig.temperature ?? null,
-            outputFormat: nodeConfig.outputFormat ?? "text",
-            outputVariable: nodeConfig.outputVariable ?? "aiReply",
-          },
-          ...controlLinks,
-          inputs: node.data.inputs ?? {},
-        };
-      case "reply":
-        return {
-          id: node.id,
-          type: "reply",
-          version: 1,
-          config: {
-            text: nodeConfig.text || "{{variables.aiReply}}",
-            replyToSourceMessage: nodeConfig.replyToSourceMessage ?? false,
-            retry: nodeConfig.retry ?? { maxAttempts: 2, initialDelayMs: 250 },
-          },
-          ...controlLinks,
-          inputs: node.data.inputs ?? {},
-        };
-      case "end":
-        return {
-          id: node.id,
-          type: "end",
-          version: 1,
-          config: { result: nodeConfig.result || "succeeded" },
-        };
-      default:
-        if (node.data.block.type === "condition") {
-          return {
-            id: node.id,
-            type: "condition",
-            version: 1,
-            config: nodeConfig,
-            ...(connectedTrue.get(node.id)
-              ? { onTrue: connectedTrue.get(node.id) }
-              : {}),
-            ...(connectedFalse.get(node.id)
-              ? { onFalse: connectedFalse.get(node.id) }
-              : {}),
-          };
-        }
-        return {
-          id: node.id,
-          type: node.data.block.type,
-          version: 1,
-          config: nodeConfig,
-          ...controlLinks,
-          inputs: node.data.inputs ?? {},
-        };
-    }
-  });
-  for (const runtimeNode of runtimeNodes) {
-    if (runtimeNode.type === "condition") {
-      if (connectedTrue.get(runtimeNode.id))
-        runtimeNode.onTrue = connectedTrue.get(runtimeNode.id);
-      else delete runtimeNode.onTrue;
-      if (connectedFalse.get(runtimeNode.id))
-        runtimeNode.onFalse = connectedFalse.get(runtimeNode.id);
-      else delete runtimeNode.onFalse;
-    }
-  }
-  const definition = {
-    schemaVersion: "1",
-    name: name.value || "New workflow",
-    startNodeId: orderedNodes[0]?.id ?? "",
-    maxSteps: 64,
-    maxExecutionMs: 60000,
-    nodes: runtimeNodes,
-  };
-  if (props.definition) emit("version", name.value, definition);
-  else emit("create", name.value, definition);
-}
-function configFor(node: any) {
-  return node.id === selected.value?.id
-    ? config.value
-    : (node.data.config ?? {});
+function selectNode(node: any) { selected.value = node; config.value = { ...(node.data.config ?? {}) }; }
+function removeSelected() { if (!selected.value) return; recordHistory(); const id = selected.value.id; nodes.value = nodes.value.filter((node) => node.id !== id); edges.value = edges.value.filter((edge) => edge.source !== id && edge.target !== id); selected.value = null; config.value = {}; }
+function portType(node: any, handle: string | null | undefined): string { if (!handle) return "control"; if (handle === "control" || handle === "success" || handle === "failure" || handle === "true" || handle === "false") return "control"; const [mode, name] = handle.split(":"); const port = mode === "input" ? node.data.block.inputs.find((item: Port) => item.name === name) : node.data.block.outputs.find((item: Port) => item.name === name); return port?.type ?? "control"; }
+function hasPath(from: string, target: string, visited = new Set<string>()): boolean { if (from === target) return true; if (visited.has(from)) return false; visited.add(from); return edges.value.filter((edge) => edge.source === from && edge.kind !== "data").some((edge) => hasPath(edge.target, target, visited)); }
+function isValidConnection(connection: Connection): boolean {
+  if (!connection.source || !connection.target || connection.source === connection.target) return false;
+  const source = nodes.value.find((node) => node.id === connection.source); const target = nodes.value.find((node) => node.id === connection.target);
+  if (!source || !target || !connection.sourceHandle || !connection.targetHandle) return false;
+  if (hasPath(connection.target, connection.source)) return false;
+  const sourceType = portType(source, connection.sourceHandle); const targetType = portType(target, connection.targetHandle);
+  if (connection.sourceHandle.startsWith("output:") && !connection.targetHandle.startsWith("input:")) return false;
+  if (!connection.sourceHandle.startsWith("output:") && connection.targetHandle !== "control") return false;
+  if (sourceType === targetType || sourceType === "control" || targetType === "string") return true;
+  return false;
 }
 function connect(connection: Connection) {
-  const source = nodes.value.find((node) => node.id === connection.source);
-  const target = nodes.value.find((node) => node.id === connection.target);
-  if (
-    source &&
-    target &&
-    connection.sourceHandle?.startsWith("output:") &&
-    connection.targetHandle?.startsWith("input:")
-  ) {
-    const port = connection.targetHandle.slice("input:".length);
-    const output = connection.sourceHandle.slice("output:".length);
-    target.data.inputs = {
-      ...(target.data.inputs ?? {}),
-      [port]: { kind: "output", blockId: source.id, port: output },
-    };
-  }
-  edges.value.push({
-    ...connection,
-    kind:
-      connection.sourceHandle === "failure"
-        ? "failure"
-        : connection.sourceHandle === "true" ||
-            connection.sourceHandle === "false"
-          ? "branch"
-          : connection.sourceHandle?.startsWith("output:")
-            ? "data"
-            : "success",
-    id: `${connection.source}-${connection.target}-${Date.now()}`,
-  });
+  if (!isValidConnection(connection)) return;
+  recordHistory();
+  const source = nodes.value.find((node) => node.id === connection.source); const target = nodes.value.find((node) => node.id === connection.target);
+  const data = connection.sourceHandle?.startsWith("output:");
+  if (data && source && target && connection.targetHandle?.startsWith("input:") && connection.sourceHandle) { const input = connection.targetHandle.slice(6); const output = connection.sourceHandle.slice(7); target.data.inputs = { ...(target.data.inputs ?? {}), [input]: { kind: "output", blockId: source.id, port: output } }; }
+  const kind = connection.sourceHandle === "failure" ? "failure" : connection.sourceHandle === "true" || connection.sourceHandle === "false" ? "branch" : data ? "data" : "success";
+  edges.value = [...edges.value.filter((edge) => !(kind === "data" && edge.target === connection.target && edge.targetHandle === connection.targetHandle)), { ...connection, kind, type: "workflow" }];
 }
-watch(
-  config,
-  (value) => {
-    if (selected.value) selected.value.data.config = { ...value };
-  },
-  { deep: true },
-);
+function deleteEdge(id: string) { const edge = edges.value.find((item) => item.id === id); if (!edge) return; recordHistory(); edges.value = edges.value.filter((item) => item.id !== id); if (edge.kind === "data") { const target = nodes.value.find((node) => node.id === edge.target); const input = edge.targetHandle?.slice(6); if (target && input) { target.data.inputs = { ...(target.data.inputs ?? {}) }; delete target.data.inputs[input]; } } }
+function tidy() {
+  if (!nodes.value.length) return; recordHistory(); const graph = new dagre.graphlib.Graph(); graph.setGraph({ rankdir: "LR", nodesep: 70, ranksep: 130 }); graph.setDefaultEdgeLabel(() => ({})); nodes.value.forEach((node) => graph.setNode(node.id, { width: 230, height: 150 })); edges.value.filter((edge) => edge.kind !== "data").forEach((edge) => graph.setEdge(edge.source, edge.target)); dagre.layout(graph); nodes.value = nodes.value.map((node) => { const point = graph.node(node.id); return point ? { ...node, position: { x: point.x - 115, y: point.y - 75 } } : node; }); }
+function configFor(node: any) { return node.id === selected.value?.id ? config.value : (node.data.config ?? {}); }
+function toDefinition() {
+  const next = new Map(edges.value.filter((edge) => edge.kind === "success").map((edge) => [edge.source, edge.target])); const failure = new Map(edges.value.filter((edge) => edge.kind === "failure").map((edge) => [edge.source, edge.target])); const onTrue = new Map(edges.value.filter((edge) => edge.sourceHandle === "true").map((edge) => [edge.source, edge.target])); const onFalse = new Map(edges.value.filter((edge) => edge.sourceHandle === "false").map((edge) => [edge.source, edge.target]));
+  const runtimeNodes = nodes.value.map((node) => { const common = { id: node.id, version: 1, config: configFor(node), inputs: node.data.inputs ?? {} }; if (node.data.block.type === "condition") return { ...common, type: "condition", ...(onTrue.get(node.id) ? { onTrue: onTrue.get(node.id) } : {}), ...(onFalse.get(node.id) ? { onFalse: onFalse.get(node.id) } : {}) }; if (node.data.block.type === "end") return { ...common, type: "end" }; return { ...common, type: node.data.block.type, ...(next.get(node.id) ? { onSuccess: next.get(node.id) } : {}), ...(failure.get(node.id) ? { onFailure: failure.get(node.id) } : {}) }; });
+  return { schemaVersion: "1", name: name.value || "New workflow", startNodeId: nodes.value[0]?.id ?? "", maxSteps: 64, maxExecutionMs: 60000, nodes: runtimeNodes };
+}
+function save() { const definition = toDefinition(); if (props.definition) emit("version", name.value, definition); else emit("create", name.value, definition); }
+function hydrate(definition: any) { if (!definition || hydratedDefinition.value === JSON.stringify(definition)) return; const sourceNodes = Array.isArray(definition.nodes) ? definition.nodes : []; nodes.value = sourceNodes.map((item: any, index: number) => { const block = blockFor(item.type); return { id: item.id, type: "action", position: item.position ?? { x: 80 + index * 260, y: 100 }, data: { label: block.name, block, config: { ...(item.config ?? {}) }, inputs: item.inputs ?? {} } }; }); const result: any[] = []; for (const item of sourceNodes) { for (const [kind, target] of [["success", item.onSuccess], ["failure", item.onFailure], ["true", item.onTrue], ["false", item.onFalse]] as const) if (typeof target === "string") result.push({ id: `${item.id}-${kind}-${target}`, source: item.id, sourceHandle: kind, target, targetHandle: "control", kind, type: "workflow" }); for (const [port, reference] of Object.entries(item.inputs ?? {})) if ((reference as any)?.kind === "output") result.push({ id: `${(reference as any).blockId}-${item.id}-${port}`, source: (reference as any).blockId, sourceHandle: `output:${(reference as any).port}`, target: item.id, targetHandle: `input:${port}`, kind: "data", type: "workflow" }); } edges.value = result; hydratedDefinition.value = JSON.stringify(definition); }
+watch(() => props.workflowName, (value) => { if (value) name.value = value; }); watch(() => props.definition, (definition) => { if (definition === undefined) { nodes.value = []; edges.value = []; selected.value = null; hydratedDefinition.value = ""; return; } hydrate(definition); }, { immediate: true, deep: true }); watch(config, (value) => { if (selected.value) selected.value.data.config = { ...value }; }, { deep: true });
+function onKeydown(event: KeyboardEvent) { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); } if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c" && selected.value) copiedNode.value = JSON.parse(JSON.stringify(selected.value)); if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v" && copiedNode.value) addBlock(copiedNode.value.data.block, { x: copiedNode.value.position.x + 40, y: copiedNode.value.position.y + 40 }); }
+window.addEventListener("keydown", onKeydown); onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 </script>
+
 <template>
-  <div class="workflow-editor">
-    <aside class="action-palette">
-      <h3>动作块</h3>
-      <p class="palette-hint">点击添加，或拖到中间画布。</p>
-      <section v-for="(items, category) in grouped" :key="category">
-        <h4>{{ categoryLabels[String(category)] ?? category }}</h4>
-        <button
-          v-for="block in items"
-          :key="`${block.type}@${block.version}`"
-          draggable="true"
-          @dragstart="dragStart($event, block)"
-          @click="addBlock(block)"
-        >
-          {{ block.name }}
-        </button>
-      </section>
-    </aside>
-    <div class="workflow-canvas" @dragover.prevent @drop="drop">
-      <div class="canvas-guide">
-        <strong>连接方法</strong>
-        <span
-          ><i class="guide-dot control-dot"></i
-          >从“成功/失败”圆点拖到下一个动作左侧圆点</span
-        >
-        <span
-          ><i class="guide-dot data-dot"></i
-          >从输出圆点拖到下游对应输入圆点</span
-        >
-      </div>
-      <VueFlow
-        v-model:nodes="nodes"
-        v-model:edges="edges"
-        fit-view-on-init
-        @connect="connect"
-        @node-click="({ node }) => selectNode(node)"
-      >
-        <template #node-action="{ data }">
-          <div class="action-node">
-            <Handle
-              id="control"
-              class="control-input-handle"
-              type="target"
-              :position="Position.Left"
-            />
-            <strong>{{ data.label }}</strong>
-            <small class="node-hint">拖端口连接下一动作</small>
-            <div
-              v-for="(input, index) in data.block.inputs"
-              :key="`in-${input.name}`"
-              class="port-label input-port"
-              :style="{ top: `${38 + Number(index) * 14}%` }"
-            >
-              <Handle
-                :id="`input:${input.name}`"
-                class="data-input-handle"
-                type="target"
-                :position="Position.Left"
-              />{{ input.label }}
-            </div>
-            <small
-              v-for="(output, index) in data.block.outputs"
-              :key="output.name"
-              class="port-label output-port"
-              :style="{ top: `${38 + Number(index) * 14}%` }"
-            >
-              <Handle
-                :id="`output:${output.name}`"
-                class="data-output-handle"
-                type="source"
-                :position="Position.Right"
-              />{{ output.label }}
-            </small>
-            <template v-if="data.block.branches?.length">
-              <small
-                v-for="(branch, index) in data.block.branches"
-                :key="branch.name"
-                class="port-label branch-port"
-                :style="{ top: `${68 + Number(index) * 14}%` }"
-              >
-                <Handle
-                  :id="branch.name === 'onTrue' ? 'true' : 'false'"
-                  class="branch-handle"
-                  type="source"
-                  :position="Position.Right"
-                />{{ branch.label }}
-              </small>
-            </template>
-            <template v-else>
-              <small class="port-label control-port success-port"
-                ><Handle
-                  id="success"
-                  class="success-handle"
-                  type="source"
-                  :position="Position.Right"
-                />成功</small
-              >
-              <small
-                v-if="
-                  ['load-context', 'ai-chat', 'reply'].includes(data.block.type)
-                "
-                class="port-label control-port failure-port"
-                ><Handle
-                  id="failure"
-                  class="failure-handle"
-                  type="source"
-                  :position="Position.Right"
-                />失败</small
-              >
-            </template>
-          </div>
-        </template>
+  <div class="workflow-editor-v2">
+    <div class="workflow-toolbar"><button class="button secondary" type="button" @click="openCreator()">＋ 添加动作</button><button class="button secondary" type="button" @click="tidy">自动整理</button><button class="button secondary" type="button" :disabled="!history.length" @click="undo">撤销</button><button class="button secondary" type="button" :disabled="!future.length" @click="redo">重做</button><label class="workflow-name-field">工作流名称<input v-model="name" maxlength="120" /></label><button class="button primary" type="button" @click="save">保存并生效</button></div>
+    <div class="workflow-stage">
+      <NodeCreator :blocks="props.blocks" :open="creatorOpen" @close="creatorOpen = false" @select="(block) => addBlock(block)" />
+      <VueFlow v-model:nodes="nodes" v-model:edges="edges" class="workflow-flow" fit-view-on-init :connection-line-options="{ markerEnd: MarkerType.ArrowClosed }" :is-valid-connection="isValidConnection" @connect="connect" @pane-click="openCreatorAt" @node-click="({ node }) => selectNode(node)" @edge-click="({ edge }) => deleteEdge(edge.id)">
+        <template #node-action="{ data, id }"><WorkflowNode :data="data" @add="() => openCreator()" /></template>
+        <template #edge-workflow="edgeProps"><WorkflowEdge v-bind="edgeProps" @delete="deleteEdge" /></template>
+        <Background pattern-color="#cbd5e1" :gap="24" /><Controls /><MiniMap pannable zoomable />
+        <svg><defs><marker id="workflow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b" /></marker></defs></svg>
       </VueFlow>
+      <NodeInspector :node="selected" :config="config" @close="selected = null" @remove="removeSelected" @update:name="(value) => { if (selected) selected.data.label = value; }" />
     </div>
-    <aside class="node-inspector">
-      <label>工作流名称<input v-model="name" maxlength="120" /></label
-      ><template v-if="selected"
-        ><h3>{{ selected.data.label }}</h3>
-        <p class="node-description">{{ selected.data.block.description }}</p>
-        <div
-          v-if="selected.data.block.inputs.length"
-          class="input-reference-list"
-        >
-          <strong>输入连接</strong>
-          <span v-for="input in selected.data.block.inputs" :key="input.name">
-            {{ input.label }}：{{
-              selected.data.inputs?.[input.name]?.kind === "output"
-                ? `${selected.data.inputs[input.name].blockId} / ${selected.data.inputs[input.name].port}`
-                : "未连接"
-            }}
-          </span>
-        </div>
-        <label v-for="item in selected.data.block.config" :key="item.name"
-          ><span>{{ item.label }}</span
-          ><select v-if="item.type === 'select'" v-model="config[item.name]">
-            <option
-              v-for="option in item.options ?? []"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option></select
-          ><input
-            v-else-if="item.type !== 'boolean'"
-            v-model="config[item.name]"
-            :type="item.type === 'number' ? 'number' : 'text'" /><input
-            v-else
-            v-model="config[item.name]"
-            type="checkbox"
-        /></label>
-        <button class="button danger" type="button" @click="removeSelected">
-          删除动作块
-        </button>
-      </template>
-      <p v-else class="editor-empty-hint">
-        从左侧点击或拖入动作块，然后用端口连接执行顺序和数据引用。
-      </p>
-      <button class="button primary" type="button" @click="save">
-        保存并生效
-      </button>
-    </aside>
   </div>
 </template>
-<style scoped>
-.workflow-editor {
-  display: grid;
-  grid-template-columns: 190px minmax(420px, 1fr) 260px;
-  min-height: 560px;
-  border: 1px solid var(--line, #d9dee8);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.action-palette,
-.node-inspector {
-  padding: 16px;
-  background: var(--surface, #fff);
-  overflow: auto;
-}
-.action-palette section {
-  margin: 12px 0;
-}
-.palette-hint {
-  margin: 4px 0 14px;
-  color: #64748b;
-  font-size: 10px;
-  line-height: 1.5;
-}
-.action-palette button {
-  display: block;
-  width: 100%;
-  margin: 5px 0;
-  padding: 8px;
-  text-align: left;
-}
-.workflow-canvas {
-  position: relative;
-  min-height: 560px;
-  background: #f7f9fc;
-}
-.canvas-guide {
-  position: absolute;
-  z-index: 5;
-  top: 12px;
-  left: 50%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border: 1px solid #dbe3ef;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.94);
-  color: #64748b;
-  font-size: 9px;
-  transform: translateX(-50%);
-  box-shadow: 0 4px 12px #0f172a0d;
-  white-space: nowrap;
-}
-.canvas-guide strong {
-  color: #334155;
-}
-.canvas-guide span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.guide-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-.control-dot {
-  background: #0a84ff;
-}
-.data-dot {
-  background: #14a477;
-}
-.node-inspector label {
-  display: block;
-  margin: 12px 0;
-}
-.node-inspector input,
-.node-inspector select {
-  display: block;
-  width: 100%;
-  margin-top: 5px;
-}
-.action-node {
-  position: relative;
-  min-width: 210px;
-  min-height: 118px;
-  padding: 18px 34px;
-  border: 1px solid #94a3b8;
-  border-radius: 9px;
-  background: white;
-  box-shadow: 0 4px 12px #0f172a18;
-}
-.action-node > strong {
-  display: block;
-  max-width: 150px;
-  overflow: hidden;
-  font-size: 15px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.action-node :deep(.vue-flow__handle) {
-  z-index: 4;
-  width: 13px;
-  height: 13px;
-  border: 2px solid #fff;
-  box-shadow:
-    0 0 0 1px #64748b66,
-    0 2px 5px #0f172a33;
-}
-.action-node :deep(.control-input-handle),
-.action-node :deep(.success-handle) {
-  background: #0a84ff;
-}
-.action-node :deep(.failure-handle) {
-  background: #e35a52;
-}
-.action-node :deep(.data-input-handle),
-.action-node :deep(.data-output-handle) {
-  background: #14a477;
-}
-.action-node :deep(.branch-handle) {
-  background: #8b5cf6;
-}
-.node-hint {
-  display: block;
-  margin-top: 5px;
-  color: #94a3b8;
-  font-size: 9px;
-}
-.control-port {
-  right: -88px;
-  width: 78px;
-  text-align: left;
-}
-.success-port {
-  top: 78%;
-}
-.failure-port {
-  top: 90%;
-}
-.branch-port {
-  right: -108px;
-  width: 98px;
-  text-align: left;
-}
-.node-description {
-  margin: 4px 0 14px;
-  color: #64748b;
-  font-size: 11px;
-  line-height: 1.5;
-}
-.editor-empty-hint {
-  color: #64748b;
-  font-size: 12px;
-  line-height: 1.6;
-}
-.input-reference-list {
-  display: grid;
-  gap: 5px;
-  margin: 10px 0 14px;
-  padding: 9px;
-  border-radius: 9px;
-  background: #f8fafc;
-  color: #64748b;
-  font-size: 10px;
-}
-.input-reference-list strong {
-  color: #334155;
-  font-size: 11px;
-}
-.action-node small {
-  display: block;
-  color: #64748b;
-  margin-top: 4px;
-}
-.port-label {
-  position: absolute;
-  z-index: 2;
-  font-size: 9px;
-  color: #64748b;
-  white-space: nowrap;
-}
-.input-port {
-  left: -90px;
-  width: 80px;
-  text-align: right;
-  transform: translateY(-50%);
-}
-.output-port {
-  right: -90px;
-  width: 80px;
-  text-align: left;
-  transform: translateY(-50%);
-}
-</style>
