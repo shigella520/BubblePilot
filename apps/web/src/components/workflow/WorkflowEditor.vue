@@ -40,6 +40,13 @@ const nodes = ref<any[]>([]);
 const edges = ref<any[]>([]);
 const selected = ref<any | null>(null);
 const config = ref<Record<string, any>>({});
+let hydratedDefinition = "";
+watch(
+  () => props.workflowName,
+  (value) => {
+    if (value) name.value = value;
+  },
+);
 const grouped = computed(() =>
   props.blocks.reduce(
     (map, block) => {
@@ -63,6 +70,57 @@ function addBlock(block: Block) {
   selected.value = nodes.value[nodes.value.length - 1];
   config.value = {};
 }
+function hydrate(definition: any) {
+  if (!definition || hydratedDefinition === JSON.stringify(definition)) return;
+  const sourceNodes = (
+    Array.isArray(definition.nodes) ? definition.nodes : []
+  ) as Array<Record<string, any>>;
+  nodes.value = sourceNodes.map((item: any, index: number) => {
+    const block = props.blocks.find(
+      (candidate) => candidate.type === item.type,
+    ) ?? {
+      type: item.type,
+      version: item.version ?? 1,
+      name: item.type,
+      description: "",
+      category: "",
+      inputs: [],
+      outputs: [],
+      config: [],
+    };
+    return {
+      id: item.id,
+      type: "action",
+      position: item.position ?? { x: 80 + index * 220, y: 100 },
+      data: {
+        label: block.name,
+        block,
+        config: { ...(item.config ?? {}) },
+        inputs: item.inputs ?? {},
+      },
+    };
+  });
+  const edgeList: any[] = [];
+  for (const item of sourceNodes) {
+    for (const [kind, target] of [
+      ["success", item.onSuccess],
+      ["failure", item.onFailure],
+    ] as const) {
+      if (typeof target === "string")
+        edgeList.push({
+          id: `${item.id}-${kind}-${target}`,
+          source: item.id,
+          sourceHandle: kind,
+          target,
+          targetHandle: "input",
+          kind,
+        });
+    }
+  }
+  edges.value = edgeList;
+  hydratedDefinition = JSON.stringify(definition);
+}
+watch(() => props.definition, hydrate, { immediate: true, deep: true });
 function defaultConfig(block: Block): Record<string, unknown> {
   const values: Record<string, unknown> = {};
   for (const item of block.config) {
@@ -114,24 +172,19 @@ function selectNode(node: any) {
 }
 function save() {
   const orderedNodes = nodes.value;
-  const runtimeOrder =
-    orderedNodes[orderedNodes.length - 1]?.data.block.type === "end"
-      ? orderedNodes
-      : [
-          ...orderedNodes,
-          {
-            id: "end",
-            data: { block: { type: "end" }, config: { result: "succeeded" } },
-          },
-        ];
+  const runtimeOrder = orderedNodes;
   const connectedNext = new Map(
-    edges.value.map((edge) => [edge.source, edge.target]),
+    edges.value
+      .filter((edge) => (edge.kind ?? edge.sourceHandle) === "success")
+      .map((edge) => [edge.source, edge.target]),
+  );
+  const connectedFailure = new Map(
+    edges.value
+      .filter((edge) => (edge.kind ?? edge.sourceHandle) === "failure")
+      .map((edge) => [edge.source, edge.target]),
   );
   const next = new Map(
-    runtimeOrder.map((node, index) => [
-      node.id,
-      connectedNext.get(node.id) ?? runtimeOrder[index + 1]?.id ?? null,
-    ]),
+    runtimeOrder.map((node) => [node.id, connectedNext.get(node.id) ?? null]),
   );
   const runtimeNodes = runtimeOrder.map((node) => {
     const nodeConfig = configFor(node);
@@ -143,6 +196,8 @@ function save() {
           version: 1,
           config: nodeConfig,
           onSuccess: next.get(node.id),
+          onFailure: connectedFailure.get(node.id) ?? null,
+          inputs: node.data.inputs ?? {},
         };
       case "ai-chat":
         return {
@@ -163,6 +218,8 @@ function save() {
             outputVariable: nodeConfig.outputVariable ?? "aiReply",
           },
           onSuccess: next.get(node.id),
+          onFailure: connectedFailure.get(node.id) ?? null,
+          inputs: node.data.inputs ?? {},
         };
       case "reply":
         return {
@@ -175,6 +232,8 @@ function save() {
             retry: nodeConfig.retry ?? { maxAttempts: 2, initialDelayMs: 250 },
           },
           onSuccess: next.get(node.id),
+          onFailure: connectedFailure.get(node.id) ?? null,
+          inputs: node.data.inputs ?? {},
         };
       case "end":
         return {
@@ -190,6 +249,8 @@ function save() {
           version: 1,
           config: nodeConfig,
           onSuccess: next.get(node.id),
+          onFailure: connectedFailure.get(node.id) ?? null,
+          inputs: node.data.inputs ?? {},
         };
     }
   });
@@ -210,8 +271,24 @@ function configFor(node: any) {
     : (node.data.config ?? {});
 }
 function connect(connection: Connection) {
+  const source = nodes.value.find((node) => node.id === connection.source);
+  const target = nodes.value.find((node) => node.id === connection.target);
+  if (
+    source &&
+    target &&
+    connection.sourceHandle?.startsWith("output:") &&
+    connection.targetHandle?.startsWith("input:")
+  ) {
+    const port = connection.targetHandle.slice("input:".length);
+    const output = connection.sourceHandle.slice("output:".length);
+    target.data.inputs = {
+      ...(target.data.inputs ?? {}),
+      [port]: { kind: "output", blockId: source.id, port: output },
+    };
+  }
   edges.value.push({
     ...connection,
+    kind: connection.sourceHandle === "failure" ? "failure" : "success",
     id: `${connection.source}-${connection.target}-${Date.now()}`,
   });
 }
@@ -249,13 +326,41 @@ watch(
         @node-click="({ node }) => selectNode(node)"
         ><template #node-action="{ data }"
           ><div class="action-node">
-            <Handle type="target" :position="Position.Left" /><strong>{{
-              data.label
-            }}</strong
-            ><small v-for="output in data.block.outputs" :key="output.name">{{
-              output.label
-            }}</small
-            ><Handle type="source" :position="Position.Right" /></div></template
+            <strong>{{ data.label }}</strong>
+            <div
+              v-for="(input, index) in data.block.inputs"
+              :key="`in-${input.name}`"
+              class="port-label input-port"
+              :style="{ top: `${30 + Number(index) * 14}%` }"
+            >
+              <Handle
+                :id="`input:${input.name}`"
+                type="target"
+                :position="Position.Left"
+              />{{ input.label }}
+            </div>
+            ><small
+              v-for="(output, index) in data.block.outputs"
+              :key="output.name"
+              class="port-label output-port"
+              :style="{ top: `${30 + Number(index) * 14}%` }"
+              ><Handle
+                :id="`output:${output.name}`"
+                type="source"
+                :position="Position.Right"
+              />{{ output.label }}</small
+            ><Handle
+              id="success"
+              type="source"
+              :position="Position.Right"
+              :style="{ top: '82%' }"
+            />
+            <Handle
+              id="failure"
+              type="source"
+              :position="Position.Right"
+              :style="{ top: '70%' }"
+            /></div></template
       ></VueFlow>
     </div>
     <aside class="node-inspector">
@@ -280,7 +385,7 @@ watch(
             v-model="config[item.name]"
             type="checkbox" /></label></template
       ><button class="button primary" type="button" @click="save">
-        保存候选版本
+        保存并生效
       </button>
     </aside>
   </div>
@@ -325,6 +430,7 @@ watch(
   margin-top: 5px;
 }
 .action-node {
+  position: relative;
   min-width: 150px;
   padding: 12px;
   border: 1px solid #94a3b8;
@@ -336,5 +442,19 @@ watch(
   display: block;
   color: #64748b;
   margin-top: 4px;
+}
+.port-label {
+  position: absolute;
+  font-size: 10px;
+  color: #64748b;
+  white-space: nowrap;
+}
+.input-port {
+  left: 8px;
+  transform: translateY(-50%);
+}
+.output-port {
+  right: 8px;
+  transform: translateY(-50%);
 }
 </style>

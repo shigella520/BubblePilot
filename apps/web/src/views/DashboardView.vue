@@ -78,31 +78,21 @@ async function load() {
   busy.value = true;
   message.value = "";
   try {
-    const [chats, workflows, providers, executions, runtime, events] =
-      await Promise.all([
-        apiRequest<unknown[]>("/api/v1/chats?limit=100"),
-        apiRequest<unknown[]>("/api/v1/workflows"),
-        apiRequest<unknown[]>("/api/v1/ai/providers"),
-        apiRequest<
-          Array<{
-            id: string;
-            workflowName: string;
-            status: string;
-            createdAt: string;
-          }>
-        >("/api/v1/executions?limit=8"),
-        apiRequest<NonNullable<typeof operations.value>>(
-          "/api/v1/operations/status",
-        ),
-        apiRequest<InboundEvent[]>("/api/v1/inbound-events?limit=8"),
-      ]);
+    const [chats, workflows, providers, runtime, events] = await Promise.all([
+      apiRequest<unknown[]>("/api/v1/chats?limit=100"),
+      apiRequest<unknown[]>("/api/v1/workflows"),
+      apiRequest<unknown[]>("/api/v1/ai/providers"),
+      apiRequest<NonNullable<typeof operations.value>>(
+        "/api/v1/operations/status",
+      ),
+      apiRequest<InboundEvent[]>("/api/v1/inbound-events?limit=8"),
+    ]);
     Object.assign(counts, {
       chats: chats.length,
       workflows: workflows.length,
       providers: providers.length,
-      executions: executions.length,
+      executions: 0,
     });
-    recent.value = executions;
     operations.value = runtime;
     inboundEvents.value = events;
   } catch (cause) {

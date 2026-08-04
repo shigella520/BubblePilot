@@ -258,8 +258,10 @@ export class AiManagementService {
         ? null
         : await this.repository.selectCandidates({
             ...storedSnapshot,
-            providers: storedSnapshot.providers.filter((provider) =>
-              isProviderSecretConfigured(provider, this.secrets),
+            providers: storedSnapshot.providers.filter(
+              (provider) =>
+                provider.enabled &&
+                isProviderSecretConfigured(provider, this.secrets),
             ),
           });
     const effectiveProviderIds =
