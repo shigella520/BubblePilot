@@ -122,4 +122,42 @@ describe("BlueBubblesSettingsService", () => {
     );
     await expect(service.verifyWebhookSecret("wrong")).resolves.toBe(false);
   });
+
+  it("tests REST connectivity without returning credentials", async () => {
+    const repository = new InMemoryBlueBubblesSettingsRepository();
+    const fetchImplementation: typeof fetch = (input, init) => {
+      const requestUrl =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      expect(requestUrl).toContain("/api/v1/server/info?password=");
+      expect(init?.method).toBe("GET");
+      return Promise.resolve(
+        new Response(JSON.stringify({ data: { version: "1.0.0" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    const service = new BlueBubblesSettingsService(
+      repository,
+      new SettingsCipher("fictional-settings-key-32-characters"),
+      {
+        serverUrl: "https://bluebubbles.example.test",
+        accessToken: "environment-token",
+        webhookSecret: "e".repeat(32),
+        sendMethod: "private-api",
+        requestTimeoutMs: 30_000,
+      },
+      fetchImplementation,
+    );
+
+    await expect(service.testConnection()).resolves.toMatchObject({
+      status: "connected",
+      code: null,
+      message: "BlueBubbles REST API 连接成功。",
+    });
+  });
 });

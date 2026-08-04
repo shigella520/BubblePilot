@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { Cable, RefreshCw, Save, Settings2, ShieldCheck } from "@lucide/vue";
+import {
+  Cable,
+  CheckCircle2,
+  RefreshCw,
+  Save,
+  Settings2,
+  ShieldCheck,
+  XCircle,
+} from "@lucide/vue";
 import { onMounted, reactive, ref } from "vue";
 
 import SensitiveUnlock from "../components/SensitiveUnlock.vue";
@@ -20,6 +28,13 @@ interface BlueBubblesSettings {
 const session = useSessionStore();
 const busy = ref(false);
 const saveBusy = ref(false);
+const testBusy = ref(false);
+const testResult = ref<{
+  status: "connected" | "failed";
+  durationMs: number;
+  code: string | null;
+  message: string;
+} | null>(null);
 const message = ref("");
 const messageIsError = ref(false);
 const current = ref<BlueBubblesSettings | null>(null);
@@ -87,6 +102,23 @@ async function save() {
   }
 }
 
+async function testConnection() {
+  if (!session.sensitiveActive || testBusy.value) return;
+  testBusy.value = true;
+  testResult.value = null;
+  try {
+    testResult.value = await apiRequest<typeof testResult.value>(
+      "/api/v1/integrations/bluebubbles/test",
+      { method: "POST" },
+    );
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    testBusy.value = false;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -127,6 +159,25 @@ onMounted(load);
           配置消息网关地址、访问令牌、Webhook Secret 和发送方式。Secret
           使用服务端密钥加密保存，页面不会回显原值。
         </p>
+
+        <div class="form-actions settings-test-actions">
+          <button
+            class="button secondary"
+            type="button"
+            :disabled="!session.sensitiveActive || testBusy"
+            @click="testConnection"
+          >
+            <Cable :size="16" />{{ testBusy ? "验证中…" : "验证服务连接" }}
+          </button>
+          <span v-if="testResult" class="panel-description">
+            <CheckCircle2 v-if="testResult.status === 'connected'" :size="15" />
+            <XCircle v-else :size="15" />
+            {{ testResult.message }}（{{ testResult.durationMs }} ms<span
+              v-if="testResult.code"
+              >，{{ testResult.code }}</span
+            >）
+          </span>
+        </div>
 
         <div v-if="current" class="provider-list settings-status-list">
           <article>

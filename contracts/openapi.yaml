@@ -122,6 +122,17 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/integrations/bluebubbles/test:
+    post:
+      operationId: testBlueBubblesConnection
+      description: 使用当前运行时配置执行无副作用的 BlueBubbles REST 连通性检查，不返回凭据。
+      security:
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 返回连接状态、耗时和脱敏错误分类。
+        "403":
+          $ref: "#/components/responses/Error"
   /api/v1/audit-events:
     get:
       operationId: listAuditEvents

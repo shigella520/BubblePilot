@@ -3,6 +3,7 @@ import type { SettingsCipher } from "./settings-cipher.js";
 import type { BlueBubblesSettingsRepository } from "./settings-repository.js";
 import type {
   BlueBubblesRuntimeSettings,
+  BlueBubblesConnectionTestResult,
   BlueBubblesSettingsUpdate,
   BlueBubblesSettingsView,
 } from "./settings-types.js";
@@ -12,6 +13,7 @@ export class BlueBubblesSettingsService {
     readonly repository: BlueBubblesSettingsRepository,
     private readonly cipher: SettingsCipher,
     private readonly fallback: BlueBubblesRuntimeSettings,
+    private readonly fetchImplementation: typeof fetch = fetch,
   ) {}
 
   async view(): Promise<BlueBubblesSettingsView> {
@@ -89,5 +91,61 @@ export class BlueBubblesSettingsService {
   async verifyWebhookSecret(candidate: string | undefined): Promise<boolean> {
     const settings = await this.resolve();
     return secretsEqual(candidate, settings.webhookSecret);
+  }
+
+  async testConnection(): Promise<BlueBubblesConnectionTestResult> {
+    const settings = await this.resolve();
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      settings.requestTimeoutMs,
+    );
+    try {
+      const endpoint = new URL("/api/v1/server/info", `${settings.serverUrl}/`);
+      endpoint.searchParams.set("password", settings.accessToken);
+      const response = await this.fetchImplementation(endpoint, {
+        method: "GET",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const code =
+          response.status === 401 || response.status === 403
+            ? "BLUEBUBBLES_INVALID_ACCESS_TOKEN"
+            : `BLUEBUBBLES_HTTP_${response.status}`;
+        return {
+          status: "failed",
+          durationMs: Date.now() - startedAt,
+          code,
+          message:
+            response.status === 401 || response.status === 403
+              ? "BlueBubbles 拒绝了 Access Token。"
+              : `BlueBubbles 服务返回 HTTP ${response.status}。`,
+        };
+      }
+      return {
+        status: "connected",
+        durationMs: Date.now() - startedAt,
+        code: null,
+        message: "BlueBubbles REST API 连接成功。",
+      };
+    } catch (error) {
+      const timedOut =
+        error instanceof Error &&
+        (error.name === "AbortError" || controller.signal.aborted);
+      return {
+        status: "failed",
+        durationMs: Date.now() - startedAt,
+        code: timedOut
+          ? "BLUEBUBBLES_CONNECTION_TIMEOUT"
+          : "BLUEBUBBLES_CONNECTION_FAILED",
+        message: timedOut
+          ? "连接 BlueBubbles 超时，请检查地址和网络。"
+          : "无法连接 BlueBubbles，请检查 Server URL、网络和服务状态。",
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }

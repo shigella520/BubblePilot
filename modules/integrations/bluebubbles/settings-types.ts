@@ -21,6 +21,13 @@ export interface BlueBubblesSettingsView {
   updatedAt: string | null;
 }
 
+export interface BlueBubblesConnectionTestResult {
+  status: "connected" | "failed";
+  durationMs: number;
+  code: string | null;
+  message: string;
+}
+
 export const blueBubblesSettingsUpdateSchema = z.object({
   serverUrl: z
     .string()
