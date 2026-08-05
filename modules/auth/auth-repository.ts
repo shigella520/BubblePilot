@@ -31,7 +31,10 @@ export interface AuthRepository {
     now: Date,
   ): Promise<SensitiveGrantRecord | null>;
   recordAudit(event: AuditEventInput): Promise<AuditEventView>;
-  listAuditEvents(limit: number): Promise<readonly AuditEventView[]>;
+  listAuditEvents(options: {
+    limit: number;
+    cursor: { timestamp: Date; id: string } | null;
+  }): Promise<readonly AuditEventView[]>;
   isReady(): Promise<boolean>;
   close(): Promise<void>;
 }

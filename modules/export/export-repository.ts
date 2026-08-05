@@ -20,7 +20,10 @@ export interface DataExportRepository {
   listJobs(
     owner: DataExportOwner,
     now: Date,
-    limit: number,
+    options: {
+      limit: number;
+      cursor: { timestamp: Date; id: string } | null;
+    },
   ): Promise<readonly DataExportJob[]>;
   confirmJob(input: {
     id: string;

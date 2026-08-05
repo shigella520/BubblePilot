@@ -11,9 +11,11 @@ import {
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
+import CursorPagination from "../components/CursorPagination.vue";
 import SensitiveUnlock from "../components/SensitiveUnlock.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
-import { apiRequest, errorMessage } from "../services/api";
+import { useCursorPager } from "../composables/useCursorPager";
+import { apiPageRequest, apiRequest, errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
 
 interface Execution {
@@ -68,6 +70,26 @@ interface ExecutionDetail extends Execution {
     errorCode: string | null;
     retryable: boolean | null;
     fallbackAllowed: boolean | null;
+    diagnostics: {
+      clientRequestId: string | null;
+      providerRequestId: string | null;
+      httpStatus: number | null;
+      requestHash: string;
+      requestMessageCount: number;
+      requestCharacters: number;
+      responseBytes: number | null;
+      responseBodyHash: string | null;
+      responseFinishReason: string | null;
+      responseContentCharacters: number | null;
+      responseReasoningCharacters: number | null;
+      promptTokens: number | null;
+      completionTokens: number | null;
+      reasoningTokens: number | null;
+      totalTokens: number | null;
+      cachedPromptTokens: number | null;
+      cacheWritePromptTokens: number | null;
+      cacheMissPromptTokens: number | null;
+    } | null;
   }>;
 }
 interface AuditEvent {
@@ -82,18 +104,31 @@ interface AuditEvent {
   occurredAt: string;
 }
 
-const executions = ref<Execution[]>([]);
-const audits = ref<AuditEvent[]>([]);
 const detail = ref<ExecutionDetail | null>(null);
 const message = ref("");
 const messageIsError = ref(false);
-const busy = ref(false);
 const recoveryBusy = ref(false);
 const recoveryOnly = ref(false);
 const detailLoadingId = ref<string | null>(null);
 let inspectRequestId = 0;
 const route = useRoute();
 const session = useSessionStore();
+const executionPager = useCursorPager<Execution>((cursor) => {
+  const query = new URLSearchParams({ limit: "50" });
+  if (recoveryOnly.value) {
+    query.set("status", "retrying,failed,dead-lettered,closed");
+  }
+  if (cursor !== null) query.set("cursor", cursor);
+  return apiPageRequest<Execution[]>(`/api/v1/executions?${query}`);
+});
+const auditPager = useCursorPager<AuditEvent>((cursor) => {
+  const query = new URLSearchParams({ limit: "50" });
+  if (cursor !== null) query.set("cursor", cursor);
+  return apiPageRequest<AuditEvent[]>(`/api/v1/audit-events?${query}`);
+});
+const executions = executionPager.items;
+const audits = auditPager.items;
+const busy = computed(() => executionPager.busy.value || auditPager.busy.value);
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
@@ -125,37 +160,50 @@ function providerHealthLabel(state: string) {
   return providerHealthLabels[state] ?? state;
 }
 
-async function load(): Promise<boolean> {
-  // Sensitive endpoints must never be requested before the unlock grant.
-  if (!session.sensitiveActive) {
-    executions.value = [];
-    audits.value = [];
-    busy.value = false;
+async function load(reset = false): Promise<boolean> {
+  if (!session.authenticated) {
+    executionPager.clear();
+    auditPager.clear();
     return false;
   }
-  busy.value = true;
   message.value = "";
   messageIsError.value = false;
   try {
-    [executions.value, audits.value] = await Promise.all([
-      apiRequest<Execution[]>(
-        recoveryOnly.value
-          ? "/api/v1/executions?limit=100&status=retrying,failed,dead-lettered,closed"
-          : "/api/v1/executions?limit=100",
-      ),
-      apiRequest<AuditEvent[]>("/api/v1/audit-events?limit=100"),
-    ]);
+    const requests = [
+      reset ? executionPager.first() : executionPager.refresh(),
+    ];
+    if (session.sensitiveActive) {
+      requests.push(reset ? auditPager.first() : auditPager.refresh());
+    } else {
+      auditPager.clear();
+    }
+    await Promise.all(requests);
     return true;
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
     return false;
-  } finally {
-    busy.value = false;
   }
 }
+
+async function changePage(action: () => Promise<boolean>) {
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    await action();
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  }
+}
+
+async function toggleRecoveryOnly() {
+  recoveryOnly.value = !recoveryOnly.value;
+  clearDetail();
+  await changePage(executionPager.first);
+}
 async function inspect(id: string) {
-  if (!session.sensitiveActive) return;
+  if (!session.authenticated) return;
   const requestId = ++inspectRequestId;
   detailLoadingId.value = id;
   message.value = "";
@@ -180,7 +228,7 @@ function clearDetail() {
   detail.value = null;
 }
 async function loadSelected() {
-  await load();
+  await load(true);
   const executionId = route.query.executionId;
   if (typeof executionId === "string") await inspect(executionId);
 }
@@ -204,7 +252,7 @@ async function recover(action: "retry" | "close") {
       { method: "POST" },
     );
     detail.value = result;
-    if (await load()) {
+    if (await executionPager.refresh()) {
       message.value =
         action === "retry" ? "已创建并执行恢复尝试。" : "执行已人工关闭。";
     }
@@ -222,19 +270,30 @@ watch(
   },
 );
 onMounted(() => {
-  if (session.sensitiveActive) void loadSelected();
+  if (session.authenticated) void loadSelected();
 });
 watch(
-  () => session.sensitiveActive,
+  () => session.authenticated,
   (active) => {
     if (active) void loadSelected();
     else {
-      executions.value = [];
-      audits.value = [];
+      executionPager.clear();
+      auditPager.clear();
       clearDetail();
     }
   },
 );
+watch(
+  () => session.sensitiveActive,
+  (active) => {
+    if (active) void changePage(resetAuditPage);
+    else auditPager.clear();
+  },
+);
+
+function resetAuditPage(): Promise<boolean> {
+  return auditPager.first();
+}
 </script>
 
 <template>
@@ -262,7 +321,6 @@ watch(
       </div>
     </aside>
     <div class="admin-workspace">
-      <SensitiveUnlock />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"
@@ -279,23 +337,19 @@ watch(
             <button
               class="button tiny"
               :class="recoveryOnly ? 'primary' : 'secondary'"
-              @click="
-                recoveryOnly = !recoveryOnly;
-                load();
-              "
+              @click="toggleRecoveryOnly"
             >
               恢复队列</button
-            ><button class="button secondary" :disabled="busy" @click="load">
+            ><button
+              class="button secondary"
+              :disabled="busy"
+              @click="load(false)"
+            >
               <RefreshCw :size="16" />刷新
             </button>
           </div>
         </div>
-        <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
-          <FileClock :size="24" />
-          <strong>执行记录已遮蔽</strong>
-          <span>完成二次验证后才能查看工作流执行轨迹。</span>
-        </div>
-        <div v-else class="table-shell">
+        <div class="table-shell">
           <table>
             <thead>
               <tr>
@@ -344,6 +398,15 @@ watch(
             </tbody>
           </table>
         </div>
+        <CursorPagination
+          :page="executionPager.pageNumber.value"
+          :item-count="executions.length"
+          :busy="executionPager.busy.value"
+          :has-previous="executionPager.hasPrevious.value"
+          :has-next="executionPager.hasNext.value"
+          @previous="changePage(executionPager.previous)"
+          @next="changePage(executionPager.next)"
+        />
       </section>
       <section v-if="detail" class="admin-panel trace-detail">
         <div class="panel-head">
@@ -442,6 +505,44 @@ watch(
                     item.fallbackAllowed ? "允许 Fallback" : "停止 Fallback"
                   }}</span
                 >
+                <p v-if="item.diagnostics" class="keyline">
+                  HTTP {{ item.diagnostics.httpStatus ?? "—" }} · 请求
+                  {{ item.diagnostics.requestMessageCount }} 条消息 /
+                  {{ item.diagnostics.requestCharacters }} 字符 · 响应
+                  {{ item.diagnostics.responseBytes ?? "—" }} B · 可见输出
+                  {{ item.diagnostics.responseContentCharacters ?? "—" }} 字符
+                </p>
+                <p v-if="item.diagnostics" class="keyline">
+                  Token：输入 {{ item.diagnostics.promptTokens ?? "—" }} · 输出
+                  {{ item.diagnostics.completionTokens ?? "—" }} · 推理
+                  {{ item.diagnostics.reasoningTokens ?? "—" }} · 缓存命中
+                  {{ item.diagnostics.cachedPromptTokens ?? "—" }} · 缓存写入
+                  {{ item.diagnostics.cacheWritePromptTokens ?? "—" }} · 未命中
+                  {{ item.diagnostics.cacheMissPromptTokens ?? "—" }}
+                </p>
+                <span v-if="item.diagnostics?.providerRequestId" class="keyline"
+                  >Provider Request ID：{{
+                    item.diagnostics.providerRequestId
+                  }}</span
+                >
+                <span
+                  v-if="item.diagnostics?.responseFinishReason"
+                  class="keyline"
+                  >Finish Reason：{{ item.diagnostics.responseFinishReason }} ·
+                  推理字段
+                  {{ item.diagnostics.responseReasoningCharacters ?? 0 }}
+                  字符</span
+                >
+                <details v-if="item.diagnostics" class="keyline">
+                  <summary>诊断标识</summary>
+                  <code
+                    >client={{ item.diagnostics.clientRequestId || "—" }}</code
+                  >
+                  <code>request={{ item.diagnostics.requestHash }}</code>
+                  <code v-if="item.diagnostics.responseBodyHash"
+                    >response={{ item.diagnostics.responseBodyHash }}</code
+                  >
+                </details>
               </div>
             </article>
             <div
@@ -476,6 +577,7 @@ watch(
           </div>
           <span class="state-badge">不含正文与 Secret</span>
         </div>
+        <SensitiveUnlock />
         <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
           <ShieldCheck :size="24" />
           <strong>审计事件已遮蔽</strong>
@@ -515,6 +617,16 @@ watch(
             </tbody>
           </table>
         </div>
+        <CursorPagination
+          v-if="session.sensitiveActive"
+          :page="auditPager.pageNumber.value"
+          :item-count="audits.length"
+          :busy="auditPager.busy.value"
+          :has-previous="auditPager.hasPrevious.value"
+          :has-next="auditPager.hasNext.value"
+          @previous="changePage(auditPager.previous)"
+          @next="changePage(auditPager.next)"
+        />
       </section>
     </div>
   </main>

@@ -113,8 +113,104 @@ describe("OpenAiCompatibleClient", () => {
         request,
       ),
     ).resolves.toMatchObject({ status: "succeeded", text: "LAN answer" });
-    expect(fetchImplementation.mock.calls[0]?.[1]?.headers).toEqual({
+    expect(fetchImplementation.mock.calls[0]?.[1]?.headers).toMatchObject({
+      accept: "application/json",
       "content-type": "application/json",
+    });
+  });
+
+  it("records response shape, request IDs, token usage, and cache counters without content", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: { content: "Answer" },
+            },
+          ],
+          usage: {
+            prompt_tokens: 200,
+            completion_tokens: 12,
+            total_tokens: 212,
+            prompt_cache_hit_tokens: 160,
+            prompt_cache_miss_tokens: 40,
+          },
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-request-id": "provider-request-123",
+          },
+        },
+      ),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+
+    const result = await client.call(provider, {
+      ...request,
+      clientRequestId: "execution:node:1:1",
+    });
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      diagnostics: {
+        clientRequestId: "execution:node:1:1",
+        providerRequestId: "provider-request-123",
+        httpStatus: 200,
+        requestMessageCount: 2,
+        responseFinishReason: "stop",
+        responseContentCharacters: 6,
+        promptTokens: 200,
+        completionTokens: 12,
+        totalTokens: 212,
+        cachedPromptTokens: 160,
+        cacheMissPromptTokens: 40,
+      },
+    });
+    expect(JSON.stringify(result.diagnostics)).not.toContain("Answer");
+    expect(fetchImplementation.mock.calls[0]?.[1]?.headers).toMatchObject({
+      "x-client-request-id": "execution:node:1:1",
+    });
+  });
+
+  it("classifies a blank final answer as retryable and records reasoning metadata", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "stop",
+              message: {
+                content: "",
+                reasoning_content: "private reasoning",
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+
+    await expect(client.call(provider, request)).resolves.toMatchObject({
+      status: "failed",
+      code: "AI_PROVIDER_EMPTY_OUTPUT",
+      retryable: true,
+      countsForDegrade: true,
+      diagnostics: {
+        httpStatus: 200,
+        responseFinishReason: "stop",
+        responseContentCharacters: 0,
+        responseReasoningCharacters: "private reasoning".length,
+      },
     });
   });
 

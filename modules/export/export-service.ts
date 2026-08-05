@@ -39,9 +39,12 @@ export class DataExportService {
 
   list(
     owner: DataExportOwner,
-    limit: number,
+    options: {
+      limit: number;
+      cursor: { timestamp: Date; id: string } | null;
+    },
   ): Promise<readonly DataExportJob[]> {
-    return this.repository.listJobs(owner, this.now(), limit);
+    return this.repository.listJobs(owner, this.now(), options);
   }
 
   confirm(

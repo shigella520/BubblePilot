@@ -82,14 +82,29 @@ export class InMemoryDataExportRepository implements DataExportRepository {
   listJobs(
     owner: DataExportOwner,
     now: Date,
-    limit: number,
+    options: {
+      limit: number;
+      cursor: { timestamp: Date; id: string } | null;
+    },
   ): Promise<readonly DataExportJob[]> {
+    const cursorTimestamp = options.cursor?.timestamp.toISOString();
     return Promise.resolve(
       [...this.jobs.values()]
         .filter((stored) => this.sameOwner(stored.owner, owner))
         .map((stored) => this.currentJob(stored.job, now))
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-        .slice(0, limit)
+        .filter(
+          (job) =>
+            cursorTimestamp === undefined ||
+            job.createdAt < cursorTimestamp ||
+            (job.createdAt === cursorTimestamp &&
+              job.id < (options.cursor?.id ?? "")),
+        )
+        .sort(
+          (left, right) =>
+            right.createdAt.localeCompare(left.createdAt) ||
+            right.id.localeCompare(left.id),
+        )
+        .slice(0, options.limit)
         .map((job) => structuredClone(job)),
     );
   }

@@ -96,12 +96,17 @@ async function provider(
 async function route(
   repository: InMemoryAiRepository,
   providerIds: readonly string[],
-  options: { threshold?: number; cooldownMs?: number; rounds?: number } = {},
+  options: {
+    threshold?: number;
+    cooldownMs?: number;
+    rounds?: number;
+    fallbackEnabled?: boolean;
+  } = {},
 ) {
   const result = await repository.createRoute({
     name: "Fictional route",
     providerIds,
-    fallbackEnabled: true,
+    fallbackEnabled: options.fallbackEnabled ?? true,
     retryPolicy: {
       maxRounds: options.rounds ?? 2,
       initialDelayMs: 0,
@@ -177,6 +182,82 @@ describe("AiRoutingService", () => {
       { round: 2, sequence: 1 },
       { round: 2, sequence: 2 },
     ]);
+  });
+
+  it("retries a transient empty response from the same provider", async () => {
+    const repository = new InMemoryAiRepository();
+    const primary = await provider(repository, "primary");
+    const configuredRoute = await route(repository, [primary.id], {
+      rounds: 2,
+      threshold: 10,
+    });
+    const client = new FakeAiClient((_, callNumber) =>
+      callNumber === 1
+        ? {
+            status: "failed",
+            category: "empty-output",
+            code: "AI_PROVIDER_EMPTY_OUTPUT",
+            summary: "Fictional provider returned no visible output.",
+            retryable: true,
+            fallbackAllowed: true,
+            countsForDegrade: true,
+            durationMs: 8,
+          }
+        : { status: "succeeded", text: "Recovered answer", durationMs: 8 },
+    );
+    const service = new AiRoutingService(repository, client, secretResolver());
+
+    await expect(
+      service.execute(routeRequest(configuredRoute.id)),
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      text: "Recovered answer",
+      attemptCount: 2,
+    });
+    expect(client.calls).toEqual([primary.id, primary.id]);
+    expect(repository.attempts).toMatchObject([
+      {
+        status: "failed",
+        errorCode: "AI_PROVIDER_EMPTY_OUTPUT",
+        retryable: true,
+        diagnostics: null,
+      },
+      { status: "succeeded", diagnostics: null },
+    ]);
+  });
+
+  it("keeps retrying one provider when fallback switching is disabled", async () => {
+    const repository = new InMemoryAiRepository();
+    const primary = await provider(repository, "primary");
+    const configuredRoute = await route(repository, [primary.id], {
+      rounds: 2,
+      fallbackEnabled: false,
+      threshold: 10,
+    });
+    const client = new FakeAiClient((_, callNumber) =>
+      callNumber === 1
+        ? {
+            status: "failed",
+            category: "empty-output",
+            code: "AI_PROVIDER_EMPTY_OUTPUT",
+            summary: "Fictional provider returned no visible output.",
+            retryable: true,
+            fallbackAllowed: true,
+            countsForDegrade: true,
+            durationMs: 8,
+          }
+        : { status: "succeeded", text: "Recovered answer", durationMs: 8 },
+    );
+    const service = new AiRoutingService(repository, client, secretResolver());
+
+    await expect(
+      service.execute(routeRequest(configuredRoute.id)),
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      text: "Recovered answer",
+      attemptCount: 2,
+    });
+    expect(client.calls).toEqual([primary.id, primary.id]);
   });
 
   it("keeps the locked route and provider snapshot while an attempt is running", async () => {

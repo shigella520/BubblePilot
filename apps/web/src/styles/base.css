@@ -579,6 +579,19 @@ a {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.58);
 }
+.cursor-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 42px;
+  padding: 10px 2px 0;
+  color: var(--bubblepilot-muted);
+  font-size: 11px;
+}
+.cursor-pagination .row-actions {
+  flex-wrap: nowrap;
+}
 table {
   width: 100%;
   min-width: 720px;

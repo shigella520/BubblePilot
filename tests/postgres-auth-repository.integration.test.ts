@@ -48,7 +48,9 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAuthRepository", () => {
       correlationId: randomUUID(),
       metadata: { fixture: true },
     });
-    await expect(repository.listAuditEvents(200)).resolves.toEqual(
+    await expect(
+      repository.listAuditEvents({ limit: 200, cursor: null }),
+    ).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: audit.id, metadata: { fixture: true } }),
       ]),

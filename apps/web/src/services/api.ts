@@ -54,10 +54,7 @@ async function responseError(response: Response): Promise<ApiError> {
   return error;
 }
 
-export async function apiRequest<T>(
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
+async function apiPayload<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body !== undefined && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
@@ -73,8 +70,54 @@ export async function apiRequest<T>(
   if (response.status === 204) {
     return undefined as T;
   }
-  const payload = (await response.json()) as { data: T };
+  return (await response.json()) as T;
+}
+
+export async function apiRequest<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const payload = await apiPayload<{ data: T }>(path, init);
   return payload.data;
+}
+
+export interface ApiPage<T> {
+  data: T;
+  page: { nextCursor: string | null };
+}
+
+export function apiPageRequest<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<ApiPage<T>> {
+  return apiPayload<ApiPage<T>>(path, init);
+}
+
+export async function apiAllPages<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T[]> {
+  const url = new URL(path, "http://bubblepilot.local");
+  const data: T[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    if (cursor === null) url.searchParams.delete("cursor");
+    else url.searchParams.set("cursor", cursor);
+    const page = await apiPageRequest<T[]>(
+      `${url.pathname}${url.search}`,
+      init,
+    );
+    data.push(...page.data);
+    cursor = page.page.nextCursor;
+    if (cursor !== null) {
+      if (seenCursors.has(cursor)) {
+        throw new Error("分页接口返回了重复游标。");
+      }
+      seenCursors.add(cursor);
+    }
+  } while (cursor !== null);
+  return data;
 }
 
 export function jsonBody(value: unknown): string {

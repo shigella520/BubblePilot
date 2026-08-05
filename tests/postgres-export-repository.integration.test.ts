@@ -232,7 +232,9 @@ describe.runIf(testDatabaseUrl !== undefined)(
         ],
       );
 
-      await expect(service.list(otherOwner, 20)).resolves.toEqual([]);
+      await expect(
+        service.list(otherOwner, { limit: 20, cursor: null }),
+      ).resolves.toEqual([]);
       await expect(service.read(preview.value.id, otherOwner)).resolves.toEqual(
         {
           status: "not-found",

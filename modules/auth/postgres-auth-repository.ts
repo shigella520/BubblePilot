@@ -208,14 +208,25 @@ export class PostgresAuthRepository implements AuthRepository {
     return auditRecord(row);
   }
 
-  async listAuditEvents(limit: number): Promise<readonly AuditEventView[]> {
+  async listAuditEvents(options: {
+    limit: number;
+    cursor: { timestamp: Date; id: string } | null;
+  }): Promise<readonly AuditEventView[]> {
     const result = await this.pool.query<AuditRow>(
       `SELECT id, actor_type, actor_session_id, action, target_type, target_id,
               outcome, correlation_id, metadata, occurred_at
        FROM audit_events
+       WHERE (
+         $1::timestamptz IS NULL
+         OR (occurred_at, id) < ($1::timestamptz, $2::uuid)
+       )
        ORDER BY occurred_at DESC, id DESC
-       LIMIT $1`,
-      [limit],
+       LIMIT $3`,
+      [
+        options.cursor?.timestamp.toISOString() ?? null,
+        options.cursor?.id ?? null,
+        options.limit,
+      ],
     );
     return result.rows.map(auditRecord);
   }

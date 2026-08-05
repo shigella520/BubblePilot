@@ -9,9 +9,11 @@ import type { AiClient } from "../modules/ai/openai-compatible-client.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import type { AiCallResult, AiProviderRecord } from "../modules/ai/ai-types.js";
 import { AuthService } from "../modules/auth/auth-service.js";
+import type { MessageAutomation } from "../modules/workflow/workflow-engine.js";
 import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
 import { InMemoryAuthRepository } from "./support/in-memory-auth-repository.js";
+import { InMemoryWorkflowRepository } from "./support/in-memory-workflow-repository.js";
 
 const loginPassword = "fictional-login-password";
 const sensitivePassword = "fictional-sensitive-password";
@@ -79,6 +81,23 @@ describe("Web admin authentication", () => {
     const secrets = new EnvironmentSecretResolver({
       PREVIEW_AI_KEY: "fictional-server-secret",
     });
+    const workflowRepository = new InMemoryWorkflowRepository();
+    const workflowEngine: MessageAutomation = {
+      handleMessage: () =>
+        Promise.resolve({
+          executionIds: [],
+          matchedTriggerIds: [],
+          activeTriggerCount: 0,
+        }),
+      retryExecution: () => Promise.resolve({ status: "not-found" }),
+      closeExecution: () => Promise.resolve({ status: "not-found" }),
+      runtimeStatus: () => ({
+        active: 0,
+        queued: 0,
+        maxConcurrency: 4,
+        queueCapacity: 64,
+      }),
+    };
     application = buildApplication(config, new InMemoryArchiveRepository(), {
       logger: false,
       auth: new AuthService(authRepository, {
@@ -95,6 +114,7 @@ describe("Web admin authentication", () => {
           secrets,
         ),
       },
+      workflow: { repository: workflowRepository, engine: workflowEngine },
     });
   });
 
@@ -232,6 +252,81 @@ describe("Web admin authentication", () => {
         }),
       ]),
     );
+  });
+
+  it("paginates audit events without repeating adjacent records", async () => {
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.headers["set-cookie"];
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/sensitive",
+      headers: { cookie },
+      payload: { password: sensitivePassword },
+    });
+
+    const first = await application.inject({
+      method: "GET",
+      url: "/api/v1/audit-events?limit=1",
+      headers: { cookie },
+    });
+    const firstPage = first.json<{
+      data: Array<{ id: string }>;
+      page: { nextCursor: string | null };
+    }>();
+    expect(firstPage.data).toHaveLength(1);
+    expect(firstPage.page.nextCursor).toEqual(expect.any(String));
+
+    const second = await application.inject({
+      method: "GET",
+      url: `/api/v1/audit-events?limit=1&cursor=${encodeURIComponent(
+        firstPage.page.nextCursor ?? "",
+      )}`,
+      headers: { cookie },
+    });
+    const secondPage = second.json<{ data: Array<{ id: string }> }>();
+    expect(secondPage.data).toHaveLength(1);
+    expect(secondPage.data[0]?.id).not.toBe(firstPage.data[0]?.id);
+  });
+
+  it("allows execution reads after login but keeps recovery sensitive", async () => {
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.headers["set-cookie"];
+
+    const list = await application.inject({
+      method: "GET",
+      url: "/api/v1/executions",
+      headers: { cookie },
+    });
+    expect(list.statusCode).toBe(200);
+    expect(list.json()).toMatchObject({ data: [] });
+
+    const detail = await application.inject({
+      method: "GET",
+      url: "/api/v1/executions/00000000-0000-4000-8000-000000000001",
+      headers: { cookie },
+    });
+    expect(detail.statusCode).toBe(404);
+    expect(detail.json()).toMatchObject({
+      error: { code: "EXECUTION_NOT_FOUND" },
+    });
+
+    const retry = await application.inject({
+      method: "POST",
+      url: "/api/v1/executions/00000000-0000-4000-8000-000000000001/retry",
+      headers: { cookie },
+    });
+    expect(retry.statusCode).toBe(403);
+    expect(retry.json()).toMatchObject({
+      error: { code: "SENSITIVE_AUTH_REQUIRED" },
+    });
   });
 
   it("allows provider changes after login and audits the outcome", async () => {

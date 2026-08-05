@@ -107,8 +107,27 @@ export class InMemoryAuthRepository implements AuthRepository {
     return record;
   }
 
-  listAuditEvents(limit: number): Promise<readonly AuditEventView[]> {
-    return Promise.resolve(this.auditEvents.slice(0, limit));
+  listAuditEvents(options: {
+    limit: number;
+    cursor: { timestamp: Date; id: string } | null;
+  }): Promise<readonly AuditEventView[]> {
+    const cursorTimestamp = options.cursor?.timestamp.toISOString();
+    return Promise.resolve(
+      [...this.auditEvents]
+        .filter(
+          (event) =>
+            cursorTimestamp === undefined ||
+            event.occurredAt < cursorTimestamp ||
+            (event.occurredAt === cursorTimestamp &&
+              event.id < (options.cursor?.id ?? "")),
+        )
+        .sort(
+          (left, right) =>
+            right.occurredAt.localeCompare(left.occurredAt) ||
+            right.id.localeCompare(left.id),
+        )
+        .slice(0, options.limit),
+    );
   }
 
   async isReady(): Promise<boolean> {

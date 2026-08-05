@@ -254,14 +254,26 @@ export class PostgresDataExportRepository implements DataExportRepository {
   async listJobs(
     owner: DataExportOwner,
     now: Date,
-    limit: number,
+    options: {
+      limit: number;
+      cursor: { timestamp: Date; id: string } | null;
+    },
   ): Promise<readonly DataExportJob[]> {
     const result = await this.pool.query<ExportJobRow>(
       `${exportJobSelect}
        WHERE ${ownerPredicate()}
+         AND (
+           $3::timestamptz IS NULL
+           OR (created_at, id) < ($3::timestamptz, $4::uuid)
+         )
        ORDER BY created_at DESC, id DESC
-       LIMIT $3`,
-      [...ownerParameters(owner), limit],
+       LIMIT $5`,
+      [
+        ...ownerParameters(owner),
+        options.cursor?.timestamp.toISOString() ?? null,
+        options.cursor?.id ?? null,
+        options.limit,
+      ],
     );
     return result.rows.map((row) => jobView(row, now));
   }

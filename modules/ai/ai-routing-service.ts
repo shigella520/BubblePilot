@@ -210,6 +210,7 @@ export class AiRoutingService {
           maxOutputTokens: request.maxOutputTokens,
           temperature: request.temperature,
           timeoutMs: Math.max(1, deadline - Date.now()),
+          clientRequestId: `${request.executionId}:${request.nodeId}:${round}:${sequence}`,
         });
 
         if (result.status === "succeeded") {
@@ -221,7 +222,12 @@ export class AiRoutingService {
             result.durationMs,
           );
           if (policyFailure !== null) {
-            result = policyFailure;
+            result = {
+              ...policyFailure,
+              ...(result.diagnostics === undefined
+                ? {}
+                : { diagnostics: result.diagnostics }),
+            };
           }
         }
 
@@ -249,6 +255,7 @@ export class AiRoutingService {
             errorCode: null,
             retryable: null,
             fallbackAllowed: null,
+            diagnostics: result.diagnostics ?? null,
           });
           return {
             status: "succeeded",
@@ -261,6 +268,7 @@ export class AiRoutingService {
             round,
             attemptCount,
             durationMs: Math.max(0, Date.now() - startedAt),
+            diagnostics: result.diagnostics ?? null,
           };
         }
 
@@ -290,12 +298,19 @@ export class AiRoutingService {
           errorCode: result.code,
           retryable: result.retryable,
           fallbackAllowed: result.fallbackAllowed,
+          diagnostics: result.diagnostics ?? null,
         });
         lastFailure = result;
         if (result.retryable) {
           nextRoundProviderIds.add(candidate.provider.id);
         }
-        if (!snapshot.route.fallbackEnabled || !result.fallbackAllowed) {
+        // Fallback controls switching to another configured provider. It must
+        // not disable the route's bounded retry rounds for a retryable failure
+        // when the current provider is the only candidate (or fallback is off).
+        if (
+          (!snapshot.route.fallbackEnabled && !result.retryable) ||
+          !result.fallbackAllowed
+        ) {
           return {
             status: "failed",
             code: result.code,
@@ -347,6 +362,18 @@ export class AiRoutingService {
       durationMs: result.durationMs,
       outputCharacters: result.text.length,
       outputHash: sha256(result.text),
+      tokenUsage:
+        result.diagnostics === null
+          ? null
+          : {
+              promptTokens: result.diagnostics.promptTokens,
+              completionTokens: result.diagnostics.completionTokens,
+              reasoningTokens: result.diagnostics.reasoningTokens,
+              totalTokens: result.diagnostics.totalTokens,
+              cachedPromptTokens: result.diagnostics.cachedPromptTokens,
+              cacheWritePromptTokens: result.diagnostics.cacheWritePromptTokens,
+              cacheMissPromptTokens: result.diagnostics.cacheMissPromptTokens,
+            },
     };
   }
 }

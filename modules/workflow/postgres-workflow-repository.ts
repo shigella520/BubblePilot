@@ -1097,15 +1097,26 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     );
   }
 
-  async listExecutions(
-    limit: number,
-    statuses: readonly WorkflowExecutionStatus[] = [],
-  ): Promise<readonly WorkflowExecutionRecord[]> {
+  async listExecutions(options: {
+    limit: number;
+    statuses?: readonly WorkflowExecutionStatus[];
+    cursor: { timestamp: Date; id: string } | null;
+  }): Promise<readonly WorkflowExecutionRecord[]> {
+    const statuses = options.statuses ?? [];
     const result = await this.pool.query<ExecutionRow>(
       `${executionSelect}
-       WHERE ($2::text[] = ARRAY[]::text[] OR e.status = ANY($2::text[]))
-       ORDER BY e.created_at DESC, e.id DESC LIMIT $1`,
-      [limit, statuses],
+       WHERE ($1::text[] = ARRAY[]::text[] OR e.status = ANY($1::text[]))
+         AND (
+           $2::timestamptz IS NULL
+           OR (e.created_at, e.id) < ($2::timestamptz, $3::uuid)
+         )
+       ORDER BY e.created_at DESC, e.id DESC LIMIT $4`,
+      [
+        statuses,
+        options.cursor?.timestamp.toISOString() ?? null,
+        options.cursor?.id ?? null,
+        options.limit,
+      ],
     );
     return result.rows.map(executionRecord);
   }
