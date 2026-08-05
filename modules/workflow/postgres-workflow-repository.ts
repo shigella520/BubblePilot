@@ -335,6 +335,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async createWorkflowVersion(
     workflowId: string,
     definition: WorkflowDefinition,
+    name?: string,
   ): Promise<WorkflowVersionRecord | null> {
     const client = await this.pool.connect();
     try {
@@ -346,6 +347,12 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       if (workflow.rowCount === 0) {
         await client.query("ROLLBACK");
         return null;
+      }
+      if (name !== undefined) {
+        await client.query(
+          "UPDATE workflows SET name = $2, updated_at = NOW() WHERE id = $1",
+          [workflowId, name],
+        );
       }
       const next = await client.query<{ version: number }>(
         `SELECT COALESCE(MAX(version), 0) + 1 AS version

@@ -584,6 +584,7 @@ describe("workflow application", () => {
   it("publishes a new immutable version and atomically moves active triggers", async () => {
     const configured = await configureWorkflow();
     const nextDefinition = structuredClone(workflowDefinition);
+    const renamedWorkflow = "Renamed ping reply";
     const replyNode = nextDefinition.nodes.find((node) => node.id === "reply");
     if (replyNode?.type !== "reply") {
       throw new Error("The reply node fixture is missing.");
@@ -594,12 +595,27 @@ describe("workflow application", () => {
       method: "POST",
       url: `/api/v1/workflows/${configured.workflowId}/versions`,
       headers: { authorization: `Bearer ${apiAccessToken}` },
-      payload: { definition: nextDefinition },
+      payload: { name: renamedWorkflow, definition: nextDefinition },
     });
     expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      data: {
+        workflowName: renamedWorkflow,
+        definition: { name: renamedWorkflow },
+      },
+    });
     const nextVersion = created.json<{ data: { version: number } }>().data
       .version;
     expect(nextVersion).toBe(2);
+
+    const workflowList = await application.inject({
+      method: "GET",
+      url: "/api/v1/workflows",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(workflowList.json()).toMatchObject({
+      data: [{ id: configured.workflowId, name: renamedWorkflow }],
+    });
 
     const versions = await application.inject({
       method: "GET",

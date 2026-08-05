@@ -175,6 +175,7 @@ export interface WorkflowRepository {
   createWorkflowVersion(
     workflowId: string,
     definition: WorkflowDefinition,
+    name?: string,
   ): Promise<WorkflowVersionRecord | null>;
   getWorkflowVersion(
     workflowId: string,

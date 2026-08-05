@@ -73,10 +73,18 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   async createWorkflowVersion(
     workflowId: string,
     definition: WorkflowDefinition,
+    name?: string,
   ): Promise<WorkflowVersionRecord | null> {
     const workflow = this.workflows.get(workflowId);
     if (workflow === undefined || this.deletedWorkflowIds.has(workflowId)) {
       return null;
+    }
+    if (name !== undefined) {
+      workflow.name = name;
+      workflow.updatedAt = new Date().toISOString();
+      for (const existingVersion of workflow.versions) {
+        existingVersion.workflowName = name;
+      }
     }
     const version: WorkflowVersionRecord = {
       id: randomUUID(),

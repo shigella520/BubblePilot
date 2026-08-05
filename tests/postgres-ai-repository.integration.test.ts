@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { PostgresAiRepository } from "../modules/ai/postgres-ai-repository.js";
@@ -8,16 +9,18 @@ const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 
 describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
   let repository: PostgresAiRepository;
+  let inspectionPool: Pool;
 
   beforeAll(() => {
     repository = new PostgresAiRepository(testDatabaseUrl ?? "");
+    inspectionPool = new Pool({ connectionString: testDatabaseUrl });
   });
 
   afterAll(async () => {
-    await repository.close();
+    await Promise.all([repository.close(), inspectionPool.end()]);
   });
 
-  it("persists provider order, route versions, and health independently", async () => {
+  it("persists provider order, current route configuration, and health independently", async () => {
     const suffix = randomUUID();
     const primary = await repository.createProvider({
       name: `Primary ${suffix}`,
@@ -114,9 +117,72 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
     if (updated.status !== "ok") {
       return;
     }
+
+    const storedRouteVersions = await inspectionPool.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM ai_provider_route_versions WHERE route_id = $1",
+      [route.value.id],
+    );
+    expect(storedRouteVersions.rows[0]?.count).toBe("1");
+
+    const workflowId = randomUUID();
+    const workflowVersionId = randomUUID();
+    await inspectionPool.query(
+      "INSERT INTO workflows (id, name, status) VALUES ($1, $2, 'active')",
+      [workflowId, `Workflow ${suffix}`],
+    );
+    await inspectionPool.query(
+      `INSERT INTO workflow_versions (
+         id, workflow_id, version, status, definition, published_at
+       ) VALUES ($1, $2, 1, 'published', $3::jsonb, NOW())`,
+      [
+        workflowVersionId,
+        workflowId,
+        JSON.stringify({
+          schemaVersion: "1",
+          name: "route-reference",
+          startNodeId: "ai",
+          maxSteps: 8,
+          maxExecutionMs: 10_000,
+          nodes: [
+            {
+              id: "ai",
+              type: "ai-chat",
+              version: 1,
+              config: { providerRouteId: route.value.id },
+            },
+          ],
+        }),
+      ],
+    );
+    await inspectionPool.query(
+      "UPDATE workflows SET published_version_id = $2 WHERE id = $1",
+      [workflowId, workflowVersionId],
+    );
+
+    await expect(
+      repository.deleteRoute(route.value.id, updated.value.version),
+    ).resolves.toMatchObject({
+      status: "conflict",
+      reason: "The AI provider route is used by an active workflow.",
+    });
+
+    await inspectionPool.query(
+      `UPDATE workflows
+       SET status = 'inactive', published_version_id = NULL
+       WHERE id = $1`,
+      [workflowId],
+    );
+    await inspectionPool.query(
+      "UPDATE workflow_versions SET status = 'superseded' WHERE id = $1",
+      [workflowVersionId],
+    );
     await expect(
       repository.deleteRoute(route.value.id, updated.value.version),
     ).resolves.toMatchObject({ status: "ok" });
+
+    await inspectionPool.query("DELETE FROM workflows WHERE id = $1", [
+      workflowId,
+    ]);
 
     const current = new Map(
       (await repository.listProviders()).map((provider) => [

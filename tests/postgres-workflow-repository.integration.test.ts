@@ -156,8 +156,13 @@ describe.runIf(testDatabaseUrl !== undefined)(
           ...definition,
           name: `postgres-reply-v2-${suffix}`,
         }),
+        `postgres-reply-v2-${suffix}`,
       );
-      expect(secondVersion?.version).toBe(2);
+      expect(secondVersion).toMatchObject({
+        version: 2,
+        workflowName: `postgres-reply-v2-${suffix}`,
+        definition: { name: `postgres-reply-v2-${suffix}` },
+      });
       await repository.publishWorkflowVersion(version.workflowId, 2);
       await expect(repository.listTriggers()).resolves.toEqual(
         expect.arrayContaining([

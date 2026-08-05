@@ -767,17 +767,8 @@ td .keyline {
   gap: 8px;
   flex-wrap: wrap;
 }
-.workflow-name-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+.workflow-save-button {
   margin-left: auto;
-  color: var(--bubblepilot-muted);
-  font-size: 11px;
-}
-.workflow-name-field input {
-  width: 220px;
-  margin: 0;
 }
 .workflow-stage {
   position: relative;
@@ -1240,12 +1231,8 @@ td .keyline {
   stroke-width: 1.5;
 }
 @media (max-width: 900px) {
-  .workflow-name-field {
-    width: 100%;
+  .workflow-save-button {
     margin-left: 0;
-  }
-  .workflow-name-field input {
-    flex: 1;
   }
   .workflow-node-inspector {
     width: min(300px, 86vw);

@@ -126,7 +126,8 @@ async function create(name: string, nextDefinition: any) {
     messageIsError.value = false;
     saveState.value = "saved";
     candidateVersion.value = version.version;
-    definition.value = nextDefinition;
+    workflowName.value = version.workflowName ?? name;
+    definition.value = version.definition ?? nextDefinition;
     await router.replace(`/automation/${version.workflowId}`);
   } catch (cause) {
     saveState.value = "error";
@@ -143,7 +144,7 @@ async function saveVersion(name: string, nextDefinition: any) {
       `/api/v1/workflows/${workflowId.value}/versions`,
       {
         method: "POST",
-        body: JSON.stringify({ definition: nextDefinition }),
+        body: JSON.stringify({ name, definition: nextDefinition }),
         headers: { "content-type": "application/json" },
       },
     );
@@ -233,6 +234,7 @@ onMounted(load);
           v-model="workflowName"
           maxlength="120"
           placeholder="未命名工作流"
+          @input="markDirty"
         />
       </div>
       <span class="workflow-save-state" :class="saveState">

@@ -147,7 +147,10 @@ const workflowBodySchema = z.object({
   definition: z.unknown(),
 });
 
-const workflowVersionBodySchema = z.object({ definition: z.unknown() });
+const workflowVersionBodySchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  definition: z.unknown(),
+});
 
 const triggerBodySchema = z.object({
   name: z.string().min(1).max(120),
@@ -1539,10 +1542,11 @@ export function buildApplication(
       { preHandler: requireAdmin },
       async (request, reply) => {
         const body = workflowBodySchema.parse(request.body);
-        const version = await workflowRepository.createWorkflow(
-          body.name,
-          workflowDefinition(body.definition),
-        );
+        const definition = workflowDefinition(body.definition);
+        const version = await workflowRepository.createWorkflow(body.name, {
+          ...definition,
+          name: body.name,
+        });
         return reply.status(201).send({ data: version });
       },
     );
@@ -1553,9 +1557,12 @@ export function buildApplication(
       async (request, reply) => {
         const parameters = workflowParametersSchema.parse(request.params);
         const body = workflowVersionBodySchema.parse(request.body);
+        const definition = workflowDefinition(body.definition);
+        const name = body.name ?? definition.name;
         const version = await workflowRepository.createWorkflowVersion(
           parameters.workflowId,
-          workflowDefinition(body.definition),
+          { ...definition, name },
+          name,
         );
         if (version === null) {
           throw new ApplicationError(

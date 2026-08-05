@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unused-expressions, vue/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unused-expressions */
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { VueFlow, type Connection, useVueFlow } from "@vue-flow/core";
 import { MarkerType } from "@vue-flow/core";
@@ -40,7 +40,6 @@ const emit = defineEmits<{
   (event: "version", name: string, definition: any): void;
   (event: "change", name: string, definition: any): void;
 }>();
-const name = ref(props.workflowName ?? "");
 const nodes = ref<any[]>([]);
 const edges = ref<any[]>([]);
 const selected = ref<any | null>(null);
@@ -125,12 +124,11 @@ function snapshot() {
   return JSON.stringify({
     nodes: nodes.value,
     edges: edges.value,
-    name: name.value,
   });
 }
 function persistedSnapshot() {
   return JSON.stringify({
-    name: name.value,
+    name: props.workflowName ?? "",
     nodes: nodes.value.map((node) => ({
       id: node.id,
       position: node.position,
@@ -158,7 +156,6 @@ function restore(raw: string) {
   const value = JSON.parse(raw);
   nodes.value = value.nodes;
   edges.value = value.edges;
-  name.value = value.name;
   selected.value = null;
   config.value = {};
 }
@@ -583,7 +580,7 @@ function toDefinition() {
   });
   return {
     schemaVersion: "1",
-    name: name.value || "New workflow",
+    name: props.workflowName || "New workflow",
     startNodeId:
       nodes.value.find((node) => node.data.block.type === "message-trigger")
         ?.id ??
@@ -596,13 +593,12 @@ function toDefinition() {
 }
 function save() {
   const definition = toDefinition();
-  if (props.definition) emit("version", name.value, definition);
-  else emit("create", name.value, definition);
+  if (props.definition) emit("version", props.workflowName ?? "", definition);
+  else emit("create", props.workflowName ?? "", definition);
 }
 function hydrate(definition: any) {
   if (!definition || hydratedDefinition.value === JSON.stringify(definition))
     return;
-  if (typeof definition.name === "string") name.value = definition.name;
   const sourceNodes = Array.isArray(definition.nodes) ? definition.nodes : [];
   nodes.value = sourceNodes.map((item: any, index: number) => {
     const block = blockFor(item.type);
@@ -661,12 +657,6 @@ function hydrate(definition: any) {
   trackedSnapshot.value = persistedSnapshot();
 }
 watch(
-  () => props.workflowName,
-  (value) => {
-    if (value) name.value = value;
-  },
-);
-watch(
   () => props.definition,
   (definition) => {
     if (definition === undefined) {
@@ -698,13 +688,13 @@ void nextTick(() => {
   changeTrackingReady.value = true;
 });
 watch(
-  [nodes, edges, name],
+  [nodes, edges, () => props.workflowName],
   () => {
     if (!changeTrackingReady.value) return;
     const nextSnapshot = persistedSnapshot();
     if (nextSnapshot === trackedSnapshot.value) return;
     trackedSnapshot.value = nextSnapshot;
-    emit("change", name.value, toDefinition());
+    emit("change", props.workflowName ?? "", toDefinition());
   },
   { deep: true },
 );
@@ -768,9 +758,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         @click="redo"
       >
         重做</button
-      ><label class="workflow-name-field"
-        >工作流名称<input v-model="name" maxlength="120" /></label
-      ><button class="button primary" type="button" @click="save">保存</button>
+      ><button
+        class="button primary workflow-save-button"
+        type="button"
+        @click="save"
+      >
+        保存
+      </button>
     </div>
     <div ref="stageElement" class="workflow-stage">
       <NodeCreator

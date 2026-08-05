@@ -762,14 +762,13 @@ onMounted(load);
             <p class="card-kicker">RETRY · FALLBACK · DEGRADE</p>
             <h2>Provider 路由</h2>
           </div>
-          <span class="state-badge">版本化策略</span>
+          <span class="state-badge">运行策略</span>
         </div>
         <div class="route-grid">
           <article v-for="item in routes" :key="item.id">
             <header>
               <div>
-                <strong>{{ item.name }}</strong
-                ><span>v{{ item.version }}</span>
+                <strong>{{ item.name }}</strong>
               </div>
               <button
                 class="switch-button"

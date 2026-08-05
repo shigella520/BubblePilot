@@ -714,6 +714,10 @@ export class PostgresAiRepository implements AiRepository {
       const workflowReference = await client.query(
         `SELECT 1
          FROM workflow_versions w
+         INNER JOIN workflows workflow
+           ON workflow.published_version_id = w.id
+          AND workflow.status = 'active'
+          AND workflow.deleted_at IS NULL
          CROSS JOIN LATERAL jsonb_array_elements(w.definition -> 'nodes') AS node
          WHERE node ->> 'type' = 'ai-chat'
            AND node -> 'config' ->> 'providerRouteId' = $1
@@ -722,9 +726,7 @@ export class PostgresAiRepository implements AiRepository {
       );
       if (workflowReference.rowCount !== 0) {
         await client.query("ROLLBACK");
-        return conflict(
-          "The AI provider route is referenced by a workflow version.",
-        );
+        return conflict("The AI provider route is used by an active workflow.");
       }
       await client.query(
         `UPDATE ai_provider_routes
@@ -1099,19 +1101,39 @@ export class PostgresAiRepository implements AiRepository {
         return conflict("The route contains a missing AI provider.");
       }
       const nextVersion = existing.version + 1;
-      const versionId = randomUUID();
-      await this.insertRouteVersion(
-        client,
-        routeId,
-        versionId,
-        nextVersion,
-        configuration,
+      const versionId = existing.versionId;
+      await client.query(
+        `UPDATE ai_provider_route_versions
+         SET version = $2,
+             fallback_enabled = $3,
+             retry_policy = $4::jsonb,
+             degrade_policy = $5::jsonb
+         WHERE id = $1`,
+        [
+          versionId,
+          nextVersion,
+          configuration.fallbackEnabled,
+          JSON.stringify(configuration.retryPolicy),
+          JSON.stringify(configuration.degradePolicy),
+        ],
       );
       await client.query(
+        "DELETE FROM ai_provider_route_members WHERE route_version_id = $1",
+        [versionId],
+      );
+      for (const [index, providerId] of configuration.providerIds.entries()) {
+        await client.query(
+          `INSERT INTO ai_provider_route_members (
+             route_version_id, provider_id, position
+           ) VALUES ($1, $2, $3)`,
+          [versionId, providerId, index + 1],
+        );
+      }
+      await client.query(
         `UPDATE ai_provider_routes
-         SET name = $2, enabled = $3, current_version_id = $4, updated_at = NOW()
+         SET name = $2, enabled = $3, updated_at = NOW()
          WHERE id = $1`,
-        [routeId, configuration.name, configuration.enabled, versionId],
+        [routeId, configuration.name, configuration.enabled],
       );
       const updated = await this.readRoute(client, routeId);
       await client.query("COMMIT");
