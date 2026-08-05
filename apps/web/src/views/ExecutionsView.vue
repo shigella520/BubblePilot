@@ -6,9 +6,17 @@ import {
   Route,
   Search,
   ShieldCheck,
+  X,
   XCircle,
 } from "@lucide/vue";
-import { computed, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import { useRoute } from "vue-router";
 
 import CursorPagination from "../components/CursorPagination.vue";
@@ -110,7 +118,12 @@ const messageIsError = ref(false);
 const recoveryBusy = ref(false);
 const recoveryOnly = ref(false);
 const detailLoadingId = ref<string | null>(null);
+const detailDialog = ref<HTMLElement | null>(null);
 let inspectRequestId = 0;
+let pageOverflowBeforeDetail = "";
+let detailReturnFocus: HTMLElement | null = null;
+let applicationRoot: HTMLElement | null = null;
+let applicationRootWasInert = false;
 const route = useRoute();
 const session = useSessionStore();
 const executionPager = useCursorPager<Execution>((cursor) => {
@@ -204,6 +217,9 @@ async function toggleRecoveryOnly() {
 }
 async function inspect(id: string) {
   if (!session.authenticated) return;
+  if (detail.value === null && document.activeElement instanceof HTMLElement) {
+    detailReturnFocus = document.activeElement;
+  }
   const requestId = ++inspectRequestId;
   detailLoadingId.value = id;
   message.value = "";
@@ -269,6 +285,69 @@ watch(
     if (typeof executionId === "string") void inspect(executionId);
   },
 );
+watch(
+  () => detail.value !== null,
+  async (open) => {
+    if (open) {
+      if (
+        detailReturnFocus === null &&
+        document.activeElement instanceof HTMLElement
+      ) {
+        detailReturnFocus = document.activeElement;
+      }
+      pageOverflowBeforeDetail = document.body.style.overflow;
+      applicationRoot = document.getElementById("app");
+      applicationRootWasInert = applicationRoot?.hasAttribute("inert") ?? false;
+      applicationRoot?.setAttribute("inert", "");
+      document.body.style.overflow = "hidden";
+      await nextTick();
+      detailDialog.value?.focus();
+      return;
+    }
+    document.body.style.overflow = pageOverflowBeforeDetail;
+    if (!applicationRootWasInert) applicationRoot?.removeAttribute("inert");
+    applicationRoot = null;
+    detailReturnFocus?.focus();
+    detailReturnFocus = null;
+  },
+);
+function onKeydown(event: KeyboardEvent) {
+  if (detail.value === null) return;
+  if (event.key === "Escape") {
+    clearDetail();
+    return;
+  }
+  if (event.key !== "Tab" || detailDialog.value === null) return;
+  const focusable = Array.from(
+    detailDialog.value.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  );
+  if (focusable.length === 0) {
+    event.preventDefault();
+    detailDialog.value.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (
+    event.shiftKey &&
+    (document.activeElement === first ||
+      document.activeElement === detailDialog.value)
+  ) {
+    event.preventDefault();
+    last?.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first?.focus();
+  }
+}
+window.addEventListener("keydown", onKeydown);
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown);
+  document.body.style.overflow = pageOverflowBeforeDetail;
+  if (!applicationRootWasInert) applicationRoot?.removeAttribute("inert");
+});
 onMounted(() => {
   if (session.authenticated) void loadSelected();
 });
@@ -408,167 +487,6 @@ function resetAuditPage(): Promise<boolean> {
           @next="changePage(executionPager.next)"
         />
       </section>
-      <section v-if="detail" class="admin-panel trace-detail">
-        <div class="panel-head">
-          <div>
-            <p class="card-kicker">{{ detail.correlationId }}</p>
-            <h2>{{ detail.workflowName }} · v{{ detail.workflowVersion }}</h2>
-            <p v-if="detail.retryOfExecutionId" class="keyline">
-              恢复自 {{ detail.retryOfExecutionId }} · 第
-              {{ detail.recoveryAttempt }} 次
-            </p>
-          </div>
-          <div class="row-actions">
-            <button
-              v-if="canOperate"
-              class="button secondary"
-              :disabled="
-                !session.sensitiveActive || retryBlocked || recoveryBusy
-              "
-              :title="recoveryBusy ? '恢复请求处理中' : retryTitle"
-              @click="recover('retry')"
-            >
-              <RotateCcw :size="15" />{{
-                recoveryBusy ? "处理中…" : "人工重试"
-              }}</button
-            ><button
-              v-if="canOperate"
-              class="button danger-ghost"
-              :disabled="!session.sensitiveActive || recoveryBusy"
-              @click="recover('close')"
-            >
-              <XCircle :size="15" />{{
-                recoveryBusy ? "处理中…" : "人工关闭"
-              }}</button
-            ><button class="button secondary" @click="clearDetail">
-              收起详情
-            </button>
-          </div>
-        </div>
-        <div class="trace-columns">
-          <section>
-            <h3>节点轨迹</h3>
-            <article
-              v-for="node in detail.nodes"
-              :key="node.id"
-              class="trace-item"
-            >
-              <span class="trace-dot" :class="node.status"></span>
-              <div>
-                <strong>{{ node.nodeId }} · {{ node.nodeType }}</strong>
-                <p>
-                  attempt {{ node.attempt }} · {{ node.durationMs ?? "—" }} ms ·
-                  {{ node.errorCode || node.status }}
-                </p>
-                <details>
-                  <summary>脱敏摘要</summary>
-                  <pre>{{
-                    JSON.stringify(
-                      { input: node.inputSummary, output: node.outputSummary },
-                      null,
-                      2,
-                    )
-                  }}</pre>
-                </details>
-              </div>
-            </article>
-          </section>
-          <section>
-            <h3>AI Provider Attempt</h3>
-            <article
-              v-for="item in detail.aiProviderAttempts"
-              :key="item.id"
-              class="trace-item"
-            >
-              <Route :size="17" />
-              <div>
-                <strong>{{ item.providerName }} · {{ item.model }}</strong>
-                <span class="keyline"
-                  >路由 v{{ item.routeVersion }} · Provider v{{
-                    item.providerVersion
-                  }}</span
-                >
-                <p>
-                  第 {{ item.round }} 轮 / 顺序 {{ item.sequence }} ·
-                  {{ item.durationMs }} ms · 选择时
-                  {{ providerHealthLabel(item.selectionHealthState) }} → 结果
-                  {{ providerHealthLabel(item.healthState) }}
-                </p>
-                <span v-if="item.errorCode" class="table-status danger">{{
-                  [item.errorCategory, item.errorCode]
-                    .filter(Boolean)
-                    .join(" · ")
-                }}</span>
-                <span v-if="item.status === 'failed'" class="keyline"
-                  >{{ item.retryable ? "可重试" : "不可重试" }} ·
-                  {{
-                    item.fallbackAllowed ? "允许 Fallback" : "停止 Fallback"
-                  }}</span
-                >
-                <p v-if="item.diagnostics" class="keyline">
-                  HTTP {{ item.diagnostics.httpStatus ?? "—" }} · 请求
-                  {{ item.diagnostics.requestMessageCount }} 条消息 /
-                  {{ item.diagnostics.requestCharacters }} 字符 · 响应
-                  {{ item.diagnostics.responseBytes ?? "—" }} B · 可见输出
-                  {{ item.diagnostics.responseContentCharacters ?? "—" }} 字符
-                </p>
-                <p v-if="item.diagnostics" class="keyline">
-                  Token：输入 {{ item.diagnostics.promptTokens ?? "—" }} · 输出
-                  {{ item.diagnostics.completionTokens ?? "—" }} · 推理
-                  {{ item.diagnostics.reasoningTokens ?? "—" }} · 缓存命中
-                  {{ item.diagnostics.cachedPromptTokens ?? "—" }} · 缓存写入
-                  {{ item.diagnostics.cacheWritePromptTokens ?? "—" }} · 未命中
-                  {{ item.diagnostics.cacheMissPromptTokens ?? "—" }}
-                </p>
-                <span v-if="item.diagnostics?.providerRequestId" class="keyline"
-                  >Provider Request ID：{{
-                    item.diagnostics.providerRequestId
-                  }}</span
-                >
-                <span
-                  v-if="item.diagnostics?.responseFinishReason"
-                  class="keyline"
-                  >Finish Reason：{{ item.diagnostics.responseFinishReason }} ·
-                  推理字段
-                  {{ item.diagnostics.responseReasoningCharacters ?? 0 }}
-                  字符</span
-                >
-                <details v-if="item.diagnostics" class="keyline">
-                  <summary>诊断标识</summary>
-                  <code
-                    >client={{ item.diagnostics.clientRequestId || "—" }}</code
-                  >
-                  <code>request={{ item.diagnostics.requestHash }}</code>
-                  <code v-if="item.diagnostics.responseBodyHash"
-                    >response={{ item.diagnostics.responseBodyHash }}</code
-                  >
-                </details>
-              </div>
-            </article>
-            <div
-              v-if="!detail.aiProviderAttempts.length"
-              class="empty-panel compact"
-            >
-              本次执行没有 AI 调用。
-            </div>
-            <h3>出站发送</h3>
-            <article
-              v-for="item in detail.deliveries"
-              :key="item.id"
-              class="trace-item"
-            >
-              <span class="trace-dot" :class="item.status"></span>
-              <div>
-                <strong>{{ item.nodeId }} · {{ item.status }}</strong>
-                <p>
-                  {{ item.attemptCount }} 次尝试 ·
-                  {{ item.errorCode || "无错误" }}
-                </p>
-              </div>
-            </article>
-          </section>
-        </div>
-      </section>
       <section id="audit" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -630,4 +548,200 @@ function resetAuditPage(): Promise<boolean> {
       </section>
     </div>
   </main>
+  <Teleport to="body">
+    <div
+      v-if="detail"
+      class="execution-detail-backdrop"
+      @click.self="clearDetail"
+    >
+      <section
+        ref="detailDialog"
+        class="execution-detail-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="execution-detail-title"
+        tabindex="-1"
+      >
+        <header class="execution-detail-header">
+          <div class="execution-detail-heading">
+            <p class="card-kicker">{{ detail.correlationId }}</p>
+            <h2 id="execution-detail-title">
+              {{ detail.workflowName }} · v{{ detail.workflowVersion }}
+            </h2>
+            <p v-if="detail.retryOfExecutionId" class="keyline">
+              恢复自 {{ detail.retryOfExecutionId }} · 第
+              {{ detail.recoveryAttempt }} 次
+            </p>
+          </div>
+          <div class="row-actions execution-detail-actions">
+            <button
+              v-if="canOperate"
+              class="button secondary"
+              :disabled="
+                !session.sensitiveActive || retryBlocked || recoveryBusy
+              "
+              :title="recoveryBusy ? '恢复请求处理中' : retryTitle"
+              @click="recover('retry')"
+            >
+              <RotateCcw :size="15" />{{
+                recoveryBusy ? "处理中…" : "人工重试"
+              }}</button
+            ><button
+              v-if="canOperate"
+              class="button danger-ghost"
+              :disabled="!session.sensitiveActive || recoveryBusy"
+              @click="recover('close')"
+            >
+              <XCircle :size="15" />{{
+                recoveryBusy ? "处理中…" : "人工关闭"
+              }}</button
+            ><button
+              class="icon-button execution-detail-close"
+              type="button"
+              title="关闭执行详情"
+              aria-label="关闭执行详情"
+              @click="clearDetail"
+            >
+              <X :size="19" />
+            </button>
+          </div>
+        </header>
+        <div class="execution-detail-body">
+          <div class="trace-columns">
+            <section>
+              <h3>节点轨迹</h3>
+              <article
+                v-for="node in detail.nodes"
+                :key="node.id"
+                class="trace-item"
+              >
+                <span class="trace-dot" :class="node.status"></span>
+                <div>
+                  <strong>{{ node.nodeId }} · {{ node.nodeType }}</strong>
+                  <p>
+                    attempt {{ node.attempt }} · {{ node.durationMs ?? "—" }} ms
+                    ·
+                    {{ node.errorCode || node.status }}
+                  </p>
+                  <details>
+                    <summary>脱敏摘要</summary>
+                    <pre>{{
+                      JSON.stringify(
+                        {
+                          input: node.inputSummary,
+                          output: node.outputSummary,
+                        },
+                        null,
+                        2,
+                      )
+                    }}</pre>
+                  </details>
+                </div>
+              </article>
+            </section>
+            <section>
+              <h3>AI Provider Attempt</h3>
+              <article
+                v-for="item in detail.aiProviderAttempts"
+                :key="item.id"
+                class="trace-item"
+              >
+                <Route :size="17" />
+                <div>
+                  <strong>{{ item.providerName }} · {{ item.model }}</strong>
+                  <span class="keyline"
+                    >路由 v{{ item.routeVersion }} · Provider v{{
+                      item.providerVersion
+                    }}</span
+                  >
+                  <p>
+                    第 {{ item.round }} 轮 / 顺序 {{ item.sequence }} ·
+                    {{ item.durationMs }} ms · 选择时
+                    {{ providerHealthLabel(item.selectionHealthState) }} → 结果
+                    {{ providerHealthLabel(item.healthState) }}
+                  </p>
+                  <span v-if="item.errorCode" class="table-status danger">{{
+                    [item.errorCategory, item.errorCode]
+                      .filter(Boolean)
+                      .join(" · ")
+                  }}</span>
+                  <span v-if="item.status === 'failed'" class="keyline"
+                    >{{ item.retryable ? "可重试" : "不可重试" }} ·
+                    {{
+                      item.fallbackAllowed ? "允许 Fallback" : "停止 Fallback"
+                    }}</span
+                  >
+                  <p v-if="item.diagnostics" class="keyline">
+                    HTTP {{ item.diagnostics.httpStatus ?? "—" }} · 请求
+                    {{ item.diagnostics.requestMessageCount }} 条消息 /
+                    {{ item.diagnostics.requestCharacters }} 字符 · 响应
+                    {{ item.diagnostics.responseBytes ?? "—" }} B · 可见输出
+                    {{ item.diagnostics.responseContentCharacters ?? "—" }}
+                    字符
+                  </p>
+                  <p v-if="item.diagnostics" class="keyline">
+                    Token：输入 {{ item.diagnostics.promptTokens ?? "—" }} ·
+                    输出 {{ item.diagnostics.completionTokens ?? "—" }} · 推理
+                    {{ item.diagnostics.reasoningTokens ?? "—" }} · 缓存命中
+                    {{ item.diagnostics.cachedPromptTokens ?? "—" }} · 缓存写入
+                    {{ item.diagnostics.cacheWritePromptTokens ?? "—" }} ·
+                    未命中
+                    {{ item.diagnostics.cacheMissPromptTokens ?? "—" }}
+                  </p>
+                  <span
+                    v-if="item.diagnostics?.providerRequestId"
+                    class="keyline"
+                    >Provider Request ID：{{
+                      item.diagnostics.providerRequestId
+                    }}</span
+                  >
+                  <span
+                    v-if="item.diagnostics?.responseFinishReason"
+                    class="keyline"
+                    >Finish Reason：{{ item.diagnostics.responseFinishReason }}
+                    · 推理字段
+                    {{ item.diagnostics.responseReasoningCharacters ?? 0 }}
+                    字符</span
+                  >
+                  <details v-if="item.diagnostics" class="keyline">
+                    <summary>诊断标识</summary>
+                    <code
+                      >client={{
+                        item.diagnostics.clientRequestId || "—"
+                      }}</code
+                    >
+                    <code>request={{ item.diagnostics.requestHash }}</code>
+                    <code v-if="item.diagnostics.responseBodyHash"
+                      >response={{ item.diagnostics.responseBodyHash }}</code
+                    >
+                  </details>
+                </div>
+              </article>
+              <div
+                v-if="!detail.aiProviderAttempts.length"
+                class="empty-panel compact"
+              >
+                本次执行没有 AI 调用。
+              </div>
+              <h3>出站发送</h3>
+              <article
+                v-for="item in detail.deliveries"
+                :key="item.id"
+                class="trace-item"
+              >
+                <span class="trace-dot" :class="item.status"></span>
+                <div>
+                  <strong>{{ item.nodeId }} · {{ item.status }}</strong>
+                  <p>
+                    {{ item.attemptCount }} 次尝试 ·
+                    {{ item.errorCode || "无错误" }}
+                  </p>
+                </div>
+              </article>
+            </section>
+          </div>
+        </div>
+      </section>
+    </div>
+  </Teleport>
 </template>
