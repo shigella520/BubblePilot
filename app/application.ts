@@ -117,10 +117,6 @@ const passwordBodySchema = z.object({
   password: z.string().min(1).max(1_024),
 });
 
-const auditQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(200).default(100),
-});
-
 const chatMonitoringBodySchema = z.object({
   enabled: z.boolean(),
   expectedVersion: z.number().int().positive(),
@@ -167,6 +163,24 @@ const triggerUpdateBodySchema = triggerBodySchema.pick({
   conditions: true,
   includeFromMe: true,
 });
+
+function cursorPage<T>(
+  items: readonly T[],
+  limit: number,
+  cursorFor: (item: T) => { timestamp: string; id: string },
+) {
+  const data = items.slice(0, limit);
+  const last = data.at(-1);
+  return {
+    data,
+    page: {
+      nextCursor:
+        items.length > limit && last !== undefined
+          ? encodeCursor(cursorFor(last))
+          : null,
+    },
+  };
+}
 
 const triggerPreviewBodySchema = z.object({
   conditions: z.unknown(),
@@ -958,11 +972,16 @@ export function buildApplication(
       "/api/v1/audit-events",
       { preHandler: requireSensitive("audit.events.view", "audit") },
       async (request) => {
-        const query = auditQuerySchema.parse(request.query);
-        return {
-          data: await options.auth?.listAuditEvents(query.limit),
-          page: { nextCursor: null },
-        };
+        const query = pageQuerySchema.parse(request.query);
+        const events =
+          (await options.auth?.listAuditEvents({
+            limit: query.limit + 1,
+            cursor: decodeCursor(query.cursor),
+          })) ?? [];
+        return cursorPage(events, query.limit, (event) => ({
+          timestamp: event.occurredAt,
+          id: event.id,
+        }));
       },
     );
   }
@@ -973,20 +992,13 @@ export function buildApplication(
     async (request) => {
       const query = pageQuerySchema.parse(request.query);
       const events = await repository.listInboundEvents({
-        limit: query.limit,
+        limit: query.limit + 1,
         cursor: decodeCursor(query.cursor),
       });
-      const last = events.at(-1);
-      return {
-        data: events,
-        page: {
-          nextCursor: encodeCursor(
-            last === undefined
-              ? undefined
-              : { timestamp: last.receivedAt, id: last.id },
-          ),
-        },
-      };
+      return cursorPage(events, query.limit, (event) => ({
+        timestamp: event.receivedAt,
+        id: event.id,
+      }));
     },
   );
 
@@ -996,20 +1008,13 @@ export function buildApplication(
     async (request) => {
       const query = pageQuerySchema.parse(request.query);
       const chats = await repository.listChats({
-        limit: query.limit,
+        limit: query.limit + 1,
         cursor: decodeCursor(query.cursor),
       });
-      const last = chats.at(-1);
-      return {
-        data: chats,
-        page: {
-          nextCursor: encodeCursor(
-            last === undefined
-              ? undefined
-              : { timestamp: last.updatedAt, id: last.id },
-          ),
-        },
-      };
+      return cursorPage(chats, query.limit, (chat) => ({
+        timestamp: chat.updatedAt,
+        id: chat.id,
+      }));
     },
   );
 
@@ -1019,20 +1024,13 @@ export function buildApplication(
     async (request) => {
       const query = pageQuerySchema.parse(request.query);
       const chats = await repository.listChatMonitoring({
-        limit: query.limit,
+        limit: query.limit + 1,
         cursor: decodeCursor(query.cursor),
       });
-      const last = chats.at(-1);
-      return {
-        data: chats,
-        page: {
-          nextCursor: encodeCursor(
-            last === undefined
-              ? undefined
-              : { timestamp: last.updatedAt, id: last.id },
-          ),
-        },
-      };
+      return cursorPage(chats, query.limit, (chat) => ({
+        timestamp: chat.updatedAt,
+        id: chat.id,
+      }));
     },
   );
 
@@ -1070,16 +1068,22 @@ export function buildApplication(
     { preHandler: requireSensitive("message.content.search", "message") },
     async (request) => {
       const query = messageSearchQuerySchema.parse(request.query);
-      const messages = await repository.searchMessages({
+      const fetchedMessages = await repository.searchMessages({
         chatId: query.chatId ?? null,
         keyword: query.q ?? null,
         senderId: query.senderId ?? null,
         sentFrom:
           query.sentFrom === undefined ? null : new Date(query.sentFrom),
         sentTo: query.sentTo === undefined ? null : new Date(query.sentTo),
-        limit: query.limit,
+        limit: query.limit + 1,
         cursor: decodeCursor(query.cursor),
       });
+      const messagePage = cursorPage(
+        fetchedMessages,
+        query.limit,
+        (message) => ({ timestamp: message.sentAt, id: message.id }),
+      );
+      const messages = messagePage.data;
       const executionLinks =
         options.workflow === undefined
           ? []
@@ -1118,19 +1122,12 @@ export function buildApplication(
         });
         executionsByMessage.set(link.providerMessageId, items);
       }
-      const last = messages.at(-1);
       return {
         data: messages.map((item) => ({
           ...item,
           executions: executionsByMessage.get(item.providerMessageId) ?? [],
         })),
-        page: {
-          nextCursor: encodeCursor(
-            last === undefined
-              ? undefined
-              : { timestamp: last.sentAt, id: last.id },
-          ),
-        },
+        page: messagePage.page,
       };
     },
   );
@@ -1142,11 +1139,15 @@ export function buildApplication(
       "/api/v1/exports",
       { preHandler: requireAdmin },
       async (request) => {
-        const query = auditQuerySchema.parse(request.query);
-        return {
-          data: await dataExport.list(dataExportOwner(request), query.limit),
-          page: { nextCursor: null },
-        };
+        const query = pageQuerySchema.parse(request.query);
+        const jobs = await dataExport.list(dataExportOwner(request), {
+          limit: query.limit + 1,
+          cursor: decodeCursor(query.cursor),
+        });
+        return cursorPage(jobs, query.limit, (job) => ({
+          timestamp: job.createdAt,
+          id: job.id,
+        }));
       },
     );
 
@@ -1870,16 +1871,18 @@ export function buildApplication(
 
     application.get(
       "/api/v1/executions",
-      { preHandler: requireSensitive("execution.list", "workflow-execution") },
+      { preHandler: requireAdmin },
       async (request) => {
         const query = executionListQuerySchema.parse(request.query);
-        return {
-          data: await workflowRepository.listExecutions(
-            query.limit,
-            executionStatuses(query.status),
-          ),
-          page: { nextCursor: null },
-        };
+        const executions = await workflowRepository.listExecutions({
+          limit: query.limit + 1,
+          statuses: executionStatuses(query.status),
+          cursor: decodeCursor(query.cursor),
+        });
+        return cursorPage(executions, query.limit, (execution) => ({
+          timestamp: execution.createdAt,
+          id: execution.id,
+        }));
       },
     );
 
@@ -2000,12 +2003,7 @@ export function buildApplication(
 
     application.get(
       "/api/v1/executions/:executionId",
-      {
-        preHandler: requireSensitive(
-          "execution.detail.view",
-          "workflow-execution",
-        ),
-      },
+      { preHandler: requireAdmin },
       async (request) => {
         const parameters = executionParametersSchema.parse(request.params);
         const execution = await executionDetail(parameters.executionId);
@@ -2089,20 +2087,13 @@ export function buildApplication(
       const parameters = chatParametersSchema.parse(request.params);
       const query = pageQuerySchema.parse(request.query);
       const messages = await repository.listMessages(parameters.chatId, {
-        limit: query.limit,
+        limit: query.limit + 1,
         cursor: decodeCursor(query.cursor),
       });
-      const last = messages.at(-1);
-      return {
-        data: messages,
-        page: {
-          nextCursor: encodeCursor(
-            last === undefined
-              ? undefined
-              : { timestamp: last.sentAt, id: last.id },
-          ),
-        },
-      };
+      return cursorPage(messages, query.limit, (message) => ({
+        timestamp: message.sentAt,
+        id: message.id,
+      }));
     },
   );
 

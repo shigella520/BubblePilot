@@ -10,9 +10,13 @@ import {
 } from "@lucide/vue";
 import { onMounted, reactive, ref, watch } from "vue";
 
+import CursorPagination from "../components/CursorPagination.vue";
 import SensitiveUnlock from "../components/SensitiveUnlock.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
+import { useCursorPager } from "../composables/useCursorPager";
 import {
+  apiAllPages,
+  apiPageRequest,
   apiRequest,
   downloadFile,
   errorMessage,
@@ -72,12 +76,10 @@ interface DataExportJob {
 }
 
 const session = useSessionStore();
-const chats = ref<Chat[]>([]);
-const messages = ref<MessageResult[]>([]);
 const busy = ref(false);
 const message = ref("");
 const messageIsError = ref(false);
-const exportJobs = ref<DataExportJob[]>([]);
+const chatOptions = ref<Chat[]>([]);
 const exportPreview = ref<DataExportJob | null>(null);
 const exportConfirmed = ref(false);
 const exportPreviewBusy = ref(false);
@@ -92,6 +94,7 @@ const form = reactive({
   sentFrom: "",
   sentTo: "",
 });
+const appliedSearch = reactive({ ...form });
 const exportForm = reactive({
   chatId: "",
   sentFrom: localDateTime(new Date(Date.now() - 24 * 60 * 60 * 1_000)),
@@ -99,6 +102,33 @@ const exportForm = reactive({
   includeMessages: true,
   includeExecutions: true,
 });
+const chatPager = useCursorPager<Chat>((cursor) => {
+  const query = new URLSearchParams({ limit: "25" });
+  if (cursor !== null) query.set("cursor", cursor);
+  return apiPageRequest<Chat[]>(`/api/v1/chat-monitoring?${query}`);
+});
+const messagePager = useCursorPager<MessageResult>((cursor) => {
+  const query = new URLSearchParams({ limit: "50" });
+  if (appliedSearch.chatId) query.set("chatId", appliedSearch.chatId);
+  if (appliedSearch.q) query.set("q", appliedSearch.q);
+  if (appliedSearch.senderId) query.set("senderId", appliedSearch.senderId);
+  if (appliedSearch.sentFrom) {
+    query.set("sentFrom", new Date(appliedSearch.sentFrom).toISOString());
+  }
+  if (appliedSearch.sentTo) {
+    query.set("sentTo", new Date(appliedSearch.sentTo).toISOString());
+  }
+  if (cursor !== null) query.set("cursor", cursor);
+  return apiPageRequest<MessageResult[]>(`/api/v1/messages/search?${query}`);
+});
+const exportPager = useCursorPager<DataExportJob>((cursor) => {
+  const query = new URLSearchParams({ limit: "10" });
+  if (cursor !== null) query.set("cursor", cursor);
+  return apiPageRequest<DataExportJob[]>(`/api/v1/exports?${query}`);
+});
+const chats = chatPager.items;
+const messages = messagePager.items;
+const exportJobs = exportPager.items;
 
 function localDateTime(value: Date) {
   const offset = value.getTimezoneOffset() * 60_000;
@@ -115,12 +145,19 @@ function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
 
-async function loadChats() {
+async function loadChatOptions() {
+  chatOptions.value = await apiAllPages<Chat>("/api/v1/chats?limit=100");
+}
+
+async function loadChats(reset = false) {
   busy.value = true;
   message.value = "";
   messageIsError.value = false;
   try {
-    chats.value = await apiRequest<Chat[]>("/api/v1/chat-monitoring?limit=100");
+    await Promise.all([
+      reset ? chatPager.first() : chatPager.refresh(),
+      loadChatOptions(),
+    ]);
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
@@ -129,11 +166,9 @@ async function loadChats() {
   }
 }
 
-async function loadExports(): Promise<boolean> {
+async function loadExports(reset = false): Promise<boolean> {
   try {
-    exportJobs.value = await apiRequest<DataExportJob[]>(
-      "/api/v1/exports?limit=20",
-    );
+    await (reset ? exportPager.first() : exportPager.refresh());
     return true;
   } catch (cause) {
     message.value = errorMessage(cause);
@@ -161,6 +196,14 @@ async function toggleChat(chat: Chat) {
     chats.value = chats.value.map((candidate) =>
       candidate.id === updated.id ? updated : candidate,
     );
+    chatOptions.value = updated.enabled
+      ? [
+          updated,
+          ...chatOptions.value.filter(
+            (candidate) => candidate.id !== updated.id,
+          ),
+        ]
+      : chatOptions.value.filter((candidate) => candidate.id !== updated.id);
     message.value = `聊天「${updated.displayName || updated.providerChatId}」已${updated.enabled ? "启用" : "停用"}监听。`;
   } catch (cause) {
     message.value = errorMessage(cause);
@@ -175,23 +218,26 @@ async function search() {
   busy.value = true;
   message.value = "";
   messageIsError.value = false;
-  const query = new URLSearchParams({ limit: "100" });
-  if (form.chatId) query.set("chatId", form.chatId);
-  if (form.q) query.set("q", form.q);
-  if (form.senderId) query.set("senderId", form.senderId);
-  if (form.sentFrom)
-    query.set("sentFrom", new Date(form.sentFrom).toISOString());
-  if (form.sentTo) query.set("sentTo", new Date(form.sentTo).toISOString());
+  Object.assign(appliedSearch, form);
   try {
-    const results = await apiRequest<MessageResult[]>(
-      `/api/v1/messages/search?${query}`,
-    );
-    messages.value = session.sensitiveActive ? results : [];
+    await messagePager.first();
+    if (!session.sensitiveActive) messagePager.clear();
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
   } finally {
     busy.value = false;
+  }
+}
+
+async function changePage(action: () => Promise<boolean>) {
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    await action();
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
   }
 }
 
@@ -221,7 +267,7 @@ async function previewExport() {
         }),
       },
     );
-    const refreshed = await loadExports();
+    const refreshed = await loadExports(true);
     message.value = refreshed
       ? "已冻结导出范围，请核对记录数后确认生成。"
       : "已冻结导出范围，但列表刷新失败，请稍后刷新。";
@@ -324,13 +370,13 @@ watch(
   () => session.sensitiveActive,
   (active) => {
     if (active) return;
-    messages.value = [];
+    messagePager.clear();
     exportPreview.value = null;
     exportConfirmed.value = false;
   },
 );
 
-onMounted(() => Promise.all([loadChats(), loadExports()]));
+onMounted(() => Promise.all([loadChats(true), loadExports(true)]));
 </script>
 
 <template>
@@ -373,7 +419,11 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
             <p class="card-kicker">MONITORING</p>
             <h1>聊天监听配置</h1>
           </div>
-          <button class="button secondary" type="button" @click="loadChats">
+          <button
+            class="button secondary"
+            type="button"
+            @click="loadChats(false)"
+          >
             <RefreshCw :size="16" />刷新
           </button>
         </div>
@@ -438,6 +488,15 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
             </tbody>
           </table>
         </div>
+        <CursorPagination
+          :page="chatPager.pageNumber.value"
+          :item-count="chats.length"
+          :busy="chatPager.busy.value"
+          :has-previous="chatPager.hasPrevious.value"
+          :has-next="chatPager.hasNext.value"
+          @previous="changePage(chatPager.previous)"
+          @next="changePage(chatPager.next)"
+        />
       </section>
       <section id="search" class="admin-panel">
         <div class="panel-head">
@@ -453,7 +512,7 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
             ><select v-model="form.chatId">
               <option value="">全部已监听聊天</option>
               <option
-                v-for="chat in chats.filter((item) => item.enabled)"
+                v-for="chat in chatOptions"
                 :key="chat.id"
                 :value="chat.id"
               >
@@ -543,6 +602,16 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
             ><span>调整聊天、关键词、发送者或时间范围后重试。</span>
           </div>
         </div>
+        <CursorPagination
+          v-if="session.sensitiveActive"
+          :page="messagePager.pageNumber.value"
+          :item-count="messages.length"
+          :busy="messagePager.busy.value"
+          :has-previous="messagePager.hasPrevious.value"
+          :has-next="messagePager.hasNext.value"
+          @previous="changePage(messagePager.previous)"
+          @next="changePage(messagePager.next)"
+        />
       </section>
       <section id="export" class="admin-panel">
         <div class="panel-head">
@@ -562,7 +631,7 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
             ><select v-model="exportForm.chatId" required>
               <option value="">请选择已监听聊天</option>
               <option
-                v-for="chat in chats.filter((item) => item.enabled)"
+                v-for="chat in chatOptions"
                 :key="chat.id"
                 :value="chat.id"
               >
@@ -752,6 +821,15 @@ onMounted(() => Promise.all([loadChats(), loadExports()]));
             </tbody>
           </table>
         </div>
+        <CursorPagination
+          :page="exportPager.pageNumber.value"
+          :item-count="exportJobs.length"
+          :busy="exportPager.busy.value"
+          :has-previous="exportPager.hasPrevious.value"
+          :has-next="exportPager.hasNext.value"
+          @previous="changePage(exportPager.previous)"
+          @next="changePage(exportPager.next)"
+        />
       </section>
     </div>
   </main>

@@ -336,6 +336,51 @@ describe("workflow application", () => {
     });
   });
 
+  it("paginates workflow executions with a stable cursor", async () => {
+    await configureWorkflow();
+    for (const sequence of [1, 2, 3]) {
+      const response = await application.inject({
+        method: "POST",
+        url: "/api/v1/webhooks/bluebubbles",
+        headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+        payload: newMessageWebhook({
+          messageGuid: `pagination-execution-${sequence}`,
+          text: `/ping page ${sequence}`,
+        }),
+      });
+      expect(response.statusCode).toBe(202);
+    }
+
+    const first = await application.inject({
+      method: "GET",
+      url: "/api/v1/executions?limit=2",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    const firstPage = first.json<{
+      data: Array<{ id: string }>;
+      page: { nextCursor: string | null };
+    }>();
+    expect(firstPage.data).toHaveLength(2);
+    expect(firstPage.page.nextCursor).toEqual(expect.any(String));
+
+    const second = await application.inject({
+      method: "GET",
+      url: `/api/v1/executions?limit=2&cursor=${encodeURIComponent(
+        firstPage.page.nextCursor ?? "",
+      )}`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    const secondPage = second.json<{
+      data: Array<{ id: string }>;
+      page: { nextCursor: string | null };
+    }>();
+    expect(secondPage.data).toHaveLength(1);
+    expect(secondPage.page.nextCursor).toBeNull();
+    expect(firstPage.data.map((item) => item.id)).not.toContain(
+      secondPage.data[0]?.id,
+    );
+  });
+
   it("records an unavailable node handler instead of leaving execution running", async () => {
     await application.close();
     archive = new InMemoryArchiveRepository();
@@ -958,9 +1003,9 @@ describe("workflow application", () => {
 
     let executionId = "";
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      const retrying = (await workflows.listExecutions(10)).find(
-        (execution) => execution.status === "retrying",
-      );
+      const retrying = (
+        await workflows.listExecutions({ limit: 10, cursor: null })
+      ).find((execution) => execution.status === "retrying");
       if (retrying !== undefined) {
         executionId = retrying.id;
         break;

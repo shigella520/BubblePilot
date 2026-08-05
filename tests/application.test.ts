@@ -321,6 +321,7 @@ describe("BubblePilot application", () => {
           senderId: "fictional-user@example.test",
         },
       ],
+      page: { nextCursor: null },
     });
 
     const unavailable = await application.inject({

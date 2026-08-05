@@ -210,6 +210,28 @@ export interface AiChatRequest {
   maxOutputTokens: number;
   temperature: number | null;
   timeoutMs: number;
+  clientRequestId?: string;
+}
+
+export interface AiCallDiagnostics {
+  clientRequestId: string | null;
+  providerRequestId: string | null;
+  httpStatus: number | null;
+  requestHash: string;
+  requestMessageCount: number;
+  requestCharacters: number;
+  responseBytes: number | null;
+  responseBodyHash: string | null;
+  responseFinishReason: string | null;
+  responseContentCharacters: number | null;
+  responseReasoningCharacters: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  reasoningTokens: number | null;
+  totalTokens: number | null;
+  cachedPromptTokens: number | null;
+  cacheWritePromptTokens: number | null;
+  cacheMissPromptTokens: number | null;
 }
 
 export type AiFailureCategory =
@@ -233,6 +255,7 @@ export interface AiCallFailure {
   fallbackAllowed: boolean;
   countsForDegrade: boolean;
   durationMs: number;
+  diagnostics?: AiCallDiagnostics;
 }
 
 export type AiCallResult =
@@ -240,6 +263,7 @@ export type AiCallResult =
       status: "succeeded";
       text: string;
       durationMs: number;
+      diagnostics?: AiCallDiagnostics;
     }
   | AiCallFailure;
 
@@ -262,6 +286,7 @@ export interface AiAttemptRecordInput {
   errorCode: string | null;
   retryable: boolean | null;
   fallbackAllowed: boolean | null;
+  diagnostics: AiCallDiagnostics | null;
 }
 
 export interface AiProviderAttemptView extends AiAttemptRecordInput {
@@ -280,6 +305,7 @@ export interface AiRouteSuccess {
   round: number;
   attemptCount: number;
   durationMs: number;
+  diagnostics: AiCallDiagnostics | null;
 }
 
 export interface AiRouteFailure {

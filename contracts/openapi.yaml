@@ -140,16 +140,11 @@ paths:
         - bearerAuth: []
         - sessionAuth: []
       parameters:
-        - in: query
-          name: limit
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 100
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
-          description: 按时间倒序返回脱敏审计事件。
+          description: 按时间倒序分页返回脱敏审计事件，并在 page.nextCursor 中提供下一页游标。
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/webhooks/bluebubbles:
@@ -363,16 +358,11 @@ paths:
         - bearerAuth: []
         - sessionAuth: []
       parameters:
-        - in: query
-          name: limit
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 200
-            default: 100
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
-          description: 导出任务按创建时间倒序返回，过期状态由服务端动态计算。
+          description: 导出任务按创建时间倒序分页返回，过期状态由服务端动态计算。
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/exports/preview:
@@ -1081,7 +1071,7 @@ paths:
             pattern: "^\\s*(created|running|retrying|succeeded|skipped|failed|dead-lettered|closed)(\\s*,\\s*(created|running|retrying|succeeded|skipped|failed|dead-lettered|closed))*\\s*$"
       responses:
         "200":
-          description: 最近的工作流执行列表。
+          description: 按创建时间倒序分页返回工作流执行列表。
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}:
@@ -1099,7 +1089,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: 执行、节点尝试、含稳定错误类别的 AI Provider Attempt 和出站发送的完整脱敏轨迹。
+          description: 执行、节点尝试、含稳定错误类别和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；不返回完整 Prompt、聊天正文、AI 输出、Secret 或原始响应体。
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/retry:

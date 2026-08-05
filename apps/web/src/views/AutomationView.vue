@@ -15,6 +15,7 @@ import WorkflowEditor from "../components/workflow/WorkflowEditor.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 
 import {
+  apiAllPages,
   apiRequest,
   errorMessage,
   jsonBody,
@@ -250,7 +251,7 @@ async function load() {
       apiRequest<Trigger[]>("/api/v1/triggers"),
       apiRequest<AiRoute[]>("/api/v1/ai/routes"),
       apiRequest<any[]>("/api/v1/workflows/action-blocks"),
-      apiRequest<Array<{ providerChatId: string; displayName: string }>>(
+      apiAllPages<{ providerChatId: string; displayName: string }>(
         "/api/v1/chats?limit=100",
       ),
     ]);

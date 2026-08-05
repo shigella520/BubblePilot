@@ -250,6 +250,42 @@ describe("bounded data export API", () => {
     );
   });
 
+  it("paginates export jobs and stops at the final page", async () => {
+    const cookie = await login();
+    await preview(cookie);
+    await preview(cookie);
+    await preview(cookie);
+
+    const first = await application.inject({
+      method: "GET",
+      url: "/api/v1/exports?limit=2",
+      headers: { cookie },
+    });
+    const firstPage = first.json<{
+      data: Array<{ id: string }>;
+      page: { nextCursor: string | null };
+    }>();
+    expect(firstPage.data).toHaveLength(2);
+    expect(firstPage.page.nextCursor).toEqual(expect.any(String));
+
+    const second = await application.inject({
+      method: "GET",
+      url: `/api/v1/exports?limit=2&cursor=${encodeURIComponent(
+        firstPage.page.nextCursor ?? "",
+      )}`,
+      headers: { cookie },
+    });
+    const secondPage = second.json<{
+      data: Array<{ id: string }>;
+      page: { nextCursor: string | null };
+    }>();
+    expect(secondPage.data).toHaveLength(1);
+    expect(secondPage.page.nextCursor).toBeNull();
+    expect(firstPage.data.map((item) => item.id)).not.toContain(
+      secondPage.data[0]?.id,
+    );
+  });
+
   it("rejects unavailable chats and ranges longer than 31 days", async () => {
     const cookie = await login();
     const unavailable = await application.inject({

@@ -698,18 +698,29 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     delivery.updatedAt = new Date().toISOString();
   }
 
-  listExecutions(
-    limit: number,
-    statuses: readonly WorkflowExecutionStatus[] = [],
-  ): Promise<readonly WorkflowExecutionRecord[]> {
+  listExecutions(options: {
+    limit: number;
+    statuses?: readonly WorkflowExecutionStatus[];
+    cursor: { timestamp: Date; id: string } | null;
+  }): Promise<readonly WorkflowExecutionRecord[]> {
+    const statuses = options.statuses ?? [];
+    const cursorTimestamp = options.cursor?.timestamp.toISOString();
     return Promise.resolve(
       [...this.executions.values()]
         .filter(
           (execution) =>
-            statuses.length === 0 || statuses.includes(execution.status),
+            (statuses.length === 0 || statuses.includes(execution.status)) &&
+            (cursorTimestamp === undefined ||
+              execution.createdAt < cursorTimestamp ||
+              (execution.createdAt === cursorTimestamp &&
+                execution.id < (options.cursor?.id ?? ""))),
         )
-        .slice(-limit)
-        .reverse()
+        .sort(
+          (left, right) =>
+            right.createdAt.localeCompare(left.createdAt) ||
+            right.id.localeCompare(left.id),
+        )
+        .slice(0, options.limit)
         .map((execution) => this.executionRecord(execution)),
     );
   }

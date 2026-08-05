@@ -1,6 +1,8 @@
 import { z } from "zod";
 
+import { sha256 } from "../../app/canonical-json.js";
 import type {
+  AiCallDiagnostics,
   AiCallFailure,
   AiCallResult,
   AiChatMessage,
@@ -30,14 +32,19 @@ const chatResponseSchema = z
     choices: z.array(
       z
         .object({
+          finish_reason: z.string().nullable().optional(),
           message: z
             .object({
-              content: z.union([
-                z.string(),
-                z.array(
-                  z.object({ text: z.string().optional() }).passthrough(),
-                ),
-              ]),
+              content: z
+                .union([
+                  z.string(),
+                  z.array(
+                    z.object({ text: z.string().optional() }).passthrough(),
+                  ),
+                ])
+                .nullable()
+                .optional(),
+              reasoning_content: z.string().nullable().optional(),
             })
             .passthrough(),
         })
@@ -48,6 +55,7 @@ const chatResponseSchema = z
 
 const responsesResponseSchema = z
   .object({
+    status: z.string().optional(),
     output_text: z.string().optional(),
     output: z
       .array(
@@ -68,6 +76,56 @@ const responsesResponseSchema = z
       .optional(),
   })
   .passthrough();
+
+const tokenUsageSchema = z
+  .object({
+    prompt_tokens: z.number().int().nonnegative().optional(),
+    completion_tokens: z.number().int().nonnegative().optional(),
+    input_tokens: z.number().int().nonnegative().optional(),
+    output_tokens: z.number().int().nonnegative().optional(),
+    total_tokens: z.number().int().nonnegative().optional(),
+    prompt_cache_hit_tokens: z.number().int().nonnegative().optional(),
+    prompt_cache_miss_tokens: z.number().int().nonnegative().optional(),
+    prompt_tokens_details: z
+      .object({
+        cached_tokens: z.number().int().nonnegative().optional(),
+        cache_write_tokens: z.number().int().nonnegative().optional(),
+      })
+      .passthrough()
+      .optional(),
+    completion_tokens_details: z
+      .object({
+        reasoning_tokens: z.number().int().nonnegative().optional(),
+      })
+      .passthrough()
+      .optional(),
+    input_tokens_details: z
+      .object({
+        cached_tokens: z.number().int().nonnegative().optional(),
+        cache_write_tokens: z.number().int().nonnegative().optional(),
+      })
+      .passthrough()
+      .optional(),
+    output_tokens_details: z
+      .object({
+        reasoning_tokens: z.number().int().nonnegative().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const responseUsageSchema = z
+  .object({ usage: tokenUsageSchema.optional() })
+  .passthrough();
+
+interface ParsedResponse {
+  supported: boolean;
+  text: string | null;
+  finishReason: string | null;
+  contentCharacters: number | null;
+  reasoningCharacters: number | null;
+}
 
 function elapsed(startedAt: number): number {
   return Math.max(0, Date.now() - startedAt);
@@ -99,6 +157,7 @@ function httpFailure(
   status: number,
   body: unknown,
   durationMs: number,
+  diagnostics: AiCallDiagnostics,
 ): AiCallFailure {
   const identity = errorIdentity(body);
   if (identity.includes("content_filter") || identity.includes("safety")) {
@@ -110,6 +169,7 @@ function httpFailure(
       fallbackAllowed: false,
       countsForDegrade: false,
       durationMs,
+      diagnostics,
     });
   }
   if (status === 408) {
@@ -121,6 +181,7 @@ function httpFailure(
       fallbackAllowed: true,
       countsForDegrade: true,
       durationMs,
+      diagnostics,
     });
   }
   if (status === 429) {
@@ -132,6 +193,7 @@ function httpFailure(
       fallbackAllowed: true,
       countsForDegrade: true,
       durationMs,
+      diagnostics,
     });
   }
   if (status >= 500) {
@@ -143,6 +205,7 @@ function httpFailure(
       fallbackAllowed: true,
       countsForDegrade: true,
       durationMs,
+      diagnostics,
     });
   }
   if (status === 401 || status === 403) {
@@ -154,6 +217,7 @@ function httpFailure(
       fallbackAllowed: true,
       countsForDegrade: false,
       durationMs,
+      diagnostics,
     });
   }
   return failure({
@@ -164,33 +228,151 @@ function httpFailure(
     fallbackAllowed: true,
     countsForDegrade: false,
     durationMs,
+    diagnostics,
   });
 }
 
-function chatText(body: unknown): string | null {
+function chatResponse(body: unknown): ParsedResponse {
   const parsed = chatResponseSchema.safeParse(body);
-  if (!parsed.success) {
-    return null;
+  const choice = parsed.success ? parsed.data.choices[0] : undefined;
+  if (choice === undefined) {
+    return {
+      supported: false,
+      text: null,
+      finishReason: null,
+      contentCharacters: null,
+      reasoningCharacters: null,
+    };
   }
-  const content = parsed.data.choices[0]?.message.content;
-  return typeof content === "string"
-    ? content
-    : (content?.map((part) => part.text ?? "").join("") ?? null);
+  const content = choice.message.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content.map((part) => part.text ?? "").join("")
+        : "";
+  return {
+    supported: true,
+    text,
+    finishReason: choice.finish_reason ?? null,
+    contentCharacters: text.length,
+    reasoningCharacters: choice.message.reasoning_content?.length ?? 0,
+  };
 }
 
-function responsesText(body: unknown): string | null {
+function responsesResponse(body: unknown): ParsedResponse {
   const parsed = responsesResponseSchema.safeParse(body);
   if (!parsed.success) {
-    return null;
+    return {
+      supported: false,
+      text: null,
+      finishReason: null,
+      contentCharacters: null,
+      reasoningCharacters: null,
+    };
   }
-  return (
+  const text =
     parsed.data.output_text ??
     parsed.data.output
       ?.flatMap((item) => item.content ?? [])
       .map((content) => content.text ?? "")
       .join("") ??
-    null
-  );
+    "";
+  return {
+    supported: true,
+    text,
+    finishReason: parsed.data.status ?? null,
+    contentCharacters: text.length,
+    reasoningCharacters: 0,
+  };
+}
+
+function requestId(headers: Headers): string | null {
+  for (const name of [
+    "x-request-id",
+    "request-id",
+    "openai-request-id",
+    "cf-ray",
+  ]) {
+    const value = headers.get(name)?.trim();
+    if (value !== undefined && value.length > 0) {
+      return value.slice(0, 512);
+    }
+  }
+  return null;
+}
+
+function tokenDiagnostics(body: unknown) {
+  const parsed = responseUsageSchema.safeParse(body);
+  const usage = parsed.success ? parsed.data.usage : undefined;
+  return {
+    promptTokens: usage?.prompt_tokens ?? usage?.input_tokens ?? null,
+    completionTokens: usage?.completion_tokens ?? usage?.output_tokens ?? null,
+    reasoningTokens:
+      usage?.completion_tokens_details?.reasoning_tokens ??
+      usage?.output_tokens_details?.reasoning_tokens ??
+      null,
+    totalTokens: usage?.total_tokens ?? null,
+    cachedPromptTokens:
+      usage?.prompt_cache_hit_tokens ??
+      usage?.prompt_tokens_details?.cached_tokens ??
+      usage?.input_tokens_details?.cached_tokens ??
+      null,
+    cacheWritePromptTokens:
+      usage?.prompt_tokens_details?.cache_write_tokens ??
+      usage?.input_tokens_details?.cache_write_tokens ??
+      null,
+    cacheMissPromptTokens: usage?.prompt_cache_miss_tokens ?? null,
+  };
+}
+
+function baseDiagnostics(
+  request: AiChatRequest,
+  requestBody: string,
+): AiCallDiagnostics {
+  return {
+    clientRequestId: request.clientRequestId?.slice(0, 512) ?? null,
+    providerRequestId: null,
+    httpStatus: null,
+    requestHash: sha256(requestBody),
+    requestMessageCount: request.messages.length,
+    requestCharacters: request.messages.reduce(
+      (total, message) => total + message.content.length,
+      0,
+    ),
+    responseBytes: null,
+    responseBodyHash: null,
+    responseFinishReason: null,
+    responseContentCharacters: null,
+    responseReasoningCharacters: null,
+    promptTokens: null,
+    completionTokens: null,
+    reasoningTokens: null,
+    totalTokens: null,
+    cachedPromptTokens: null,
+    cacheWritePromptTokens: null,
+    cacheMissPromptTokens: null,
+  };
+}
+
+function responseDiagnostics(
+  base: AiCallDiagnostics,
+  response: Response,
+  responseBody: string,
+  body: unknown,
+  parsed: ParsedResponse,
+): AiCallDiagnostics {
+  return {
+    ...base,
+    providerRequestId: requestId(response.headers),
+    httpStatus: response.status,
+    responseBytes: new TextEncoder().encode(responseBody).byteLength,
+    responseBodyHash: sha256(responseBody),
+    responseFinishReason: parsed.finishReason,
+    responseContentCharacters: parsed.contentCharacters,
+    responseReasoningCharacters: parsed.reasoningCharacters,
+    ...tokenDiagnostics(body),
+  };
 }
 
 export interface AiClient {
@@ -215,18 +397,6 @@ export class OpenAiCompatibleClient implements AiClient {
     request: AiChatRequest,
   ): Promise<AiCallResult> {
     const startedAt = Date.now();
-    const secret = resolveProviderSecret(provider, this.secrets);
-    if (!isProviderSecretConfigured(provider, this.secrets)) {
-      return failure({
-        category: "configuration",
-        code: "AI_PROVIDER_SECRET_NOT_CONFIGURED",
-        summary: "The AI provider secret reference is not configured.",
-        retryable: false,
-        fallbackAllowed: true,
-        countsForDegrade: false,
-        durationMs: elapsed(startedAt),
-      });
-    }
     const endpoint = new URL(
       provider.apiKind === "chat-completions"
         ? "chat/completions"
@@ -248,6 +418,21 @@ export class OpenAiCompatibleClient implements AiClient {
     if (request.temperature !== null) {
       payload.temperature = request.temperature;
     }
+    const requestBody = JSON.stringify(payload);
+    const initialDiagnostics = baseDiagnostics(request, requestBody);
+    const secret = resolveProviderSecret(provider, this.secrets);
+    if (!isProviderSecretConfigured(provider, this.secrets)) {
+      return failure({
+        category: "configuration",
+        code: "AI_PROVIDER_SECRET_NOT_CONFIGURED",
+        summary: "The AI provider secret reference is not configured.",
+        retryable: false,
+        fallbackAllowed: true,
+        countsForDegrade: false,
+        durationMs: elapsed(startedAt),
+        diagnostics: initialDiagnostics,
+      });
+    }
 
     const controller = new AbortController();
     const timeoutMs = Math.min(request.timeoutMs, provider.requestTimeoutMs);
@@ -257,48 +442,69 @@ export class OpenAiCompatibleClient implements AiClient {
         method: "POST",
         headers: {
           ...(secret === null ? {} : { authorization: `Bearer ${secret}` }),
+          ...(request.clientRequestId === undefined
+            ? {}
+            : { "x-client-request-id": request.clientRequestId }),
+          accept: "application/json",
           "content-type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: requestBody,
         signal: controller.signal,
       });
+      let responseBody = "";
       let body: unknown;
       try {
-        body = await response.json();
+        responseBody = await response.text();
+        body = JSON.parse(responseBody) as unknown;
       } catch {
         body = null;
       }
       const durationMs = elapsed(startedAt);
-      if (!response.ok) {
-        return httpFailure(response.status, body, durationMs);
-      }
-      const text =
+      const parsed =
         provider.apiKind === "chat-completions"
-          ? chatText(body)
-          : responsesText(body);
-      if (text === null) {
+          ? chatResponse(body)
+          : responsesResponse(body);
+      const diagnostics = responseDiagnostics(
+        initialDiagnostics,
+        response,
+        responseBody,
+        body,
+        parsed,
+      );
+      if (!response.ok) {
+        return httpFailure(response.status, body, durationMs, diagnostics);
+      }
+      if (!parsed.supported) {
         return failure({
           category: "invalid-response",
           code: "AI_PROVIDER_INVALID_RESPONSE",
           summary: "The AI provider returned an unsupported response shape.",
-          retryable: false,
+          retryable: true,
           fallbackAllowed: true,
-          countsForDegrade: false,
+          countsForDegrade: true,
           durationMs,
+          diagnostics,
         });
       }
+      const text = parsed.text ?? "";
       if (text.trim().length === 0) {
         return failure({
           category: "empty-output",
           code: "AI_PROVIDER_EMPTY_OUTPUT",
           summary: "The AI provider returned empty output.",
-          retryable: false,
+          retryable: true,
           fallbackAllowed: true,
-          countsForDegrade: false,
+          countsForDegrade: true,
           durationMs,
+          diagnostics,
         });
       }
-      return { status: "succeeded", text: text.trim(), durationMs };
+      return {
+        status: "succeeded",
+        text: text.trim(),
+        durationMs,
+        diagnostics,
+      };
     } catch (error) {
       const timedOut =
         controller.signal.aborted ||
@@ -315,6 +521,7 @@ export class OpenAiCompatibleClient implements AiClient {
         fallbackAllowed: true,
         countsForDegrade: true,
         durationMs: elapsed(startedAt),
+        diagnostics: initialDiagnostics,
       });
     } finally {
       clearTimeout(timeout);

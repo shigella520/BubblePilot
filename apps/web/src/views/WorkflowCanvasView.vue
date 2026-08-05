@@ -6,7 +6,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import WorkflowEditor from "../components/workflow/WorkflowEditor.vue";
-import { apiRequest, errorMessage } from "../services/api";
+import { apiAllPages, apiRequest, errorMessage } from "../services/api";
 
 const route = useRoute();
 const router = useRouter();
@@ -91,7 +91,7 @@ async function load() {
     const [actionBlocks, aiRoutes, chats] = await Promise.all([
       apiRequest<any[]>("/api/v1/workflows/action-blocks"),
       apiRequest<AiRouteOption[]>("/api/v1/ai/routes"),
-      apiRequest<ChatOption[]>("/api/v1/chats?limit=100"),
+      apiAllPages<ChatOption>("/api/v1/chats?limit=100"),
     ]);
     blocks.value = enrichActionBlocks(actionBlocks, aiRoutes, chats);
     if (!isNew.value) {

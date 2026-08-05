@@ -85,6 +85,24 @@ interface AttemptRow {
   error_code: string | null;
   retryable: boolean | null;
   fallback_allowed: boolean | null;
+  client_request_id: string | null;
+  provider_request_id: string | null;
+  http_status: number | null;
+  request_hash: string | null;
+  request_message_count: number | null;
+  request_characters: number | null;
+  response_bytes: number | null;
+  response_body_hash: string | null;
+  response_finish_reason: string | null;
+  response_content_characters: number | null;
+  response_reasoning_characters: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  reasoning_tokens: number | null;
+  total_tokens: number | null;
+  cached_prompt_tokens: number | null;
+  cache_write_prompt_tokens: number | null;
+  cache_miss_prompt_tokens: number | null;
   created_at: Date;
 }
 
@@ -182,6 +200,29 @@ function attemptView(row: AttemptRow): AiProviderAttemptView {
     errorCode: row.error_code,
     retryable: row.retryable,
     fallbackAllowed: row.fallback_allowed,
+    diagnostics:
+      row.request_hash === null
+        ? null
+        : {
+            clientRequestId: row.client_request_id,
+            providerRequestId: row.provider_request_id,
+            httpStatus: row.http_status,
+            requestHash: row.request_hash,
+            requestMessageCount: row.request_message_count ?? 0,
+            requestCharacters: row.request_characters ?? 0,
+            responseBytes: row.response_bytes,
+            responseBodyHash: row.response_body_hash,
+            responseFinishReason: row.response_finish_reason,
+            responseContentCharacters: row.response_content_characters,
+            responseReasoningCharacters: row.response_reasoning_characters,
+            promptTokens: row.prompt_tokens,
+            completionTokens: row.completion_tokens,
+            reasoningTokens: row.reasoning_tokens,
+            totalTokens: row.total_tokens,
+            cachedPromptTokens: row.cached_prompt_tokens,
+            cacheWritePromptTokens: row.cache_write_prompt_tokens,
+            cacheMissPromptTokens: row.cache_miss_prompt_tokens,
+          },
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -889,10 +930,18 @@ export class PostgresAiRepository implements AiRepository {
          provider_name, provider_version, model, round, sequence, status,
          health_state,
          selection_health_state, duration_ms, error_category, error_code,
-         retryable, fallback_allowed
+         retryable, fallback_allowed, client_request_id, provider_request_id,
+         http_status, request_hash, request_message_count, request_characters,
+         response_bytes, response_body_hash, response_finish_reason,
+         response_content_characters, response_reasoning_characters,
+         prompt_tokens, completion_tokens, reasoning_tokens, total_tokens,
+         cached_prompt_tokens, cache_write_prompt_tokens,
+         cache_miss_prompt_tokens
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-         $13, $14, $15, $16, $17, $18, $19
+         $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
+         $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34,
+         $35, $36, $37
        )`,
       [
         randomUUID(),
@@ -914,6 +963,24 @@ export class PostgresAiRepository implements AiRepository {
         input.errorCode,
         input.retryable,
         input.fallbackAllowed,
+        input.diagnostics?.clientRequestId ?? null,
+        input.diagnostics?.providerRequestId ?? null,
+        input.diagnostics?.httpStatus ?? null,
+        input.diagnostics?.requestHash ?? null,
+        input.diagnostics?.requestMessageCount ?? null,
+        input.diagnostics?.requestCharacters ?? null,
+        input.diagnostics?.responseBytes ?? null,
+        input.diagnostics?.responseBodyHash ?? null,
+        input.diagnostics?.responseFinishReason ?? null,
+        input.diagnostics?.responseContentCharacters ?? null,
+        input.diagnostics?.responseReasoningCharacters ?? null,
+        input.diagnostics?.promptTokens ?? null,
+        input.diagnostics?.completionTokens ?? null,
+        input.diagnostics?.reasoningTokens ?? null,
+        input.diagnostics?.totalTokens ?? null,
+        input.diagnostics?.cachedPromptTokens ?? null,
+        input.diagnostics?.cacheWritePromptTokens ?? null,
+        input.diagnostics?.cacheMissPromptTokens ?? null,
       ],
     );
   }
@@ -935,7 +1002,7 @@ export class PostgresAiRepository implements AiRepository {
     try {
       const result = await this.pool.query<{ ready: boolean }>(
         `SELECT EXISTS (
-           SELECT 1 FROM schema_migrations WHERE name = '0011_ai_provider_secrets.sql'
+           SELECT 1 FROM schema_migrations WHERE name = '0016_ai_attempt_diagnostics.sql'
          ) AS ready`,
       );
       return result.rows[0]?.ready === true;

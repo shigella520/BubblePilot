@@ -278,10 +278,11 @@ export interface WorkflowRepository {
     status: "failed" | "unknown",
     error: { code: string; summary: string; retryable: boolean },
   ): Promise<void>;
-  listExecutions(
-    limit: number,
-    statuses?: readonly WorkflowExecutionStatus[],
-  ): Promise<readonly WorkflowExecutionRecord[]>;
+  listExecutions(options: {
+    limit: number;
+    statuses?: readonly WorkflowExecutionStatus[];
+    cursor: { timestamp: Date; id: string } | null;
+  }): Promise<readonly WorkflowExecutionRecord[]>;
   listExecutionsForMessages(
     providerMessageIds: readonly string[],
   ): Promise<readonly MessageExecutionLink[]>;

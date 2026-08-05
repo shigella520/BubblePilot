@@ -137,8 +137,11 @@ export class AuthService {
     return this.repository.recordAudit(event);
   }
 
-  listAuditEvents(limit: number): Promise<readonly AuditEventView[]> {
-    return this.repository.listAuditEvents(limit);
+  listAuditEvents(options: {
+    limit: number;
+    cursor: { timestamp: Date; id: string } | null;
+  }): Promise<readonly AuditEventView[]> {
+    return this.repository.listAuditEvents(options);
   }
 
   isReady(): Promise<boolean> {

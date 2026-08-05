@@ -159,6 +159,89 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       [workflowId, workflowVersionId],
     );
 
+    const triggerId = randomUUID();
+    const diagnosticExecutionId = randomUUID();
+    await inspectionPool.query(
+      `INSERT INTO bot_triggers (id, name, workflow_version_id, conditions, enabled)
+       VALUES ($1, $2, $3, '{}'::jsonb, TRUE)`,
+      [triggerId, `Trigger ${suffix}`, workflowVersionId],
+    );
+    await inspectionPool.query(
+      `INSERT INTO workflow_executions (
+         id, provider, external_event_id, trigger_id, workflow_version_id,
+         correlation_id, status
+       ) VALUES ($1, 'fictional', $2, $3, $4, $5, 'running')`,
+      [
+        diagnosticExecutionId,
+        `event-${suffix}`,
+        triggerId,
+        workflowVersionId,
+        randomUUID(),
+      ],
+    );
+    await repository.recordAttempt({
+      executionId: diagnosticExecutionId,
+      nodeId: "ai-node",
+      routeId: route.value.id,
+      routeVersion: route.value.version,
+      providerId: primary.value.id,
+      providerName: primary.value.name,
+      providerVersion: primary.value.version,
+      model: primary.value.model,
+      round: 1,
+      sequence: 1,
+      status: "succeeded",
+      selectionHealthState: "healthy",
+      healthState: "healthy",
+      durationMs: 123,
+      errorCategory: null,
+      errorCode: null,
+      retryable: null,
+      fallbackAllowed: null,
+      diagnostics: {
+        clientRequestId: `${diagnosticExecutionId}:ai-node:1:1`,
+        providerRequestId: "provider-request-fictional",
+        httpStatus: 200,
+        requestHash: "request-hash-fictional",
+        requestMessageCount: 3,
+        requestCharacters: 420,
+        responseBytes: 512,
+        responseBodyHash: "response-hash-fictional",
+        responseFinishReason: "stop",
+        responseContentCharacters: 64,
+        responseReasoningCharacters: 0,
+        promptTokens: 300,
+        completionTokens: 64,
+        reasoningTokens: 0,
+        totalTokens: 364,
+        cachedPromptTokens: 256,
+        cacheWritePromptTokens: 0,
+        cacheMissPromptTokens: 44,
+      },
+    });
+    await expect(
+      repository.listAttempts(diagnosticExecutionId, "ai-node"),
+    ).resolves.toMatchObject([
+      {
+        executionId: diagnosticExecutionId,
+        diagnostics: {
+          providerRequestId: "provider-request-fictional",
+          requestHash: "request-hash-fictional",
+          requestMessageCount: 3,
+          promptTokens: 300,
+          cachedPromptTokens: 256,
+          cacheMissPromptTokens: 44,
+        },
+      },
+    ]);
+    await inspectionPool.query(
+      "DELETE FROM workflow_executions WHERE id = $1",
+      [diagnosticExecutionId],
+    );
+    await inspectionPool.query("DELETE FROM bot_triggers WHERE id = $1", [
+      triggerId,
+    ]);
+
     await expect(
       repository.deleteRoute(route.value.id, updated.value.version),
     ).resolves.toMatchObject({
