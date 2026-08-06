@@ -317,6 +317,119 @@ describe("AgentRunner", () => {
     );
   });
 
+  it("uses collected results for a final answer when a tool-call batch exceeds the limit", async () => {
+    const { repository, request } = await setup();
+    const scriptedClient: AiClient & { requests: AiChatRequest[] } = {
+      requests: [],
+      call(_provider, chatRequest) {
+        this.requests.push(structuredClone(chatRequest));
+        if (this.requests.length === 1) {
+          return Promise.resolve({
+            status: "succeeded" as const,
+            text: "",
+            toolCalls: [
+              {
+                id: "initial-search",
+                name: "web_search",
+                arguments: '{"query":"fictional product latest news"}',
+              },
+            ],
+            durationMs: 2,
+          });
+        }
+        if (this.requests.length === 2) {
+          return Promise.resolve({
+            status: "succeeded" as const,
+            text: "",
+            toolCalls: [
+              {
+                id: "refinement-one",
+                name: "web_search",
+                arguments: '{"query":"fictional product price"}',
+              },
+              {
+                id: "refinement-two",
+                name: "web_search",
+                arguments: '{"query":"fictional product release date"}',
+              },
+              {
+                id: "over-limit-refinement",
+                name: "web_search",
+                arguments: '{"query":"fictional product configuration"}',
+              },
+            ],
+            durationMs: 2,
+          });
+        }
+        return Promise.resolve({
+          status: "succeeded" as const,
+          text: "Final answer from the three completed searches",
+          durationMs: 2,
+        });
+      },
+    };
+    const routing = new AiRoutingService(
+      repository,
+      scriptedClient,
+      new EnvironmentSecretResolver({ FICTIONAL_KEY: "fictional-secret" }),
+      true,
+    );
+    let searchCalls = 0;
+    const search: WebSearchTool = {
+      isReady: () => Promise.resolve(true),
+      search: () => {
+        searchCalls += 1;
+        return Promise.resolve({
+          results: [
+            {
+              title: `Source ${searchCalls}`,
+              url: `https://news.example.test/item-${searchCalls}`,
+              snippet: "Fresh fact",
+              publishedAt: null,
+              source: "fictional",
+            },
+          ],
+          durationMs: 2,
+        });
+      },
+    };
+
+    await expect(
+      new AgentRunner(routing, search, repository).run(request),
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      text: "Final answer from the three completed searches",
+    });
+    expect(searchCalls).toBe(3);
+    expect(scriptedClient.requests).toHaveLength(3);
+    expect(scriptedClient.requests[2]?.webSearch).toBeUndefined();
+    expect(scriptedClient.requests[2]?.tools).toBeUndefined();
+    expect(scriptedClient.requests[2]?.toolChoice).toBeUndefined();
+    expect(repository.toolExecutions).toMatchObject([
+      { status: "succeeded", resultCount: 1 },
+      { status: "succeeded", resultCount: 1 },
+      { status: "succeeded", resultCount: 1 },
+      {
+        status: "failed",
+        resultCount: null,
+        errorCode: "AI_AGENT_TOOL_LIMIT_REACHED",
+        requestDetails: {
+          query: "fictional product configuration",
+          skipped: true,
+          reason: "tool_limit",
+        },
+      },
+    ]);
+    const skippedToolMessage = scriptedClient.requests[2]?.messages.find(
+      (message) =>
+        message.role === "tool" &&
+        message.toolCallId === "over-limit-refinement",
+    );
+    expect(skippedToolMessage?.content).toContain(
+      '"errorCode":"AI_AGENT_TOOL_LIMIT_REACHED"',
+    );
+  });
+
   it("hides searched source links while retaining tool audit results", async () => {
     const { repository, client, routing, search, request } = await setup(
       "Fresh fact [News](https://news.example.test/item) 详情：https://other.example.test/story，之后继续。\n来源：https://source.example.test",

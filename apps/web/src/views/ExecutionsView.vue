@@ -422,6 +422,7 @@ function resetAuditPage(): Promise<boolean> {
         @close="message = ''"
         >{{ message }}</DismissibleMessage
       >
+      <SensitiveUnlock />
       <section id="executions" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -511,7 +512,6 @@ function resetAuditPage(): Promise<boolean> {
           </div>
           <span class="state-badge">不含正文与 Secret</span>
         </div>
-        <SensitiveUnlock />
         <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
           <ShieldCheck :size="24" />
           <strong>审计事件已遮蔽</strong>

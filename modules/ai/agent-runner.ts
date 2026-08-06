@@ -86,6 +86,15 @@ function toolFailureOutput(code: string, maximumCharacters: number): string {
   }).slice(0, maximumCharacters);
 }
 
+function toolLimitOutput(maximumCharacters: number): string {
+  return JSON.stringify({
+    status: "skipped",
+    errorCode: "AI_AGENT_TOOL_LIMIT_REACHED",
+    guidance:
+      "The web search call limit has been reached. Do not request more tools. Answer now using the search results already provided and disclose any remaining uncertainty.",
+  }).slice(0, maximumCharacters);
+}
+
 function sourceDisplayInstruction(
   sourceDisplay: WebSearchSourceDisplay,
 ): string {
@@ -208,17 +217,28 @@ export class AgentRunner {
     let searchAttempted = false;
     let preferredProviderId: string | undefined;
     let totalAttempts = 0;
+    let finalAnswerOnly = false;
     const startedAt = Date.now();
 
     for (let turn = 1; turn <= this.limits.maxTurns; turn += 1) {
-      const result = await this.routing.execute({
+      const mustFinalize =
+        finalAnswerOnly || (turn === this.limits.maxTurns && searchAttempted);
+      const routeRequest: AiRouteRequest = {
         ...request,
         messages,
-        tools: [webSearchDefinition],
-        toolChoice: policy === "required" && !searched ? "required" : "auto",
         agentTurn: turn,
         ...(preferredProviderId === undefined ? {} : { preferredProviderId }),
-      });
+      };
+      if (mustFinalize) {
+        routeRequest.webSearch = "disabled";
+        delete routeRequest.tools;
+        delete routeRequest.toolChoice;
+      } else {
+        routeRequest.tools = [webSearchDefinition];
+        routeRequest.toolChoice =
+          policy === "required" && !searched ? "required" : "auto";
+      }
+      const result = await this.routing.execute(routeRequest);
       totalAttempts += result.attemptCount;
       if (result.status === "failed") {
         return { ...result, attemptCount: totalAttempts };
@@ -249,6 +269,16 @@ export class AgentRunner {
           durationMs: Math.max(0, Date.now() - startedAt),
         };
       }
+      if (mustFinalize) {
+        return {
+          status: "failed",
+          code: "AI_AGENT_TOOL_LIMIT_EXCEEDED",
+          summary:
+            "The provider requested another web search after tools were disabled for the final answer.",
+          retryable: false,
+          attemptCount: totalAttempts,
+        };
+      }
 
       messages.push({
         role: "assistant",
@@ -256,16 +286,43 @@ export class AgentRunner {
         toolCalls: result.toolCalls,
       });
       for (const call of result.toolCalls) {
-        toolCallCount += 1;
-        if (toolCallCount > this.limits.maxToolCalls) {
-          return {
+        if (toolCallCount >= this.limits.maxToolCalls) {
+          const skippedQuery =
+            call.name === "web_search" ? queryFromCall(call) : null;
+          const queryHash = sha256(skippedQuery ?? call.arguments).slice(
+            "sha256:".length,
+          );
+          await this.repository?.recordToolExecution({
+            executionId: request.executionId,
+            nodeId: request.nodeId,
+            providerId: result.providerId,
+            toolCallId: call.id.slice(0, 512),
+            toolName: call.name.slice(0, 120),
             status: "failed",
-            code: "AI_AGENT_TOOL_LIMIT_EXCEEDED",
-            summary: "The AI agent exceeded its web search call limit.",
-            retryable: false,
-            attemptCount: totalAttempts,
-          };
+            durationMs: 0,
+            resultCount: null,
+            queryHash,
+            errorCode: "AI_AGENT_TOOL_LIMIT_REACHED",
+            requestDetails: {
+              ...(skippedQuery === null ? {} : { query: skippedQuery }),
+              skipped: true,
+              reason: "tool_limit",
+            },
+            responseDetails: {
+              outcome: "skipped",
+              reason: "tool_limit",
+              retainedResultCount: 0,
+            },
+          });
+          messages.push({
+            role: "tool",
+            toolCallId: call.id,
+            content: toolLimitOutput(this.limits.maxToolOutputCharacters),
+          });
+          finalAnswerOnly = true;
+          continue;
         }
+        toolCallCount += 1;
         const query = call.name === "web_search" ? queryFromCall(call) : null;
         if (query === null) {
           return {
@@ -363,6 +420,9 @@ export class AgentRunner {
             attemptCount: totalAttempts,
           };
         }
+      }
+      if (toolCallCount >= this.limits.maxToolCalls) {
+        finalAnswerOnly = true;
       }
     }
 
