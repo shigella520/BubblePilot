@@ -105,6 +105,7 @@ export const aiRouteEnabledSchema = z.object({
 export type AiApiKind = "chat-completions" | "responses";
 export type AiCapabilityProbeState = "verified" | "failed" | "unknown";
 export type WebSearchPolicy = "disabled" | "auto" | "required";
+export type WebSearchSourceDisplay = "full" | "compact" | "hidden";
 export interface AiProviderCapabilities {
   functionCalling: boolean;
   hostedWebSearch: boolean;
@@ -371,6 +372,7 @@ export interface AiRouteRequest {
   outputFormat: "text" | "json";
   protectedPrompt: string | null;
   webSearch?: WebSearchPolicy | undefined;
+  webSearchSources?: WebSearchSourceDisplay | undefined;
   tools?: readonly AiToolDefinition[];
   toolChoice?: "auto" | "required";
   preferredProviderId?: string;

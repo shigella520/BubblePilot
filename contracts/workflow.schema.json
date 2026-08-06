@@ -217,6 +217,12 @@
                   "minimum": 0,
                   "maximum": 2
                 },
+                "webSearch": {
+                  "enum": ["disabled", "auto", "required"]
+                },
+                "webSearchSources": {
+                  "enum": ["full", "compact", "hidden"]
+                },
                 "outputFormat": { "enum": ["text", "json"] },
                 "outputVariable": {
                   "type": "string",

@@ -21,6 +21,8 @@ import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 class ToolCallingClient implements AiClient {
   readonly requests: AiChatRequest[] = [];
 
+  constructor(private readonly answer = "Answer with source") {}
+
   call(
     _provider: AiProviderRecord,
     request: AiChatRequest,
@@ -29,7 +31,7 @@ class ToolCallingClient implements AiClient {
     const hasToolOutput = request.messages.some((item) => item.role === "tool");
     return Promise.resolve(
       hasToolOutput
-        ? { status: "succeeded", text: "Answer with source", durationMs: 4 }
+        ? { status: "succeeded", text: this.answer, durationMs: 4 }
         : {
             status: "succeeded",
             text: "",
@@ -46,7 +48,7 @@ class ToolCallingClient implements AiClient {
   }
 }
 
-async function setup() {
+async function setup(answer?: string) {
   const repository = new InMemoryAiRepository();
   const created = await repository.createProvider({
     name: "Fictional",
@@ -74,7 +76,7 @@ async function setup() {
     enabled: true,
   });
   if (route.status !== "ok") throw new Error("route setup failed");
-  const client = new ToolCallingClient();
+  const client = new ToolCallingClient(answer);
   const routing = new AiRoutingService(
     repository,
     client,
@@ -167,6 +169,30 @@ describe("AgentRunner", () => {
     ).resolves.toMatchObject({
       status: "succeeded",
       text: "Timeless answer",
+    });
+  });
+
+  it("hides searched source links while retaining tool audit results", async () => {
+    const { repository, client, routing, search, request } = await setup(
+      "Fresh fact [News](https://news.example.test/item) 详情：https://other.example.test/story，之后继续。\n来源：https://source.example.test",
+    );
+    const result = await new AgentRunner(routing, search, repository).run({
+      ...request,
+      webSearchSources: "hidden",
+    });
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      text: "Fresh fact News 详情，之后继续。",
+    });
+    const sourceInstruction = client.requests[0]?.messages.find(
+      (message) =>
+        message.role === "system" &&
+        message.content.includes("do not include URLs"),
+    );
+    expect(sourceInstruction?.content).toContain("do not include URLs");
+    expect(repository.toolExecutions[0]?.responseDetails).toMatchObject({
+      results: [{ url: "https://news.example.test/item" }],
     });
   });
 

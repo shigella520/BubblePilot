@@ -472,6 +472,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
         ...(node.config.webSearch === undefined
           ? {}
           : { webSearch: node.config.webSearch }),
+        webSearchSources: node.config.webSearchSources,
         protectedPrompt: systemPrompt.length === 0 ? null : systemPrompt,
       });
     } catch (error) {
