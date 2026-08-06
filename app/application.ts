@@ -11,6 +11,7 @@ import Fastify, {
 import { z, ZodError } from "zod";
 
 import type { AiManagementService } from "../modules/ai/ai-management-service.js";
+import type { WebSearchTool } from "../modules/ai/web-search-tool.js";
 import type {
   AiMutationResult,
   AiRepository,
@@ -201,6 +202,7 @@ export interface ApplicationOptions {
   ai?: {
     repository: AiRepository;
     management: AiManagementService;
+    searchTool?: WebSearchTool;
   };
   workflow?: {
     repository: WorkflowRepository;
@@ -1240,6 +1242,22 @@ export function buildApplication(
     const ai = options.ai.management;
 
     application.get(
+      "/api/v1/ai/search/status",
+      { preHandler: requireAdmin },
+      async () => ({
+        data: {
+          enabled: config.enableWebSearch ?? false,
+          backend: "searxng",
+          ready:
+            (config.enableWebSearch ?? false) &&
+            options.ai?.searchTool !== undefined
+              ? await options.ai.searchTool.isReady()
+              : false,
+        },
+      }),
+    );
+
+    application.get(
       "/api/v1/ai/providers",
       { preHandler: requireAdmin },
       async () => ({ data: await ai.listProviders() }),
@@ -1529,6 +1547,9 @@ export function buildApplication(
             ...execution,
             aiProviderAttempts:
               (await options.ai?.repository.listAttempts(executionId)) ?? [],
+            aiToolExecutions:
+              (await options.ai?.repository.listToolExecutions(executionId)) ??
+              [],
           };
     };
 
@@ -1626,17 +1647,26 @@ export function buildApplication(
           parameters.workflowId,
           parameters.version,
         );
-        const routeIds = [
-          ...new Set(
-            candidate?.definition.nodes.flatMap((node) =>
-              node.type === "ai-chat" ? [node.config.providerRouteId] : [],
-            ) ?? [],
-          ),
-        ];
-        for (const routeId of routeIds) {
+        const routePolicies = new Map<
+          string,
+          "disabled" | "auto" | "required"
+        >();
+        for (const node of candidate?.definition.nodes ?? []) {
+          if (node.type !== "ai-chat") continue;
+          const policy = node.config.webSearch ?? "disabled";
+          const current = routePolicies.get(node.config.providerRouteId);
+          const rank = { disabled: 0, auto: 1, required: 2 };
+          if (current === undefined || rank[policy] > rank[current]) {
+            routePolicies.set(node.config.providerRouteId, policy);
+          }
+        }
+        for (const [routeId, webSearch] of routePolicies) {
           if (
             options.ai === undefined ||
-            !(await options.ai.management.isRoutePublishable(routeId))
+            !(await options.ai.management.isRoutePublishable(
+              routeId,
+              webSearch,
+            ))
           ) {
             throw new ApplicationError(
               "AI_ROUTE_NOT_PUBLISHABLE",

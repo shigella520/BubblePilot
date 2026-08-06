@@ -3,6 +3,8 @@ import { loadConfig } from "./config.js";
 import { AiManagementService } from "../modules/ai/ai-management-service.js";
 import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
 import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
+import { AgentRunner } from "../modules/ai/agent-runner.js";
+import { SearxngWebSearchTool } from "../modules/ai/web-search-tool.js";
 import { PostgresAiRepository } from "../modules/ai/postgres-ai-repository.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import { AuthService } from "../modules/auth/auth-service.js";
@@ -62,18 +64,34 @@ const authService = new AuthService(authRepository, {
 });
 const secretResolver = new EnvironmentSecretResolver();
 const aiClient = new OpenAiCompatibleClient(secretResolver);
-const aiRouting = new AiRoutingService(aiRepository, aiClient, secretResolver);
+const aiRouting = new AiRoutingService(
+  aiRepository,
+  aiClient,
+  secretResolver,
+  config.enableWebSearch ?? false,
+);
+const webSearchTool = new SearxngWebSearchTool({
+  baseUrl: config.searxngBaseUrl ?? "http://searxng:8080",
+  engines: config.searxngEngines ?? [],
+  language: config.searxngLanguage ?? "zh-CN",
+  timeoutMs: config.webSearchTimeoutMs ?? 8_000,
+  maxResults: config.webSearchMaxResults ?? 5,
+});
 const aiManagement = new AiManagementService(
   aiRepository,
   aiClient,
   secretResolver,
+  config.enableWebSearch ?? false,
+  webSearchTool,
 );
+const aiAgent = new AgentRunner(aiRouting, webSearchTool, aiRepository);
 const replyGateway = new ManagedBlueBubblesReplyGateway(blueBubblesSettings);
 const workflowEngine = new WorkflowEngine(
   workflowRepository,
   createDefaultNodeRegistry(workflowRepository, replyGateway, {
     archive: repository,
     aiRouting,
+    aiAgent,
   }),
   {
     maxConcurrency: config.workflowMaxConcurrency,
@@ -86,7 +104,11 @@ const workflowDispatcher = new InProcessWorkflowExecutionDispatcher(
 );
 const application = buildApplication(config, repository, {
   auth: authService,
-  ai: { repository: aiRepository, management: aiManagement },
+  ai: {
+    repository: aiRepository,
+    management: aiManagement,
+    searchTool: webSearchTool,
+  },
   workflow: {
     repository: workflowRepository,
     engine: workflowEngine,

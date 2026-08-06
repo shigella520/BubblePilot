@@ -1,5 +1,6 @@
 import { sha256 } from "../../app/canonical-json.js";
 import type { AiRoutingService } from "../ai/ai-routing-service.js";
+import { AgentRunner } from "../ai/agent-runner.js";
 import type { AiChatMessage } from "../ai/ai-types.js";
 import type {
   ArchiveRepository,
@@ -379,9 +380,14 @@ function taggedPrompt(
 
 class AiChatNodeHandler extends BaseNodeHandler {
   readonly type = "ai-chat" as const;
+  private readonly agent: AgentRunner;
 
-  constructor(private readonly routing: AiRoutingService) {
+  constructor(
+    private readonly routing: AiRoutingService,
+    agent?: AgentRunner,
+  ) {
     super();
+    this.agent = agent ?? new AgentRunner(routing);
   }
 
   override failureTarget(node: WorkflowNode): string | null {
@@ -453,7 +459,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
 
     let result;
     try {
-      result = await this.routing.execute({
+      result = await this.agent.run({
         executionId: context.executionId,
         nodeId: node.id,
         routeId: node.config.providerRouteId,
@@ -463,6 +469,10 @@ class AiChatNodeHandler extends BaseNodeHandler {
         timeoutMs: Math.min(node.config.timeoutMs, remainingMs),
         maxOutputCharacters: node.config.maxOutputCharacters,
         outputFormat: node.config.outputFormat,
+        ...(node.config.webSearch === undefined
+          ? {}
+          : { webSearch: node.config.webSearch }),
+        webSearchSources: node.config.webSearchSources,
         protectedPrompt: systemPrompt.length === 0 ? null : systemPrompt,
       });
     } catch (error) {
@@ -696,6 +706,7 @@ export function createDefaultNodeRegistry(
   capabilities?: {
     archive: ArchiveRepository;
     aiRouting: AiRoutingService;
+    aiAgent?: AgentRunner;
   },
 ): NodeRegistry {
   const registry = new NodeRegistry();
@@ -705,7 +716,9 @@ export function createDefaultNodeRegistry(
   registry.register(new SetVariableNodeHandler());
   if (capabilities !== undefined) {
     registry.register(new LoadContextNodeHandler(capabilities.archive));
-    registry.register(new AiChatNodeHandler(capabilities.aiRouting));
+    registry.register(
+      new AiChatNodeHandler(capabilities.aiRouting, capabilities.aiAgent),
+    );
   }
   registry.register(new ReplyNodeHandler(repository, gateway));
   registry.register(new EndNodeHandler());

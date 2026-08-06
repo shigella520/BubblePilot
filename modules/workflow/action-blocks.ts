@@ -385,6 +385,28 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         ],
         description: "文本或 JSON。",
       },
+      {
+        name: "webSearch",
+        label: "联网搜索",
+        type: "select",
+        description: "禁用、由模型自动判断，或要求必须搜索。",
+        options: [
+          { value: "disabled", label: "禁用" },
+          { value: "auto", label: "自动判断" },
+          { value: "required", label: "必须搜索" },
+        ],
+      },
+      {
+        name: "webSearchSources",
+        label: "搜索来源展示",
+        type: "select",
+        description: "完整展示来源、仅在末尾精简展示，或只在执行详情保留来源。",
+        options: [
+          { value: "full", label: "完整来源" },
+          { value: "compact", label: "精简来源" },
+          { value: "hidden", label: "隐藏来源" },
+        ],
+      },
     ],
     branches: [
       { name: "onSuccess", label: "成功", description: "AI 调用成功。" },

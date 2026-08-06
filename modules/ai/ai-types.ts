@@ -34,6 +34,12 @@ const aiProviderConfigurationBaseSchema = z.object({
     .default({}),
   requestTimeoutMs: z.number().int().min(1_000).max(120_000).default(30_000),
   enabled: z.boolean().default(true),
+  capabilities: z
+    .object({
+      functionCalling: z.boolean().default(false),
+      hostedWebSearch: z.boolean().default(false),
+    })
+    .default({ functionCalling: false, hostedWebSearch: false }),
 });
 
 // API keys are optional: local OpenAI-compatible servers such as Ollama do
@@ -97,6 +103,18 @@ export const aiRouteEnabledSchema = z.object({
 });
 
 export type AiApiKind = "chat-completions" | "responses";
+export type AiCapabilityProbeState = "verified" | "failed" | "unknown";
+export type WebSearchPolicy = "disabled" | "auto" | "required";
+export type WebSearchSourceDisplay = "full" | "compact" | "hidden";
+export interface AiProviderCapabilities {
+  functionCalling: boolean;
+  hostedWebSearch: boolean;
+}
+export interface AiProviderCapabilityProbe {
+  functionCalling: AiCapabilityProbeState;
+  hostedWebSearch: AiCapabilityProbeState;
+  checkedAt: string | null;
+}
 export type AiProviderParameters = Readonly<
   Record<string, string | number | boolean>
 >;
@@ -112,6 +130,7 @@ export interface AiProviderConfiguration {
   parameters: AiProviderParameters;
   requestTimeoutMs: number;
   enabled: boolean;
+  capabilities?: AiProviderCapabilities | undefined;
 }
 
 export interface AiProviderRecord extends AiProviderConfiguration {
@@ -121,6 +140,7 @@ export interface AiProviderRecord extends AiProviderConfiguration {
   version: number;
   createdAt: string;
   updatedAt: string;
+  capabilityProbe?: AiProviderCapabilityProbe | undefined;
 }
 
 export interface AiProviderHealth {
@@ -141,6 +161,7 @@ export interface AiProviderView extends Omit<
 > {
   secretConfigured: boolean;
   health: AiProviderHealth;
+  capabilityProbe: AiProviderCapabilityProbe;
 }
 
 export interface AiRouteRetryPolicy {
@@ -201,8 +222,22 @@ export interface AiCandidateSelection {
 }
 
 export interface AiChatMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  toolCallId?: string;
+  toolCalls?: readonly AiToolCall[];
+}
+
+export interface AiToolDefinition {
+  name: string;
+  description: string;
+  parameters: Readonly<Record<string, unknown>>;
+}
+
+export interface AiToolCall {
+  id: string;
+  name: string;
+  arguments: string;
 }
 
 export interface AiChatRequest {
@@ -211,6 +246,10 @@ export interface AiChatRequest {
   temperature: number | null;
   timeoutMs: number;
   clientRequestId?: string;
+  webSearch?: WebSearchPolicy | undefined;
+  maxToolCalls?: number;
+  tools?: readonly AiToolDefinition[];
+  toolChoice?: "auto" | "required";
 }
 
 export interface AiCallDiagnostics {
@@ -262,6 +301,7 @@ export type AiCallResult =
   | {
       status: "succeeded";
       text: string;
+      toolCalls?: readonly AiToolCall[];
       durationMs: number;
       diagnostics?: AiCallDiagnostics;
     }
@@ -276,6 +316,7 @@ export interface AiAttemptRecordInput {
   providerName: string;
   providerVersion: number;
   model: string;
+  agentTurn: number;
   round: number;
   sequence: number;
   status: "succeeded" | "failed";
@@ -297,6 +338,7 @@ export interface AiProviderAttemptView extends AiAttemptRecordInput {
 export interface AiRouteSuccess {
   status: "succeeded";
   text: string;
+  toolCalls: readonly AiToolCall[];
   providerId: string;
   providerName: string;
   providerVersion: number;
@@ -329,6 +371,32 @@ export interface AiRouteRequest {
   maxOutputCharacters: number;
   outputFormat: "text" | "json";
   protectedPrompt: string | null;
+  webSearch?: WebSearchPolicy | undefined;
+  webSearchSources?: WebSearchSourceDisplay | undefined;
+  tools?: readonly AiToolDefinition[];
+  toolChoice?: "auto" | "required";
+  preferredProviderId?: string;
+  agentTurn?: number;
+}
+
+export interface AiToolExecutionRecordInput {
+  executionId: string;
+  nodeId: string;
+  providerId: string;
+  toolCallId: string;
+  toolName: string;
+  status: "succeeded" | "failed";
+  durationMs: number;
+  resultCount: number | null;
+  queryHash: string;
+  errorCode: string | null;
+  requestDetails: Readonly<Record<string, unknown>> | null;
+  responseDetails: Readonly<Record<string, unknown>> | null;
+}
+
+export interface AiToolExecutionView extends AiToolExecutionRecordInput {
+  id: string;
+  createdAt: string;
 }
 
 export function normalizeAiBaseUrl(value: string): string {

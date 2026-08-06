@@ -1,4 +1,5 @@
 import type { AiClient } from "./openai-compatible-client.js";
+import type { WebSearchTool } from "./web-search-tool.js";
 import type { AiMutationResult, AiRepository } from "./ai-repository.js";
 import {
   normalizeAiBaseUrl,
@@ -9,6 +10,7 @@ import {
   type AiProviderTestResult,
   type AiProviderView,
   type AiRouteConfiguration,
+  type WebSearchPolicy,
 } from "./ai-types.js";
 import {
   isProviderSecretConfigured,
@@ -20,6 +22,8 @@ export class AiManagementService {
     private readonly repository: AiRepository,
     private readonly client: AiClient,
     private readonly secrets: SecretResolver,
+    private readonly localWebSearchEnabled = false,
+    private readonly searchTool?: WebSearchTool,
   ) {}
 
   async listProviders(): Promise<readonly AiProviderView[]> {
@@ -126,20 +130,99 @@ export class AiManagementService {
       temperature: 0,
       timeoutMs: provider.requestTimeoutMs,
     });
+    let functionCalling: "verified" | "failed" | "unknown" = "unknown";
+    let hostedWebSearch: "verified" | "failed" | "unknown" = "unknown";
+    const capabilityMessages: string[] = [];
+    let totalDurationMs = result.durationMs;
+    if (
+      result.status === "succeeded" &&
+      provider.capabilities?.functionCalling
+    ) {
+      const functionProbe = await this.client.call(provider, {
+        messages: [
+          {
+            role: "user",
+            content: "Call the capability_probe tool exactly once.",
+          },
+        ],
+        maxOutputTokens: 128,
+        temperature: 0,
+        timeoutMs: provider.requestTimeoutMs,
+        tools: [
+          {
+            name: "capability_probe",
+            description:
+              "A harmless tool used only to verify function calling.",
+            parameters: {
+              type: "object",
+              properties: {},
+              additionalProperties: false,
+            },
+          },
+        ],
+        toolChoice: "required",
+      });
+      totalDurationMs += functionProbe.durationMs;
+      functionCalling =
+        functionProbe.status === "succeeded" &&
+        (functionProbe.toolCalls?.some(
+          (call) => call.name === "capability_probe",
+        ) ??
+          false)
+          ? "verified"
+          : "failed";
+      capabilityMessages.push(
+        `Function Calling ${functionCalling === "verified" ? "verified" : "failed"}`,
+      );
+    }
+    if (
+      result.status === "succeeded" &&
+      provider.capabilities?.hostedWebSearch
+    ) {
+      const searchProbe = await this.client.call(provider, {
+        messages: [
+          {
+            role: "user",
+            content:
+              "Capability test. Search the web for the official OpenAI website and reply with OK.",
+          },
+        ],
+        maxOutputTokens: 128,
+        temperature: 0,
+        timeoutMs: provider.requestTimeoutMs,
+        webSearch: "required",
+      });
+      totalDurationMs += searchProbe.durationMs;
+      hostedWebSearch =
+        searchProbe.status === "succeeded" ? "verified" : "failed";
+      capabilityMessages.push(
+        `Hosted web search ${hostedWebSearch === "verified" ? "verified" : "failed"}`,
+      );
+    }
+    if (result.status === "succeeded") {
+      await this.repository.updateProviderCapabilityProbe(providerId, {
+        functionCalling,
+        hostedWebSearch,
+        checkedAt: new Date().toISOString(),
+      });
+    }
     return result.status === "succeeded"
       ? {
           success: true,
           providerId,
           model: provider.model,
-          durationMs: result.durationMs,
+          durationMs: totalDurationMs,
           errorCode: null,
-          message: "The AI provider connection succeeded.",
+          message: [
+            "The AI provider connection succeeded.",
+            ...capabilityMessages,
+          ].join(" "),
         }
       : {
           success: false,
           providerId,
           model: provider.model,
-          durationMs: result.durationMs,
+          durationMs: totalDurationMs,
           errorCode: result.code,
           message: result.summary,
         };
@@ -158,7 +241,10 @@ export class AiManagementService {
     return route === null ? null : this.routeView(route);
   }
 
-  async isRoutePublishable(routeId: string): Promise<boolean> {
+  async isRoutePublishable(
+    routeId: string,
+    webSearch: WebSearchPolicy = "disabled",
+  ): Promise<boolean> {
     const route = await this.repository.getRoute(routeId);
     if (route === null || !route.enabled) {
       return false;
@@ -173,10 +259,29 @@ export class AiManagementService {
             );
             return provider === undefined ? [] : [provider];
           });
-    return configured.some(
+    const available = configured.filter(
       (provider) =>
         provider.enabled && isProviderSecretConfigured(provider, this.secrets),
     );
+    if (webSearch === "disabled") return available.length > 0;
+    const localWebSearchReady =
+      this.localWebSearchEnabled &&
+      this.searchTool !== undefined &&
+      (await this.searchTool.isReady());
+    const searchable = available.filter((provider) => {
+      const hosted =
+        provider.apiKind === "responses" &&
+        provider.capabilities?.hostedWebSearch === true &&
+        provider.capabilityProbe?.hostedWebSearch === "verified";
+      const local =
+        localWebSearchReady &&
+        provider.capabilities?.functionCalling === true &&
+        provider.capabilityProbe?.functionCalling === "verified";
+      return hosted || local;
+    });
+    return webSearch === "required"
+      ? searchable.length === available.length && available.length > 0
+      : searchable.length > 0;
   }
 
   async createRoute(
@@ -226,6 +331,10 @@ export class AiManagementService {
     return {
       ...configuration,
       baseUrl: normalizeAiBaseUrl(configuration.baseUrl),
+      capabilities: configuration.capabilities ?? {
+        functionCalling: false,
+        hostedWebSearch: false,
+      },
     };
   }
 
@@ -243,6 +352,11 @@ export class AiManagementService {
       ...safeProvider,
       secretConfigured: isProviderSecretConfigured(provider, this.secrets),
       health,
+      capabilityProbe: provider.capabilityProbe ?? {
+        functionCalling: "unknown",
+        hostedWebSearch: "unknown",
+        checkedAt: null,
+      },
     };
   }
 

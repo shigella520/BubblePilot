@@ -68,6 +68,7 @@ interface ExecutionDetail extends Execution {
     providerName: string;
     providerVersion: number;
     model: string;
+    agentTurn: number;
     round: number;
     sequence: number;
     status: string;
@@ -98,6 +99,21 @@ interface ExecutionDetail extends Execution {
       cacheWritePromptTokens: number | null;
       cacheMissPromptTokens: number | null;
     } | null;
+  }>;
+  aiToolExecutions: Array<{
+    id: string;
+    nodeId: string;
+    providerId: string;
+    toolCallId: string;
+    toolName: string;
+    status: string;
+    durationMs: number;
+    resultCount: number | null;
+    queryHash: string;
+    errorCode: string | null;
+    requestDetails: Record<string, unknown> | null;
+    responseDetails: Record<string, unknown> | null;
+    createdAt: string;
   }>;
 }
 interface AuditEvent {
@@ -406,6 +422,7 @@ function resetAuditPage(): Promise<boolean> {
         @close="message = ''"
         >{{ message }}</DismissibleMessage
       >
+      <SensitiveUnlock />
       <section id="executions" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -495,7 +512,6 @@ function resetAuditPage(): Promise<boolean> {
           </div>
           <span class="state-badge">不含正文与 Secret</span>
         </div>
-        <SensitiveUnlock />
         <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
           <ShieldCheck :size="24" />
           <strong>审计事件已遮蔽</strong>
@@ -655,7 +671,8 @@ function resetAuditPage(): Promise<boolean> {
                     }}</span
                   >
                   <p>
-                    第 {{ item.round }} 轮 / 顺序 {{ item.sequence }} ·
+                    Agent 第 {{ item.agentTurn }} 轮 · 路由第
+                    {{ item.round }} 轮 / 顺序 {{ item.sequence }} ·
                     {{ item.durationMs }} ms · 选择时
                     {{ providerHealthLabel(item.selectionHealthState) }} → 结果
                     {{ providerHealthLabel(item.healthState) }}
@@ -722,6 +739,56 @@ function resetAuditPage(): Promise<boolean> {
                 class="empty-panel compact"
               >
                 本次执行没有 AI 调用。
+              </div>
+              <h3>AI 工具调用</h3>
+              <article
+                v-for="item in detail.aiToolExecutions"
+                :key="item.id"
+                class="trace-item"
+              >
+                <Search :size="17" />
+                <div>
+                  <strong>{{ item.toolName }} · {{ item.status }}</strong>
+                  <p>
+                    {{ item.durationMs }} ms · 结果
+                    {{ item.resultCount ?? "—" }} 条
+                  </p>
+                  <span v-if="item.errorCode" class="table-status danger">{{
+                    item.errorCode
+                  }}</span>
+                  <span
+                    v-else-if="item.responseDetails?.outcome === 'no_results'"
+                    class="table-status warning"
+                    >AI_WEB_SEARCH_NO_RESULTS</span
+                  >
+                  <details class="keyline">
+                    <summary>诊断标识</summary>
+                    <code>query={{ item.queryHash }}</code>
+                    <code>call={{ item.toolCallId }}</code>
+                  </details>
+                  <details
+                    v-if="item.requestDetails || item.responseDetails"
+                    class="keyline"
+                  >
+                    <summary>搜索请求与返回</summary>
+                    <pre>{{
+                      JSON.stringify(
+                        {
+                          request: item.requestDetails,
+                          response: item.responseDetails,
+                        },
+                        null,
+                        2,
+                      )
+                    }}</pre>
+                  </details>
+                </div>
+              </article>
+              <div
+                v-if="!detail.aiToolExecutions.length"
+                class="empty-panel compact"
+              >
+                本次执行没有工具调用。
               </div>
               <h3>出站发送</h3>
               <article

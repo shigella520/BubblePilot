@@ -42,6 +42,12 @@ services:
       BLUEBUBBLES_ACCESS_TOKEN: ${BLUEBUBBLES_ACCESS_TOKEN:?set BLUEBUBBLES_ACCESS_TOKEN in .env}
       BLUEBUBBLES_SEND_METHOD: ${BLUEBUBBLES_SEND_METHOD:-private-api}
       BLUEBUBBLES_REQUEST_TIMEOUT_MS: ${BLUEBUBBLES_REQUEST_TIMEOUT_MS:-30000}
+      ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-false}
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://searxng:8080}
+      SEARXNG_ENGINES: ${SEARXNG_ENGINES:-}
+      SEARXNG_LANGUAGE: ${SEARXNG_LANGUAGE:-zh-CN}
+      WEB_SEARCH_TIMEOUT_MS: ${WEB_SEARCH_TIMEOUT_MS:-8000}
+      WEB_SEARCH_MAX_RESULTS: ${WEB_SEARCH_MAX_RESULTS:-5}
       MONITORED_CHAT_IDS: ${MONITORED_CHAT_IDS:-}
       MESSAGE_RETENTION_DAYS: ${MESSAGE_RETENTION_DAYS:-90}
       WEBHOOK_BODY_LIMIT_BYTES: ${WEBHOOK_BODY_LIMIT_BYTES:-1048576}
@@ -66,5 +72,34 @@ services:
     stop_grace_period: 330s
     restart: unless-stopped
 
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in .env}
+    configs:
+      - source: searxng_settings
+        target: /etc/searxng/settings.yml
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
 volumes:
   bubblepilot-postgres:
+
+configs:
+  searxng_settings:
+    content: |
+      use_default_settings: true
+      search:
+        safe_search: 1
+        formats:
+          - html
+          - json
+      server:
+        secret_key: "ultrasecretkey"
+        limiter: false
+        image_proxy: false

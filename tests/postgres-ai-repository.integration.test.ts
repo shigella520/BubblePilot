@@ -188,6 +188,7 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       providerName: primary.value.name,
       providerVersion: primary.value.version,
       model: primary.value.model,
+      agentTurn: 1,
       round: 1,
       sequence: 1,
       status: "succeeded",
@@ -231,6 +232,49 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
           promptTokens: 300,
           cachedPromptTokens: 256,
           cacheMissPromptTokens: 44,
+        },
+      },
+    ]);
+    await repository.recordToolExecution({
+      executionId: diagnosticExecutionId,
+      nodeId: "ai-node",
+      providerId: primary.value.id,
+      toolCallId: "fictional-tool-call",
+      toolName: "web_search",
+      status: "succeeded",
+      durationMs: 42,
+      resultCount: 1,
+      queryHash: "a".repeat(64),
+      errorCode: null,
+      requestDetails: {
+        query: "fictional latest news",
+        language: "zh-CN",
+      },
+      responseDetails: {
+        retainedResultCount: 1,
+        results: [
+          {
+            title: "Fictional result",
+            url: "https://news.example.test/fictional",
+          },
+        ],
+      },
+    });
+    await expect(
+      repository.listToolExecutions(diagnosticExecutionId, "ai-node"),
+    ).resolves.toMatchObject([
+      {
+        executionId: diagnosticExecutionId,
+        toolName: "web_search",
+        status: "succeeded",
+        resultCount: 1,
+        queryHash: "a".repeat(64),
+        requestDetails: {
+          query: "fictional latest news",
+          language: "zh-CN",
+        },
+        responseDetails: {
+          retainedResultCount: 1,
         },
       },
     ]);

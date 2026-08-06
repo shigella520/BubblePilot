@@ -770,6 +770,17 @@ paths:
           description: 触发器启停状态已更新。
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/ai/search/status:
+    get:
+      operationId: getAiSearchStatus
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 返回实例联网搜索总开关、后端类型与即时可用状态。
+        "401":
+          $ref: "#/components/responses/Error"
   /api/v1/ai/providers:
     get:
       operationId: listAiProviders

@@ -241,6 +241,144 @@ describe("OpenAiCompatibleClient", () => {
     });
   });
 
+  it("adds the hosted web search tool to Responses requests", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ output_text: "Fresh answer" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    await expect(
+      client.call(
+        { ...provider, apiKind: "responses" },
+        { ...request, webSearch: "auto" },
+      ),
+    ).resolves.toMatchObject({ status: "succeeded", text: "Fresh answer" });
+    const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+    expect(JSON.parse(typeof body === "string" ? body : "null")).toMatchObject({
+      tools: [{ type: "web_search" }],
+    });
+  });
+
+  it("serializes and parses Chat Completions function calls", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                content: null,
+                tool_calls: [
+                  {
+                    id: "call-1",
+                    function: {
+                      name: "web_search",
+                      arguments: '{"query":"fictional current event"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    const result = await client.call(provider, {
+      ...request,
+      tools: [
+        {
+          name: "web_search",
+          description: "Search",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      toolChoice: "required",
+    });
+    expect(result).toMatchObject({
+      status: "succeeded",
+      toolCalls: [{ id: "call-1", name: "web_search" }],
+    });
+    const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+    expect(JSON.parse(typeof body === "string" ? body : "null")).toMatchObject({
+      tool_choice: "required",
+      tools: [{ type: "function", function: { name: "web_search" } }],
+    });
+  });
+
+  it("serializes Responses function outputs for a continuation turn", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ output_text: "Final answer" }), {
+        status: 200,
+      }),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    await client.call(
+      { ...provider, apiKind: "responses" },
+      {
+        ...request,
+        messages: [
+          ...request.messages,
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [
+              {
+                id: "call-1",
+                name: "web_search",
+                arguments: '{"query":"fictional"}',
+              },
+            ],
+          },
+          { role: "tool", toolCallId: "call-1", content: "result" },
+        ],
+        tools: [
+          {
+            name: "web_search",
+            description: "Search",
+            parameters: { type: "object", properties: {} },
+          },
+        ],
+      },
+    );
+    const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+    const payload = JSON.parse(typeof body === "string" ? body : "null") as {
+      input: Array<Record<string, unknown>>;
+    };
+    expect(payload.input).toContainEqual({
+      type: "function_call_output",
+      call_id: "call-1",
+      output: "result",
+    });
+  });
+
+  it("rejects hosted web search on Chat Completions before network access", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    await expect(
+      client.call(provider, { ...request, webSearch: "required" }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      code: "AI_WEB_SEARCH_UNSUPPORTED",
+    });
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
   it("classifies safe error categories without returning provider bodies", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

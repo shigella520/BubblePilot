@@ -3,11 +3,14 @@ import type {
   AiCandidateSelection,
   AiProviderAttemptView,
   AiProviderConfiguration,
+  AiProviderCapabilityProbe,
   AiProviderHealth,
   AiProviderRecord,
   AiProviderRouteRecord,
   AiRouteConfiguration,
   AiRouteSnapshot,
+  AiToolExecutionRecordInput,
+  AiToolExecutionView,
 } from "./ai-types.js";
 
 export type AiMutationResult<T> =
@@ -40,6 +43,10 @@ export interface AiRepository {
   ): Promise<AiMutationResult<AiProviderRecord>>;
   getProviderHealth(providerId: string): Promise<AiProviderHealth | null>;
   resetProviderHealth(providerId: string): Promise<AiProviderHealth | null>;
+  updateProviderCapabilityProbe(
+    providerId: string,
+    probe: AiProviderCapabilityProbe,
+  ): Promise<AiProviderRecord | null>;
   recordProviderSuccess(providerId: string): Promise<AiProviderHealth>;
   recordProviderFailure(input: {
     providerId: string;
@@ -79,6 +86,11 @@ export interface AiRepository {
     executionId: string,
     nodeId?: string,
   ): Promise<readonly AiProviderAttemptView[]>;
+  recordToolExecution(input: AiToolExecutionRecordInput): Promise<void>;
+  listToolExecutions(
+    executionId: string,
+    nodeId?: string,
+  ): Promise<readonly AiToolExecutionView[]>;
   isReady(): Promise<boolean>;
   close(): Promise<void>;
 }

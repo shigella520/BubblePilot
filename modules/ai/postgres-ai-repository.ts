@@ -12,6 +12,7 @@ import {
   type AiCandidateSelection,
   type AiFailureCategory,
   type AiProviderAttemptView,
+  type AiProviderCapabilityProbe,
   type AiProviderConfiguration,
   type AiProviderHealth,
   type AiProviderHealthState,
@@ -19,6 +20,8 @@ import {
   type AiProviderRouteRecord,
   type AiRouteConfiguration,
   type AiRouteSnapshot,
+  type AiToolExecutionRecordInput,
+  type AiToolExecutionView,
 } from "./ai-types.js";
 
 interface ProviderRow {
@@ -31,6 +34,15 @@ interface ProviderRow {
   encrypted_secret: string | null;
   parameters: Record<string, string | number | boolean>;
   request_timeout_ms: number;
+  capabilities: {
+    functionCalling: boolean;
+    hostedWebSearch: boolean;
+  };
+  capability_probe: {
+    functionCalling: "verified" | "failed" | "unknown";
+    hostedWebSearch: "verified" | "failed" | "unknown";
+    checkedAt: string | null;
+  };
   enabled: boolean;
   sort_order: number;
   version: number;
@@ -75,6 +87,7 @@ interface AttemptRow {
   provider_name: string;
   provider_version: number;
   model: string;
+  agent_turn: number;
   round: number;
   sequence: number;
   status: "succeeded" | "failed";
@@ -106,9 +119,27 @@ interface AttemptRow {
   created_at: Date;
 }
 
+interface ToolExecutionRow {
+  id: string;
+  execution_id: string;
+  node_id: string;
+  provider_id: string;
+  tool_call_id: string;
+  tool_name: string;
+  status: "succeeded" | "failed";
+  duration_ms: number;
+  result_count: number | null;
+  query_hash: string;
+  error_code: string | null;
+  request_details: Record<string, unknown> | null;
+  response_details: Record<string, unknown> | null;
+  created_at: Date;
+}
+
 const providerSelect = `SELECT
   id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-  request_timeout_ms, enabled, sort_order, version, created_at, updated_at
+  request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
+  created_at, updated_at
 FROM ai_providers`;
 
 const routeSelect = `SELECT
@@ -142,6 +173,8 @@ function providerRecord(
     parameters: row.parameters,
     requestTimeoutMs: row.request_timeout_ms,
     enabled: row.enabled,
+    capabilities: row.capabilities,
+    capabilityProbe: row.capability_probe,
     sortOrder: row.sort_order,
     version: row.version,
     createdAt: row.created_at.toISOString(),
@@ -190,6 +223,7 @@ function attemptView(row: AttemptRow): AiProviderAttemptView {
     providerName: row.provider_name,
     providerVersion: row.provider_version,
     model: row.model,
+    agentTurn: row.agent_turn,
     round: row.round,
     sequence: row.sequence,
     status: row.status,
@@ -294,8 +328,8 @@ export class PostgresAiRepository implements AiRepository {
       await client.query(
         `INSERT INTO ai_providers (
            id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-           request_timeout_ms, enabled, sort_order
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
+           request_timeout_ms, enabled, sort_order, capabilities
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12::jsonb)`,
         [
           id,
           configuration.name,
@@ -310,6 +344,12 @@ export class PostgresAiRepository implements AiRepository {
           configuration.requestTimeoutMs,
           configuration.enabled,
           order.rows[0]?.sort_order ?? 100,
+          JSON.stringify(
+            configuration.capabilities ?? {
+              functionCalling: false,
+              hostedWebSearch: false,
+            },
+          ),
         ],
       );
       await client.query(
@@ -344,10 +384,11 @@ export class PostgresAiRepository implements AiRepository {
            name = $3, api_kind = $4, base_url = $5, model = $6,
            secret_ref = $7, encrypted_secret = COALESCE($11, encrypted_secret), parameters = $8::jsonb,
            request_timeout_ms = $9, enabled = $10,
+           capabilities = $12::jsonb,
            version = version + 1, updated_at = NOW()
          WHERE id = $1 AND version = $2 AND deleted_at IS NULL
         RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                   request_timeout_ms, enabled, sort_order, version,
+                   request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
                    created_at, updated_at`,
         [
           providerId,
@@ -363,6 +404,12 @@ export class PostgresAiRepository implements AiRepository {
           configuration.secret === undefined || configuration.secret === null
             ? null
             : this.cipher.encrypt(configuration.secret),
+          JSON.stringify(
+            configuration.capabilities ?? {
+              functionCalling: false,
+              hostedWebSearch: false,
+            },
+          ),
         ],
       );
       const row = result.rows[0];
@@ -388,7 +435,7 @@ export class PostgresAiRepository implements AiRepository {
        SET enabled = $3, version = version + 1, updated_at = NOW()
        WHERE id = $1 AND version = $2 AND deleted_at IS NULL
        RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                 request_timeout_ms, enabled, sort_order, version,
+                 request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
                  created_at, updated_at`,
       [providerId, expectedVersion, enabled],
     );
@@ -479,7 +526,7 @@ export class PostgresAiRepository implements AiRepository {
              version = version + 1
          WHERE id = $1
          RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                   request_timeout_ms, enabled, sort_order, version,
+                   request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
                    created_at, updated_at`,
         [providerId],
       );
@@ -543,6 +590,22 @@ export class PostgresAiRepository implements AiRepository {
     } finally {
       client.release();
     }
+  }
+
+  async updateProviderCapabilityProbe(
+    providerId: string,
+    probe: AiProviderCapabilityProbe,
+  ): Promise<AiProviderRecord | null> {
+    const result = await this.pool.query<ProviderRow>(
+      `UPDATE ai_providers SET capability_probe = $2::jsonb, updated_at = NOW()
+       WHERE id = $1 AND deleted_at IS NULL
+       RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret,
+                 parameters, request_timeout_ms, enabled, sort_order, version,
+                 capabilities, capability_probe, created_at, updated_at`,
+      [providerId, JSON.stringify(probe)],
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : providerRecord(row, this.cipher);
   }
 
   async recordProviderSuccess(providerId: string): Promise<AiProviderHealth> {
@@ -927,7 +990,7 @@ export class PostgresAiRepository implements AiRepository {
     await this.pool.query(
       `INSERT INTO ai_provider_attempts (
          id, execution_id, node_id, route_id, route_version, provider_id,
-         provider_name, provider_version, model, round, sequence, status,
+         provider_name, provider_version, model, agent_turn, round, sequence, status,
          health_state,
          selection_health_state, duration_ms, error_category, error_code,
          retryable, fallback_allowed, client_request_id, provider_request_id,
@@ -941,7 +1004,7 @@ export class PostgresAiRepository implements AiRepository {
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
          $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
          $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34,
-         $35, $36, $37
+         $35, $36, $37, $38
        )`,
       [
         randomUUID(),
@@ -953,6 +1016,7 @@ export class PostgresAiRepository implements AiRepository {
         input.providerName,
         input.providerVersion,
         input.model,
+        input.agentTurn,
         input.round,
         input.sequence,
         input.status,
@@ -992,17 +1056,70 @@ export class PostgresAiRepository implements AiRepository {
     const result = await this.pool.query<AttemptRow>(
       `SELECT * FROM ai_provider_attempts
        WHERE execution_id = $1 AND ($2::text IS NULL OR node_id = $2)
-       ORDER BY round, sequence`,
+       ORDER BY agent_turn, round, sequence`,
       [executionId, nodeId ?? null],
     );
     return result.rows.map(attemptView);
+  }
+
+  async recordToolExecution(input: AiToolExecutionRecordInput): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO ai_tool_executions (
+         id, execution_id, node_id, provider_id, tool_call_id, tool_name,
+         status, duration_ms, result_count, query_hash, error_code,
+         request_details, response_details
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [
+        randomUUID(),
+        input.executionId,
+        input.nodeId,
+        input.providerId,
+        input.toolCallId,
+        input.toolName,
+        input.status,
+        input.durationMs,
+        input.resultCount,
+        input.queryHash,
+        input.errorCode,
+        input.requestDetails,
+        input.responseDetails,
+      ],
+    );
+  }
+
+  async listToolExecutions(
+    executionId: string,
+    nodeId?: string,
+  ): Promise<readonly AiToolExecutionView[]> {
+    const result = await this.pool.query<ToolExecutionRow>(
+      `SELECT * FROM ai_tool_executions
+       WHERE execution_id = $1 AND ($2::text IS NULL OR node_id = $2)
+       ORDER BY created_at, id`,
+      [executionId, nodeId ?? null],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      executionId: row.execution_id,
+      nodeId: row.node_id,
+      providerId: row.provider_id,
+      toolCallId: row.tool_call_id,
+      toolName: row.tool_name,
+      status: row.status,
+      durationMs: row.duration_ms,
+      resultCount: row.result_count,
+      queryHash: row.query_hash,
+      errorCode: row.error_code,
+      requestDetails: row.request_details,
+      responseDetails: row.response_details,
+      createdAt: row.created_at.toISOString(),
+    }));
   }
 
   async isReady(): Promise<boolean> {
     try {
       const result = await this.pool.query<{ ready: boolean }>(
         `SELECT EXISTS (
-           SELECT 1 FROM schema_migrations WHERE name = '0016_ai_attempt_diagnostics.sql'
+           SELECT 1 FROM schema_migrations WHERE name = '0018_ai_tool_executions.sql'
          ) AS ready`,
       );
       return result.rows[0]?.ready === true;

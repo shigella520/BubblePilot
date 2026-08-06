@@ -98,14 +98,43 @@ function validateOutput(
   return null;
 }
 
+function supportsHostedSearch(provider: AiRouteSnapshot["providers"][number]) {
+  return (
+    provider.apiKind === "responses" &&
+    provider.capabilities?.hostedWebSearch === true &&
+    provider.capabilityProbe?.hostedWebSearch === "verified"
+  );
+}
+
+function supportsLocalTools(provider: AiRouteSnapshot["providers"][number]) {
+  return (
+    provider.capabilities?.functionCalling === true &&
+    provider.capabilityProbe?.functionCalling === "verified"
+  );
+}
+
 export class AiRoutingService {
   constructor(
     private readonly repository: AiRepository,
     private readonly client: AiClient,
     private readonly secrets: SecretResolver,
+    private readonly enableWebSearch = true,
   ) {}
 
   async execute(request: AiRouteRequest): Promise<AiRouteResult> {
+    if (
+      request.webSearch !== undefined &&
+      request.webSearch !== "disabled" &&
+      !this.enableWebSearch
+    ) {
+      return {
+        status: "failed",
+        code: "AI_WEB_SEARCH_DISABLED",
+        summary: "Web search is disabled for this BubblePilot instance.",
+        retryable: false,
+        attemptCount: 0,
+      };
+    }
     const storedSnapshot = await this.repository.getRouteSnapshot(
       request.routeId,
     );
@@ -117,7 +146,12 @@ export class AiRoutingService {
             providers: storedSnapshot.providers.filter(
               (provider) =>
                 provider.enabled &&
-                isProviderSecretConfigured(provider, this.secrets),
+                isProviderSecretConfigured(provider, this.secrets) &&
+                (request.webSearch === undefined ||
+                  request.webSearch === "disabled" ||
+                  supportsHostedSearch(provider) ||
+                  (request.tools !== undefined &&
+                    supportsLocalTools(provider))),
             ),
           };
     if (snapshot === null || snapshot.providers.length === 0) {
@@ -147,11 +181,18 @@ export class AiRoutingService {
       round += 1
     ) {
       const selection = await this.repository.selectCandidates(snapshot);
-      const candidates = selection.candidates.filter(
-        (candidate) =>
-          retryableProviderIds === null ||
-          retryableProviderIds.has(candidate.provider.id),
-      );
+      const candidates = selection.candidates
+        .filter(
+          (candidate) =>
+            retryableProviderIds === null ||
+            retryableProviderIds.has(candidate.provider.id),
+        )
+        .sort((left, right) => {
+          if (request.preferredProviderId === undefined) return 0;
+          if (left.provider.id === request.preferredProviderId) return -1;
+          if (right.provider.id === request.preferredProviderId) return 1;
+          return 0;
+        });
       if (candidates.length === 0) {
         const availableAt =
           selection.nextAvailableAt === null
@@ -205,15 +246,29 @@ export class AiRoutingService {
         }
         sequence += 1;
         attemptCount += 1;
+        const useHostedSearch =
+          request.webSearch !== undefined &&
+          request.webSearch !== "disabled" &&
+          supportsHostedSearch(candidate.provider);
         let result: AiCallResult = await this.client.call(candidate.provider, {
           messages: request.messages,
           maxOutputTokens: request.maxOutputTokens,
           temperature: request.temperature,
           timeoutMs: Math.max(1, deadline - Date.now()),
           clientRequestId: `${request.executionId}:${request.nodeId}:${round}:${sequence}`,
+          ...(useHostedSearch ? { webSearch: request.webSearch } : {}),
+          ...(!useHostedSearch && request.tools !== undefined
+            ? {
+                tools: request.tools,
+                toolChoice: request.toolChoice ?? "auto",
+              }
+            : {}),
         });
 
-        if (result.status === "succeeded") {
+        if (
+          result.status === "succeeded" &&
+          (result.toolCalls?.length ?? 0) === 0
+        ) {
           const policyFailure = validateOutput(
             result.text,
             request,
@@ -245,6 +300,7 @@ export class AiRoutingService {
             providerName: candidate.provider.name,
             providerVersion: candidate.provider.version,
             model: candidate.provider.model,
+            agentTurn: request.agentTurn ?? 1,
             round,
             sequence,
             status: "succeeded",
@@ -260,6 +316,7 @@ export class AiRoutingService {
           return {
             status: "succeeded",
             text: result.text,
+            toolCalls: result.toolCalls ?? [],
             providerId: candidate.provider.id,
             providerName: candidate.provider.name,
             providerVersion: candidate.provider.version,
@@ -288,6 +345,7 @@ export class AiRoutingService {
           providerName: candidate.provider.name,
           providerVersion: candidate.provider.version,
           model: candidate.provider.model,
+          agentTurn: request.agentTurn ?? 1,
           round,
           sequence,
           status: "failed",

@@ -56,6 +56,16 @@ class SuccessfulAiClient implements AiClient {
   ): Promise<AiCallResult> {
     this.calls.push(provider);
     this.requests.push(request);
+    if (request.tools?.some((tool) => tool.name === "capability_probe")) {
+      return Promise.resolve({
+        status: "succeeded",
+        text: "",
+        toolCalls: [
+          { id: "fictional-call", name: "capability_probe", arguments: "{}" },
+        ],
+        durationMs: 7,
+      });
+    }
     return Promise.resolve({
       status: "succeeded",
       text: "OK",
@@ -124,6 +134,36 @@ describe("AI management API", () => {
       };
     }>().data;
   }
+
+  it("probes and persists configured hosted search capability", async () => {
+    const created = await request({
+      method: "POST",
+      url: "/api/v1/ai/providers",
+      payload: {
+        name: "Primary",
+        apiKind: "responses",
+        baseUrl: "https://ai.example.test/v1",
+        model: "fictional-model",
+        secretRef: "PRIMARY_AI_KEY",
+        capabilities: { functionCalling: true, hostedWebSearch: true },
+      },
+    });
+    const providerId = created.json<{ data: { id: string } }>().data.id;
+    const tested = await request({
+      method: "POST",
+      url: `/api/v1/ai/providers/${providerId}/test`,
+    });
+    expect(tested.statusCode).toBe(200);
+    expect(client.requests).toHaveLength(3);
+    expect(client.requests[1]).toMatchObject({ toolChoice: "required" });
+    expect(client.requests[2]).toMatchObject({ webSearch: "required" });
+    await expect(repository.getProvider(providerId)).resolves.toMatchObject({
+      capabilityProbe: {
+        functionCalling: "verified",
+        hostedWebSearch: "verified",
+      },
+    });
+  });
 
   it("manages, reorders, tests, and routes providers without exposing secrets", async () => {
     const primary = await createProvider("Primary", "PRIMARY_AI_KEY");

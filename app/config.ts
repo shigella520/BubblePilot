@@ -70,6 +70,31 @@ const environmentSchema = z
       .min(1_000)
       .max(120_000)
       .default(30_000),
+    ENABLE_WEB_SEARCH: z
+      .preprocess(
+        (value) =>
+          typeof value === "string"
+            ? ["1", "true", "yes", "on"].includes(value.toLowerCase())
+            : value,
+        z.boolean(),
+      )
+      .default(false),
+    SEARXNG_BASE_URL: z.string().url().default("http://searxng:8080"),
+    SEARXNG_ENGINES: z.string().default(""),
+    SEARXNG_LANGUAGE: z
+      .string()
+      .trim()
+      .min(2)
+      .max(35)
+      .regex(/^[a-z0-9_-]+$/iu)
+      .default("zh-CN"),
+    WEB_SEARCH_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(60_000)
+      .default(8_000),
+    WEB_SEARCH_MAX_RESULTS: z.coerce.number().int().min(1).max(20).default(5),
     MONITORED_CHAT_IDS: z.string().default(""),
     MESSAGE_RETENTION_DAYS: z.coerce
       .number()
@@ -153,6 +178,12 @@ export interface AppConfig {
   blueBubblesAccessToken: string;
   blueBubblesSendMethod: "private-api" | "apple-script";
   blueBubblesRequestTimeoutMs: number;
+  enableWebSearch?: boolean;
+  searxngBaseUrl?: string;
+  searxngEngines?: readonly string[];
+  searxngLanguage?: string;
+  webSearchTimeoutMs?: number;
+  webSearchMaxResults?: number;
   monitoredChatIds: ReadonlySet<string>;
   messageRetentionDays: number;
   webhookBodyLimitBytes: number;
@@ -175,6 +206,13 @@ export function loadConfig(
       .map((chatId) => chatId.trim())
       .filter((chatId) => chatId.length > 0),
   );
+  const searxngEngines = [
+    ...new Set(
+      parsed.SEARXNG_ENGINES.split(",")
+        .map((engine) => engine.trim())
+        .filter((engine) => /^[a-z0-9_-]+$/iu.test(engine)),
+    ),
+  ];
 
   return {
     nodeEnv: parsed.NODE_ENV,
@@ -194,6 +232,12 @@ export function loadConfig(
     blueBubblesAccessToken: parsed.BLUEBUBBLES_ACCESS_TOKEN,
     blueBubblesSendMethod: parsed.BLUEBUBBLES_SEND_METHOD,
     blueBubblesRequestTimeoutMs: parsed.BLUEBUBBLES_REQUEST_TIMEOUT_MS,
+    enableWebSearch: parsed.ENABLE_WEB_SEARCH,
+    searxngBaseUrl: parsed.SEARXNG_BASE_URL.replace(/\/+$/u, ""),
+    searxngEngines,
+    searxngLanguage: parsed.SEARXNG_LANGUAGE,
+    webSearchTimeoutMs: parsed.WEB_SEARCH_TIMEOUT_MS,
+    webSearchMaxResults: parsed.WEB_SEARCH_MAX_RESULTS,
     monitoredChatIds,
     messageRetentionDays: parsed.MESSAGE_RETENTION_DAYS,
     webhookBodyLimitBytes: parsed.WEBHOOK_BODY_LIMIT_BYTES,

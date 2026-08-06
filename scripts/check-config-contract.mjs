@@ -31,7 +31,7 @@ if (composeApp === undefined) {
 const composeVariables = matches(composeApp, /^ {6}([A-Z][A-Z0-9_]+):/gmu);
 const documentedVariables = matches(
   contractDocument,
-  /^\| `([A-Z][A-Z0-9_]+)` \| (?:是|否) \|/gmu,
+  /^\| `([A-Z][A-Z0-9_]+)`\s+\|\s+(?:是|否)\s+\|/gmu,
 );
 const exampleVariables = matches(environmentExample, /^([A-Z][A-Z0-9_]*)=/gmu);
 
@@ -41,6 +41,7 @@ const allowedExampleOnlyVariables = new Set([
   "POSTGRES_DB",
   "POSTGRES_PASSWORD",
   "POSTGRES_USER",
+  "SEARXNG_SECRET",
 ]);
 
 const errors = [];

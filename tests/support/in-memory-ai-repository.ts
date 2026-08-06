@@ -9,12 +9,15 @@ import type {
   AiCandidate,
   AiCandidateSelection,
   AiProviderAttemptView,
+  AiProviderCapabilityProbe,
   AiProviderConfiguration,
   AiProviderHealth,
   AiProviderRecord,
   AiProviderRouteRecord,
   AiRouteConfiguration,
   AiRouteSnapshot,
+  AiToolExecutionRecordInput,
+  AiToolExecutionView,
 } from "../../modules/ai/ai-types.js";
 
 function cloned<T>(value: T): T {
@@ -27,6 +30,7 @@ export class InMemoryAiRepository implements AiRepository {
   readonly health = new Map<string, AiProviderHealth>();
   readonly routes = new Map<string, AiProviderRouteRecord>();
   readonly attempts: AiProviderAttemptView[] = [];
+  readonly toolExecutions: AiToolExecutionView[] = [];
   readonly healthEvents: Array<{
     providerId: string;
     from: AiProviderHealth["state"];
@@ -50,6 +54,16 @@ export class InMemoryAiRepository implements AiRepository {
   getProvider(providerId: string): Promise<AiProviderRecord | null> {
     const provider = this.providers.get(providerId);
     return Promise.resolve(provider === undefined ? null : cloned(provider));
+  }
+
+  updateProviderCapabilityProbe(
+    providerId: string,
+    probe: AiProviderCapabilityProbe,
+  ): Promise<AiProviderRecord | null> {
+    const provider = this.providers.get(providerId);
+    if (provider === undefined) return Promise.resolve(null);
+    provider.capabilityProbe = cloned(probe);
+    return Promise.resolve(cloned(provider));
   }
 
   async createProvider(
@@ -473,7 +487,33 @@ export class InMemoryAiRepository implements AiRepository {
         )
         .sort(
           (left, right) =>
-            left.round - right.round || left.sequence - right.sequence,
+            left.agentTurn - right.agentTurn ||
+            left.round - right.round ||
+            left.sequence - right.sequence,
+        )
+        .map(cloned),
+    );
+  }
+
+  recordToolExecution(input: AiToolExecutionRecordInput): Promise<void> {
+    this.toolExecutions.push({
+      ...cloned(input),
+      id: randomUUID(),
+      createdAt: this.timestamp(),
+    });
+    return Promise.resolve();
+  }
+
+  listToolExecutions(
+    executionId: string,
+    nodeId?: string,
+  ): Promise<readonly AiToolExecutionView[]> {
+    return Promise.resolve(
+      this.toolExecutions
+        .filter(
+          (item) =>
+            item.executionId === executionId &&
+            (nodeId === undefined || item.nodeId === nodeId),
         )
         .map(cloned),
     );
