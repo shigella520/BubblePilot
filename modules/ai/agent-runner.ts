@@ -133,6 +133,7 @@ export class AgentRunner {
         messages,
         tools: [webSearchDefinition],
         toolChoice: policy === "required" && !searched ? "required" : "auto",
+        agentTurn: turn,
         ...(preferredProviderId === undefined ? {} : { preferredProviderId }),
       });
       totalAttempts += result.attemptCount;

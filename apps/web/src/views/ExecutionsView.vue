@@ -68,6 +68,7 @@ interface ExecutionDetail extends Execution {
     providerName: string;
     providerVersion: number;
     model: string;
+    agentTurn: number;
     round: number;
     sequence: number;
     status: string;
@@ -668,7 +669,8 @@ function resetAuditPage(): Promise<boolean> {
                     }}</span
                   >
                   <p>
-                    第 {{ item.round }} 轮 / 顺序 {{ item.sequence }} ·
+                    Agent 第 {{ item.agentTurn }} 轮 · 路由第
+                    {{ item.round }} 轮 / 顺序 {{ item.sequence }} ·
                     {{ item.durationMs }} ms · 选择时
                     {{ providerHealthLabel(item.selectionHealthState) }} → 结果
                     {{ providerHealthLabel(item.healthState) }}

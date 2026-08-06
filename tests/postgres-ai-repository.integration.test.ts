@@ -188,6 +188,7 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       providerName: primary.value.name,
       providerVersion: primary.value.version,
       model: primary.value.model,
+      agentTurn: 1,
       round: 1,
       sequence: 1,
       status: "succeeded",

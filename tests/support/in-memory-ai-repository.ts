@@ -487,7 +487,9 @@ export class InMemoryAiRepository implements AiRepository {
         )
         .sort(
           (left, right) =>
-            left.round - right.round || left.sequence - right.sequence,
+            left.agentTurn - right.agentTurn ||
+            left.round - right.round ||
+            left.sequence - right.sequence,
         )
         .map(cloned),
     );

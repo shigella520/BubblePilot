@@ -87,6 +87,7 @@ interface AttemptRow {
   provider_name: string;
   provider_version: number;
   model: string;
+  agent_turn: number;
   round: number;
   sequence: number;
   status: "succeeded" | "failed";
@@ -220,6 +221,7 @@ function attemptView(row: AttemptRow): AiProviderAttemptView {
     providerName: row.provider_name,
     providerVersion: row.provider_version,
     model: row.model,
+    agentTurn: row.agent_turn,
     round: row.round,
     sequence: row.sequence,
     status: row.status,
@@ -986,7 +988,7 @@ export class PostgresAiRepository implements AiRepository {
     await this.pool.query(
       `INSERT INTO ai_provider_attempts (
          id, execution_id, node_id, route_id, route_version, provider_id,
-         provider_name, provider_version, model, round, sequence, status,
+         provider_name, provider_version, model, agent_turn, round, sequence, status,
          health_state,
          selection_health_state, duration_ms, error_category, error_code,
          retryable, fallback_allowed, client_request_id, provider_request_id,
@@ -1000,7 +1002,7 @@ export class PostgresAiRepository implements AiRepository {
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
          $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
          $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34,
-         $35, $36, $37
+         $35, $36, $37, $38
        )`,
       [
         randomUUID(),
@@ -1012,6 +1014,7 @@ export class PostgresAiRepository implements AiRepository {
         input.providerName,
         input.providerVersion,
         input.model,
+        input.agentTurn,
         input.round,
         input.sequence,
         input.status,
@@ -1051,7 +1054,7 @@ export class PostgresAiRepository implements AiRepository {
     const result = await this.pool.query<AttemptRow>(
       `SELECT * FROM ai_provider_attempts
        WHERE execution_id = $1 AND ($2::text IS NULL OR node_id = $2)
-       ORDER BY round, sequence`,
+       ORDER BY agent_turn, round, sequence`,
       [executionId, nodeId ?? null],
     );
     return result.rows.map(attemptView);

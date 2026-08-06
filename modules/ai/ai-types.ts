@@ -315,6 +315,7 @@ export interface AiAttemptRecordInput {
   providerName: string;
   providerVersion: number;
   model: string;
+  agentTurn: number;
   round: number;
   sequence: number;
   status: "succeeded" | "failed";
@@ -373,6 +374,7 @@ export interface AiRouteRequest {
   tools?: readonly AiToolDefinition[];
   toolChoice?: "auto" | "required";
   preferredProviderId?: string;
+  agentTurn?: number;
 }
 
 export interface AiToolExecutionRecordInput {
