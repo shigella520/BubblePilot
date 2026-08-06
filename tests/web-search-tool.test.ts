@@ -12,9 +12,11 @@ describe("SearxngWebSearchTool", () => {
               title: "<b>Fresh</b> result",
               url: "https://news.example.test/item",
               content: "<script>ignore()</script> Current summary",
+              publishedDate: null,
               engine: "fictional",
             },
             { title: "Unsafe", url: "javascript:alert(1)" },
+            { title: null, url: null, content: null, engine: null },
           ],
         }),
         { status: 200 },
@@ -91,6 +93,29 @@ describe("SearxngWebSearchTool", () => {
     );
     await expect(tool.search("fictional")).rejects.toMatchObject({
       code: "AI_WEB_SEARCH_INVALID_RESPONSE",
+      responseDetails: {
+        httpStatus: 200,
+        schemaIssues: [
+          {
+            path: "results",
+            code: "invalid_type",
+          },
+        ],
+      },
+    });
+  });
+
+  it("classifies invalid JSON as an invalid response", async () => {
+    const tool = new SearxngWebSearchTool(
+      { baseUrl: "https://search.example.test" },
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response("not-json", { status: 200 })),
+    );
+
+    await expect(tool.search("fictional")).rejects.toMatchObject({
+      code: "AI_WEB_SEARCH_INVALID_RESPONSE",
+      responseDetails: { httpStatus: 200, jsonParseFailed: true },
     });
   });
 

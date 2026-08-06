@@ -4,11 +4,11 @@ const searxngResponseSchema = z.object({
   results: z.array(
     z
       .object({
-        title: z.string().optional(),
-        url: z.string(),
-        content: z.string().optional(),
-        publishedDate: z.string().optional(),
-        engine: z.string().optional(),
+        title: z.string().nullish(),
+        url: z.string().nullish(),
+        content: z.string().nullish(),
+        publishedDate: z.string().nullish(),
+        engine: z.string().nullish(),
       })
       .passthrough(),
   ),
@@ -177,19 +177,44 @@ export class SearxngWebSearchTool implements WebSearchTool {
           },
         );
       }
-      const parsed = searxngResponseSchema.safeParse(await response.json());
+      let responseBody: unknown;
+      try {
+        responseBody = await response.json();
+      } catch (error) {
+        throw new WebSearchToolError(
+          "AI_WEB_SEARCH_INVALID_RESPONSE",
+          "The web search service returned invalid JSON.",
+          {
+            cause: error,
+            requestDetails,
+            responseDetails: {
+              httpStatus: response.status,
+              jsonParseFailed: true,
+            },
+          },
+        );
+      }
+      const parsed = searxngResponseSchema.safeParse(responseBody);
       if (!parsed.success) {
         throw new WebSearchToolError(
           "AI_WEB_SEARCH_INVALID_RESPONSE",
           "The web search service returned an invalid response.",
           {
             requestDetails,
-            responseDetails: { httpStatus: response.status },
+            responseDetails: {
+              httpStatus: response.status,
+              schemaIssues: parsed.error.issues.slice(0, 10).map((issue) => ({
+                path: issue.path.map(String).join("."),
+                code: issue.code,
+                message: cleanText(issue.message, 300),
+              })),
+            },
           },
         );
       }
       const results = parsed.data.results.flatMap((item) => {
-        const url = safeResultUrl(item.url);
+        const url =
+          typeof item.url === "string" ? safeResultUrl(item.url) : null;
         if (url === null) return [];
         return [
           {
