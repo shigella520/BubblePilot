@@ -42,6 +42,7 @@ jobs:
       BLUEBUBBLES_WEBHOOK_SECRET: ci-webhook-secret-with-32-characters
       BLUEBUBBLES_SERVER_URL: https://bluebubbles.example.test
       BLUEBUBBLES_ACCESS_TOKEN: fictional-ci-bluebubbles-token
+      SEARXNG_SECRET: ci-searxng-secret-with-32-characters
     steps:
       - uses: actions/checkout@v4
 
