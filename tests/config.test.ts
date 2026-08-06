@@ -27,6 +27,7 @@ describe("loadConfig", () => {
     expect(config.workflowQueueCapacity).toBe(64);
     expect(config.adminRateLimitMax).toBe(600);
     expect(config.sessionCookieSecure).toBe("auto");
+    expect(config.searxngLanguage).toBe("zh-CN");
   });
 
   it("supports explicit session cookie security modes", () => {

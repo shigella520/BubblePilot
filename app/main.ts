@@ -73,6 +73,7 @@ const aiRouting = new AiRoutingService(
 const webSearchTool = new SearxngWebSearchTool({
   baseUrl: config.searxngBaseUrl ?? "http://searxng:8080",
   engines: config.searxngEngines ?? [],
+  language: config.searxngLanguage ?? "zh-CN",
   timeoutMs: config.webSearchTimeoutMs ?? 8_000,
   maxResults: config.webSearchMaxResults ?? 5,
 });

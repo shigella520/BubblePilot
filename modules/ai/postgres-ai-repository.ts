@@ -131,6 +131,8 @@ interface ToolExecutionRow {
   result_count: number | null;
   query_hash: string;
   error_code: string | null;
+  request_details: Record<string, unknown> | null;
+  response_details: Record<string, unknown> | null;
   created_at: Date;
 }
 
@@ -1064,8 +1066,9 @@ export class PostgresAiRepository implements AiRepository {
     await this.pool.query(
       `INSERT INTO ai_tool_executions (
          id, execution_id, node_id, provider_id, tool_call_id, tool_name,
-         status, duration_ms, result_count, query_hash, error_code
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+         status, duration_ms, result_count, query_hash, error_code,
+         request_details, response_details
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         randomUUID(),
         input.executionId,
@@ -1078,6 +1081,8 @@ export class PostgresAiRepository implements AiRepository {
         input.resultCount,
         input.queryHash,
         input.errorCode,
+        input.requestDetails,
+        input.responseDetails,
       ],
     );
   }
@@ -1104,6 +1109,8 @@ export class PostgresAiRepository implements AiRepository {
       resultCount: row.result_count,
       queryHash: row.query_hash,
       errorCode: row.error_code,
+      requestDetails: row.request_details,
+      responseDetails: row.response_details,
       createdAt: row.created_at.toISOString(),
     }));
   }

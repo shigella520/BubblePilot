@@ -204,6 +204,11 @@ export class AgentRunner {
             resultCount: searchResult.results.length,
             queryHash,
             errorCode: null,
+            requestDetails: searchResult.requestDetails ?? { query },
+            responseDetails: searchResult.responseDetails ?? {
+              retainedResultCount: searchResult.results.length,
+              results: searchResult.results,
+            },
           });
           messages.push({
             role: "tool",
@@ -218,6 +223,11 @@ export class AgentRunner {
             error instanceof WebSearchToolError
               ? error.code
               : "AI_WEB_SEARCH_FAILED";
+          const resultCount =
+            error instanceof WebSearchToolError &&
+            typeof error.responseDetails?.retainedResultCount === "number"
+              ? error.responseDetails.retainedResultCount
+              : null;
           await this.repository?.recordToolExecution({
             executionId: request.executionId,
             nodeId: request.nodeId,
@@ -226,9 +236,17 @@ export class AgentRunner {
             toolName: call.name.slice(0, 120),
             status: "failed",
             durationMs: Math.max(0, Date.now() - toolStartedAt),
-            resultCount: null,
+            resultCount,
             queryHash,
             errorCode: code,
+            requestDetails:
+              error instanceof WebSearchToolError
+                ? (error.requestDetails ?? { query })
+                : { query },
+            responseDetails:
+              error instanceof WebSearchToolError
+                ? error.responseDetails
+                : null,
           });
           return {
             status: "failed",

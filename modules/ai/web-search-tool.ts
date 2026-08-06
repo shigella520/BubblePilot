@@ -12,6 +12,10 @@ const searxngResponseSchema = z.object({
       })
       .passthrough(),
   ),
+  unresponsive_engines: z
+    .array(z.tuple([z.string(), z.string()]))
+    .optional()
+    .default([]),
 });
 
 export interface WebSearchResult {
@@ -25,6 +29,8 @@ export interface WebSearchResult {
 export interface WebSearchToolResult {
   results: readonly WebSearchResult[];
   durationMs: number;
+  requestDetails?: Readonly<Record<string, unknown>>;
+  responseDetails?: Readonly<Record<string, unknown>>;
 }
 
 export interface WebSearchTool {
@@ -33,13 +39,21 @@ export interface WebSearchTool {
 }
 
 export class WebSearchToolError extends Error {
+  readonly requestDetails: Readonly<Record<string, unknown>> | null;
+  readonly responseDetails: Readonly<Record<string, unknown>> | null;
+
   constructor(
     readonly code: string,
     message: string,
-    options?: ErrorOptions,
+    options?: ErrorOptions & {
+      requestDetails?: Readonly<Record<string, unknown>>;
+      responseDetails?: Readonly<Record<string, unknown>>;
+    },
   ) {
     super(message, options);
     this.name = "WebSearchToolError";
+    this.requestDetails = options?.requestDetails ?? null;
+    this.responseDetails = options?.responseDetails ?? null;
   }
 }
 
@@ -82,6 +96,7 @@ export interface SearxngWebSearchOptions {
   maxResults?: number;
   maxSnippetCharacters?: number;
   engines?: readonly string[];
+  language?: string;
 }
 
 export class SearxngWebSearchTool implements WebSearchTool {
@@ -90,6 +105,7 @@ export class SearxngWebSearchTool implements WebSearchTool {
   private readonly maxResults: number;
   private readonly maxSnippetCharacters: number;
   private readonly engines: readonly string[];
+  private readonly language: string;
 
   constructor(
     options: SearxngWebSearchOptions,
@@ -100,6 +116,7 @@ export class SearxngWebSearchTool implements WebSearchTool {
     this.maxResults = options.maxResults ?? 5;
     this.maxSnippetCharacters = options.maxSnippetCharacters ?? 1_000;
     this.engines = options.engines ?? [];
+    this.language = options.language?.trim() || "zh-CN";
   }
 
   async isReady(): Promise<boolean> {
@@ -124,9 +141,17 @@ export class SearxngWebSearchTool implements WebSearchTool {
     endpoint.searchParams.set("q", normalizedQuery);
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "1");
+    endpoint.searchParams.set("language", this.language);
     if (this.engines.length > 0) {
       endpoint.searchParams.set("engines", this.engines.join(","));
     }
+    const requestDetails = {
+      endpoint: `${endpoint.origin}${endpoint.pathname}`,
+      query: normalizedQuery,
+      language: this.language,
+      safeSearch: 1,
+      engines: [...this.engines],
+    };
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -138,6 +163,10 @@ export class SearxngWebSearchTool implements WebSearchTool {
         throw new WebSearchToolError(
           `AI_WEB_SEARCH_HTTP_${response.status}`,
           `The web search service returned HTTP ${response.status}.`,
+          {
+            requestDetails,
+            responseDetails: { httpStatus: response.status },
+          },
         );
       }
       const parsed = searxngResponseSchema.safeParse(await response.json());
@@ -145,6 +174,10 @@ export class SearxngWebSearchTool implements WebSearchTool {
         throw new WebSearchToolError(
           "AI_WEB_SEARCH_INVALID_RESPONSE",
           "The web search service returned an invalid response.",
+          {
+            requestDetails,
+            responseDetails: { httpStatus: response.status },
+          },
         );
       }
       const results = parsed.data.results.flatMap((item) => {
@@ -160,9 +193,32 @@ export class SearxngWebSearchTool implements WebSearchTool {
           },
         ];
       });
+      const retainedResults = results.slice(0, this.maxResults);
+      const engineFailures = parsed.data.unresponsive_engines.map(
+        ([engine, reason]) => ({
+          engine: cleanText(engine, 100),
+          reason: cleanText(reason, 300),
+        }),
+      );
+      const responseDetails = {
+        httpStatus: response.status,
+        rawResultCount: parsed.data.results.length,
+        retainedResultCount: retainedResults.length,
+        results: retainedResults,
+        engineFailures,
+      };
+      if (retainedResults.length === 0 && engineFailures.length > 0) {
+        throw new WebSearchToolError(
+          "AI_WEB_SEARCH_ENGINES_UNAVAILABLE",
+          "The web search engines returned no results and reported failures.",
+          { requestDetails, responseDetails },
+        );
+      }
       return {
-        results: results.slice(0, this.maxResults),
+        results: retainedResults,
         durationMs: Math.max(0, Date.now() - startedAt),
+        requestDetails,
+        responseDetails,
       };
     } catch (error) {
       if (error instanceof WebSearchToolError) throw error;
@@ -174,7 +230,7 @@ export class SearxngWebSearchTool implements WebSearchTool {
         timedOut
           ? "The web search service timed out."
           : "The web search service connection failed.",
-        { cause: error },
+        { cause: error, requestDetails },
       );
     } finally {
       clearTimeout(timeout);

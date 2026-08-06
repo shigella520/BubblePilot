@@ -243,9 +243,22 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       toolName: "web_search",
       status: "succeeded",
       durationMs: 42,
-      resultCount: 5,
+      resultCount: 1,
       queryHash: "a".repeat(64),
       errorCode: null,
+      requestDetails: {
+        query: "fictional latest news",
+        language: "zh-CN",
+      },
+      responseDetails: {
+        retainedResultCount: 1,
+        results: [
+          {
+            title: "Fictional result",
+            url: "https://news.example.test/fictional",
+          },
+        ],
+      },
     });
     await expect(
       repository.listToolExecutions(diagnosticExecutionId, "ai-node"),
@@ -254,8 +267,15 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         executionId: diagnosticExecutionId,
         toolName: "web_search",
         status: "succeeded",
-        resultCount: 5,
+        resultCount: 1,
         queryHash: "a".repeat(64),
+        requestDetails: {
+          query: "fictional latest news",
+          language: "zh-CN",
+        },
+        responseDetails: {
+          retainedResultCount: 1,
+        },
       },
     ]);
     await inspectionPool.query(

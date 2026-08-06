@@ -111,6 +111,8 @@ interface ExecutionDetail extends Execution {
     resultCount: number | null;
     queryHash: string;
     errorCode: string | null;
+    requestDetails: Record<string, unknown> | null;
+    responseDetails: Record<string, unknown> | null;
     createdAt: string;
   }>;
 }
@@ -758,6 +760,22 @@ function resetAuditPage(): Promise<boolean> {
                     <summary>诊断标识</summary>
                     <code>query={{ item.queryHash }}</code>
                     <code>call={{ item.toolCallId }}</code>
+                  </details>
+                  <details
+                    v-if="item.requestDetails || item.responseDetails"
+                    class="keyline"
+                  >
+                    <summary>搜索请求与返回</summary>
+                    <pre>{{
+                      JSON.stringify(
+                        {
+                          request: item.requestDetails,
+                          response: item.responseDetails,
+                        },
+                        null,
+                        2,
+                      )
+                    }}</pre>
                   </details>
                 </div>
               </article>

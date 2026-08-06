@@ -81,6 +81,13 @@ const environmentSchema = z
       .default(false),
     SEARXNG_BASE_URL: z.string().url().default("http://searxng:8080"),
     SEARXNG_ENGINES: z.string().default(""),
+    SEARXNG_LANGUAGE: z
+      .string()
+      .trim()
+      .min(2)
+      .max(35)
+      .regex(/^[a-z0-9_-]+$/iu)
+      .default("zh-CN"),
     WEB_SEARCH_TIMEOUT_MS: z.coerce
       .number()
       .int()
@@ -174,6 +181,7 @@ export interface AppConfig {
   enableWebSearch?: boolean;
   searxngBaseUrl?: string;
   searxngEngines?: readonly string[];
+  searxngLanguage?: string;
   webSearchTimeoutMs?: number;
   webSearchMaxResults?: number;
   monitoredChatIds: ReadonlySet<string>;
@@ -227,6 +235,7 @@ export function loadConfig(
     enableWebSearch: parsed.ENABLE_WEB_SEARCH,
     searxngBaseUrl: parsed.SEARXNG_BASE_URL.replace(/\/+$/u, ""),
     searxngEngines,
+    searxngLanguage: parsed.SEARXNG_LANGUAGE,
     webSearchTimeoutMs: parsed.WEB_SEARCH_TIMEOUT_MS,
     webSearchMaxResults: parsed.WEB_SEARCH_MAX_RESULTS,
     monitoredChatIds,

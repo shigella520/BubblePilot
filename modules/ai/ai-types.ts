@@ -388,6 +388,8 @@ export interface AiToolExecutionRecordInput {
   resultCount: number | null;
   queryHash: string;
   errorCode: string | null;
+  requestDetails: Readonly<Record<string, unknown>> | null;
+  responseDetails: Readonly<Record<string, unknown>> | null;
 }
 
 export interface AiToolExecutionView extends AiToolExecutionRecordInput {
