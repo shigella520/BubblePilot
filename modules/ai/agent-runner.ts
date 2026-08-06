@@ -85,10 +85,7 @@ function stripSourceLinks(value: string): string {
   return value
     .replace(/\[([^\]\n]+)\]\((?:https?:\/\/|www\.)[^)\s]+\)/giu, "$1")
     .replace(/<https?:\/\/[^>\s]+>/giu, "")
-    .replace(
-      /\b(?:https?:\/\/|www\.)[a-z0-9\-._~:/?#@!$&'()*+,;=%]+/giu,
-      "",
-    )
+    .replace(/\b(?:https?:\/\/|www\.)[a-z0-9\-._~:/?#@!$&'()*+,;=%]+/giu, "")
     .split("\n")
     .filter(
       (line) =>
