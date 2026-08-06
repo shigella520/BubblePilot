@@ -130,6 +130,7 @@ describe("AgentRunner", () => {
       status: "succeeded",
       resultCount: 1,
     });
+    expect(repository.toolExecutions[0]?.queryHash).toMatch(/^[a-f0-9]{64}$/u);
   });
 
   it("allows auto mode to answer without searching", async () => {

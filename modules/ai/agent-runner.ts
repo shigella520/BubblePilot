@@ -183,7 +183,9 @@ export class AgentRunner {
             attemptCount: totalAttempts,
           };
         }
-        const queryHash = sha256(query);
+        // The audit schema stores the 64-character hexadecimal digest without
+        // the algorithm prefix used by the application's general hash helper.
+        const queryHash = sha256(query).slice("sha256:".length);
         const toolStartedAt = Date.now();
         try {
           const searchResult =

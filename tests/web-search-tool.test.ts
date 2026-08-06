@@ -57,4 +57,17 @@ describe("SearxngWebSearchTool", () => {
       code: "AI_WEB_SEARCH_INVALID_RESPONSE",
     });
   });
+
+  it("reports ready when the search endpoint returns valid empty results", async () => {
+    const tool = new SearxngWebSearchTool(
+      { baseUrl: "https://search.example.test" },
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ results: [] }), { status: 200 }),
+        ),
+    );
+
+    await expect(tool.isReady()).resolves.toBe(true);
+  });
 });

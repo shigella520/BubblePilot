@@ -104,8 +104,8 @@ export class SearxngWebSearchTool implements WebSearchTool {
 
   async isReady(): Promise<boolean> {
     try {
-      const result = await this.search("OpenAI official website");
-      return result.results.length > 0;
+      await this.search("OpenAI official website");
+      return true;
     } catch {
       return false;
     }
