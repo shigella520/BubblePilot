@@ -9,6 +9,7 @@ import {
   type AiProviderTestResult,
   type AiProviderView,
   type AiRouteConfiguration,
+  type WebSearchPolicy,
 } from "./ai-types.js";
 import {
   isProviderSecretConfigured,
@@ -126,7 +127,36 @@ export class AiManagementService {
       temperature: 0,
       timeoutMs: provider.requestTimeoutMs,
     });
-    return result.status === "succeeded"
+    let capabilityErrorCode: string | null = null;
+    if (
+      result.status === "succeeded" &&
+      provider.capabilities?.hostedWebSearch
+    ) {
+      const searchProbe = await this.client.call(provider, {
+        messages: [
+          {
+            role: "user",
+            content:
+              "Capability test. Search the web for the official OpenAI website and reply with OK.",
+          },
+        ],
+        maxOutputTokens: 128,
+        temperature: 0,
+        timeoutMs: provider.requestTimeoutMs,
+        webSearch: "required",
+      });
+      await this.repository.updateProviderCapabilityProbe(providerId, {
+        functionCalling:
+          searchProbe.status === "succeeded" ? "verified" : "failed",
+        hostedWebSearch:
+          searchProbe.status === "succeeded" ? "verified" : "failed",
+        checkedAt: new Date().toISOString(),
+      });
+      if (searchProbe.status === "failed") {
+        capabilityErrorCode = searchProbe.code;
+      }
+    }
+    return result.status === "succeeded" && capabilityErrorCode === null
       ? {
           success: true,
           providerId,
@@ -140,8 +170,13 @@ export class AiManagementService {
           providerId,
           model: provider.model,
           durationMs: result.durationMs,
-          errorCode: result.code,
-          message: result.summary,
+          errorCode:
+            capabilityErrorCode ??
+            (result.status === "failed" ? result.code : "AI_WEB_SEARCH_FAILED"),
+          message:
+            capabilityErrorCode === null && result.status === "failed"
+              ? result.summary
+              : "The configured hosted web search capability failed its probe.",
         };
   }
 
@@ -158,7 +193,10 @@ export class AiManagementService {
     return route === null ? null : this.routeView(route);
   }
 
-  async isRoutePublishable(routeId: string): Promise<boolean> {
+  async isRoutePublishable(
+    routeId: string,
+    webSearch: WebSearchPolicy = "disabled",
+  ): Promise<boolean> {
     const route = await this.repository.getRoute(routeId);
     if (route === null || !route.enabled) {
       return false;
@@ -173,10 +211,20 @@ export class AiManagementService {
             );
             return provider === undefined ? [] : [provider];
           });
-    return configured.some(
+    const available = configured.filter(
       (provider) =>
         provider.enabled && isProviderSecretConfigured(provider, this.secrets),
     );
+    if (webSearch === "disabled") return available.length > 0;
+    const searchable = available.filter(
+      (provider) =>
+        provider.apiKind === "responses" &&
+        provider.capabilities?.hostedWebSearch === true &&
+        provider.capabilityProbe?.hostedWebSearch === "verified",
+    );
+    return webSearch === "required"
+      ? searchable.length === available.length && available.length > 0
+      : searchable.length > 0;
   }
 
   async createRoute(
@@ -226,6 +274,10 @@ export class AiManagementService {
     return {
       ...configuration,
       baseUrl: normalizeAiBaseUrl(configuration.baseUrl),
+      capabilities: configuration.capabilities ?? {
+        functionCalling: false,
+        hostedWebSearch: false,
+      },
     };
   }
 
@@ -243,6 +295,11 @@ export class AiManagementService {
       ...safeProvider,
       secretConfigured: isProviderSecretConfigured(provider, this.secrets),
       health,
+      capabilityProbe: provider.capabilityProbe ?? {
+        functionCalling: "unknown",
+        hostedWebSearch: "unknown",
+        checkedAt: null,
+      },
     };
   }
 

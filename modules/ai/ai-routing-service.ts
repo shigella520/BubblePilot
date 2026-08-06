@@ -103,9 +103,23 @@ export class AiRoutingService {
     private readonly repository: AiRepository,
     private readonly client: AiClient,
     private readonly secrets: SecretResolver,
+    private readonly enableWebSearch = true,
   ) {}
 
   async execute(request: AiRouteRequest): Promise<AiRouteResult> {
+    if (
+      request.webSearch !== undefined &&
+      request.webSearch !== "disabled" &&
+      !this.enableWebSearch
+    ) {
+      return {
+        status: "failed",
+        code: "AI_WEB_SEARCH_DISABLED",
+        summary: "Web search is disabled for this BubblePilot instance.",
+        retryable: false,
+        attemptCount: 0,
+      };
+    }
     const storedSnapshot = await this.repository.getRouteSnapshot(
       request.routeId,
     );
@@ -117,7 +131,12 @@ export class AiRoutingService {
             providers: storedSnapshot.providers.filter(
               (provider) =>
                 provider.enabled &&
-                isProviderSecretConfigured(provider, this.secrets),
+                isProviderSecretConfigured(provider, this.secrets) &&
+                (request.webSearch === undefined ||
+                  request.webSearch === "disabled" ||
+                  (provider.apiKind === "responses" &&
+                    provider.capabilities?.hostedWebSearch === true &&
+                    provider.capabilityProbe?.hostedWebSearch === "verified")),
             ),
           };
     if (snapshot === null || snapshot.providers.length === 0) {
@@ -211,6 +230,9 @@ export class AiRoutingService {
           temperature: request.temperature,
           timeoutMs: Math.max(1, deadline - Date.now()),
           clientRequestId: `${request.executionId}:${request.nodeId}:${round}:${sequence}`,
+          ...(request.webSearch === undefined
+            ? {}
+            : { webSearch: request.webSearch }),
         });
 
         if (result.status === "succeeded") {

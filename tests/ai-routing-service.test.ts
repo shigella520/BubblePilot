@@ -124,6 +124,45 @@ async function route(
 }
 
 describe("AiRoutingService", () => {
+  it("filters search routes to providers with verified hosted search", async () => {
+    const repository = new InMemoryAiRepository();
+    const primary = await provider(repository, "Primary");
+    const backup = await provider(repository, "Backup");
+    Object.assign(repository.providers.get(primary.id)!, {
+      apiKind: "responses",
+      capabilities: { functionCalling: true, hostedWebSearch: true },
+      capabilityProbe: {
+        functionCalling: "failed",
+        hostedWebSearch: "failed",
+        checkedAt: new Date().toISOString(),
+      },
+    });
+    Object.assign(repository.providers.get(backup.id)!, {
+      apiKind: "responses",
+      capabilities: { functionCalling: true, hostedWebSearch: true },
+      capabilityProbe: {
+        functionCalling: "verified",
+        hostedWebSearch: "verified",
+        checkedAt: new Date().toISOString(),
+      },
+    });
+    const configuredRoute = await route(repository, [primary.id, backup.id]);
+    const client = new FakeAiClient(() => ({
+      status: "succeeded",
+      text: "Fresh answer",
+      durationMs: 1,
+    }));
+    const service = new AiRoutingService(repository, client, secretResolver());
+
+    await expect(
+      service.execute({
+        ...routeRequest(configuredRoute.id),
+        webSearch: "auto",
+      }),
+    ).resolves.toMatchObject({ status: "succeeded", providerId: backup.id });
+    expect(client.calls).toEqual([backup.id]);
+  });
+
   it("falls back in fixed order and records every attempt", async () => {
     const repository = new InMemoryAiRepository();
     const primary = await provider(repository, "primary");

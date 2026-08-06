@@ -241,6 +241,44 @@ describe("OpenAiCompatibleClient", () => {
     });
   });
 
+  it("adds the hosted web search tool to Responses requests", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ output_text: "Fresh answer" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    await expect(
+      client.call(
+        { ...provider, apiKind: "responses" },
+        { ...request, webSearch: "auto" },
+      ),
+    ).resolves.toMatchObject({ status: "succeeded", text: "Fresh answer" });
+    const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+    expect(JSON.parse(typeof body === "string" ? body : "null")).toMatchObject({
+      tools: [{ type: "web_search_preview" }],
+    });
+  });
+
+  it("rejects hosted web search on Chat Completions before network access", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    await expect(
+      client.call(provider, { ...request, webSearch: "required" }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      code: "AI_WEB_SEARCH_UNSUPPORTED",
+    });
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
   it("classifies safe error categories without returning provider bodies", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

@@ -1626,17 +1626,26 @@ export function buildApplication(
           parameters.workflowId,
           parameters.version,
         );
-        const routeIds = [
-          ...new Set(
-            candidate?.definition.nodes.flatMap((node) =>
-              node.type === "ai-chat" ? [node.config.providerRouteId] : [],
-            ) ?? [],
-          ),
-        ];
-        for (const routeId of routeIds) {
+        const routePolicies = new Map<
+          string,
+          "disabled" | "auto" | "required"
+        >();
+        for (const node of candidate?.definition.nodes ?? []) {
+          if (node.type !== "ai-chat") continue;
+          const policy = node.config.webSearch ?? "disabled";
+          const current = routePolicies.get(node.config.providerRouteId);
+          const rank = { disabled: 0, auto: 1, required: 2 };
+          if (current === undefined || rank[policy] > rank[current]) {
+            routePolicies.set(node.config.providerRouteId, policy);
+          }
+        }
+        for (const [routeId, webSearch] of routePolicies) {
           if (
             options.ai === undefined ||
-            !(await options.ai.management.isRoutePublishable(routeId))
+            !(await options.ai.management.isRoutePublishable(
+              routeId,
+              webSearch,
+            ))
           ) {
             throw new ApplicationError(
               "AI_ROUTE_NOT_PUBLISHABLE",

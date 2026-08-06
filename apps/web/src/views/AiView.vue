@@ -34,6 +34,12 @@ interface Provider {
   enabled: boolean;
   sortOrder: number;
   version: number;
+  capabilities: { functionCalling: boolean; hostedWebSearch: boolean };
+  capabilityProbe: {
+    functionCalling: "verified" | "failed" | "unknown";
+    hostedWebSearch: "verified" | "failed" | "unknown";
+    checkedAt: string | null;
+  };
   health: {
     state: string;
     consecutiveFailures: number;
@@ -65,6 +71,8 @@ interface ProviderForm {
   parameters: string;
   requestTimeoutMs: number;
   enabled: boolean;
+  functionCalling: boolean;
+  hostedWebSearch: boolean;
 }
 
 function scrollToSection(id: string) {
@@ -96,6 +104,8 @@ const providerForm = reactive<ProviderForm>({
   parameters: "{}",
   requestTimeoutMs: 30000,
   enabled: true,
+  functionCalling: false,
+  hostedWebSearch: false,
 });
 const routeForm = reactive({
   id: "",
@@ -175,6 +185,8 @@ function resetProvider() {
     parameters: "{}",
     requestTimeoutMs: 30000,
     enabled: true,
+    functionCalling: false,
+    hostedWebSearch: false,
   });
 }
 function editProvider(item: Provider) {
@@ -189,6 +201,8 @@ function editProvider(item: Provider) {
     parameters: JSON.stringify(item.parameters, null, 2),
     requestTimeoutMs: item.requestTimeoutMs,
     enabled: item.enabled,
+    functionCalling: item.capabilities?.functionCalling ?? false,
+    hostedWebSearch: item.capabilities?.hostedWebSearch ?? false,
   });
   document
     .querySelector("#provider-form")
@@ -210,6 +224,10 @@ async function saveProvider() {
       parameters: parseJsonObject(providerForm.parameters),
       requestTimeoutMs: providerForm.requestTimeoutMs,
       enabled: providerForm.enabled,
+      capabilities: {
+        functionCalling: providerForm.functionCalling,
+        hostedWebSearch: providerForm.hostedWebSearch,
+      },
       ...(providerForm.id
         ? { expectedVersion: providerForm.expectedVersion }
         : {}),
@@ -735,6 +753,14 @@ onMounted(load);
               ><span>默认参数（JSON）</span
               ><textarea v-model="providerForm.parameters" rows="4"></textarea>
             </label>
+            <label class="checkbox-field"
+              ><input v-model="providerForm.functionCalling" type="checkbox" />
+              <span>支持 Function Calling</span></label
+            >
+            <label class="checkbox-field"
+              ><input v-model="providerForm.hostedWebSearch" type="checkbox" />
+              <span>支持 Provider 托管联网搜索</span></label
+            >
           </div>
           <div class="form-actions">
             <button

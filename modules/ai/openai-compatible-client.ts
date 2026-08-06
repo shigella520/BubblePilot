@@ -408,12 +408,30 @@ export class OpenAiCompatibleClient implements AiClient {
       model: provider.model,
       stream: false,
     };
+    if (
+      request.webSearch !== undefined &&
+      request.webSearch !== "disabled" &&
+      provider.apiKind !== "responses"
+    ) {
+      return failure({
+        category: "configuration",
+        code: "AI_WEB_SEARCH_UNSUPPORTED",
+        summary: "This provider interface does not support hosted web search.",
+        retryable: false,
+        fallbackAllowed: true,
+        countsForDegrade: false,
+        durationMs: elapsed(startedAt),
+      });
+    }
     if (provider.apiKind === "chat-completions") {
       payload.messages = request.messages;
       payload.max_tokens = request.maxOutputTokens;
     } else {
       payload.input = inputMessages(request.messages);
       payload.max_output_tokens = request.maxOutputTokens;
+      if (request.webSearch !== undefined && request.webSearch !== "disabled") {
+        payload.tools = [{ type: "web_search_preview" }];
+      }
     }
     if (request.temperature !== null) {
       payload.temperature = request.temperature;

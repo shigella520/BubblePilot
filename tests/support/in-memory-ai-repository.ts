@@ -9,6 +9,7 @@ import type {
   AiCandidate,
   AiCandidateSelection,
   AiProviderAttemptView,
+  AiProviderCapabilityProbe,
   AiProviderConfiguration,
   AiProviderHealth,
   AiProviderRecord,
@@ -50,6 +51,16 @@ export class InMemoryAiRepository implements AiRepository {
   getProvider(providerId: string): Promise<AiProviderRecord | null> {
     const provider = this.providers.get(providerId);
     return Promise.resolve(provider === undefined ? null : cloned(provider));
+  }
+
+  updateProviderCapabilityProbe(
+    providerId: string,
+    probe: AiProviderCapabilityProbe,
+  ): Promise<AiProviderRecord | null> {
+    const provider = this.providers.get(providerId);
+    if (provider === undefined) return Promise.resolve(null);
+    provider.capabilityProbe = cloned(probe);
+    return Promise.resolve(cloned(provider));
   }
 
   async createProvider(

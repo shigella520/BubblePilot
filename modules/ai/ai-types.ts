@@ -34,6 +34,12 @@ const aiProviderConfigurationBaseSchema = z.object({
     .default({}),
   requestTimeoutMs: z.number().int().min(1_000).max(120_000).default(30_000),
   enabled: z.boolean().default(true),
+  capabilities: z
+    .object({
+      functionCalling: z.boolean().default(false),
+      hostedWebSearch: z.boolean().default(false),
+    })
+    .default({ functionCalling: false, hostedWebSearch: false }),
 });
 
 // API keys are optional: local OpenAI-compatible servers such as Ollama do
@@ -97,6 +103,17 @@ export const aiRouteEnabledSchema = z.object({
 });
 
 export type AiApiKind = "chat-completions" | "responses";
+export type AiCapabilityProbeState = "verified" | "failed" | "unknown";
+export type WebSearchPolicy = "disabled" | "auto" | "required";
+export interface AiProviderCapabilities {
+  functionCalling: boolean;
+  hostedWebSearch: boolean;
+}
+export interface AiProviderCapabilityProbe {
+  functionCalling: AiCapabilityProbeState;
+  hostedWebSearch: AiCapabilityProbeState;
+  checkedAt: string | null;
+}
 export type AiProviderParameters = Readonly<
   Record<string, string | number | boolean>
 >;
@@ -112,6 +129,7 @@ export interface AiProviderConfiguration {
   parameters: AiProviderParameters;
   requestTimeoutMs: number;
   enabled: boolean;
+  capabilities?: AiProviderCapabilities | undefined;
 }
 
 export interface AiProviderRecord extends AiProviderConfiguration {
@@ -121,6 +139,7 @@ export interface AiProviderRecord extends AiProviderConfiguration {
   version: number;
   createdAt: string;
   updatedAt: string;
+  capabilityProbe?: AiProviderCapabilityProbe | undefined;
 }
 
 export interface AiProviderHealth {
@@ -141,6 +160,7 @@ export interface AiProviderView extends Omit<
 > {
   secretConfigured: boolean;
   health: AiProviderHealth;
+  capabilityProbe: AiProviderCapabilityProbe;
 }
 
 export interface AiRouteRetryPolicy {
@@ -211,6 +231,8 @@ export interface AiChatRequest {
   temperature: number | null;
   timeoutMs: number;
   clientRequestId?: string;
+  webSearch?: WebSearchPolicy | undefined;
+  maxToolCalls?: number;
 }
 
 export interface AiCallDiagnostics {
@@ -329,6 +351,7 @@ export interface AiRouteRequest {
   maxOutputCharacters: number;
   outputFormat: "text" | "json";
   protectedPrompt: string | null;
+  webSearch?: WebSearchPolicy | undefined;
 }
 
 export function normalizeAiBaseUrl(value: string): string {

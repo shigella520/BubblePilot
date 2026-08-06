@@ -385,6 +385,17 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         ],
         description: "文本或 JSON。",
       },
+      {
+        name: "webSearch",
+        label: "联网搜索",
+        type: "select",
+        description: "禁用、由模型自动判断，或要求必须搜索。",
+        options: [
+          { value: "disabled", label: "禁用" },
+          { value: "auto", label: "自动判断" },
+          { value: "required", label: "必须搜索" },
+        ],
+      },
     ],
     branches: [
       { name: "onSuccess", label: "成功", description: "AI 调用成功。" },

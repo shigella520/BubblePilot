@@ -125,6 +125,35 @@ describe("AI management API", () => {
     }>().data;
   }
 
+  it("probes and persists configured hosted search capability", async () => {
+    const created = await request({
+      method: "POST",
+      url: "/api/v1/ai/providers",
+      payload: {
+        name: "Primary",
+        apiKind: "responses",
+        baseUrl: "https://ai.example.test/v1",
+        model: "fictional-model",
+        secretRef: "PRIMARY_AI_KEY",
+        capabilities: { functionCalling: true, hostedWebSearch: true },
+      },
+    });
+    const providerId = created.json<{ data: { id: string } }>().data.id;
+    const tested = await request({
+      method: "POST",
+      url: `/api/v1/ai/providers/${providerId}/test`,
+    });
+    expect(tested.statusCode).toBe(200);
+    expect(client.requests).toHaveLength(2);
+    expect(client.requests[1]).toMatchObject({ webSearch: "required" });
+    await expect(repository.getProvider(providerId)).resolves.toMatchObject({
+      capabilityProbe: {
+        functionCalling: "verified",
+        hostedWebSearch: "verified",
+      },
+    });
+  });
+
   it("manages, reorders, tests, and routes providers without exposing secrets", async () => {
     const primary = await createProvider("Primary", "PRIMARY_AI_KEY");
     const backup = await createProvider("Backup", "BACKUP_AI_KEY");

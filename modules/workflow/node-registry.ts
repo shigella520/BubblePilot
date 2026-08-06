@@ -1,5 +1,6 @@
 import { sha256 } from "../../app/canonical-json.js";
 import type { AiRoutingService } from "../ai/ai-routing-service.js";
+import { AgentRunner } from "../ai/agent-runner.js";
 import type { AiChatMessage } from "../ai/ai-types.js";
 import type {
   ArchiveRepository,
@@ -379,9 +380,11 @@ function taggedPrompt(
 
 class AiChatNodeHandler extends BaseNodeHandler {
   readonly type = "ai-chat" as const;
+  private readonly agent: AgentRunner;
 
   constructor(private readonly routing: AiRoutingService) {
     super();
+    this.agent = new AgentRunner(routing);
   }
 
   override failureTarget(node: WorkflowNode): string | null {
@@ -453,7 +456,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
 
     let result;
     try {
-      result = await this.routing.execute({
+      result = await this.agent.run({
         executionId: context.executionId,
         nodeId: node.id,
         routeId: node.config.providerRouteId,
@@ -463,6 +466,9 @@ class AiChatNodeHandler extends BaseNodeHandler {
         timeoutMs: Math.min(node.config.timeoutMs, remainingMs),
         maxOutputCharacters: node.config.maxOutputCharacters,
         outputFormat: node.config.outputFormat,
+        ...(node.config.webSearch === undefined
+          ? {}
+          : { webSearch: node.config.webSearch }),
         protectedPrompt: systemPrompt.length === 0 ? null : systemPrompt,
       });
     } catch (error) {

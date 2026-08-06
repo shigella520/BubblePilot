@@ -70,6 +70,15 @@ const environmentSchema = z
       .min(1_000)
       .max(120_000)
       .default(30_000),
+    ENABLE_WEB_SEARCH: z
+      .preprocess(
+        (value) =>
+          typeof value === "string"
+            ? ["1", "true", "yes", "on"].includes(value.toLowerCase())
+            : value,
+        z.boolean(),
+      )
+      .default(false),
     MONITORED_CHAT_IDS: z.string().default(""),
     MESSAGE_RETENTION_DAYS: z.coerce
       .number()
@@ -153,6 +162,7 @@ export interface AppConfig {
   blueBubblesAccessToken: string;
   blueBubblesSendMethod: "private-api" | "apple-script";
   blueBubblesRequestTimeoutMs: number;
+  enableWebSearch?: boolean;
   monitoredChatIds: ReadonlySet<string>;
   messageRetentionDays: number;
   webhookBodyLimitBytes: number;
@@ -194,6 +204,7 @@ export function loadConfig(
     blueBubblesAccessToken: parsed.BLUEBUBBLES_ACCESS_TOKEN,
     blueBubblesSendMethod: parsed.BLUEBUBBLES_SEND_METHOD,
     blueBubblesRequestTimeoutMs: parsed.BLUEBUBBLES_REQUEST_TIMEOUT_MS,
+    enableWebSearch: parsed.ENABLE_WEB_SEARCH,
     monitoredChatIds,
     messageRetentionDays: parsed.MESSAGE_RETENTION_DAYS,
     webhookBodyLimitBytes: parsed.WEBHOOK_BODY_LIMIT_BYTES,

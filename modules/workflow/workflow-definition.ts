@@ -116,6 +116,7 @@ const aiChatNodeSchema = z.object({
     maxOutputTokens: z.number().int().min(1).max(8_192).default(1_024),
     maxOutputCharacters: z.number().int().min(1).max(12_000).default(4_000),
     temperature: z.number().min(0).max(2).nullable().default(null),
+    webSearch: z.enum(["disabled", "auto", "required"]).optional(),
     outputFormat: z.enum(["text", "json"]).default("text"),
     outputVariable: variableNameSchema.default("aiReply"),
   }),

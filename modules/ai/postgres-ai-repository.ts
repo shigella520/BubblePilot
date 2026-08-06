@@ -12,6 +12,7 @@ import {
   type AiCandidateSelection,
   type AiFailureCategory,
   type AiProviderAttemptView,
+  type AiProviderCapabilityProbe,
   type AiProviderConfiguration,
   type AiProviderHealth,
   type AiProviderHealthState,
@@ -31,6 +32,15 @@ interface ProviderRow {
   encrypted_secret: string | null;
   parameters: Record<string, string | number | boolean>;
   request_timeout_ms: number;
+  capabilities: {
+    functionCalling: boolean;
+    hostedWebSearch: boolean;
+  };
+  capability_probe: {
+    functionCalling: "verified" | "failed" | "unknown";
+    hostedWebSearch: "verified" | "failed" | "unknown";
+    checkedAt: string | null;
+  };
   enabled: boolean;
   sort_order: number;
   version: number;
@@ -108,7 +118,8 @@ interface AttemptRow {
 
 const providerSelect = `SELECT
   id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-  request_timeout_ms, enabled, sort_order, version, created_at, updated_at
+  request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
+  created_at, updated_at
 FROM ai_providers`;
 
 const routeSelect = `SELECT
@@ -142,6 +153,8 @@ function providerRecord(
     parameters: row.parameters,
     requestTimeoutMs: row.request_timeout_ms,
     enabled: row.enabled,
+    capabilities: row.capabilities,
+    capabilityProbe: row.capability_probe,
     sortOrder: row.sort_order,
     version: row.version,
     createdAt: row.created_at.toISOString(),
@@ -294,8 +307,8 @@ export class PostgresAiRepository implements AiRepository {
       await client.query(
         `INSERT INTO ai_providers (
            id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-           request_timeout_ms, enabled, sort_order
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
+           request_timeout_ms, enabled, sort_order, capabilities
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12::jsonb)`,
         [
           id,
           configuration.name,
@@ -310,6 +323,12 @@ export class PostgresAiRepository implements AiRepository {
           configuration.requestTimeoutMs,
           configuration.enabled,
           order.rows[0]?.sort_order ?? 100,
+          JSON.stringify(
+            configuration.capabilities ?? {
+              functionCalling: false,
+              hostedWebSearch: false,
+            },
+          ),
         ],
       );
       await client.query(
@@ -344,10 +363,11 @@ export class PostgresAiRepository implements AiRepository {
            name = $3, api_kind = $4, base_url = $5, model = $6,
            secret_ref = $7, encrypted_secret = COALESCE($11, encrypted_secret), parameters = $8::jsonb,
            request_timeout_ms = $9, enabled = $10,
+           capabilities = $12::jsonb,
            version = version + 1, updated_at = NOW()
          WHERE id = $1 AND version = $2 AND deleted_at IS NULL
         RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                   request_timeout_ms, enabled, sort_order, version,
+                   request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
                    created_at, updated_at`,
         [
           providerId,
@@ -363,6 +383,12 @@ export class PostgresAiRepository implements AiRepository {
           configuration.secret === undefined || configuration.secret === null
             ? null
             : this.cipher.encrypt(configuration.secret),
+          JSON.stringify(
+            configuration.capabilities ?? {
+              functionCalling: false,
+              hostedWebSearch: false,
+            },
+          ),
         ],
       );
       const row = result.rows[0];
@@ -388,7 +414,7 @@ export class PostgresAiRepository implements AiRepository {
        SET enabled = $3, version = version + 1, updated_at = NOW()
        WHERE id = $1 AND version = $2 AND deleted_at IS NULL
        RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                 request_timeout_ms, enabled, sort_order, version,
+                 request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
                  created_at, updated_at`,
       [providerId, expectedVersion, enabled],
     );
@@ -479,7 +505,7 @@ export class PostgresAiRepository implements AiRepository {
              version = version + 1
          WHERE id = $1
          RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                   request_timeout_ms, enabled, sort_order, version,
+                   request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
                    created_at, updated_at`,
         [providerId],
       );
@@ -543,6 +569,22 @@ export class PostgresAiRepository implements AiRepository {
     } finally {
       client.release();
     }
+  }
+
+  async updateProviderCapabilityProbe(
+    providerId: string,
+    probe: AiProviderCapabilityProbe,
+  ): Promise<AiProviderRecord | null> {
+    const result = await this.pool.query<ProviderRow>(
+      `UPDATE ai_providers SET capability_probe = $2::jsonb, updated_at = NOW()
+       WHERE id = $1 AND deleted_at IS NULL
+       RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret,
+                 parameters, request_timeout_ms, enabled, sort_order, version,
+                 capabilities, capability_probe, created_at, updated_at`,
+      [providerId, JSON.stringify(probe)],
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : providerRecord(row, this.cipher);
   }
 
   async recordProviderSuccess(providerId: string): Promise<AiProviderHealth> {

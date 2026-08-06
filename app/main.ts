@@ -62,7 +62,12 @@ const authService = new AuthService(authRepository, {
 });
 const secretResolver = new EnvironmentSecretResolver();
 const aiClient = new OpenAiCompatibleClient(secretResolver);
-const aiRouting = new AiRoutingService(aiRepository, aiClient, secretResolver);
+const aiRouting = new AiRoutingService(
+  aiRepository,
+  aiClient,
+  secretResolver,
+  config.enableWebSearch ?? false,
+);
 const aiManagement = new AiManagementService(
   aiRepository,
   aiClient,
