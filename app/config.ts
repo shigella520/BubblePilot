@@ -80,6 +80,7 @@ const environmentSchema = z
       )
       .default(false),
     SEARXNG_BASE_URL: z.string().url().default("http://searxng:8080"),
+    SEARXNG_ENGINES: z.string().default(""),
     WEB_SEARCH_TIMEOUT_MS: z.coerce
       .number()
       .int()
@@ -172,6 +173,7 @@ export interface AppConfig {
   blueBubblesRequestTimeoutMs: number;
   enableWebSearch?: boolean;
   searxngBaseUrl?: string;
+  searxngEngines?: readonly string[];
   webSearchTimeoutMs?: number;
   webSearchMaxResults?: number;
   monitoredChatIds: ReadonlySet<string>;
@@ -196,6 +198,13 @@ export function loadConfig(
       .map((chatId) => chatId.trim())
       .filter((chatId) => chatId.length > 0),
   );
+  const searxngEngines = [
+    ...new Set(
+      parsed.SEARXNG_ENGINES.split(",")
+        .map((engine) => engine.trim())
+        .filter((engine) => /^[a-z0-9_-]+$/iu.test(engine)),
+    ),
+  ];
 
   return {
     nodeEnv: parsed.NODE_ENV,
@@ -217,6 +226,7 @@ export function loadConfig(
     blueBubblesRequestTimeoutMs: parsed.BLUEBUBBLES_REQUEST_TIMEOUT_MS,
     enableWebSearch: parsed.ENABLE_WEB_SEARCH,
     searxngBaseUrl: parsed.SEARXNG_BASE_URL.replace(/\/+$/u, ""),
+    searxngEngines,
     webSearchTimeoutMs: parsed.WEB_SEARCH_TIMEOUT_MS,
     webSearchMaxResults: parsed.WEB_SEARCH_MAX_RESULTS,
     monitoredChatIds,

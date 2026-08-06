@@ -21,7 +21,11 @@ describe("SearxngWebSearchTool", () => {
       ),
     );
     const tool = new SearxngWebSearchTool(
-      { baseUrl: "https://search.example.test", maxResults: 5 },
+      {
+        baseUrl: "https://search.example.test",
+        maxResults: 5,
+        engines: ["baidu"],
+      },
       fetchImplementation,
     );
     await expect(tool.search(" fictional query ")).resolves.toMatchObject({
@@ -33,6 +37,11 @@ describe("SearxngWebSearchTool", () => {
         },
       ],
     });
+    const requestUrl = fetchImplementation.mock.calls.at(0)?.at(0);
+    expect(requestUrl).toBeInstanceOf(URL);
+    if (!(requestUrl instanceof URL))
+      throw new Error("Expected a URL request.");
+    expect(requestUrl.searchParams.get("engines")).toBe("baidu");
   });
 
   it("returns stable errors for invalid responses", async () => {

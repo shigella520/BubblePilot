@@ -81,6 +81,7 @@ export interface SearxngWebSearchOptions {
   timeoutMs?: number;
   maxResults?: number;
   maxSnippetCharacters?: number;
+  engines?: readonly string[];
 }
 
 export class SearxngWebSearchTool implements WebSearchTool {
@@ -88,6 +89,7 @@ export class SearxngWebSearchTool implements WebSearchTool {
   private readonly timeoutMs: number;
   private readonly maxResults: number;
   private readonly maxSnippetCharacters: number;
+  private readonly engines: readonly string[];
 
   constructor(
     options: SearxngWebSearchOptions,
@@ -97,6 +99,7 @@ export class SearxngWebSearchTool implements WebSearchTool {
     this.timeoutMs = options.timeoutMs ?? 8_000;
     this.maxResults = options.maxResults ?? 5;
     this.maxSnippetCharacters = options.maxSnippetCharacters ?? 1_000;
+    this.engines = options.engines ?? [];
   }
 
   async isReady(): Promise<boolean> {
@@ -121,6 +124,9 @@ export class SearxngWebSearchTool implements WebSearchTool {
     endpoint.searchParams.set("q", normalizedQuery);
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "1");
+    if (this.engines.length > 0) {
+      endpoint.searchParams.set("engines", this.engines.join(","));
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
