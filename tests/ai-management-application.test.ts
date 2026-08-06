@@ -56,6 +56,16 @@ class SuccessfulAiClient implements AiClient {
   ): Promise<AiCallResult> {
     this.calls.push(provider);
     this.requests.push(request);
+    if (request.tools?.some((tool) => tool.name === "capability_probe")) {
+      return Promise.resolve({
+        status: "succeeded",
+        text: "",
+        toolCalls: [
+          { id: "fictional-call", name: "capability_probe", arguments: "{}" },
+        ],
+        durationMs: 7,
+      });
+    }
     return Promise.resolve({
       status: "succeeded",
       text: "OK",
@@ -144,8 +154,9 @@ describe("AI management API", () => {
       url: `/api/v1/ai/providers/${providerId}/test`,
     });
     expect(tested.statusCode).toBe(200);
-    expect(client.requests).toHaveLength(2);
-    expect(client.requests[1]).toMatchObject({ webSearch: "required" });
+    expect(client.requests).toHaveLength(3);
+    expect(client.requests[1]).toMatchObject({ toolChoice: "required" });
+    expect(client.requests[2]).toMatchObject({ webSearch: "required" });
     await expect(repository.getProvider(providerId)).resolves.toMatchObject({
       capabilityProbe: {
         functionCalling: "verified",

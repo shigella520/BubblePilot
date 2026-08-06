@@ -79,6 +79,14 @@ const environmentSchema = z
         z.boolean(),
       )
       .default(false),
+    SEARXNG_BASE_URL: z.string().url().default("http://searxng:8080"),
+    WEB_SEARCH_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(60_000)
+      .default(8_000),
+    WEB_SEARCH_MAX_RESULTS: z.coerce.number().int().min(1).max(20).default(5),
     MONITORED_CHAT_IDS: z.string().default(""),
     MESSAGE_RETENTION_DAYS: z.coerce
       .number()
@@ -163,6 +171,9 @@ export interface AppConfig {
   blueBubblesSendMethod: "private-api" | "apple-script";
   blueBubblesRequestTimeoutMs: number;
   enableWebSearch?: boolean;
+  searxngBaseUrl?: string;
+  webSearchTimeoutMs?: number;
+  webSearchMaxResults?: number;
   monitoredChatIds: ReadonlySet<string>;
   messageRetentionDays: number;
   webhookBodyLimitBytes: number;
@@ -205,6 +216,9 @@ export function loadConfig(
     blueBubblesSendMethod: parsed.BLUEBUBBLES_SEND_METHOD,
     blueBubblesRequestTimeoutMs: parsed.BLUEBUBBLES_REQUEST_TIMEOUT_MS,
     enableWebSearch: parsed.ENABLE_WEB_SEARCH,
+    searxngBaseUrl: parsed.SEARXNG_BASE_URL.replace(/\/+$/u, ""),
+    webSearchTimeoutMs: parsed.WEB_SEARCH_TIMEOUT_MS,
+    webSearchMaxResults: parsed.WEB_SEARCH_MAX_RESULTS,
     monitoredChatIds,
     messageRetentionDays: parsed.MESSAGE_RETENTION_DAYS,
     webhookBodyLimitBytes: parsed.WEBHOOK_BODY_LIMIT_BYTES,

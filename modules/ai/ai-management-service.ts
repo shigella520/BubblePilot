@@ -1,4 +1,5 @@
 import type { AiClient } from "./openai-compatible-client.js";
+import type { WebSearchTool } from "./web-search-tool.js";
 import type { AiMutationResult, AiRepository } from "./ai-repository.js";
 import {
   normalizeAiBaseUrl,
@@ -21,6 +22,8 @@ export class AiManagementService {
     private readonly repository: AiRepository,
     private readonly client: AiClient,
     private readonly secrets: SecretResolver,
+    private readonly localWebSearchEnabled = false,
+    private readonly searchTool?: WebSearchTool,
   ) {}
 
   async listProviders(): Promise<readonly AiProviderView[]> {
@@ -127,7 +130,51 @@ export class AiManagementService {
       temperature: 0,
       timeoutMs: provider.requestTimeoutMs,
     });
-    let capabilityErrorCode: string | null = null;
+    let functionCalling: "verified" | "failed" | "unknown" = "unknown";
+    let hostedWebSearch: "verified" | "failed" | "unknown" = "unknown";
+    const capabilityMessages: string[] = [];
+    let totalDurationMs = result.durationMs;
+    if (
+      result.status === "succeeded" &&
+      provider.capabilities?.functionCalling
+    ) {
+      const functionProbe = await this.client.call(provider, {
+        messages: [
+          {
+            role: "user",
+            content: "Call the capability_probe tool exactly once.",
+          },
+        ],
+        maxOutputTokens: 128,
+        temperature: 0,
+        timeoutMs: provider.requestTimeoutMs,
+        tools: [
+          {
+            name: "capability_probe",
+            description:
+              "A harmless tool used only to verify function calling.",
+            parameters: {
+              type: "object",
+              properties: {},
+              additionalProperties: false,
+            },
+          },
+        ],
+        toolChoice: "required",
+      });
+      totalDurationMs += functionProbe.durationMs;
+      functionCalling =
+        functionProbe.status === "succeeded" &&
+        (functionProbe.toolCalls?.some(
+          (call) => call.name === "capability_probe",
+        ) ??
+          false)
+          ? "verified"
+          : "failed";
+      capabilityMessages.push(
+        `Function Calling ${functionCalling === "verified" ? "verified" : "failed"}`,
+      );
+    }
     if (
       result.status === "succeeded" &&
       provider.capabilities?.hostedWebSearch
@@ -145,38 +192,39 @@ export class AiManagementService {
         timeoutMs: provider.requestTimeoutMs,
         webSearch: "required",
       });
+      totalDurationMs += searchProbe.durationMs;
+      hostedWebSearch =
+        searchProbe.status === "succeeded" ? "verified" : "failed";
+      capabilityMessages.push(
+        `Hosted web search ${hostedWebSearch === "verified" ? "verified" : "failed"}`,
+      );
+    }
+    if (result.status === "succeeded") {
       await this.repository.updateProviderCapabilityProbe(providerId, {
-        functionCalling:
-          searchProbe.status === "succeeded" ? "verified" : "failed",
-        hostedWebSearch:
-          searchProbe.status === "succeeded" ? "verified" : "failed",
+        functionCalling,
+        hostedWebSearch,
         checkedAt: new Date().toISOString(),
       });
-      if (searchProbe.status === "failed") {
-        capabilityErrorCode = searchProbe.code;
-      }
     }
-    return result.status === "succeeded" && capabilityErrorCode === null
+    return result.status === "succeeded"
       ? {
           success: true,
           providerId,
           model: provider.model,
-          durationMs: result.durationMs,
+          durationMs: totalDurationMs,
           errorCode: null,
-          message: "The AI provider connection succeeded.",
+          message: [
+            "The AI provider connection succeeded.",
+            ...capabilityMessages,
+          ].join(" "),
         }
       : {
           success: false,
           providerId,
           model: provider.model,
-          durationMs: result.durationMs,
-          errorCode:
-            capabilityErrorCode ??
-            (result.status === "failed" ? result.code : "AI_WEB_SEARCH_FAILED"),
-          message:
-            capabilityErrorCode === null && result.status === "failed"
-              ? result.summary
-              : "The configured hosted web search capability failed its probe.",
+          durationMs: totalDurationMs,
+          errorCode: result.code,
+          message: result.summary,
         };
   }
 
@@ -216,12 +264,21 @@ export class AiManagementService {
         provider.enabled && isProviderSecretConfigured(provider, this.secrets),
     );
     if (webSearch === "disabled") return available.length > 0;
-    const searchable = available.filter(
-      (provider) =>
+    const localWebSearchReady =
+      this.localWebSearchEnabled &&
+      this.searchTool !== undefined &&
+      (await this.searchTool.isReady());
+    const searchable = available.filter((provider) => {
+      const hosted =
         provider.apiKind === "responses" &&
         provider.capabilities?.hostedWebSearch === true &&
-        provider.capabilityProbe?.hostedWebSearch === "verified",
-    );
+        provider.capabilityProbe?.hostedWebSearch === "verified";
+      const local =
+        localWebSearchReady &&
+        provider.capabilities?.functionCalling === true &&
+        provider.capabilityProbe?.functionCalling === "verified";
+      return hosted || local;
+    });
     return webSearch === "required"
       ? searchable.length === available.length && available.length > 0
       : searchable.length > 0;

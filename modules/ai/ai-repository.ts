@@ -9,6 +9,8 @@ import type {
   AiProviderRouteRecord,
   AiRouteConfiguration,
   AiRouteSnapshot,
+  AiToolExecutionRecordInput,
+  AiToolExecutionView,
 } from "./ai-types.js";
 
 export type AiMutationResult<T> =
@@ -84,6 +86,11 @@ export interface AiRepository {
     executionId: string,
     nodeId?: string,
   ): Promise<readonly AiProviderAttemptView[]>;
+  recordToolExecution(input: AiToolExecutionRecordInput): Promise<void>;
+  listToolExecutions(
+    executionId: string,
+    nodeId?: string,
+  ): Promise<readonly AiToolExecutionView[]>;
   isReady(): Promise<boolean>;
   close(): Promise<void>;
 }

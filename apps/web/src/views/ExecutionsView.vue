@@ -99,6 +99,19 @@ interface ExecutionDetail extends Execution {
       cacheMissPromptTokens: number | null;
     } | null;
   }>;
+  aiToolExecutions: Array<{
+    id: string;
+    nodeId: string;
+    providerId: string;
+    toolCallId: string;
+    toolName: string;
+    status: string;
+    durationMs: number;
+    resultCount: number | null;
+    queryHash: string;
+    errorCode: string | null;
+    createdAt: string;
+  }>;
 }
 interface AuditEvent {
   id: string;
@@ -722,6 +735,35 @@ function resetAuditPage(): Promise<boolean> {
                 class="empty-panel compact"
               >
                 本次执行没有 AI 调用。
+              </div>
+              <h3>AI 工具调用</h3>
+              <article
+                v-for="item in detail.aiToolExecutions"
+                :key="item.id"
+                class="trace-item"
+              >
+                <Search :size="17" />
+                <div>
+                  <strong>{{ item.toolName }} · {{ item.status }}</strong>
+                  <p>
+                    {{ item.durationMs }} ms · 结果
+                    {{ item.resultCount ?? "—" }} 条
+                  </p>
+                  <span v-if="item.errorCode" class="table-status danger">{{
+                    item.errorCode
+                  }}</span>
+                  <details class="keyline">
+                    <summary>诊断标识</summary>
+                    <code>query={{ item.queryHash }}</code>
+                    <code>call={{ item.toolCallId }}</code>
+                  </details>
+                </div>
+              </article>
+              <div
+                v-if="!detail.aiToolExecutions.length"
+                class="empty-panel compact"
+              >
+                本次执行没有工具调用。
               </div>
               <h3>出站发送</h3>
               <article

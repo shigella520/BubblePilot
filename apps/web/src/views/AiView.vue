@@ -78,8 +78,16 @@ interface ProviderForm {
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
+function probeLabel(value: "verified" | "failed" | "unknown") {
+  return value === "verified"
+    ? "已验证"
+    : value === "failed"
+      ? "失败"
+      : "未探测";
+}
 const providers = ref<Provider[]>([]);
 const routes = ref<AiRoute[]>([]);
+const searchStatus = ref({ enabled: false, backend: "searxng", ready: false });
 const message = ref("");
 const messageIsError = ref(false);
 const busy = ref(false);
@@ -162,9 +170,12 @@ async function load() {
   message.value = "";
   messageIsError.value = false;
   try {
-    [providers.value, routes.value] = await Promise.all([
+    [providers.value, routes.value, searchStatus.value] = await Promise.all([
       apiRequest<Provider[]>("/api/v1/ai/providers"),
       apiRequest<AiRoute[]>("/api/v1/ai/routes"),
+      apiRequest<{ enabled: boolean; backend: string; ready: boolean }>(
+        "/api/v1/ai/search/status",
+      ),
     ]);
   } catch (cause) {
     message.value = errorMessage(cause);
@@ -313,11 +324,12 @@ async function providerAction(
         errorCode: string | null;
       }>(`/api/v1/ai/providers/${item.id}/test`, { method: "POST" });
       feedback = result.success
-        ? `AI Provider「${item.name}」连接测试成功（${result.model} · ${result.durationMs} ms）。`
+        ? `AI Provider「${item.name}」连接测试成功：${result.message}（${result.model} · ${result.durationMs} ms）。`
         : `AI Provider「${item.name}」连接测试失败：${result.message}${
             result.errorCode === null ? "" : `（${result.errorCode}）`
           }（${result.durationMs} ms）。`;
       feedbackIsError = !result.success;
+      await load();
     }
     if (action === "reset") {
       const updated = await apiRequest<Provider>(
@@ -579,6 +591,16 @@ onMounted(load);
           拖拽或使用上下按钮改变固定顺序，启停和连通性测试即时反馈；Secret API
           Key 会在服务端加密保存，列表和接口不会回显原值。
         </p>
+        <p class="keyline">
+          搜索后端：{{ searchStatus.backend }} ·
+          {{
+            !searchStatus.enabled
+              ? "实例总开关已关闭"
+              : searchStatus.ready
+                ? "可用"
+                : "不可用"
+          }}
+        </p>
         <div class="provider-list">
           <article
             v-for="item in providers"
@@ -633,7 +655,16 @@ onMounted(load);
                 }}</span
                 ><span v-if="item.health.lastErrorCode">{{
                   item.health.lastErrorCode
-                }}</span>
+                }}</span
+                ><span v-if="item.capabilities.functionCalling"
+                  >Function Calling：{{
+                    probeLabel(item.capabilityProbe.functionCalling)
+                  }}</span
+                ><span v-if="item.capabilities.hostedWebSearch"
+                  >托管搜索：{{
+                    probeLabel(item.capabilityProbe.hostedWebSearch)
+                  }}</span
+                >
               </footer>
             </div>
             <div class="row-actions">

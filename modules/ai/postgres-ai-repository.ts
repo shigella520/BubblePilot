@@ -20,6 +20,8 @@ import {
   type AiProviderRouteRecord,
   type AiRouteConfiguration,
   type AiRouteSnapshot,
+  type AiToolExecutionRecordInput,
+  type AiToolExecutionView,
 } from "./ai-types.js";
 
 interface ProviderRow {
@@ -113,6 +115,21 @@ interface AttemptRow {
   cached_prompt_tokens: number | null;
   cache_write_prompt_tokens: number | null;
   cache_miss_prompt_tokens: number | null;
+  created_at: Date;
+}
+
+interface ToolExecutionRow {
+  id: string;
+  execution_id: string;
+  node_id: string;
+  provider_id: string;
+  tool_call_id: string;
+  tool_name: string;
+  status: "succeeded" | "failed";
+  duration_ms: number;
+  result_count: number | null;
+  query_hash: string;
+  error_code: string | null;
   created_at: Date;
 }
 
@@ -1040,11 +1057,59 @@ export class PostgresAiRepository implements AiRepository {
     return result.rows.map(attemptView);
   }
 
+  async recordToolExecution(input: AiToolExecutionRecordInput): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO ai_tool_executions (
+         id, execution_id, node_id, provider_id, tool_call_id, tool_name,
+         status, duration_ms, result_count, query_hash, error_code
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        randomUUID(),
+        input.executionId,
+        input.nodeId,
+        input.providerId,
+        input.toolCallId,
+        input.toolName,
+        input.status,
+        input.durationMs,
+        input.resultCount,
+        input.queryHash,
+        input.errorCode,
+      ],
+    );
+  }
+
+  async listToolExecutions(
+    executionId: string,
+    nodeId?: string,
+  ): Promise<readonly AiToolExecutionView[]> {
+    const result = await this.pool.query<ToolExecutionRow>(
+      `SELECT * FROM ai_tool_executions
+       WHERE execution_id = $1 AND ($2::text IS NULL OR node_id = $2)
+       ORDER BY created_at, id`,
+      [executionId, nodeId ?? null],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      executionId: row.execution_id,
+      nodeId: row.node_id,
+      providerId: row.provider_id,
+      toolCallId: row.tool_call_id,
+      toolName: row.tool_name,
+      status: row.status,
+      durationMs: row.duration_ms,
+      resultCount: row.result_count,
+      queryHash: row.query_hash,
+      errorCode: row.error_code,
+      createdAt: row.created_at.toISOString(),
+    }));
+  }
+
   async isReady(): Promise<boolean> {
     try {
       const result = await this.pool.query<{ ready: boolean }>(
         `SELECT EXISTS (
-           SELECT 1 FROM schema_migrations WHERE name = '0016_ai_attempt_diagnostics.sql'
+           SELECT 1 FROM schema_migrations WHERE name = '0018_ai_tool_executions.sql'
          ) AS ready`,
       );
       return result.rows[0]?.ready === true;

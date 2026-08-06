@@ -98,6 +98,21 @@ function validateOutput(
   return null;
 }
 
+function supportsHostedSearch(provider: AiRouteSnapshot["providers"][number]) {
+  return (
+    provider.apiKind === "responses" &&
+    provider.capabilities?.hostedWebSearch === true &&
+    provider.capabilityProbe?.hostedWebSearch === "verified"
+  );
+}
+
+function supportsLocalTools(provider: AiRouteSnapshot["providers"][number]) {
+  return (
+    provider.capabilities?.functionCalling === true &&
+    provider.capabilityProbe?.functionCalling === "verified"
+  );
+}
+
 export class AiRoutingService {
   constructor(
     private readonly repository: AiRepository,
@@ -134,9 +149,9 @@ export class AiRoutingService {
                 isProviderSecretConfigured(provider, this.secrets) &&
                 (request.webSearch === undefined ||
                   request.webSearch === "disabled" ||
-                  (provider.apiKind === "responses" &&
-                    provider.capabilities?.hostedWebSearch === true &&
-                    provider.capabilityProbe?.hostedWebSearch === "verified")),
+                  supportsHostedSearch(provider) ||
+                  (request.tools !== undefined &&
+                    supportsLocalTools(provider))),
             ),
           };
     if (snapshot === null || snapshot.providers.length === 0) {
@@ -166,11 +181,18 @@ export class AiRoutingService {
       round += 1
     ) {
       const selection = await this.repository.selectCandidates(snapshot);
-      const candidates = selection.candidates.filter(
-        (candidate) =>
-          retryableProviderIds === null ||
-          retryableProviderIds.has(candidate.provider.id),
-      );
+      const candidates = selection.candidates
+        .filter(
+          (candidate) =>
+            retryableProviderIds === null ||
+            retryableProviderIds.has(candidate.provider.id),
+        )
+        .sort((left, right) => {
+          if (request.preferredProviderId === undefined) return 0;
+          if (left.provider.id === request.preferredProviderId) return -1;
+          if (right.provider.id === request.preferredProviderId) return 1;
+          return 0;
+        });
       if (candidates.length === 0) {
         const availableAt =
           selection.nextAvailableAt === null
@@ -224,18 +246,29 @@ export class AiRoutingService {
         }
         sequence += 1;
         attemptCount += 1;
+        const useHostedSearch =
+          request.webSearch !== undefined &&
+          request.webSearch !== "disabled" &&
+          supportsHostedSearch(candidate.provider);
         let result: AiCallResult = await this.client.call(candidate.provider, {
           messages: request.messages,
           maxOutputTokens: request.maxOutputTokens,
           temperature: request.temperature,
           timeoutMs: Math.max(1, deadline - Date.now()),
           clientRequestId: `${request.executionId}:${request.nodeId}:${round}:${sequence}`,
-          ...(request.webSearch === undefined
-            ? {}
-            : { webSearch: request.webSearch }),
+          ...(useHostedSearch ? { webSearch: request.webSearch } : {}),
+          ...(!useHostedSearch && request.tools !== undefined
+            ? {
+                tools: request.tools,
+                toolChoice: request.toolChoice ?? "auto",
+              }
+            : {}),
         });
 
-        if (result.status === "succeeded") {
+        if (
+          result.status === "succeeded" &&
+          (result.toolCalls?.length ?? 0) === 0
+        ) {
           const policyFailure = validateOutput(
             result.text,
             request,
@@ -282,6 +315,7 @@ export class AiRoutingService {
           return {
             status: "succeeded",
             text: result.text,
+            toolCalls: result.toolCalls ?? [],
             providerId: candidate.provider.id,
             providerName: candidate.provider.name,
             providerVersion: candidate.provider.version,

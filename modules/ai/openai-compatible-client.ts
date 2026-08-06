@@ -8,6 +8,7 @@ import type {
   AiChatMessage,
   AiChatRequest,
   AiProviderRecord,
+  AiToolCall,
 } from "./ai-types.js";
 import {
   isProviderSecretConfigured,
@@ -45,6 +46,17 @@ const chatResponseSchema = z
                 .nullable()
                 .optional(),
               reasoning_content: z.string().nullable().optional(),
+              tool_calls: z
+                .array(
+                  z.object({
+                    id: z.string(),
+                    function: z.object({
+                      name: z.string(),
+                      arguments: z.string(),
+                    }),
+                  }),
+                )
+                .optional(),
             })
             .passthrough(),
         })
@@ -61,6 +73,10 @@ const responsesResponseSchema = z
       .array(
         z
           .object({
+            type: z.string().optional(),
+            call_id: z.string().optional(),
+            name: z.string().optional(),
+            arguments: z.string().optional(),
             content: z
               .array(
                 z
@@ -125,6 +141,7 @@ interface ParsedResponse {
   finishReason: string | null;
   contentCharacters: number | null;
   reasoningCharacters: number | null;
+  toolCalls: readonly AiToolCall[];
 }
 
 function elapsed(startedAt: number): number {
@@ -135,11 +152,54 @@ function failure(input: Omit<AiCallFailure, "status">): AiCallFailure {
   return { status: "failed", ...input };
 }
 
-function inputMessages(messages: readonly AiChatMessage[]) {
-  return messages.map((message) => ({
-    role: message.role,
-    content: message.content,
-  }));
+function chatMessages(messages: readonly AiChatMessage[]) {
+  return messages.map((message) =>
+    message.role === "tool"
+      ? {
+          role: "tool",
+          content: message.content,
+          tool_call_id: message.toolCallId,
+        }
+      : {
+          role: message.role,
+          content: message.content,
+          ...(message.toolCalls === undefined
+            ? {}
+            : {
+                tool_calls: message.toolCalls.map((call) => ({
+                  id: call.id,
+                  type: "function",
+                  function: { name: call.name, arguments: call.arguments },
+                })),
+              }),
+        },
+  );
+}
+
+function responseInput(messages: readonly AiChatMessage[]) {
+  const items: unknown[] = [];
+  for (const message of messages) {
+    if (message.role === "tool") {
+      items.push({
+        type: "function_call_output",
+        call_id: message.toolCallId ?? "missing-tool-call-id",
+        output: message.content,
+      });
+      continue;
+    }
+    if (message.content.length > 0) {
+      items.push({ role: message.role, content: message.content });
+    }
+    for (const call of message.toolCalls ?? []) {
+      items.push({
+        type: "function_call",
+        call_id: call.id,
+        name: call.name,
+        arguments: call.arguments,
+      });
+    }
+  }
+  return items;
 }
 
 function errorIdentity(value: unknown): string {
@@ -242,6 +302,7 @@ function chatResponse(body: unknown): ParsedResponse {
       finishReason: null,
       contentCharacters: null,
       reasoningCharacters: null,
+      toolCalls: [],
     };
   }
   const content = choice.message.content;
@@ -257,6 +318,11 @@ function chatResponse(body: unknown): ParsedResponse {
     finishReason: choice.finish_reason ?? null,
     contentCharacters: text.length,
     reasoningCharacters: choice.message.reasoning_content?.length ?? 0,
+    toolCalls: (choice.message.tool_calls ?? []).map((call) => ({
+      id: call.id,
+      name: call.function.name,
+      arguments: call.function.arguments,
+    })),
   };
 }
 
@@ -269,6 +335,7 @@ function responsesResponse(body: unknown): ParsedResponse {
       finishReason: null,
       contentCharacters: null,
       reasoningCharacters: null,
+      toolCalls: [],
     };
   }
   const text =
@@ -284,6 +351,20 @@ function responsesResponse(body: unknown): ParsedResponse {
     finishReason: parsed.data.status ?? null,
     contentCharacters: text.length,
     reasoningCharacters: 0,
+    toolCalls: (parsed.data.output ?? []).flatMap((item) =>
+      item.type === "function_call" &&
+      item.call_id !== undefined &&
+      item.name !== undefined &&
+      item.arguments !== undefined
+        ? [
+            {
+              id: item.call_id,
+              name: item.name,
+              arguments: item.arguments,
+            },
+          ]
+        : [],
+    ),
   };
 }
 
@@ -424,13 +505,37 @@ export class OpenAiCompatibleClient implements AiClient {
       });
     }
     if (provider.apiKind === "chat-completions") {
-      payload.messages = request.messages;
+      payload.messages = chatMessages(request.messages);
       payload.max_tokens = request.maxOutputTokens;
+      if (request.tools !== undefined) {
+        payload.tools = request.tools.map((tool) => ({
+          type: "function",
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.parameters,
+            strict: true,
+          },
+        }));
+        payload.tool_choice = request.toolChoice ?? "auto";
+      }
     } else {
-      payload.input = inputMessages(request.messages);
+      payload.input = responseInput(request.messages);
       payload.max_output_tokens = request.maxOutputTokens;
       if (request.webSearch !== undefined && request.webSearch !== "disabled") {
         payload.tools = [{ type: "web_search" }];
+        if (request.webSearch === "required") {
+          payload.tool_choice = "required";
+        }
+      } else if (request.tools !== undefined) {
+        payload.tools = request.tools.map((tool) => ({
+          type: "function",
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+          strict: true,
+        }));
+        payload.tool_choice = request.toolChoice ?? "auto";
       }
     }
     if (request.temperature !== null) {
@@ -505,7 +610,7 @@ export class OpenAiCompatibleClient implements AiClient {
         });
       }
       const text = parsed.text ?? "";
-      if (text.trim().length === 0) {
+      if (text.trim().length === 0 && parsed.toolCalls.length === 0) {
         return failure({
           category: "empty-output",
           code: "AI_PROVIDER_EMPTY_OUTPUT",
@@ -520,6 +625,7 @@ export class OpenAiCompatibleClient implements AiClient {
       return {
         status: "succeeded",
         text: text.trim(),
+        toolCalls: parsed.toolCalls,
         durationMs,
         diagnostics,
       };

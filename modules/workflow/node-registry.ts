@@ -382,9 +382,12 @@ class AiChatNodeHandler extends BaseNodeHandler {
   readonly type = "ai-chat" as const;
   private readonly agent: AgentRunner;
 
-  constructor(private readonly routing: AiRoutingService) {
+  constructor(
+    private readonly routing: AiRoutingService,
+    agent?: AgentRunner,
+  ) {
     super();
-    this.agent = new AgentRunner(routing);
+    this.agent = agent ?? new AgentRunner(routing);
   }
 
   override failureTarget(node: WorkflowNode): string | null {
@@ -702,6 +705,7 @@ export function createDefaultNodeRegistry(
   capabilities?: {
     archive: ArchiveRepository;
     aiRouting: AiRoutingService;
+    aiAgent?: AgentRunner;
   },
 ): NodeRegistry {
   const registry = new NodeRegistry();
@@ -711,7 +715,9 @@ export function createDefaultNodeRegistry(
   registry.register(new SetVariableNodeHandler());
   if (capabilities !== undefined) {
     registry.register(new LoadContextNodeHandler(capabilities.archive));
-    registry.register(new AiChatNodeHandler(capabilities.aiRouting));
+    registry.register(
+      new AiChatNodeHandler(capabilities.aiRouting, capabilities.aiAgent),
+    );
   }
   registry.register(new ReplyNodeHandler(repository, gateway));
   registry.register(new EndNodeHandler());

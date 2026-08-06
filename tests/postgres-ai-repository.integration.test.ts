@@ -234,6 +234,29 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         },
       },
     ]);
+    await repository.recordToolExecution({
+      executionId: diagnosticExecutionId,
+      nodeId: "ai-node",
+      providerId: primary.value.id,
+      toolCallId: "fictional-tool-call",
+      toolName: "web_search",
+      status: "succeeded",
+      durationMs: 42,
+      resultCount: 5,
+      queryHash: "a".repeat(64),
+      errorCode: null,
+    });
+    await expect(
+      repository.listToolExecutions(diagnosticExecutionId, "ai-node"),
+    ).resolves.toMatchObject([
+      {
+        executionId: diagnosticExecutionId,
+        toolName: "web_search",
+        status: "succeeded",
+        resultCount: 5,
+        queryHash: "a".repeat(64),
+      },
+    ]);
     await inspectionPool.query(
       "DELETE FROM workflow_executions WHERE id = $1",
       [diagnosticExecutionId],

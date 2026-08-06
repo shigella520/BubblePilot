@@ -221,8 +221,22 @@ export interface AiCandidateSelection {
 }
 
 export interface AiChatMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  toolCallId?: string;
+  toolCalls?: readonly AiToolCall[];
+}
+
+export interface AiToolDefinition {
+  name: string;
+  description: string;
+  parameters: Readonly<Record<string, unknown>>;
+}
+
+export interface AiToolCall {
+  id: string;
+  name: string;
+  arguments: string;
 }
 
 export interface AiChatRequest {
@@ -233,6 +247,8 @@ export interface AiChatRequest {
   clientRequestId?: string;
   webSearch?: WebSearchPolicy | undefined;
   maxToolCalls?: number;
+  tools?: readonly AiToolDefinition[];
+  toolChoice?: "auto" | "required";
 }
 
 export interface AiCallDiagnostics {
@@ -284,6 +300,7 @@ export type AiCallResult =
   | {
       status: "succeeded";
       text: string;
+      toolCalls?: readonly AiToolCall[];
       durationMs: number;
       diagnostics?: AiCallDiagnostics;
     }
@@ -319,6 +336,7 @@ export interface AiProviderAttemptView extends AiAttemptRecordInput {
 export interface AiRouteSuccess {
   status: "succeeded";
   text: string;
+  toolCalls: readonly AiToolCall[];
   providerId: string;
   providerName: string;
   providerVersion: number;
@@ -352,6 +370,27 @@ export interface AiRouteRequest {
   outputFormat: "text" | "json";
   protectedPrompt: string | null;
   webSearch?: WebSearchPolicy | undefined;
+  tools?: readonly AiToolDefinition[];
+  toolChoice?: "auto" | "required";
+  preferredProviderId?: string;
+}
+
+export interface AiToolExecutionRecordInput {
+  executionId: string;
+  nodeId: string;
+  providerId: string;
+  toolCallId: string;
+  toolName: string;
+  status: "succeeded" | "failed";
+  durationMs: number;
+  resultCount: number | null;
+  queryHash: string;
+  errorCode: string | null;
+}
+
+export interface AiToolExecutionView extends AiToolExecutionRecordInput {
+  id: string;
+  createdAt: string;
 }
 
 export function normalizeAiBaseUrl(value: string): string {
