@@ -120,11 +120,19 @@ export class SearxngWebSearchTool implements WebSearchTool {
   }
 
   async isReady(): Promise<boolean> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      await this.search("OpenAI official website");
-      return true;
+      const endpoint = new URL("healthz", `${this.baseUrl}/`);
+      const response = await this.fetchImplementation(endpoint, {
+        headers: { accept: "text/plain" },
+        signal: controller.signal,
+      });
+      return response.ok;
     } catch {
       return false;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

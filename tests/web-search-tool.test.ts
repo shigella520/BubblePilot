@@ -94,16 +94,28 @@ describe("SearxngWebSearchTool", () => {
     });
   });
 
-  it("reports ready when the search endpoint returns valid empty results", async () => {
+  it("checks backend readiness without depending on a search engine result", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("OK", { status: 200 }));
+    const tool = new SearxngWebSearchTool(
+      { baseUrl: "https://search.example.test" },
+      fetchImplementation,
+    );
+
+    await expect(tool.isReady()).resolves.toBe(true);
+    const requestUrl = fetchImplementation.mock.calls.at(0)?.at(0);
+    expect(requestUrl).toEqual(new URL("https://search.example.test/healthz"));
+  });
+
+  it("reports unavailable when the backend health endpoint fails", async () => {
     const tool = new SearxngWebSearchTool(
       { baseUrl: "https://search.example.test" },
       vi
         .fn<typeof fetch>()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ results: [] }), { status: 200 }),
-        ),
+        .mockResolvedValue(new Response("unavailable", { status: 503 })),
     );
 
-    await expect(tool.isReady()).resolves.toBe(true);
+    await expect(tool.isReady()).resolves.toBe(false);
   });
 });
