@@ -172,6 +172,151 @@ describe("AgentRunner", () => {
     });
   });
 
+  it("does not count an empty search as satisfying required mode", async () => {
+    const { repository, client, routing, request } = await setup();
+    const search: WebSearchTool = {
+      isReady: () => Promise.resolve(true),
+      search: () =>
+        Promise.resolve({
+          results: [],
+          durationMs: 2,
+          requestDetails: { query: "fictional latest news" },
+          responseDetails: {
+            outcome: "no_results",
+            retainedResultCount: 0,
+            engineFailures: [{ engine: "baidu", reason: "CAPTCHA" }],
+          },
+        }),
+    };
+
+    await expect(
+      new AgentRunner(routing, search, repository).run(request),
+    ).resolves.toMatchObject({
+      status: "failed",
+      code: "AI_WEB_SEARCH_REQUIRED_NO_RESULTS",
+    });
+    expect(repository.toolExecutions).toMatchObject([
+      {
+        status: "succeeded",
+        resultCount: 0,
+        errorCode: null,
+        responseDetails: {
+          outcome: "no_results",
+          retainedResultCount: 0,
+        },
+      },
+    ]);
+    const toolMessage = client.requests[1]?.messages.find(
+      (message) => message.role === "tool",
+    );
+    expect(toolMessage?.content).toContain('"status":"no_results"');
+    expect(client.requests[0]?.tools?.[0]?.description).toContain(
+      "Do not use site:",
+    );
+  });
+
+  it("keeps earlier search evidence when a later refinement fails", async () => {
+    const { repository, request } = await setup();
+    const scriptedClient: AiClient & { requests: AiChatRequest[] } = {
+      requests: [],
+      call(_provider, chatRequest) {
+        this.requests.push(structuredClone(chatRequest));
+        switch (this.requests.length) {
+          case 1:
+            return Promise.resolve({
+              status: "succeeded" as const,
+              text: "",
+              toolCalls: [
+                {
+                  id: "broad-search",
+                  name: "web_search",
+                  arguments: '{"query":"Segway 2026 products"}',
+                },
+              ],
+              durationMs: 2,
+            });
+          case 2:
+            return Promise.resolve({
+              status: "succeeded" as const,
+              text: "",
+              toolCalls: [
+                {
+                  id: "site-search",
+                  name: "web_search",
+                  arguments:
+                    '{"query":"site:segway.com.cn Segway 2026 products"}',
+                },
+              ],
+              durationMs: 2,
+            });
+          default:
+            return Promise.resolve({
+              status: "succeeded" as const,
+              text: "Answer from the first search with uncertainty",
+              durationMs: 2,
+            });
+        }
+      },
+    };
+    const routing = new AiRoutingService(
+      repository,
+      scriptedClient,
+      new EnvironmentSecretResolver({ FICTIONAL_KEY: "fictional-secret" }),
+      true,
+    );
+    let searchCalls = 0;
+    const search: WebSearchTool = {
+      isReady: () => Promise.resolve(true),
+      search: () => {
+        searchCalls += 1;
+        if (searchCalls === 1) {
+          return Promise.resolve({
+            results: [
+              {
+                title: "Initial source",
+                url: "https://news.example.test/segway",
+                snippet: "Initial evidence",
+                publishedAt: null,
+                source: "fictional",
+              },
+            ],
+            durationMs: 2,
+          });
+        }
+        return Promise.reject(
+          new WebSearchToolError(
+            "AI_WEB_SEARCH_TIMEOUT",
+            "The refinement timed out.",
+            {
+              requestDetails: {
+                query: "site:segway.com.cn Segway 2026 products",
+              },
+            },
+          ),
+        );
+      },
+    };
+
+    await expect(
+      new AgentRunner(routing, search, repository).run(request),
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      text: "Answer from the first search with uncertainty",
+    });
+    expect(scriptedClient.requests).toHaveLength(3);
+    expect(repository.toolExecutions).toMatchObject([
+      { status: "succeeded", resultCount: 1 },
+      { status: "failed", errorCode: "AI_WEB_SEARCH_TIMEOUT" },
+    ]);
+    const failedToolMessage = scriptedClient.requests[2]?.messages.find(
+      (message) =>
+        message.role === "tool" && message.toolCallId === "site-search",
+    );
+    expect(failedToolMessage?.content).toContain(
+      '"errorCode":"AI_WEB_SEARCH_TIMEOUT"',
+    );
+  });
+
   it("hides searched source links while retaining tool audit results", async () => {
     const { repository, client, routing, search, request } = await setup(
       "Fresh fact [News](https://news.example.test/item) 详情：https://other.example.test/story，之后继续。\n来源：https://source.example.test",

@@ -99,6 +99,65 @@ export interface SearxngWebSearchOptions {
   language?: string;
 }
 
+interface EngineFailure {
+  engine: string;
+  reason: string;
+}
+
+interface SearxngSearchAttempt {
+  query: string;
+  strategy: "exact" | "relaxed-site";
+  httpStatus: number;
+  rawResultCount: number;
+  results: readonly WebSearchResult[];
+  engineFailures: readonly EngineFailure[];
+}
+
+interface SiteConstraint {
+  domain: string;
+  relaxedQuery: string;
+}
+
+const siteOperatorPattern = /(?:^|\s)site:([a-z0-9.-]+\.[a-z]{2,})(?=\s|$)/iu;
+
+function siteConstraintFromQuery(query: string): SiteConstraint | null {
+  const match = siteOperatorPattern.exec(query);
+  const requestedDomain = match?.[1];
+  if (match === null || requestedDomain === undefined) return null;
+  try {
+    const domain = new URL(`https://${requestedDomain}`).hostname.toLowerCase();
+    const withoutOperator = query
+      .replace(match[0], " ")
+      .replace(/\s+/gu, " ")
+      .trim();
+    return {
+      domain,
+      relaxedQuery: [withoutOperator, domain].filter(Boolean).join(" "),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function belongsToDomain(result: WebSearchResult, domain: string): boolean {
+  const hostname = new URL(result.url).hostname.toLowerCase();
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+function uniqueEngineFailures(
+  attempts: readonly SearxngSearchAttempt[],
+): readonly EngineFailure[] {
+  const seen = new Set<string>();
+  return attempts.flatMap((attempt) =>
+    attempt.engineFailures.filter((failure) => {
+      const key = `${failure.engine}\u0000${failure.reason}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  );
+}
+
 export class SearxngWebSearchTool implements WebSearchTool {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
@@ -145,23 +204,123 @@ export class SearxngWebSearchTool implements WebSearchTool {
       );
     }
     const startedAt = Date.now();
+    const siteConstraint = siteConstraintFromQuery(normalizedQuery);
+    const auditEndpoint = new URL("search", `${this.baseUrl}/`);
+    const requestDetails = {
+      endpoint: `${auditEndpoint.origin}${auditEndpoint.pathname}`,
+      query: normalizedQuery,
+      language: this.language,
+      safeSearch: 1,
+      engines: [...this.engines],
+      queryStrategy:
+        siteConstraint === null ? "exact" : "site-with-relaxed-fallback",
+      ...(siteConstraint === null
+        ? {}
+        : {
+            siteConstraint: siteConstraint.domain,
+            relaxedQuery: siteConstraint.relaxedQuery,
+          }),
+    };
+    const attempts: SearxngSearchAttempt[] = [
+      await this.searchOnce(
+        normalizedQuery,
+        "exact",
+        this.timeoutMs,
+        requestDetails,
+      ),
+    ];
+    const exactResults =
+      siteConstraint === null
+        ? (attempts[0]?.results ?? [])
+        : (attempts[0]?.results ?? []).filter((result) =>
+            belongsToDomain(result, siteConstraint.domain),
+          );
+    let usableResults = exactResults;
+    let relaxedSearchError: Readonly<Record<string, unknown>> | null = null;
+    if (siteConstraint !== null && usableResults.length === 0) {
+      const remainingMs = Math.max(
+        0,
+        this.timeoutMs - (Date.now() - startedAt),
+      );
+      if (remainingMs > 0) {
+        try {
+          const relaxedAttempt = await this.searchOnce(
+            siteConstraint.relaxedQuery,
+            "relaxed-site",
+            remainingMs,
+            {
+              ...requestDetails,
+              query: siteConstraint.relaxedQuery,
+            },
+          );
+          attempts.push(relaxedAttempt);
+          usableResults = relaxedAttempt.results.filter((result) =>
+            belongsToDomain(result, siteConstraint.domain),
+          );
+        } catch (error) {
+          if (!(error instanceof WebSearchToolError)) throw error;
+          relaxedSearchError = {
+            code: error.code,
+            requestDetails: error.requestDetails,
+            responseDetails: error.responseDetails,
+          };
+        }
+      } else {
+        relaxedSearchError = { code: "AI_WEB_SEARCH_TIMEOUT" };
+      }
+    }
+    const retainedResults = usableResults.slice(0, this.maxResults);
+    const engineFailures = uniqueEngineFailures(attempts);
+    const responseDetails = {
+      outcome: retainedResults.length > 0 ? "results" : "no_results",
+      httpStatus: attempts.at(-1)?.httpStatus ?? 200,
+      rawResultCount: attempts.reduce(
+        (total, attempt) => total + attempt.rawResultCount,
+        0,
+      ),
+      retainedResultCount: retainedResults.length,
+      results: retainedResults,
+      engineFailures,
+      attempts: attempts.map((attempt) => ({
+        strategy: attempt.strategy,
+        query: attempt.query,
+        httpStatus: attempt.httpStatus,
+        rawResultCount: attempt.rawResultCount,
+        normalizedResultCount: attempt.results.length,
+        matchingResultCount:
+          siteConstraint === null
+            ? attempt.results.length
+            : attempt.results.filter((result) =>
+                belongsToDomain(result, siteConstraint.domain),
+              ).length,
+        engineFailures: attempt.engineFailures,
+      })),
+      ...(relaxedSearchError === null ? {} : { relaxedSearchError }),
+    };
+    return {
+      results: retainedResults,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      requestDetails,
+      responseDetails,
+    };
+  }
+
+  private async searchOnce(
+    query: string,
+    strategy: SearxngSearchAttempt["strategy"],
+    timeoutMs: number,
+    requestDetails: Readonly<Record<string, unknown>>,
+  ): Promise<SearxngSearchAttempt> {
     const endpoint = new URL("search", `${this.baseUrl}/`);
-    endpoint.searchParams.set("q", normalizedQuery);
+    endpoint.searchParams.set("q", query);
     endpoint.searchParams.set("format", "json");
     endpoint.searchParams.set("safesearch", "1");
     endpoint.searchParams.set("language", this.language);
     if (this.engines.length > 0) {
       endpoint.searchParams.set("engines", this.engines.join(","));
     }
-    const requestDetails = {
-      endpoint: `${endpoint.origin}${endpoint.pathname}`,
-      query: normalizedQuery,
-      language: this.language,
-      safeSearch: 1,
-      engines: [...this.engines],
-    };
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await this.fetchImplementation(endpoint, {
         headers: { accept: "application/json" },
@@ -226,32 +385,18 @@ export class SearxngWebSearchTool implements WebSearchTool {
           },
         ];
       });
-      const retainedResults = results.slice(0, this.maxResults);
-      const engineFailures = parsed.data.unresponsive_engines.map(
-        ([engine, reason]) => ({
-          engine: cleanText(engine, 100),
-          reason: cleanText(reason, 300),
-        }),
-      );
-      const responseDetails = {
+      return {
+        query,
+        strategy,
         httpStatus: response.status,
         rawResultCount: parsed.data.results.length,
-        retainedResultCount: retainedResults.length,
-        results: retainedResults,
-        engineFailures,
-      };
-      if (retainedResults.length === 0 && engineFailures.length > 0) {
-        throw new WebSearchToolError(
-          "AI_WEB_SEARCH_ENGINES_UNAVAILABLE",
-          "The web search engines returned no results and reported failures.",
-          { requestDetails, responseDetails },
-        );
-      }
-      return {
-        results: retainedResults,
-        durationMs: Math.max(0, Date.now() - startedAt),
-        requestDetails,
-        responseDetails,
+        results,
+        engineFailures: parsed.data.unresponsive_engines.map(
+          ([engine, reason]) => ({
+            engine: cleanText(engine, 100),
+            reason: cleanText(reason, 300),
+          }),
+        ),
       };
     } catch (error) {
       if (error instanceof WebSearchToolError) throw error;

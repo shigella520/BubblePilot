@@ -49,7 +49,7 @@ describe("SearxngWebSearchTool", () => {
     expect(requestUrl.searchParams.get("safesearch")).toBe("1");
   });
 
-  it("reports engine failures instead of treating an empty response as success", async () => {
+  it("returns a no-results outcome while preserving partial engine failures", async () => {
     const tool = new SearxngWebSearchTool(
       { baseUrl: "https://search.example.test", language: "zh-CN" },
       vi.fn<typeof fetch>().mockResolvedValue(
@@ -66,13 +66,14 @@ describe("SearxngWebSearchTool", () => {
       ),
     );
 
-    await expect(tool.search("卢本伟的最新资讯")).rejects.toMatchObject({
-      code: "AI_WEB_SEARCH_ENGINES_UNAVAILABLE",
+    await expect(tool.search("卢本伟的最新资讯")).resolves.toMatchObject({
+      results: [],
       requestDetails: {
         query: "卢本伟的最新资讯",
         language: "zh-CN",
       },
       responseDetails: {
+        outcome: "no_results",
         retainedResultCount: 0,
         engineFailures: [
           { engine: "baidu", reason: "Suspended: CAPTCHA" },
@@ -80,6 +81,88 @@ describe("SearxngWebSearchTool", () => {
         ],
       },
     });
+  });
+
+  it("relaxes a site query once and keeps only results from that domain", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            results: [],
+            unresponsive_engines: [["baidu", "CAPTCHA"]],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                title: "Official product",
+                url: "https://www.segway.com.cn/product/n1",
+                content: "Official details",
+                engine: "yandex",
+              },
+              {
+                title: "Third-party article",
+                url: "https://news.example.test/segway-n1",
+                content: "External details",
+                engine: "yandex",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+    const tool = new SearxngWebSearchTool(
+      { baseUrl: "https://search.example.test", language: "zh-CN" },
+      fetchImplementation,
+    );
+
+    await expect(
+      tool.search("site:segway.com.cn 九号 2026 新品 N1 M1 M3 F25 电动车"),
+    ).resolves.toMatchObject({
+      results: [
+        {
+          title: "Official product",
+          url: "https://www.segway.com.cn/product/n1",
+        },
+      ],
+      requestDetails: {
+        siteConstraint: "segway.com.cn",
+        queryStrategy: "site-with-relaxed-fallback",
+        relaxedQuery: "九号 2026 新品 N1 M1 M3 F25 电动车 segway.com.cn",
+      },
+      responseDetails: {
+        outcome: "results",
+        retainedResultCount: 1,
+        attempts: [
+          {
+            strategy: "exact",
+            rawResultCount: 0,
+            matchingResultCount: 0,
+          },
+          {
+            strategy: "relaxed-site",
+            rawResultCount: 2,
+            matchingResultCount: 1,
+          },
+        ],
+        engineFailures: [{ engine: "baidu", reason: "CAPTCHA" }],
+      },
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+    const exactUrl = fetchImplementation.mock.calls[0]?.[0];
+    const relaxedUrl = fetchImplementation.mock.calls[1]?.[0];
+    expect(exactUrl).toBeInstanceOf(URL);
+    expect(relaxedUrl).toBeInstanceOf(URL);
+    if (!(relaxedUrl instanceof URL))
+      throw new Error("Expected the relaxed request URL.");
+    expect(relaxedUrl.searchParams.get("q")).toBe(
+      "九号 2026 新品 N1 M1 M3 F25 电动车 segway.com.cn",
+    );
   });
 
   it("returns stable errors for invalid responses", async () => {

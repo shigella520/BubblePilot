@@ -756,6 +756,11 @@ function resetAuditPage(): Promise<boolean> {
                   <span v-if="item.errorCode" class="table-status danger">{{
                     item.errorCode
                   }}</span>
+                  <span
+                    v-else-if="item.responseDetails?.outcome === 'no_results'"
+                    class="table-status warning"
+                    >AI_WEB_SEARCH_NO_RESULTS</span
+                  >
                   <details class="keyline">
                     <summary>诊断标识</summary>
                     <code>query={{ item.queryHash }}</code>
