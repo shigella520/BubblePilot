@@ -430,7 +430,7 @@ export class OpenAiCompatibleClient implements AiClient {
       payload.input = inputMessages(request.messages);
       payload.max_output_tokens = request.maxOutputTokens;
       if (request.webSearch !== undefined && request.webSearch !== "disabled") {
-        payload.tools = [{ type: "web_search_preview" }];
+        payload.tools = [{ type: "web_search" }];
       }
     }
     if (request.temperature !== null) {

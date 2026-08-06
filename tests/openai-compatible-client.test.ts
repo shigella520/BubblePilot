@@ -260,7 +260,7 @@ describe("OpenAiCompatibleClient", () => {
     ).resolves.toMatchObject({ status: "succeeded", text: "Fresh answer" });
     const body = fetchImplementation.mock.calls[0]?.[1]?.body;
     expect(JSON.parse(typeof body === "string" ? body : "null")).toMatchObject({
-      tools: [{ type: "web_search_preview" }],
+      tools: [{ type: "web_search" }],
     });
   });
 
