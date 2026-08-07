@@ -180,7 +180,7 @@ SENSITIVE_OPERATION_PASSWORD_HASH='scrypt$...'
 - `MONITORED_CHAT_IDS`：已知 Chat GUID 時可提前填入，多個值用逗號分隔；留空時先用 Webhook 發現聊天，再到管理端開啟監聽。
 - `MESSAGE_RETENTION_DAYS`：正文與附件中繼資料預設保留 90 天；`0` 表示明確接受永久保留風險。
 - `ENABLE_WEB_SEARCH`：預設 `false`；需要 SearXNG 搜尋時改為 `true`。
-- `BUBBLEPILOT_IMAGE`：原始碼部署由 Compose 本機建置；正式發布後建議固定精確版本。
+- `BUBBLEPILOT_IMAGE`：原始碼部署由 Compose 本機建置；正式部署可固定為 `ghcr.io/shigella520/bubblepilot:1.0.0`，不要長期使用 `dev` 或 `latest`。
 
 ### 4. 啟動並檢查服務
 
