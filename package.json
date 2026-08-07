@@ -1,6 +1,6 @@
 {
   "name": "bubblepilot",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "A self-hosted automation, archiving, and AI bot platform for BlueBubbles.",
