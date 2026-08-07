@@ -1,6 +1,6 @@
 # 参与 BubblePilot 开发
 
-BubblePilot 采用短期功能分支和 Pull Request 进入 `main`。完整流程见[代码管理规范](doc/代码管理规范.md)。
+BubblePilot 采用短期功能分支和 Pull Request 进入 `main`。完整流程见[开发与发布](doc/开发与发布.md)。
 
 ## 快速流程
 

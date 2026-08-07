@@ -45,7 +45,7 @@
   <text x="64" y="108" fill="#6f6b66" font-family="Avenir Next, Inter, PingFang SC, sans-serif" font-size="17">消息接入、可编排工作流与敏感数据边界清晰分离</text>
   <rect x="1140" y="52" width="236" height="40" rx="20" fill="#ffffff" fill-opacity=".76" stroke="#ffffff"/>
   <circle cx="1166" cy="72" r="7" fill="#32c46c"/>
-  <text x="1184" y="78" fill="#466078" font-family="Avenir Next, Inter, PingFang SC, sans-serif" font-size="15" font-weight="600">Modular monolith · M1</text>
+  <text x="1184" y="78" fill="#466078" font-family="Avenir Next, Inter, PingFang SC, sans-serif" font-size="15" font-weight="600">Modular monolith · self-hosted</text>
 
   <text x="64" y="154" fill="#8a8883" font-family="Avenir Next, Inter, PingFang SC, sans-serif" font-size="13" font-weight="700" letter-spacing="2">EXPERIENCE &amp; EXTERNAL SERVICES</text>
 

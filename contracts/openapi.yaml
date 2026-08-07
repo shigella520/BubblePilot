@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: BubblePilot API
   version: 0.1.0
-  description: M4 管理会话、二次验证、审计、消息归档、版本化工作流与多 AI Provider 路由接口。
+  description: BubblePilot 管理会话、二次验证、消息归档、版本化工作流、AI Provider 路由、执行与审计接口。
 servers:
   - url: http://localhost:8080
 paths:

@@ -13,7 +13,8 @@
 
 ## 安全要求
 
-- BlueBubbles 和 AI Provider 凭据必须放在环境变量或外部 Secret 存储中。
+- BlueBubbles 首次启动凭据放在受控环境变量中；管理端保存的 BlueBubbles 与 AI Provider 凭据必须使用稳定的 `SETTINGS_ENCRYPTION_KEY` 加密。
 - 生产部署使用固定版本，不要未经 Review 长期使用浮动镜像标签。
 - 怀疑凭据泄漏后立即轮换，并检查日志和镜像层。
 - 归档消息、工作流配置、执行轨迹和导出文件都按敏感应用数据处理。
+- 完整安全、备份与恢复要求见[技术设计](doc/技术设计.md#安全边界)和[部署与运维](doc/部署与运维.md)。
