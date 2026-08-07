@@ -38,12 +38,6 @@ BubblePilot receives new-message events from BlueBubbles, archives only the chat
 - **No single AI dependency:** providers can Retry and Fallback in a fixed order, with automatic degradation after repeated failures.
 - **Your instance owns the data:** PostgreSQL is authoritative for messages, configuration, executions, and audit records.
 
-## Product preview
-
-The workflow canvas is shown on the left; the complete node, AI provider, web-search, and outgoing-delivery trace is shown on the right. Click the image to view it at full resolution.
-
-[![BubblePilot workflow canvas and execution trace](assets/preview/bubblepilot-usage.png)](assets/preview/bubblepilot-usage.png)
-
 ## What you can build
 
 | Use case | BubblePilot capability |
@@ -64,6 +58,12 @@ Web search is optional. With it disabled, archiving, regular workflows, and non-
 BlueBubbles remains the iMessage gateway. BubblePilot owns its monitoring rules, archive, workflows, execution history, and audit facts. Every message is normalized and deduplicated before matching, so a webhook redelivery cannot create a duplicate reply.
 
 ![BubblePilot message workflow](doc/message-workflow-flow.svg)
+
+## Product preview
+
+The workflow canvas is shown on the left; the complete node, AI provider, web-search, and outgoing-delivery trace is shown on the right. Click the image to view it at full resolution.
+
+[![BubblePilot workflow canvas and execution trace](assets/preview/bubblepilot-usage.png)](assets/preview/bubblepilot-usage.png)
 
 ## First working automation in 10 minutes
 
