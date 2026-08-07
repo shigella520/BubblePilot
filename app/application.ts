@@ -198,6 +198,7 @@ const triggerPreviewBodySchema = z.object({
 
 export interface ApplicationOptions {
   logger?: boolean;
+  webRoot?: string | false;
   auth?: AuthService;
   ai?: {
     repository: AiRepository;
@@ -464,13 +465,14 @@ export function buildApplication(
     logController: new LogController({ disableRequestLogging: true }),
     logger: options.logger ?? { level: config.logLevel },
   });
-  const webRoot = resolve(process.cwd(), "public");
-  if (existsSync(webRoot)) {
+  const webRoot = options.webRoot ?? resolve(process.cwd(), "public");
+  if (webRoot !== false && existsSync(webRoot)) {
     void application.register(fastifyStatic, {
       root: webRoot,
       prefix: "/",
       index: ["index.html"],
       wildcard: false,
+      dotfiles: "ignore",
     });
   }
   const ingestion = new IngestionService(
