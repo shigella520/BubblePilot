@@ -38,6 +38,12 @@ BubblePilot receives new-message events from BlueBubbles, archives only the chat
 - **No single AI dependency:** providers can Retry and Fallback in a fixed order, with automatic degradation after repeated failures.
 - **Your instance owns the data:** PostgreSQL is authoritative for messages, configuration, executions, and audit records.
 
+## Product preview
+
+The workflow canvas is shown on the left; the complete node, AI provider, web-search, and outgoing-delivery trace is shown on the right. Click the image to view it at full resolution.
+
+[![BubblePilot workflow canvas and execution trace](assets/preview/bubblepilot-usage.png)](assets/preview/bubblepilot-usage.png)
+
 ## What you can build
 
 | Use case | BubblePilot capability |

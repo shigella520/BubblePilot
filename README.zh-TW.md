@@ -38,6 +38,12 @@ BubblePilot 接收 BlueBubbles 的新訊息，只在你指定的聊天中保存�
 - **AI 服務不被單點綁定**：多個 Provider 可按固定順序 Retry、Fallback，並在連續故障後自動降級。
 - **資料保存在自己的實例**：PostgreSQL 是訊息、設定、執行和稽核記錄的權威來源。
 
+## 實際使用效果
+
+左側展示視覺化工作流程編排，右側展示節點、AI Provider、聯網搜尋和出站回覆的完整執行軌跡。點擊圖片可查看原始清晰度。
+
+[![BubblePilot 工作流程編排與執行追蹤](assets/preview/bubblepilot-usage.png)](assets/preview/bubblepilot-usage.png)
+
 ## 核心能力
 
 | 場景 | BubblePilot 提供的能力 |
