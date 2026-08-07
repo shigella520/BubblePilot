@@ -1,5 +1,26 @@
 <script setup lang="ts">
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, vue/no-mutating-props */
+import ContextTemplateEditor from "./ContextTemplateEditor.vue";
+
+const contextTemplateReferences = [
+  { token: "context.event.message.text", label: "当前消息文本" },
+  { token: "context.event.message.senderId", label: "当前发送者标识" },
+  {
+    token: "context.event.message.providerMessageId",
+    label: "当前消息 Provider ID",
+  },
+  { token: "context.event.message.sentAt", label: "当前消息时间" },
+  { token: "context.event.message.contentType", label: "当前消息类型" },
+  { token: "context.event.message.isFromMe", label: "是否由自己发送" },
+  { token: "context.event.message.attachments", label: "当前消息附件（JSON）" },
+  { token: "context.event.message.attachmentCount", label: "当前消息附件数量" },
+  { token: "context.event.chat.providerChatId", label: "当前 Chat ID" },
+  { token: "context.event.chat.type", label: "当前聊天类型" },
+  { token: "context.event.chat.displayName", label: "当前聊天名称" },
+  { token: "context.event.provider", label: "当前消息 Provider" },
+  { token: "context.history.messages", label: "聊天历史（JSON）" },
+  { token: "context.history.count", label: "聊天历史数量" },
+];
 const props = defineProps<{
   node: any | null;
   config: Record<string, any>;
@@ -58,6 +79,20 @@ function referenceOptionLabel(
 ): string {
   return typeof reference === "string" ? reference : reference.label;
 }
+function templateReferences() {
+  const outputs = (props.references ?? []).flatMap((reference) => {
+    const value = referenceOptionValue(reference);
+    const match = /^output:([^:]+):([^:]+)$/u.exec(value);
+    if (!match?.[1] || !match[2]) return [];
+    return [
+      {
+        token: `context.outputs.${match[1]}.${match[2]}`,
+        label: referenceOptionLabel(reference),
+      },
+    ];
+  });
+  return [...contextTemplateReferences, ...outputs];
+}
 </script>
 <template>
   <aside v-if="node" class="workflow-node-inspector">
@@ -111,8 +146,14 @@ function referenceOptionLabel(
     >
       <label
         ><span>{{ item.label }}</span
-        ><select
-          v-if="item.type === 'select'"
+        ><ContextTemplateEditor
+          v-if="item.type === 'template'"
+          :model-value="String(props.config[item.name] ?? '')"
+          :references="templateReferences()"
+          @update:model-value="
+            (value) => (props.config[item.name] = value)
+          " /><select
+          v-else-if="item.type === 'select'"
           v-model="props.config[item.name]"
         >
           <option
@@ -149,9 +190,17 @@ function referenceOptionLabel(
           "
         ></textarea
         ><input
+          v-else-if="item.type === 'number'"
+          :value="props.config[item.name]"
+          type="number"
+          @input="
+            props.config[item.name] = Number(
+              ($event.target as HTMLInputElement).value,
+            )
+          " /><input
           v-else-if="item.type !== 'boolean'"
           v-model="props.config[item.name]"
-          :type="item.type === 'number' ? 'number' : 'text'" /><input
+          type="text" /><input
           v-else
           v-model="props.config[item.name]"
           type="checkbox"

@@ -196,6 +196,94 @@ describe("workflow application", () => {
     };
   }
 
+  it("only exposes implemented data actions in the action catalog", async () => {
+    const response = await application.inject({
+      method: "GET",
+      url: "/api/v1/workflows/action-blocks",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const types = response
+      .json<{ data: Array<{ type: string }> }>()
+      .data.map((block) => block.type);
+    expect(types).toContain("render-text");
+    expect(types).not.toContain("set-variable");
+    expect(types).not.toContain("text-template");
+    expect(types).not.toContain("json-parse");
+    expect(types).not.toContain("json-get");
+  });
+
+  it("renders Context and upstream outputs into text", async () => {
+    const renderDefinition = parseWorkflowDefinition({
+      schemaVersion: "1",
+      name: "render-context",
+      startNodeId: "render-input",
+      maxSteps: 8,
+      maxExecutionMs: 5_000,
+      nodes: [
+        {
+          id: "render-input",
+          type: "render-text",
+          version: 1,
+          config: {
+            template:
+              "{{context.event.message.senderId}}|{{context.event.message.text}}",
+          },
+          onSuccess: "render-reply",
+        },
+        {
+          id: "render-reply",
+          type: "render-text",
+          version: 1,
+          config: {
+            template: "Rendered: {{context.outputs.render-input.text}}",
+          },
+          onSuccess: "reply",
+        },
+        {
+          id: "reply",
+          type: "reply",
+          version: 1,
+          config: {
+            text: "unused fallback",
+            replyToSourceMessage: false,
+            retry: { maxAttempts: 1, initialDelayMs: 0 },
+          },
+          inputs: {
+            text: {
+              kind: "output",
+              blockId: "render-reply",
+              port: "text",
+            },
+          },
+          onSuccess: "done",
+        },
+        {
+          id: "done",
+          type: "end",
+          version: 1,
+          config: { result: "succeeded" },
+        },
+      ],
+    });
+    await configureWorkflow(renderDefinition);
+
+    const response = await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({ text: "/ping template" }),
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(gateway.commands).toMatchObject([
+      {
+        text: "Rendered: fictional-user@example.test|/ping template",
+      },
+    ]);
+  });
+
   it("configures, matches and executes an idempotent reply workflow", async () => {
     await configureWorkflow();
 

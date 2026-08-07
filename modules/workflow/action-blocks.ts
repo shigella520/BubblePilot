@@ -14,7 +14,14 @@ export interface ActionPortDefinition {
 export interface ActionConfigDefinition {
   name: string;
   label: string;
-  type: "text" | "number" | "boolean" | "select" | "select-array" | "json";
+  type:
+    | "text"
+    | "template"
+    | "number"
+    | "boolean"
+    | "select"
+    | "select-array"
+    | "json";
   required?: boolean;
   options?: readonly { value: string; label: string }[];
   emptyLabel?: string;
@@ -153,125 +160,27 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
     ],
   },
   {
-    type: "set-variable",
+    type: "render-text",
     version: 1,
-    name: "设置变量",
-    description: "将输入值保存到 Context 变量。",
+    name: "渲染文本",
+    description: "使用 Context 内容渲染文本模板。",
     category: "data",
-    inputs: [
-      {
-        name: "value",
-        label: "值",
-        type: "string",
-        required: true,
-        description: "要保存的值。",
-      },
-    ],
-    outputs: [
-      {
-        name: "value",
-        label: "变量值",
-        type: "string",
-        description: "保存后的变量值。",
-      },
-    ],
-    config: [
-      {
-        name: "name",
-        label: "变量名",
-        type: "text",
-        required: true,
-        description: "下游动作引用的变量名。",
-      },
-    ],
-  },
-  {
-    type: "text-template",
-    version: 1,
-    name: "文本模板",
-    description: "组合固定文本和多个 Context 输入。",
-    category: "data",
-    inputs: [
-      {
-        name: "values",
-        label: "输入值",
-        type: "string",
-        description: "可连接多个文本输入。",
-      },
-    ],
+    inputs: [],
     outputs: [
       {
         name: "text",
-        label: "文本",
+        label: "渲染文本",
         type: "string",
-        description: "组合后的文本。",
+        description: "模板渲染后的文本。",
       },
     ],
     config: [
       {
         name: "template",
-        label: "模板",
-        type: "text",
+        label: "文本模板",
+        type: "template",
         required: true,
-        description: "可插入已连接的输入 Token。",
-      },
-    ],
-  },
-  {
-    type: "json-parse",
-    version: 1,
-    name: "JSON 解析",
-    description: "将文本解析成结构化 JSON。",
-    category: "data",
-    inputs: [
-      {
-        name: "text",
-        label: "文本",
-        type: "string",
-        required: true,
-        description: "待解析文本。",
-      },
-    ],
-    outputs: [
-      {
-        name: "json",
-        label: "JSON",
-        type: "json",
-        description: "解析后的结构化数据。",
-      },
-    ],
-    config: [],
-  },
-  {
-    type: "json-get",
-    version: 1,
-    name: "JSON 字段提取",
-    description: "从 JSON 输出中读取指定字段。",
-    category: "data",
-    inputs: [
-      {
-        name: "json",
-        label: "JSON",
-        type: "json",
-        required: true,
-        description: "上游 JSON。",
-      },
-    ],
-    outputs: [
-      {
-        name: "value",
-        label: "字段值",
-        type: "string",
-        description: "提取后的字段。",
-      },
-    ],
-    config: [
-      {
-        name: "path",
-        label: "字段路径",
-        type: "text",
-        required: true,
-        description: "例如 reply.text。",
+        description: "输入固定文本，并从编辑器插入允许的 Context 内容。",
       },
     ],
   },

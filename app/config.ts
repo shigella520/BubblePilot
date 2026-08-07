@@ -88,13 +88,6 @@ const environmentSchema = z
       .max(35)
       .regex(/^[a-z0-9_-]+$/iu)
       .default("zh-CN"),
-    WEB_SEARCH_TIMEOUT_MS: z.coerce
-      .number()
-      .int()
-      .min(1_000)
-      .max(60_000)
-      .default(8_000),
-    WEB_SEARCH_MAX_RESULTS: z.coerce.number().int().min(1).max(20).default(5),
     MONITORED_CHAT_IDS: z.string().default(""),
     MESSAGE_RETENTION_DAYS: z.coerce
       .number()
@@ -182,8 +175,6 @@ export interface AppConfig {
   searxngBaseUrl?: string;
   searxngEngines?: readonly string[];
   searxngLanguage?: string;
-  webSearchTimeoutMs?: number;
-  webSearchMaxResults?: number;
   monitoredChatIds: ReadonlySet<string>;
   messageRetentionDays: number;
   webhookBodyLimitBytes: number;
@@ -236,8 +227,6 @@ export function loadConfig(
     searxngBaseUrl: parsed.SEARXNG_BASE_URL.replace(/\/+$/u, ""),
     searxngEngines,
     searxngLanguage: parsed.SEARXNG_LANGUAGE,
-    webSearchTimeoutMs: parsed.WEB_SEARCH_TIMEOUT_MS,
-    webSearchMaxResults: parsed.WEB_SEARCH_MAX_RESULTS,
     monitoredChatIds,
     messageRetentionDays: parsed.MESSAGE_RETENTION_DAYS,
     webhookBodyLimitBytes: parsed.WEBHOOK_BODY_LIMIT_BYTES,

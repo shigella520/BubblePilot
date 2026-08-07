@@ -172,6 +172,83 @@ describe("AgentRunner", () => {
     });
   });
 
+  it("degrades auto mode to a final answer when local search retries fail", async () => {
+    const { repository, client, routing, request } = await setup(
+      "I could not verify live information, so this is only stable background.",
+    );
+    const search: WebSearchTool = {
+      isReady: () => Promise.resolve(true),
+      search: () =>
+        Promise.reject(
+          new WebSearchToolError(
+            "AI_WEB_SEARCH_TIMEOUT",
+            "Search attempts timed out.",
+            {
+              responseDetails: {
+                outcome: "failed",
+                transportAttempts: [
+                  { attempt: 1, errorCode: "AI_WEB_SEARCH_TIMEOUT" },
+                  { attempt: 2, errorCode: "AI_WEB_SEARCH_TIMEOUT" },
+                ],
+              },
+            },
+          ),
+        ),
+    };
+
+    await expect(
+      new AgentRunner(routing, search, repository).run({
+        ...request,
+        webSearch: "auto",
+      }),
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      text: "I could not verify live information, so this is only stable background.",
+    });
+    expect(client.requests).toHaveLength(2);
+    expect(client.requests[1]?.tools).toBeUndefined();
+    const failedToolMessage = client.requests[1]?.messages.at(-1);
+    expect(failedToolMessage?.role).toBe("tool");
+    expect(failedToolMessage?.content).toContain('"status":"failed"');
+    expect(repository.toolExecutions).toMatchObject([
+      { status: "failed", errorCode: "AI_WEB_SEARCH_TIMEOUT" },
+    ]);
+  });
+
+  it("allows required mode to opt into a degraded answer", async () => {
+    const { repository, client, routing, request } = await setup(
+      "Live search is unavailable; no current claim is made.",
+    );
+    const search: WebSearchTool = {
+      isReady: () => Promise.resolve(true),
+      search: () =>
+        Promise.reject(
+          new WebSearchToolError(
+            "AI_WEB_SEARCH_CONNECTION_FAILED",
+            "Search backend unavailable.",
+          ),
+        ),
+    };
+
+    await expect(
+      new AgentRunner(routing, search, repository, {
+        resolve: () =>
+          Promise.resolve({
+            maxAttempts: 2,
+            attemptTimeoutMs: 8_000,
+            totalTimeoutMs: 18_000,
+            retryDelayMs: 300,
+            maxResults: 5,
+            failurePolicy: "continue",
+          }),
+      }).run(request),
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      text: "Live search is unavailable; no current claim is made.",
+    });
+    expect(client.requests).toHaveLength(2);
+  });
+
   it("does not count an empty search as satisfying required mode", async () => {
     const { repository, client, routing, request } = await setup();
     const search: WebSearchTool = {

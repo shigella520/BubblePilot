@@ -781,6 +781,61 @@ paths:
           description: 返回实例联网搜索总开关、后端类型与即时可用状态。
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/ai/search/settings:
+    get:
+      operationId: getAiWebSearchSettings
+      description: 返回所有工作流共享的联网搜索运行参数；尚未保存时返回应用默认值。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 返回当前联网搜索全局配置、来源和乐观锁版本。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/WebSearchSettingsView"
+                additionalProperties: false
+        "401":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: updateAiWebSearchSettings
+      description: 将联网搜索全局配置保存到数据库；新的 AI 执行会立即读取该版本，无需重启应用。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebSearchSettingsUpdate"
+      responses:
+        "200":
+          description: 全局配置已保存并立即生效。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/WebSearchSettingsView"
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /api/v1/ai/providers:
     get:
       operationId: listAiProviders
@@ -1213,6 +1268,92 @@ components:
         type: integer
         minimum: 1
   schemas:
+    WebSearchSettingsUpdate:
+      type: object
+      required:
+        - maxAttempts
+        - attemptTimeoutMs
+        - totalTimeoutMs
+        - retryDelayMs
+        - maxResults
+        - failurePolicy
+        - expectedVersion
+      properties:
+        maxAttempts:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: 每个查询策略的最大 HTTP 尝试次数。
+        attemptTimeoutMs:
+          type: integer
+          minimum: 1000
+          maximum: 60000
+        totalTimeoutMs:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+          description: 必须大于或等于单次 HTTP 超时。
+        retryDelayMs:
+          type: integer
+          minimum: 0
+          maximum: 5000
+        maxResults:
+          type: integer
+          minimum: 1
+          maximum: 20
+        failurePolicy:
+          type: string
+          enum: [mode-default, fail, continue]
+        expectedVersion:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+    WebSearchSettingsView:
+      type: object
+      required:
+        - maxAttempts
+        - attemptTimeoutMs
+        - totalTimeoutMs
+        - retryDelayMs
+        - maxResults
+        - failurePolicy
+        - source
+        - version
+        - updatedAt
+      properties:
+        maxAttempts:
+          type: integer
+          minimum: 1
+          maximum: 5
+        attemptTimeoutMs:
+          type: integer
+          minimum: 1000
+          maximum: 60000
+        totalTimeoutMs:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+        retryDelayMs:
+          type: integer
+          minimum: 0
+          maximum: 5000
+        maxResults:
+          type: integer
+          minimum: 1
+          maximum: 20
+        failurePolicy:
+          type: string
+          enum: [mode-default, fail, continue]
+        source:
+          type: string
+          enum: [defaults, database]
+        version:
+          type: integer
+          minimum: 0
+        updatedAt:
+          type: [string, "null"]
+          format: date-time
+      additionalProperties: false
     InboundEventSummary:
       type: object
       required:

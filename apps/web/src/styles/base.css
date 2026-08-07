@@ -1199,6 +1199,40 @@ td .keyline {
   width: 100%;
   margin-top: 5px;
 }
+.workflow-template-editor {
+  display: grid;
+  gap: 8px;
+  margin-top: 5px;
+}
+.workflow-template-editor textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.workflow-template-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+.workflow-template-toolbar select {
+  min-width: 0;
+  margin: 0;
+}
+.workflow-template-toolbar .button {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+.workflow-template-editor small {
+  color: #64748b;
+  line-height: 1.5;
+}
+.workflow-template-editor code {
+  font-size: 9px;
+}
 .workflow-inspector-refs {
   display: grid;
   gap: 6px;

@@ -152,12 +152,30 @@ function resolveContextPath(
   context: NodeExecutionContext,
 ): unknown {
   switch (path) {
+    case "context.event.provider":
+      return context.envelope.provider;
     case "context.event.message.text":
       return context.envelope.message.text;
     case "context.event.message.senderId":
       return context.envelope.message.senderId;
+    case "context.event.message.providerMessageId":
+      return context.envelope.message.providerMessageId;
+    case "context.event.message.sentAt":
+      return context.envelope.message.sentAt;
+    case "context.event.message.contentType":
+      return context.envelope.message.contentType;
+    case "context.event.message.isFromMe":
+      return context.envelope.message.isFromMe;
+    case "context.event.message.attachments":
+      return context.envelope.message.attachments;
+    case "context.event.message.attachmentCount":
+      return context.envelope.message.attachments.length;
     case "context.event.chat.providerChatId":
       return context.envelope.chat.providerChatId;
+    case "context.event.chat.type":
+      return context.envelope.chat.type;
+    case "context.event.chat.displayName":
+      return context.envelope.chat.displayName;
     case "context.history.messages":
       return context.history;
     case "context.history.count":
@@ -191,6 +209,16 @@ function contextText(value: unknown): string {
   if (typeof value === "number" || typeof value === "boolean")
     return String(value);
   return JSON.stringify(value);
+}
+
+function renderContextTemplate(
+  template: string,
+  context: NodeExecutionContext,
+): string {
+  return template.replace(
+    /\{\{\s*([a-zA-Z][a-zA-Z0-9_.-]*)\s*\}\}/gu,
+    (_match, path: string) => contextText(resolveContextPath(path, context)),
+  );
 }
 
 function setVariable(
@@ -296,6 +324,31 @@ class SetVariableNodeHandler extends BaseNodeHandler {
         variable: node.config.name,
         characters: value.length,
       },
+    });
+  }
+}
+
+class RenderTextNodeHandler extends BaseNodeHandler {
+  readonly type = "render-text" as const;
+
+  execute(
+    node: WorkflowNode,
+    context: NodeExecutionContext,
+  ): Promise<NodeHandlerResult> {
+    this.assertType(node, this.type);
+    const rendered = renderContextTemplate(node.config.template, context);
+    if (rendered.length > 32_000) {
+      throw new WorkflowExecutionError(
+        "RENDERED_TEXT_TOO_LARGE",
+        "The rendered text exceeds the 32,000 character limit.",
+        false,
+      );
+    }
+    return Promise.resolve({
+      status: "succeeded",
+      nextNodeId: node.onSuccess,
+      outputSummary: { characters: rendered.length },
+      outputs: { text: rendered },
     });
   }
 }
@@ -713,7 +766,10 @@ export function createDefaultNodeRegistry(
   registry.register(new MessageTriggerNodeHandler());
   registry.register(new ConditionNodeHandler());
   registry.register(new LogNodeHandler());
+  // Keep the legacy handler so already-published set-variable@1 workflows
+  // continue to execute, but do not expose that block in the action catalog.
   registry.register(new SetVariableNodeHandler());
+  registry.register(new RenderTextNodeHandler());
   if (capabilities !== undefined) {
     registry.register(new LoadContextNodeHandler(capabilities.archive));
     registry.register(

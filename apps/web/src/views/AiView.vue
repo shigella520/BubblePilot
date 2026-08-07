@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Route,
   Save,
+  Search,
   TestTube2,
   Trash2,
 } from "@lucide/vue";
@@ -60,6 +61,26 @@ interface AiRoute {
   enabled: boolean;
   version: number;
 }
+interface WebSearchSettings {
+  maxAttempts: number;
+  attemptTimeoutMs: number;
+  totalTimeoutMs: number;
+  retryDelayMs: number;
+  maxResults: number;
+  failurePolicy: "mode-default" | "fail" | "continue";
+  source: "defaults" | "database";
+  version: number;
+  updatedAt: string | null;
+}
+type WebSearchSettingsForm = Pick<
+  WebSearchSettings,
+  | "maxAttempts"
+  | "attemptTimeoutMs"
+  | "totalTimeoutMs"
+  | "retryDelayMs"
+  | "maxResults"
+  | "failurePolicy"
+>;
 interface ProviderForm {
   id: string;
   expectedVersion: number;
@@ -88,6 +109,16 @@ function probeLabel(value: "verified" | "failed" | "unknown") {
 const providers = ref<Provider[]>([]);
 const routes = ref<AiRoute[]>([]);
 const searchStatus = ref({ enabled: false, backend: "searxng", ready: false });
+const searchSettings = ref<WebSearchSettings | null>(null);
+const searchSettingsBusy = ref(false);
+const searchSettingsForm = reactive<WebSearchSettingsForm>({
+  maxAttempts: 2,
+  attemptTimeoutMs: 8000,
+  totalTimeoutMs: 18000,
+  retryDelayMs: 300,
+  maxResults: 5,
+  failurePolicy: "mode-default",
+});
 const message = ref("");
 const messageIsError = ref(false);
 const busy = ref(false);
@@ -140,6 +171,18 @@ function healthLabel(state: string) {
   return healthLabels[state] ?? state;
 }
 
+function applySearchSettings(value: WebSearchSettings) {
+  searchSettings.value = value;
+  Object.assign(searchSettingsForm, {
+    maxAttempts: value.maxAttempts,
+    attemptTimeoutMs: value.attemptTimeoutMs,
+    totalTimeoutMs: value.totalTimeoutMs,
+    retryDelayMs: value.retryDelayMs,
+    maxResults: value.maxResults,
+    failurePolicy: value.failurePolicy,
+  });
+}
+
 function routeToggleLabel(item: AiRoute) {
   if (routeToggleBusyIds.has(item.id)) {
     return item.enabled ? "停用中…" : "启用中…";
@@ -170,18 +213,50 @@ async function load() {
   message.value = "";
   messageIsError.value = false;
   try {
-    [providers.value, routes.value, searchStatus.value] = await Promise.all([
-      apiRequest<Provider[]>("/api/v1/ai/providers"),
-      apiRequest<AiRoute[]>("/api/v1/ai/routes"),
-      apiRequest<{ enabled: boolean; backend: string; ready: boolean }>(
-        "/api/v1/ai/search/status",
-      ),
-    ]);
+    const [providerData, routeData, statusData, settingsData] =
+      await Promise.all([
+        apiRequest<Provider[]>("/api/v1/ai/providers"),
+        apiRequest<AiRoute[]>("/api/v1/ai/routes"),
+        apiRequest<{ enabled: boolean; backend: string; ready: boolean }>(
+          "/api/v1/ai/search/status",
+        ),
+        apiRequest<WebSearchSettings>("/api/v1/ai/search/settings"),
+      ]);
+    providers.value = providerData;
+    routes.value = routeData;
+    searchStatus.value = statusData;
+    applySearchSettings(settingsData);
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
   } finally {
     busy.value = false;
+  }
+}
+
+async function saveSearchSettings() {
+  if (searchSettingsBusy.value || searchSettings.value === null) return;
+  searchSettingsBusy.value = true;
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    const saved = await apiRequest<WebSearchSettings>(
+      "/api/v1/ai/search/settings",
+      {
+        method: "PUT",
+        body: jsonBody({
+          ...searchSettingsForm,
+          expectedVersion: searchSettings.value.version,
+        }),
+      },
+    );
+    applySearchSettings(saved);
+    message.value = "联网搜索全局配置已保存并立即生效。";
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    searchSettingsBusy.value = false;
   }
 }
 function resetProvider() {
@@ -558,8 +633,11 @@ onMounted(load);
         <button
           class="active"
           type="button"
-          @click="scrollToSection('providers')"
+          @click="scrollToSection('search-settings')"
         >
+          <Search :size="18" />联网搜索
+        </button>
+        <button type="button" @click="scrollToSection('providers')">
           <Bot :size="18" />Provider
         </button>
         <button type="button" @click="scrollToSection('routes')">
@@ -577,6 +655,115 @@ onMounted(load);
         @close="message = ''"
         >{{ message }}</DismissibleMessage
       >
+      <section id="search-settings" class="admin-panel">
+        <div class="panel-head">
+          <div>
+            <p class="card-kicker">WEB SEARCH</p>
+            <h1>联网搜索全局配置</h1>
+          </div>
+          <button class="button secondary" :disabled="busy" @click="load">
+            <RefreshCw :size="16" />刷新
+          </button>
+        </div>
+        <p class="panel-description">
+          统一控制所有工作流的 SearXNG HTTP
+          重试、超时、结果数量和失败兜底；保存后立即生效，无需重新部署容器。
+        </p>
+        <p class="keyline">
+          搜索后端：{{ searchStatus.backend }} ·
+          {{
+            !searchStatus.enabled
+              ? "实例安全开关已关闭"
+              : searchStatus.ready
+                ? "可用"
+                : "不可用"
+          }}
+          <span v-if="searchSettings">
+            · 配置来源：{{
+              searchSettings.source === "database" ? "数据库" : "系统默认"
+            }}
+            · 版本 {{ searchSettings.version }}
+          </span>
+        </p>
+        <form
+          v-if="searchSettings"
+          class="settings-form boxed-form"
+          @submit.prevent="saveSearchSettings"
+        >
+          <h3><Search :size="18" />工具执行参数</h3>
+          <div class="field-grid">
+            <label
+              ><span>单个查询尝试次数</span
+              ><input
+                v-model.number="searchSettingsForm.maxAttempts"
+                type="number"
+                min="1"
+                max="5"
+                required
+            /></label>
+            <label
+              ><span>最大结果数</span
+              ><input
+                v-model.number="searchSettingsForm.maxResults"
+                type="number"
+                min="1"
+                max="20"
+                required
+            /></label>
+            <label
+              ><span>单次超时（毫秒）</span
+              ><input
+                v-model.number="searchSettingsForm.attemptTimeoutMs"
+                type="number"
+                min="1000"
+                max="60000"
+                step="500"
+                required
+            /></label>
+            <label
+              ><span>工具总预算（毫秒）</span
+              ><input
+                v-model.number="searchSettingsForm.totalTimeoutMs"
+                type="number"
+                min="1000"
+                max="120000"
+                step="500"
+                required
+            /></label>
+            <label
+              ><span>重试基础退避（毫秒）</span
+              ><input
+                v-model.number="searchSettingsForm.retryDelayMs"
+                type="number"
+                min="0"
+                max="5000"
+                step="50"
+                required
+            /></label>
+            <label
+              ><span>搜索失败处理</span
+              ><select v-model="searchSettingsForm.failurePolicy">
+                <option value="mode-default">
+                  自动模式降级，必须模式失败（推荐）
+                </option>
+                <option value="continue">全部降级继续回答</option>
+                <option value="fail">全部让 AI 节点失败</option>
+              </select></label
+            >
+          </div>
+          <p class="panel-description">
+            内部 HTTP 重试不占用 Agent 工具调用次数。只重试超时、连接失败和 HTTP
+            429/502/503/504；总预算必须不小于单次超时。
+          </p>
+          <div class="form-actions">
+            <button class="button" type="submit" :disabled="searchSettingsBusy">
+              <Save :size="16" />{{
+                searchSettingsBusy ? "保存中…" : "保存全局配置"
+              }}
+            </button>
+          </div>
+        </form>
+      </section>
       <section id="providers" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -590,16 +777,6 @@ onMounted(load);
         <p class="panel-description">
           拖拽或使用上下按钮改变固定顺序，启停和连通性测试即时反馈；Secret API
           Key 会在服务端加密保存，列表和接口不会回显原值。
-        </p>
-        <p class="keyline">
-          搜索后端：{{ searchStatus.backend }} ·
-          {{
-            !searchStatus.enabled
-              ? "实例总开关已关闭"
-              : searchStatus.ready
-                ? "可用"
-                : "不可用"
-          }}
         </p>
         <div class="provider-list">
           <article

@@ -23,6 +23,7 @@
           { "$ref": "#/$defs/conditionNode" },
           { "$ref": "#/$defs/logNode" },
           { "$ref": "#/$defs/setVariableNode" },
+          { "$ref": "#/$defs/renderTextNode" },
           { "$ref": "#/$defs/loadContextNode" },
           { "$ref": "#/$defs/aiChatNode" },
           { "$ref": "#/$defs/replyNode" },
@@ -134,6 +135,33 @@
                   "pattern": "^[a-z][a-zA-Z0-9_]{0,63}$"
                 },
                 "valueTemplate": { "type": "string", "maxLength": 4000 }
+              },
+              "additionalProperties": false
+            },
+            "onSuccess": { "$ref": "#/$defs/nodeId" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "renderTextNode": {
+      "type": "object",
+      "allOf": [
+        { "$ref": "#/$defs/baseNode" },
+        {
+          "type": "object",
+          "required": ["onSuccess"],
+          "properties": {
+            "type": { "const": "render-text" },
+            "config": {
+              "type": "object",
+              "required": ["template"],
+              "properties": {
+                "template": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 12000
+                }
               },
               "additionalProperties": false
             },

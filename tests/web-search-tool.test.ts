@@ -3,6 +3,180 @@ import { describe, expect, it, vi } from "vitest";
 import { SearxngWebSearchTool } from "../modules/ai/web-search-tool.js";
 
 describe("SearxngWebSearchTool", () => {
+  it("retries transient HTTP failures inside one logical tool call", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("busy", { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                title: "Recovered result",
+                url: "https://news.example.test/recovered",
+                content: "Available after retry",
+                engine: "fictional",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+    const tool = new SearxngWebSearchTool(
+      {
+        baseUrl: "https://search.example.test",
+        maxAttempts: 2,
+        retryDelayMs: 0,
+      },
+      fetchImplementation,
+    );
+
+    await expect(tool.search("fictional latest news")).resolves.toMatchObject({
+      results: [{ title: "Recovered result" }],
+      requestDetails: {
+        retry: {
+          maxAttempts: 2,
+          attemptTimeoutMs: 8000,
+          totalTimeoutMs: 18000,
+          retryDelayMs: 0,
+        },
+      },
+      responseDetails: {
+        attempts: [
+          {
+            transportAttempts: [
+              {
+                attempt: 1,
+                status: "failed",
+                httpStatus: 503,
+                errorCode: "AI_WEB_SEARCH_HTTP_503",
+              },
+              {
+                attempt: 2,
+                status: "succeeded",
+                httpStatus: 200,
+                errorCode: null,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a timed-out transport attempt", async () => {
+    const timeoutError = Object.assign(new Error("aborted"), {
+      name: "AbortError",
+    });
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(timeoutError)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                title: "Result after timeout",
+                url: "https://news.example.test/after-timeout",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+    const tool = new SearxngWebSearchTool(
+      {
+        baseUrl: "https://search.example.test",
+        maxAttempts: 2,
+        retryDelayMs: 0,
+      },
+      fetchImplementation,
+    );
+
+    await expect(tool.search("fictional")).resolves.toMatchObject({
+      responseDetails: {
+        attempts: [
+          {
+            transportAttempts: [
+              { attempt: 1, errorCode: "AI_WEB_SEARCH_TIMEOUT" },
+              { attempt: 2, status: "succeeded" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry non-transient HTTP failures", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("bad request", { status: 400 }));
+    const tool = new SearxngWebSearchTool(
+      {
+        baseUrl: "https://search.example.test",
+        maxAttempts: 3,
+        retryDelayMs: 0,
+      },
+      fetchImplementation,
+    );
+
+    await expect(tool.search("fictional")).rejects.toMatchObject({
+      code: "AI_WEB_SEARCH_HTTP_400",
+      responseDetails: {
+        transportAttempts: [
+          {
+            attempt: 1,
+            status: "failed",
+            httpStatus: 400,
+          },
+        ],
+      },
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts bounded per-call search parameters", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [1, 2, 3].map((index) => ({
+            title: `Result ${index}`,
+            url: `https://news.example.test/${index}`,
+            content: "Summary",
+          })),
+        }),
+        { status: 200 },
+      ),
+    );
+    const tool = new SearxngWebSearchTool(
+      { baseUrl: "https://search.example.test" },
+      fetchImplementation,
+    );
+
+    await expect(
+      tool.search("fictional", {
+        maxAttempts: 3,
+        attemptTimeoutMs: 6_000,
+        totalTimeoutMs: 15_000,
+        retryDelayMs: 250,
+        maxResults: 2,
+      }),
+    ).resolves.toMatchObject({
+      results: [{ title: "Result 1" }, { title: "Result 2" }],
+      requestDetails: {
+        retry: {
+          maxAttempts: 3,
+          attemptTimeoutMs: 6_000,
+          totalTimeoutMs: 15_000,
+          retryDelayMs: 250,
+        },
+        maxResults: 2,
+      },
+    });
+  });
+
   it("normalizes safe JSON results and drops unsafe URLs", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

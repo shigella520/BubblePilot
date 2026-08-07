@@ -12,6 +12,8 @@ import { z, ZodError } from "zod";
 
 import type { AiManagementService } from "../modules/ai/ai-management-service.js";
 import type { WebSearchTool } from "../modules/ai/web-search-tool.js";
+import type { WebSearchSettingsService } from "../modules/ai/web-search-settings-service.js";
+import { webSearchSettingsUpdateSchema } from "../modules/ai/web-search-settings-types.js";
 import type {
   AiMutationResult,
   AiRepository,
@@ -204,6 +206,7 @@ export interface ApplicationOptions {
     repository: AiRepository;
     management: AiManagementService;
     searchTool?: WebSearchTool;
+    searchSettings?: WebSearchSettingsService;
   };
   workflow?: {
     repository: WorkflowRepository;
@@ -581,6 +584,7 @@ export function buildApplication(
       options.auth?.isReady() ?? Promise.resolve(true),
       options.workflow?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.repository.isReady() ?? Promise.resolve(true),
+      options.ai?.searchSettings?.repository.isReady() ?? Promise.resolve(true),
       options.dataExport?.repository.isReady() ?? Promise.resolve(true),
       options.blueBubbles?.settings.repository.isReady() ??
         Promise.resolve(true),
@@ -1257,6 +1261,51 @@ export function buildApplication(
               : false,
         },
       }),
+    );
+
+    application.get(
+      "/api/v1/ai/search/settings",
+      { preHandler: requireAdmin },
+      async () => {
+        if (options.ai?.searchSettings === undefined) {
+          throw new ApplicationError(
+            "AI_WEB_SEARCH_SETTINGS_UNAVAILABLE",
+            "Web search settings are unavailable.",
+            503,
+          );
+        }
+        return { data: await options.ai.searchSettings.view() };
+      },
+    );
+
+    application.put(
+      "/api/v1/ai/search/settings",
+      {
+        preHandler: requireAuditedAdmin(
+          "ai.web-search.settings.update",
+          "ai-web-search-settings",
+        ),
+      },
+      async (request) => {
+        if (options.ai?.searchSettings === undefined) {
+          throw new ApplicationError(
+            "AI_WEB_SEARCH_SETTINGS_UNAVAILABLE",
+            "Web search settings are unavailable.",
+            503,
+          );
+        }
+        const result = await options.ai.searchSettings.update(
+          webSearchSettingsUpdateSchema.parse(request.body),
+        );
+        if (result.status === "conflict") {
+          throw new ApplicationError(
+            "AI_WEB_SEARCH_SETTINGS_CONFLICT",
+            "Web search settings changed; refresh before retrying.",
+            409,
+          );
+        }
+        return { data: result.value };
+      },
     );
 
     application.get(
@@ -2136,6 +2185,7 @@ export function buildApplication(
       options.auth?.close() ?? Promise.resolve(),
       options.workflow?.repository.close() ?? Promise.resolve(),
       options.ai?.repository.close() ?? Promise.resolve(),
+      options.ai?.searchSettings?.repository.close() ?? Promise.resolve(),
       options.dataExport?.repository.close() ?? Promise.resolve(),
       options.blueBubbles?.settings.repository.close() ?? Promise.resolve(),
     ]);
