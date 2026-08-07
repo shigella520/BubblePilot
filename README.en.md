@@ -189,7 +189,7 @@ Optional settings:
 
 - `MONITORED_CHAT_IDS`: comma-separated Chat GUIDs to monitor from the first event. If empty, discover chats through the webhook and enable them in the Web UI.
 - `MESSAGE_RETENTION_DAYS`: archived bodies and attachment metadata are kept for 90 days by default. `0` explicitly accepts indefinite retention.
-- `ENABLE_WEB_SEARCH`: defaults to `false`; set it to `true` to allow SearXNG-backed search.
+- `ENABLE_WEB_SEARCH`: defaults to `false` and acts as the deployment-level safety switch. Once enabled, manage retries, timeouts, result limits, and failure fallback from the AI page's global Web Search settings; saved changes apply immediately.
 - `BUBBLEPILOT_IMAGE`: source deployments build locally. For a release deployment, pin `ghcr.io/shigella520/bubblepilot:1.0.0` instead of relying on `dev` or `latest`.
 
 ### 4. Start and check the stack
@@ -238,10 +238,12 @@ Message Trigger → Load Context → AI Chat → Reply → End
 ```
 
 1. Select a monitored chat in **Message Trigger**, set a keyword or prefix, and enable the trigger node.
-2. Select the provider route in **AI Chat** and set its prompt, output limits, and web-search policy.
-3. **Reply** can use the default `{{variables.aiReply}}` output.
-4. Connect the success edges, save the workflow, and click **Enable** in the top bar.
-5. Send a matching message and inspect **Executions** for the complete result.
+2. Add **Render Text** when fixed instructions, the current event, and upstream outputs must be combined; insert allowed Context values in its template editor.
+3. Select the provider route in **AI Chat** and set its prompt, output limits, and web-search policy.
+4. Connect `AI Chat.text` to `Reply.text`, then connect the control edges.
+5. Save and enable the workflow, send a matching message, and inspect **Executions** for the complete result.
+
+**Render Text** supports controlled references such as `{{context.event.message.text}}`, `{{context.event.message.senderId}}`, and `{{context.outputs.<node-id>.<output-port>}}`.
 
 For a fixed reply, use `Message Trigger → Reply → End` and skip AI configuration.
 

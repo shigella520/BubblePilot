@@ -88,6 +88,17 @@ const setVariableNodeSchema = z.object({
   onSuccess: nextNodeIdSchema,
 });
 
+const renderTextNodeSchema = z.object({
+  ...canvasNodeFields,
+  id: nodeIdSchema,
+  type: z.literal("render-text"),
+  version: z.literal(1),
+  config: z.object({
+    template: z.string().min(1).max(12_000),
+  }),
+  onSuccess: nextNodeIdSchema,
+});
+
 const loadContextNodeSchema = z.object({
   ...canvasNodeFields,
   id: nodeIdSchema,
@@ -159,6 +170,7 @@ export const workflowNodeSchema = z.discriminatedUnion("type", [
   conditionNodeSchema,
   logNodeSchema,
   setVariableNodeSchema,
+  renderTextNodeSchema,
   loadContextNodeSchema,
   aiChatNodeSchema,
   replyNodeSchema,
@@ -185,6 +197,7 @@ function targets(node: WorkflowNode): readonly string[] {
       return [node.onTrue, node.onFalse];
     case "log":
     case "set-variable":
+    case "render-text":
       return [node.onSuccess];
     case "load-context":
     case "ai-chat":
@@ -201,6 +214,22 @@ function targets(node: WorkflowNode): readonly string[] {
 }
 
 function validateSemantics(definition: WorkflowDefinition): void {
+  const contextTemplatePaths = new Set([
+    "context.event.provider",
+    "context.event.message.text",
+    "context.event.message.senderId",
+    "context.event.message.providerMessageId",
+    "context.event.message.sentAt",
+    "context.event.message.contentType",
+    "context.event.message.isFromMe",
+    "context.event.message.attachments",
+    "context.event.message.attachmentCount",
+    "context.event.chat.providerChatId",
+    "context.event.chat.type",
+    "context.event.chat.displayName",
+    "context.history.messages",
+    "context.history.count",
+  ]);
   const allowedTemplateKeys = new Set<string>([
     "message.text",
     "message.senderId",
@@ -275,6 +304,43 @@ function validateSemantics(definition: WorkflowDefinition): void {
     actionBlockDefinitions.map((block) => [block.type, block]),
   );
   for (const node of definition.nodes) {
+    if (node.type === "render-text") {
+      const pattern = /\{\{\s*([a-zA-Z][a-zA-Z0-9_.-]*)\s*\}\}/gu;
+      for (const match of node.config.template.matchAll(pattern)) {
+        const path = match[1];
+        if (path === undefined) continue;
+        if (contextTemplatePaths.has(path)) continue;
+        const outputPath =
+          /^context\.outputs\.([a-z][a-z0-9-]{0,63})\.([a-zA-Z][a-zA-Z0-9_-]{0,63})$/u.exec(
+            path,
+          );
+        if (outputPath === null) {
+          throw new Error(
+            `Node '${node.id}' text template uses unsupported Context path '${path}'.`,
+          );
+        }
+        const sourceNodeId = outputPath[1];
+        const outputName = outputPath[2];
+        const source =
+          sourceNodeId === undefined ? undefined : nodes.get(sourceNodeId);
+        const sourceBlock =
+          source === undefined ? undefined : blocksByType.get(source.type);
+        if (
+          source === undefined ||
+          outputName === undefined ||
+          !sourceBlock?.outputs.some((output) => output.name === outputName)
+        ) {
+          throw new Error(
+            `Node '${node.id}' text template references unknown output '${sourceNodeId ?? ""}.${outputName ?? ""}'.`,
+          );
+        }
+      }
+      if (node.config.template.replace(pattern, "").match(/\{\{|\}\}/u)) {
+        throw new Error(
+          `Node '${node.id}' text template contains invalid template syntax.`,
+        );
+      }
+    }
     for (const [inputName, reference] of Object.entries(node.inputs ?? {})) {
       if (reference.kind !== "output") continue;
       const source = nodes.get(reference.blockId);

@@ -194,7 +194,7 @@ SENSITIVE_OPERATION_PASSWORD_HASH='scrypt$...'
 
 - `MONITORED_CHAT_IDS`：已知 Chat GUID 时可提前写入，多个值以逗号分隔；留空时先通过 Webhook 发现聊天，再在管理端开启监听。
 - `MESSAGE_RETENTION_DAYS`：消息正文和附件元数据默认保留 90 天；设为 `0` 表示明确接受无限期保留风险。
-- `ENABLE_WEB_SEARCH`：默认 `false`。需要 SearXNG 联网搜索时改为 `true`。
+- `ENABLE_WEB_SEARCH`：默认 `false`，作为部署级安全总开关。开启后，重试、超时、结果数和失败兜底统一在 AI 页面的“联网搜索全局配置”中管理，保存后立即生效。
 - `BUBBLEPILOT_IMAGE`：源码部署会由 Compose 本地构建；正式部署可固定为 `ghcr.io/shigella520/bubblepilot:1.0.0`，不要长期使用 `dev` 或 `latest`。
 
 ### 4. 启动并检查服务
@@ -243,10 +243,12 @@ API Key 会使用 `SETTINGS_ENCRYPTION_KEY` 加密保存到 PostgreSQL，之后�
 ```
 
 1. 在“消息触发器”中选择已监听聊天，填写关键词或前缀，并打开节点的启用开关。
-2. 在“AI 对话”中选择刚创建的 Provider 路由，设置提示词、输出上限和联网策略。
-3. “回复消息”默认可以使用 `{{variables.aiReply}}` 发送 AI 节点结果。
-4. 连接节点的成功出口，保存工作流，再点击顶部“启用”。
-5. 在目标聊天发送符合条件的消息，到“执行”页面检查每个节点和最终回复状态。
+2. 需要组合固定说明、当前消息或上游结果时，加入“渲染文本”，在模板编辑器中插入 Context 内容并把 `text` 输出连接给下游。
+3. 在“AI 对话”中选择刚创建的 Provider 路由，设置提示词、输出上限和联网策略。
+4. 将 `AI 对话.text` 连接到 `回复消息.text`，再连接各节点的成功出口。
+5. 保存工作流并点击顶部“启用”，然后在目标聊天发送符合条件的消息，到“执行”页面检查每个节点和最终回复状态。
+
+“渲染文本”支持 `{{context.event.message.text}}`、`{{context.event.message.senderId}}` 和 `{{context.outputs.<动作ID>.<输出端口>}}` 等受控引用，适合昵称映射、固定背景与动态消息的组合。
 
 不需要 AI 时，可以使用“消息触发器 → 回复消息 → 结束”创建固定回复自动化。
 

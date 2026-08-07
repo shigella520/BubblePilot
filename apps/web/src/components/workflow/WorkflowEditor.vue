@@ -91,6 +91,8 @@ function defaultConfig(block: Block): Record<string, unknown> {
       characterLimit: 6000,
       includeFromMe: true,
     });
+  if (block.type === "render-text")
+    values.template = "{{context.event.message.text}}";
   if (block.type === "ai-chat")
     Object.assign(values, {
       timeoutMs: 60000,

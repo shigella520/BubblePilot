@@ -106,6 +106,14 @@ export type AiApiKind = "chat-completions" | "responses";
 export type AiCapabilityProbeState = "verified" | "failed" | "unknown";
 export type WebSearchPolicy = "disabled" | "auto" | "required";
 export type WebSearchSourceDisplay = "full" | "compact" | "hidden";
+export type WebSearchFailurePolicy = "mode-default" | "fail" | "continue";
+export interface WebSearchExecutionOptions {
+  maxAttempts?: number;
+  attemptTimeoutMs?: number;
+  totalTimeoutMs?: number;
+  retryDelayMs?: number;
+  maxResults?: number;
+}
 export interface AiProviderCapabilities {
   functionCalling: boolean;
   hostedWebSearch: boolean;

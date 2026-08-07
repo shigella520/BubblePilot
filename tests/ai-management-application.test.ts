@@ -11,8 +11,10 @@ import type {
   AiProviderRecord,
 } from "../modules/ai/ai-types.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
+import { WebSearchSettingsService } from "../modules/ai/web-search-settings-service.js";
 import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
+import { InMemoryWebSearchSettingsRepository } from "./support/in-memory-web-search-settings-repository.js";
 
 const apiAccessToken = "fictional-api-access-token-32-chars-long";
 const config: AppConfig = {
@@ -93,6 +95,19 @@ describe("AI management API", () => {
       ai: {
         repository,
         management: new AiManagementService(repository, client, secrets),
+        searchSettings: new WebSearchSettingsService(
+          new InMemoryWebSearchSettingsRepository(
+            () => new Date("2026-08-07T00:00:00.000Z"),
+          ),
+          {
+            maxAttempts: 2,
+            attemptTimeoutMs: 8_000,
+            totalTimeoutMs: 18_000,
+            retryDelayMs: 300,
+            maxResults: 5,
+            failurePolicy: "mode-default",
+          },
+        ),
       },
     });
   });
@@ -163,6 +178,74 @@ describe("AI management API", () => {
         hostedWebSearch: "verified",
       },
     });
+  });
+
+  it("manages global web search settings with optimistic concurrency", async () => {
+    const initial = await request({
+      method: "GET",
+      url: "/api/v1/ai/search/settings",
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({
+      data: {
+        maxAttempts: 2,
+        attemptTimeoutMs: 8_000,
+        totalTimeoutMs: 18_000,
+        retryDelayMs: 300,
+        maxResults: 5,
+        failurePolicy: "mode-default",
+        source: "defaults",
+        version: 0,
+        updatedAt: null,
+      },
+    });
+
+    const payload = {
+      maxAttempts: 3,
+      attemptTimeoutMs: 10_000,
+      totalTimeoutMs: 25_000,
+      retryDelayMs: 500,
+      maxResults: 8,
+      failurePolicy: "continue",
+      expectedVersion: 0,
+    };
+    const updated = await request({
+      method: "PUT",
+      url: "/api/v1/ai/search/settings",
+      payload,
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({
+      data: {
+        maxAttempts: 3,
+        maxResults: 8,
+        failurePolicy: "continue",
+        source: "database",
+        version: 1,
+      },
+    });
+
+    const stale = await request({
+      method: "PUT",
+      url: "/api/v1/ai/search/settings",
+      payload,
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toMatchObject({
+      error: { code: "AI_WEB_SEARCH_SETTINGS_CONFLICT" },
+    });
+
+    const invalid = await request({
+      method: "PUT",
+      url: "/api/v1/ai/search/settings",
+      payload: {
+        ...payload,
+        attemptTimeoutMs: 20_000,
+        totalTimeoutMs: 10_000,
+        expectedVersion: 1,
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
   });
 
   it("manages, reorders, tests, and routes providers without exposing secrets", async () => {
