@@ -31,6 +31,12 @@
   <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
 </p>
 
+<p align="center">
+  <a href="https://linux.do" target="_blank">
+    <img src="https://img.shields.io/badge/LINUX-DO-FFB003?style=for-the-badge&logo=linux&logoColor=white" alt="LINUX DO" />
+  </a>
+</p>
+
 BubblePilot 接收 BlueBubbles 的新消息，在你指定的聊天中保存内容、匹配触发条件并执行可视化工作流。工作流可以读取最近对话、调用一个或多个 OpenAI 兼容服务、按需联网搜索，再把结果安全地回复到原聊天。
 
 - **只处理你选择的聊天**：未启用监听的聊天只保留发现所需的最小元数据，不归档正文。
@@ -269,11 +275,3 @@ API Key 会使用 `SETTINGS_ENCRYPTION_KEY` 加密保存到 PostgreSQL，之后�
 ## 许可证
 
 BubblePilot 使用 [MIT License](LICENSE) 开源。
-
-## 友情链接
-
-<p align="center">
-  <a href="https://linux.do" target="_blank">
-    <img src="https://img.shields.io/badge/LINUX-DO-FFB003?style=for-the-badge&logo=linux&logoColor=white" alt="LINUX DO" />
-  </a>
-</p>
