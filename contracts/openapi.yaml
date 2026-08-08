@@ -112,6 +112,17 @@ paths:
                   type: integer
                   minimum: 1000
                   maximum: 120000
+                linkPreviewEnabled:
+                  type: boolean
+                  default: true
+                openGraphFallbackEnabled:
+                  type: boolean
+                  default: true
+                openGraphTimeoutMs:
+                  type: integer
+                  minimum: 1000
+                  maximum: 15000
+                  default: 5000
                 expectedVersion:
                   type: integer
                   minimum: 0

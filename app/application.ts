@@ -49,6 +49,7 @@ import {
 } from "../modules/export/export-types.js";
 import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/webhook-adapter.js";
 import type { BlueBubblesSettingsService } from "../modules/integrations/bluebubbles/settings-service.js";
+import type { LinkPreviewEnricher } from "../modules/integrations/bluebubbles/link-preview-enricher.js";
 import { blueBubblesSettingsUpdateSchema } from "../modules/integrations/bluebubbles/settings-types.js";
 import { IngestionService } from "../modules/ingestion/ingestion-service.js";
 import { FixedWindowRateLimiter } from "../modules/reliability/rate-limiter.js";
@@ -260,6 +261,7 @@ export interface ApplicationOptions {
   };
   blueBubbles?: {
     settings: BlueBubblesSettingsService;
+    linkPreviewEnricher?: LinkPreviewEnricher;
   };
   messageRetention?: MessageRetentionWorker;
 }
@@ -523,6 +525,7 @@ export function buildApplication(
     new BlueBubblesWebhookAdapter(),
     repository,
     config.monitoredChatIds,
+    options.blueBubbles?.linkPreviewEnricher,
   );
   const adminRateLimiter = new FixedWindowRateLimiter(
     config.adminRateLimitMax,
@@ -1919,7 +1922,7 @@ export function buildApplication(
       (request) => {
         const body = triggerPreviewBodySchema.parse(request.body);
         const sample: MessageEnvelope = {
-          schemaVersion: "1",
+          schemaVersion: "2",
           eventId: "preview:fictional-event",
           correlationId: request.id,
           provider: "bluebubbles",
@@ -1936,6 +1939,11 @@ export function buildApplication(
             contentType: body.sample.contentType,
             isFromMe: body.sample.isFromMe,
             attachments: [],
+            linkPreview: {
+              status: "not-requested",
+              errorCode: null,
+              items: [],
+            },
             contentHash: `sha256:${"0".repeat(64)}`,
           },
           metadata: {

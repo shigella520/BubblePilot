@@ -36,6 +36,7 @@ BubblePilot receives new-message events from BlueBubbles, archives only the chat
 - **Selective archiving:** unmonitored chats keep only the minimum metadata needed for discovery; message bodies are not archived.
 - **Explainable automation:** inbound decisions, nodes, AI attempts, search tools, and outgoing delivery states are traceable in the Web UI.
 - **No single AI dependency:** providers can Retry and Fallback in a fixed order, with automatic degradation after repeated failures.
+- **Link cards become usable context:** prefer BlueBubbles metadata, safely fall back to public Open Graph, and retain bounded diagnostics.
 - **Your instance owns the data:** PostgreSQL is authoritative for messages, configuration, executions, and audit records.
 
 ## What you can build
@@ -44,6 +45,7 @@ BubblePilot receives new-message events from BlueBubbles, archives only the chat
 | --- | --- |
 | Archive important conversations | Enable monitoring per chat, search archived messages, and export an authorized JSON Lines snapshot |
 | Create a group-chat bot | Trigger on chat, sender, content type, keyword, prefix, regex, or time window |
+| Understand link cards | Archive titles, summaries, and site names so AI can use card context without claiming it read the full page |
 | Design message workflows | Connect context, condition, variable, AI, reply, and end nodes on a visual canvas |
 | Use multiple AI services | Manage OpenAI-compatible providers and routes with Retry, Fallback, degradation, and recovery |
 | Answer with current web information | Use provider-hosted search or Function Calling with the bundled private SearXNG service |

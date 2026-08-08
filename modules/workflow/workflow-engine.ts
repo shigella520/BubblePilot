@@ -189,6 +189,8 @@ export class WorkflowEngine implements MessageAutomation {
             contentType: envelope.message.contentType,
             hasText: envelope.message.text !== null,
             attachmentCount: envelope.message.attachments.length,
+            linkPreviewStatus: envelope.message.linkPreview.status,
+            linkPreviewCount: envelope.message.linkPreview.items.length,
             variableCount: Object.keys(variables).length,
             historyMessageCount: history.length,
           },

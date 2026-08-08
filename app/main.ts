@@ -22,6 +22,7 @@ import { ManagedBlueBubblesReplyGateway } from "../modules/integrations/bluebubb
 import { PostgresBlueBubblesSettingsRepository } from "../modules/integrations/bluebubbles/postgres-settings-repository.js";
 import { SettingsCipher } from "../modules/integrations/bluebubbles/settings-cipher.js";
 import { BlueBubblesSettingsService } from "../modules/integrations/bluebubbles/settings-service.js";
+import { ManagedLinkPreviewEnricher } from "../modules/integrations/bluebubbles/link-preview-enricher.js";
 import { createDefaultNodeRegistry } from "../modules/workflow/node-registry.js";
 import { InProcessWorkflowExecutionDispatcher } from "../modules/workflow/execution-dispatcher.js";
 import { PostgresWorkflowRepository } from "../modules/workflow/postgres-workflow-repository.js";
@@ -76,6 +77,9 @@ const blueBubblesSettings = new BlueBubblesSettingsService(
     webhookSecret: config.blueBubblesWebhookSecret,
     sendMethod: config.blueBubblesSendMethod,
     requestTimeoutMs: config.blueBubblesRequestTimeoutMs,
+    linkPreviewEnabled: true,
+    openGraphFallbackEnabled: true,
+    openGraphTimeoutMs: 5_000,
   },
 );
 const messageRetention =
@@ -119,6 +123,7 @@ const aiAgent = new AgentRunner(
   webSearchSettings,
 );
 const replyGateway = new ManagedBlueBubblesReplyGateway(blueBubblesSettings);
+const linkPreviewEnricher = new ManagedLinkPreviewEnricher(blueBubblesSettings);
 const workflowEngine = new WorkflowEngine(
   workflowRepository,
   createDefaultNodeRegistry(workflowRepository, replyGateway, {
@@ -152,7 +157,7 @@ const application = buildApplication(config, repository, {
     repository: dataExportRepository,
     service: new DataExportService(dataExportRepository),
   },
-  blueBubbles: { settings: blueBubblesSettings },
+  blueBubbles: { settings: blueBubblesSettings, linkPreviewEnricher },
   ...(messageRetention === undefined ? {} : { messageRetention }),
 });
 

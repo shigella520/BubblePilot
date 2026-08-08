@@ -21,6 +21,9 @@ interface BlueBubblesSettings {
   webhookSecretConfigured: boolean;
   sendMethod: "private-api" | "apple-script";
   requestTimeoutMs: number;
+  linkPreviewEnabled: boolean;
+  openGraphFallbackEnabled: boolean;
+  openGraphTimeoutMs: number;
   source: "environment" | "database";
   version: number;
   updatedAt: string | null;
@@ -45,6 +48,9 @@ const form = reactive({
   webhookSecret: "",
   sendMethod: "private-api",
   requestTimeoutMs: 30_000,
+  linkPreviewEnabled: true,
+  openGraphFallbackEnabled: true,
+  openGraphTimeoutMs: 5_000,
 });
 
 function scrollToSection(id: string) {
@@ -58,6 +64,9 @@ function apply(value: BlueBubblesSettings) {
   form.webhookSecret = "";
   form.sendMethod = value.sendMethod;
   form.requestTimeoutMs = value.requestTimeoutMs;
+  form.linkPreviewEnabled = value.linkPreviewEnabled;
+  form.openGraphFallbackEnabled = value.openGraphFallbackEnabled;
+  form.openGraphTimeoutMs = value.openGraphTimeoutMs;
 }
 
 async function load() {
@@ -92,6 +101,9 @@ async function save() {
           ...(form.webhookSecret ? { webhookSecret: form.webhookSecret } : {}),
           sendMethod: form.sendMethod,
           requestTimeoutMs: form.requestTimeoutMs,
+          linkPreviewEnabled: form.linkPreviewEnabled,
+          openGraphFallbackEnabled: form.openGraphFallbackEnabled,
+          openGraphTimeoutMs: form.openGraphTimeoutMs,
           expectedVersion: current.value.version,
         }),
       },
@@ -263,6 +275,36 @@ onMounted(load);
                 placeholder="留空则保留当前值"
             /></label>
           </div>
+          <h3><Settings2 :size="18" />链接卡片解析</h3>
+          <div class="field-grid">
+            <label
+              ><span>启用链接卡片解析</span
+              ><input v-model="form.linkPreviewEnabled" type="checkbox"
+            /></label>
+            <label
+              ><span>启用公网 Open Graph 兜底</span
+              ><input
+                v-model="form.openGraphFallbackEnabled"
+                type="checkbox"
+                :disabled="!form.linkPreviewEnabled"
+            /></label>
+            <label
+              ><span>OG 单次请求超时（毫秒）</span
+              ><input
+                v-model.number="form.openGraphTimeoutMs"
+                type="number"
+                min="1000"
+                max="15000"
+                required
+                :disabled="
+                  !form.linkPreviewEnabled || !form.openGraphFallbackEnabled
+                "
+            /></label>
+          </div>
+          <p class="panel-description">
+            优先解析 BlueBubbles
+            卡片；缺失时只访问通过公网地址安全校验的网页，不下载预览图片。
+          </p>
           <div class="form-actions">
             <span class="panel-description"
               ><ShieldCheck :size="15" />保存需要敏感操作授权</span

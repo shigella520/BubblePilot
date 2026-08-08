@@ -82,6 +82,7 @@ export interface DataExportMessage {
   contentType: string;
   isFromMe: boolean;
   attachments: readonly unknown[];
+  linkPreview: unknown;
   contentRedactedAt: string | null;
   createdAt: string;
 }

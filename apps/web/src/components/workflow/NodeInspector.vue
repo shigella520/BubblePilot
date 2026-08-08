@@ -14,6 +14,29 @@ const contextTemplateReferences = [
   { token: "context.event.message.isFromMe", label: "是否由自己发送" },
   { token: "context.event.message.attachments", label: "当前消息附件（JSON）" },
   { token: "context.event.message.attachmentCount", label: "当前消息附件数量" },
+  { token: "context.event.message.linkPreview", label: "当前链接预览（JSON）" },
+  { token: "context.event.message.linkPreview.status", label: "链接预览状态" },
+  {
+    token: "context.event.message.linkPreview.items",
+    label: "链接预览列表（JSON）",
+  },
+  { token: "context.event.message.linkPreview.count", label: "链接预览数量" },
+  {
+    token: "context.event.message.linkPreview.primary.url",
+    label: "主链接 URL",
+  },
+  {
+    token: "context.event.message.linkPreview.primary.title",
+    label: "主链接标题",
+  },
+  {
+    token: "context.event.message.linkPreview.primary.summary",
+    label: "主链接摘要",
+  },
+  {
+    token: "context.event.message.linkPreview.primary.siteName",
+    label: "主链接站点",
+  },
   { token: "context.event.chat.providerChatId", label: "当前 Chat ID" },
   { token: "context.event.chat.type", label: "当前聊天类型" },
   { token: "context.event.chat.displayName", label: "当前聊天名称" },
@@ -128,6 +151,9 @@ function templateReferences() {
         >
           <option value="literal">固定值（在动作配置中填写）</option>
           <option value="path:context.event.message.text">当前消息文本</option>
+          <option value="path:context.event.message.linkPreview.items">
+            当前链接预览
+          </option>
           <option value="path:context.history.messages">聊天历史消息</option>
           <option value="path:context.history.count">历史消息数量</option>
           <option value="path:context.history.participants">

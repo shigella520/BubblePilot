@@ -25,6 +25,9 @@ export class BlueBubblesSettingsService {
           webhookSecretConfigured: this.fallback.webhookSecret.length >= 32,
           sendMethod: this.fallback.sendMethod,
           requestTimeoutMs: this.fallback.requestTimeoutMs,
+          linkPreviewEnabled: this.fallback.linkPreviewEnabled,
+          openGraphFallbackEnabled: this.fallback.openGraphFallbackEnabled,
+          openGraphTimeoutMs: this.fallback.openGraphTimeoutMs,
           source: "environment",
           version: 0,
           updatedAt: null,
@@ -35,6 +38,9 @@ export class BlueBubblesSettingsService {
           webhookSecretConfigured: stored.encryptedWebhookSecret.length > 0,
           sendMethod: stored.sendMethod,
           requestTimeoutMs: stored.requestTimeoutMs,
+          linkPreviewEnabled: stored.linkPreviewEnabled,
+          openGraphFallbackEnabled: stored.openGraphFallbackEnabled,
+          openGraphTimeoutMs: stored.openGraphTimeoutMs,
           source: "database",
           version: stored.version,
           updatedAt: stored.updatedAt,
@@ -51,6 +57,9 @@ export class BlueBubblesSettingsService {
           webhookSecret: this.cipher.decrypt(stored.encryptedWebhookSecret),
           sendMethod: stored.sendMethod,
           requestTimeoutMs: stored.requestTimeoutMs,
+          linkPreviewEnabled: stored.linkPreviewEnabled,
+          openGraphFallbackEnabled: stored.openGraphFallbackEnabled,
+          openGraphTimeoutMs: stored.openGraphTimeoutMs,
         };
   }
 
@@ -70,6 +79,9 @@ export class BlueBubblesSettingsService {
       ),
       sendMethod: input.sendMethod,
       requestTimeoutMs: input.requestTimeoutMs,
+      linkPreviewEnabled: input.linkPreviewEnabled,
+      openGraphFallbackEnabled: input.openGraphFallbackEnabled,
+      openGraphTimeoutMs: input.openGraphTimeoutMs,
       expectedVersion: input.expectedVersion,
     });
     if (result.status === "conflict") return result;
@@ -81,6 +93,9 @@ export class BlueBubblesSettingsService {
         webhookSecretConfigured: true,
         sendMethod: result.value.sendMethod,
         requestTimeoutMs: result.value.requestTimeoutMs,
+        linkPreviewEnabled: result.value.linkPreviewEnabled,
+        openGraphFallbackEnabled: result.value.openGraphFallbackEnabled,
+        openGraphTimeoutMs: result.value.openGraphTimeoutMs,
         source: "database",
         version: result.value.version,
         updatedAt: result.value.updatedAt,

@@ -3,6 +3,8 @@ import type {
   IngestionResult,
 } from "../archive/archive-repository.js";
 import type { BlueBubblesWebhookAdapter } from "../integrations/bluebubbles/webhook-adapter.js";
+import type { LinkPreviewEnricher } from "../integrations/bluebubbles/link-preview-enricher.js";
+import { emptyLinkPreview } from "./link-preview.js";
 import type { MessageEnvelope } from "./message-envelope.js";
 
 export interface IngestionOutcome {
@@ -15,6 +17,7 @@ export class IngestionService {
     private readonly adapter: BlueBubblesWebhookAdapter,
     private readonly repository: ArchiveRepository,
     private readonly monitoredChatIds: ReadonlySet<string>,
+    private readonly linkPreviewEnricher?: LinkPreviewEnricher,
   ) {}
 
   async ingest(
@@ -38,13 +41,54 @@ export class IngestionService {
       normalized.envelope,
       archiveEnabled,
     );
+    let automationEnvelope = normalized.envelope;
+    if (
+      this.linkPreviewEnricher !== undefined &&
+      normalized.envelope.message.linkPreview.status === "pending" &&
+      (result.status === "archived" ||
+        result.automationOutcome === "evaluation-pending")
+    ) {
+      try {
+        const enrichment = await this.linkPreviewEnricher.enrich(
+          normalized.envelope,
+        );
+        const saved = await this.repository.saveMessageLinkPreview({
+          providerMessageId: normalized.envelope.message.providerMessageId,
+          linkPreview: enrichment.linkPreview,
+          diagnostics: enrichment.diagnostics,
+          fetchedAt: new Date(),
+        });
+        automationEnvelope = {
+          ...normalized.envelope,
+          message: {
+            ...normalized.envelope.message,
+            linkPreview: saved ?? enrichment.linkPreview,
+          },
+        };
+      } catch {
+        const failed = emptyLinkPreview(
+          "failed",
+          "LINK_PREVIEW_ENRICHMENT_FAILED",
+        );
+        await this.repository.saveMessageLinkPreview({
+          providerMessageId: normalized.envelope.message.providerMessageId,
+          linkPreview: failed,
+          diagnostics: [],
+          fetchedAt: new Date(),
+        });
+        automationEnvelope = {
+          ...normalized.envelope,
+          message: { ...normalized.envelope.message, linkPreview: failed },
+        };
+      }
+    }
     return {
       result,
       automationEnvelope:
         archiveEnabled &&
         (result.status === "archived" ||
           result.automationOutcome === "evaluation-pending")
-          ? normalized.envelope
+          ? automationEnvelope
           : null,
     };
   }
