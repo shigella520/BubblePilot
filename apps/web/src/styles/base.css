@@ -1508,6 +1508,48 @@ legend {
 .switch-button.active > span {
   background: var(--bubblepilot-success);
 }
+.participant-editor {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+  padding: 20px;
+  border: 1px solid rgba(10, 132, 255, 0.16);
+  border-radius: 20px;
+  background: rgba(244, 249, 255, 0.72);
+}
+.participant-editor > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.participant-editor h3,
+.participant-editor p {
+  margin: 0;
+}
+.participant-editor h3 {
+  margin-top: 6px;
+  font-size: 18px;
+}
+.participant-editor header p:last-child {
+  margin-top: 7px;
+  color: var(--bubblepilot-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.participant-table {
+  margin-top: 0;
+}
+.participant-table table {
+  min-width: 860px;
+}
+.participant-table th:first-child,
+.participant-table td:first-child {
+  width: 34%;
+}
+.participant-table input {
+  min-width: 170px;
+}
 .message-results {
   display: grid;
   gap: 10px;

@@ -35,6 +35,7 @@ const config: AppConfig = {
   host: "127.0.0.1",
   port: 8080,
   databaseUrl: "postgresql://unused.example.test/bubblepilot",
+  databaseQueryTimeoutMs: 30_000,
   apiAccessToken,
   settingsEncryptionKey: "fictional-settings-encryption-key-32-chars",
   loginPasswordHash: "scrypt$16384$8$1$fictional-salt$fictional-key",
@@ -66,7 +67,6 @@ const workflowDefinition = {
   name: "ping-reply",
   startNodeId: "check-command",
   maxSteps: 8,
-  maxExecutionMs: 5_000,
   nodes: [
     {
       id: "check-command",
@@ -204,10 +204,28 @@ describe("workflow application", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    const types = response
-      .json<{ data: Array<{ type: string }> }>()
-      .data.map((block) => block.type);
+    const blocks = response.json<{
+      data: Array<{
+        type: string;
+        outputs: Array<{ name: string; type: string }>;
+        config: Array<{ name: string; type: string }>;
+      }>;
+    }>().data;
+    const types = blocks.map((block) => block.type);
     expect(types).toContain("render-text");
+    expect(
+      blocks.find((block) => block.type === "load-context")?.outputs,
+    ).toContainEqual(
+      expect.objectContaining({ name: "participants", type: "json" }),
+    );
+    expect(
+      blocks.find((block) => block.type === "ai-chat")?.config,
+    ).toContainEqual(
+      expect.objectContaining({
+        name: "includeLoadedContext",
+        type: "boolean",
+      }),
+    );
     expect(types).not.toContain("set-variable");
     expect(types).not.toContain("text-template");
     expect(types).not.toContain("json-parse");
@@ -220,7 +238,6 @@ describe("workflow application", () => {
       name: "render-context",
       startNodeId: "render-input",
       maxSteps: 8,
-      maxExecutionMs: 5_000,
       nodes: [
         {
           id: "render-input",

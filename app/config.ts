@@ -41,6 +41,12 @@ const environmentSchema = z
     APP_HOST: z.string().min(1).default("0.0.0.0"),
     APP_PORT: z.coerce.number().int().min(1).max(65_535).default(8080),
     DATABASE_URL: z.string().min(1),
+    DATABASE_QUERY_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(120_000)
+      .default(30_000),
     API_ACCESS_TOKEN: runtimeSecretSchema,
     SETTINGS_ENCRYPTION_KEY: runtimeSecretSchema.optional(),
     APP_LOGIN_PASSWORD_HASH: passwordHashSchema,
@@ -159,6 +165,7 @@ export interface AppConfig {
   host: string;
   port: number;
   databaseUrl: string;
+  databaseQueryTimeoutMs: number;
   apiAccessToken: string;
   settingsEncryptionKey: string;
   loginPasswordHash: string;
@@ -210,6 +217,7 @@ export function loadConfig(
     host: parsed.APP_HOST,
     port: parsed.APP_PORT,
     databaseUrl: parsed.DATABASE_URL,
+    databaseQueryTimeoutMs: parsed.DATABASE_QUERY_TIMEOUT_MS,
     apiAccessToken: parsed.API_ACCESS_TOKEN,
     settingsEncryptionKey:
       parsed.SETTINGS_ENCRYPTION_KEY ?? parsed.API_ACCESS_TOKEN,

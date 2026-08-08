@@ -110,7 +110,6 @@ export type WebSearchFailurePolicy = "mode-default" | "fail" | "continue";
 export interface WebSearchExecutionOptions {
   maxAttempts?: number;
   attemptTimeoutMs?: number;
-  totalTimeoutMs?: number;
   retryDelayMs?: number;
   maxResults?: number;
 }
@@ -252,7 +251,6 @@ export interface AiChatRequest {
   messages: readonly AiChatMessage[];
   maxOutputTokens: number;
   temperature: number | null;
-  timeoutMs: number;
   clientRequestId?: string;
   webSearch?: WebSearchPolicy | undefined;
   maxToolCalls?: number;
@@ -375,7 +373,6 @@ export interface AiRouteRequest {
   messages: readonly AiChatMessage[];
   maxOutputTokens: number;
   temperature: number | null;
-  timeoutMs: number;
   maxOutputCharacters: number;
   outputFormat: "text" | "json";
   protectedPrompt: string | null;

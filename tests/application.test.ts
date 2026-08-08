@@ -16,6 +16,7 @@ const config: AppConfig = {
   host: "127.0.0.1",
   port: 8080,
   databaseUrl: "postgresql://unused.example.test/bubblepilot",
+  databaseQueryTimeoutMs: 30_000,
   apiAccessToken,
   settingsEncryptionKey: "fictional-settings-encryption-key-32-chars",
   loginPasswordHash: "scrypt$16384$8$1$fictional-salt$fictional-key",
@@ -305,6 +306,92 @@ describe("BubblePilot application", () => {
       }),
     });
     expect(archived.json()).toMatchObject({ data: { status: "archived" } });
+
+    const participants = await application.inject({
+      method: "GET",
+      url: `/api/v1/chats/${discovered?.id}/participants`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(participants.statusCode).toBe(200);
+    expect(participants.json()).toMatchObject({
+      data: {
+        chatId: discovered?.id,
+        version: 1,
+        participants: [
+          {
+            senderId: "fictional-user@example.test",
+            realName: null,
+            nickname: null,
+            messageCount: 1,
+          },
+        ],
+      },
+    });
+
+    const mapped = await application.inject({
+      method: "PUT",
+      url: `/api/v1/chats/${discovered?.id}/participants`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: {
+        expectedVersion: 1,
+        identities: [
+          {
+            senderId: "fictional-user@example.test",
+            realName: "林一",
+            nickname: "队长",
+          },
+        ],
+      },
+    });
+    expect(mapped.statusCode).toBe(200);
+    expect(mapped.json()).toMatchObject({
+      data: {
+        version: 2,
+        participants: [{ realName: "林一", nickname: "队长" }],
+      },
+    });
+
+    const staleMapping = await application.inject({
+      method: "PUT",
+      url: `/api/v1/chats/${discovered?.id}/participants`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: { expectedVersion: 1, identities: [] },
+    });
+    expect(staleMapping.statusCode).toBe(409);
+
+    const undiscoveredMapping = await application.inject({
+      method: "PUT",
+      url: `/api/v1/chats/${discovered?.id}/participants`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: {
+        expectedVersion: 2,
+        identities: [
+          {
+            senderId: "unknown-user@example.test",
+            realName: "未知成员",
+            nickname: null,
+          },
+        ],
+      },
+    });
+    expect(undiscoveredMapping.statusCode).toBe(400);
+    expect(undiscoveredMapping.json()).toMatchObject({
+      error: { code: "CHAT_PARTICIPANT_NOT_DISCOVERED" },
+    });
+
+    const clearedMapping = await application.inject({
+      method: "PUT",
+      url: `/api/v1/chats/${discovered?.id}/participants`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: { expectedVersion: 2, identities: [] },
+    });
+    expect(clearedMapping.statusCode).toBe(200);
+    expect(clearedMapping.json()).toMatchObject({
+      data: {
+        version: 3,
+        participants: [{ realName: null, nickname: null }],
+      },
+    });
 
     const search = await application.inject({
       method: "GET",

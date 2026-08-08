@@ -3,7 +3,6 @@ import type { WebSearchFailurePolicy } from "./ai-types.js";
 export interface WebSearchSettingsRecord {
   maxAttempts: number;
   attemptTimeoutMs: number;
-  totalTimeoutMs: number;
   retryDelayMs: number;
   maxResults: number;
   failurePolicy: WebSearchFailurePolicy;
@@ -14,7 +13,6 @@ export interface WebSearchSettingsRecord {
 export interface WebSearchSettingsSaveInput {
   maxAttempts: number;
   attemptTimeoutMs: number;
-  totalTimeoutMs: number;
   retryDelayMs: number;
   maxResults: number;
   failurePolicy: WebSearchFailurePolicy;

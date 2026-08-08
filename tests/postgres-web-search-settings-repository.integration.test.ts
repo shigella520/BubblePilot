@@ -33,7 +33,6 @@ describe.runIf(testDatabaseUrl !== undefined)(
       const created = await repository.save({
         maxAttempts: 3,
         attemptTimeoutMs: 10_000,
-        totalTimeoutMs: 25_000,
         retryDelayMs: 500,
         maxResults: 8,
         failurePolicy: "continue",
@@ -53,7 +52,6 @@ describe.runIf(testDatabaseUrl !== undefined)(
         repository.save({
           maxAttempts: 2,
           attemptTimeoutMs: 8_000,
-          totalTimeoutMs: 18_000,
           retryDelayMs: 300,
           maxResults: 5,
           failurePolicy: "mode-default",
@@ -64,7 +62,6 @@ describe.runIf(testDatabaseUrl !== undefined)(
       const updated = await repository.save({
         maxAttempts: 2,
         attemptTimeoutMs: 8_000,
-        totalTimeoutMs: 18_000,
         retryDelayMs: 300,
         maxResults: 5,
         failurePolicy: "fail",

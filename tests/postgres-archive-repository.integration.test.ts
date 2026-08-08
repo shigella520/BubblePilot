@@ -77,6 +77,57 @@ describe.runIf(testDatabaseUrl !== undefined)(
       });
       expect(messages).toHaveLength(1);
       expect(messages[0]?.providerMessageId).toBe(`fake-message-${suffix}`);
+
+      const mapped = await repository.saveChatParticipantIdentities({
+        chatId: chat?.id ?? randomUUID(),
+        expectedVersion: 1,
+        identities: [
+          {
+            senderId: "fictional-user@example.test",
+            realName: "林一",
+            nickname: "队长",
+          },
+        ],
+      });
+      expect(mapped).toMatchObject({
+        status: "ok",
+        value: {
+          version: 2,
+          participants: [
+            {
+              senderId: "fictional-user@example.test",
+              realName: "林一",
+              nickname: "队长",
+              messageCount: 1,
+            },
+          ],
+        },
+      });
+      await expect(
+        repository.resolveParticipantIdentities(
+          normalized.envelope.chat.providerChatId,
+          ["fictional-user@example.test", "not-present@example.test"],
+        ),
+      ).resolves.toEqual([
+        {
+          senderId: "fictional-user@example.test",
+          realName: "林一",
+          nickname: "队长",
+        },
+      ]);
+      await expect(
+        repository.saveChatParticipantIdentities({
+          chatId: chat?.id ?? randomUUID(),
+          expectedVersion: 2,
+          identities: [
+            {
+              senderId: "not-present@example.test",
+              realName: "未知成员",
+              nickname: null,
+            },
+          ],
+        }),
+      ).resolves.toMatchObject({ status: "invalid-sender" });
     });
 
     it("redacts expired content only after automation is final and audits it", async () => {

@@ -18,6 +18,7 @@ describe("loadConfig", () => {
     });
 
     expect(config.port).toBe(8080);
+    expect(config.databaseQueryTimeoutMs).toBe(30_000);
     expect(config.blueBubblesServerUrl).toBe(
       "https://bluebubbles.example.test",
     );
@@ -50,6 +51,27 @@ describe("loadConfig", () => {
       loadConfig({ ...environment, SESSION_COOKIE_SECURE: "false" })
         .sessionCookieSecure,
     ).toBe("false");
+  });
+
+  it("accepts only bounded leaf database query timeouts", () => {
+    const environment = {
+      DATABASE_URL: "postgresql://example.test/bubblepilot",
+      API_ACCESS_TOKEN: "a".repeat(32),
+      APP_LOGIN_PASSWORD_HASH:
+        "scrypt$16384$8$1$fictional-salt$fictional-password-key",
+      SENSITIVE_OPERATION_PASSWORD_HASH:
+        "scrypt$16384$8$1$fictional-salt$fictional-sensitive-key",
+      BLUEBUBBLES_WEBHOOK_SECRET: "b".repeat(32),
+      BLUEBUBBLES_SERVER_URL: "https://bluebubbles.example.test",
+      BLUEBUBBLES_ACCESS_TOKEN: "fictional-bluebubbles-token",
+    };
+    expect(
+      loadConfig({ ...environment, DATABASE_QUERY_TIMEOUT_MS: "45000" })
+        .databaseQueryTimeoutMs,
+    ).toBe(45_000);
+    expect(() =>
+      loadConfig({ ...environment, DATABASE_QUERY_TIMEOUT_MS: "999" }),
+    ).toThrow();
   });
 
   it("allows explicit message retention opt-out and rejects invalid days", () => {

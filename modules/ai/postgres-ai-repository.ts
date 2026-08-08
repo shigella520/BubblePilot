@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { Pool, type PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 import type { AiMutationResult, AiRepository } from "./ai-repository.js";
 import { SettingsCipher } from "../integrations/bluebubbles/settings-cipher.js";
+import { createPostgresPool } from "../shared/postgres-pool.js";
 import {
   aiRouteDegradePolicySchema,
   aiRouteRetryPolicySchema,
@@ -278,8 +279,12 @@ export class PostgresAiRepository implements AiRepository {
   private readonly pool: Pool;
   private readonly cipher: SettingsCipher;
 
-  constructor(databaseUrl: string, settingsEncryptionKey?: string) {
-    this.pool = new Pool({ connectionString: databaseUrl, max: 10 });
+  constructor(
+    databaseUrl: string,
+    settingsEncryptionKey?: string,
+    queryTimeoutMs?: number,
+  ) {
+    this.pool = createPostgresPool(databaseUrl, 10, queryTimeoutMs);
     this.cipher = new SettingsCipher(
       settingsEncryptionKey ??
         process.env.API_ACCESS_TOKEN ??

@@ -37,7 +37,6 @@ describe("SearxngWebSearchTool", () => {
         retry: {
           maxAttempts: 2,
           attemptTimeoutMs: 8000,
-          totalTimeoutMs: 18000,
           retryDelayMs: 0,
         },
       },
@@ -159,7 +158,6 @@ describe("SearxngWebSearchTool", () => {
       tool.search("fictional", {
         maxAttempts: 3,
         attemptTimeoutMs: 6_000,
-        totalTimeoutMs: 15_000,
         retryDelayMs: 250,
         maxResults: 2,
       }),
@@ -169,7 +167,6 @@ describe("SearxngWebSearchTool", () => {
         retry: {
           maxAttempts: 3,
           attemptTimeoutMs: 6_000,
-          totalTimeoutMs: 15_000,
           retryDelayMs: 250,
         },
         maxResults: 2,

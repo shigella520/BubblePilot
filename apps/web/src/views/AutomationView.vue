@@ -194,7 +194,6 @@ const defaultDefinition = (name: string) =>
       name: name || "New workflow",
       startNodeId: "end",
       maxSteps: 64,
-      maxExecutionMs: 60000,
       nodes: [
         { id: "end", type: "end", version: 1, config: { result: "succeeded" } },
       ],
@@ -300,7 +299,6 @@ function aiConversationDefinition(name: string) {
     name: name || "AI conversation workflow",
     startNodeId: "load-context",
     maxSteps: 16,
-    maxExecutionMs: 120000,
     nodes: [
       {
         id: "load-context",
@@ -323,7 +321,6 @@ function aiConversationDefinition(name: string) {
           systemPrompt: aiFlowForm.systemPrompt,
           promptTemplate: aiFlowForm.promptTemplate,
           includeLoadedContext: true,
-          timeoutMs: 60000,
           maxOutputTokens: 1024,
           maxOutputCharacters: 4000,
           temperature: null,

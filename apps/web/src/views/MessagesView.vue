@@ -4,8 +4,10 @@ import {
   FileJson2,
   MessageCircle,
   RefreshCw,
+  Save,
   Search,
   SlidersHorizontal,
+  Users,
   X,
 } from "@lucide/vue";
 import { onMounted, reactive, ref, watch } from "vue";
@@ -56,6 +58,28 @@ interface MessageResult {
     errorCode: string | null;
   }>;
 }
+
+interface ChatParticipant {
+  senderId: string;
+  realName: string | null;
+  nickname: string | null;
+  messageCount: number;
+  lastSeenAt: string;
+}
+
+interface ChatParticipantSet {
+  chatId: string;
+  version: number;
+  participants: ChatParticipant[];
+}
+
+interface ChatParticipantDraft extends Omit<
+  ChatParticipant,
+  "realName" | "nickname"
+> {
+  realName: string;
+  nickname: string;
+}
 interface DataExportJob {
   id: string;
   scope: {
@@ -85,6 +109,11 @@ const exportConfirmed = ref(false);
 const exportPreviewBusy = ref(false);
 const exportConfirmBusy = ref(false);
 const chatToggleBusyIds = reactive(new Set<string>());
+const participantChat = ref<Chat | null>(null);
+const participantVersion = ref(0);
+const participantDrafts = ref<ChatParticipantDraft[]>([]);
+const participantBusy = ref(false);
+const participantSaveBusy = ref(false);
 const exportCancelBusyIds = reactive(new Set<string>());
 const exportDownloadBusyIds = reactive(new Set<string>());
 const form = reactive({
@@ -210,6 +239,88 @@ async function toggleChat(chat: Chat) {
     messageIsError.value = true;
   } finally {
     chatToggleBusyIds.delete(chat.id);
+  }
+}
+
+function applyParticipantSet(value: ChatParticipantSet) {
+  participantVersion.value = value.version;
+  participantDrafts.value = value.participants.map((participant) => ({
+    ...participant,
+    realName: participant.realName ?? "",
+    nickname: participant.nickname ?? "",
+  }));
+}
+
+function closeParticipantEditor() {
+  participantChat.value = null;
+  participantVersion.value = 0;
+  participantDrafts.value = [];
+}
+
+async function editParticipants(chat: Chat) {
+  if (!session.sensitiveActive || participantBusy.value) return;
+  if (participantChat.value?.id === chat.id) {
+    closeParticipantEditor();
+    return;
+  }
+  participantBusy.value = true;
+  participantChat.value = chat;
+  participantDrafts.value = [];
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    const updated = await apiRequest<ChatParticipantSet>(
+      `/api/v1/chats/${chat.id}/participants`,
+    );
+    if (participantChat.value?.id === chat.id) applyParticipantSet(updated);
+  } catch (cause) {
+    closeParticipantEditor();
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    participantBusy.value = false;
+  }
+}
+
+async function saveParticipants() {
+  const chat = participantChat.value;
+  if (chat === null || !session.sensitiveActive || participantSaveBusy.value) {
+    return;
+  }
+  participantSaveBusy.value = true;
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    const identities = participantDrafts.value.flatMap((participant) => {
+      const realName = participant.realName.trim();
+      const nickname = participant.nickname.trim();
+      return realName.length === 0 && nickname.length === 0
+        ? []
+        : [
+            {
+              senderId: participant.senderId,
+              realName: realName.length === 0 ? null : realName,
+              nickname: nickname.length === 0 ? null : nickname,
+            },
+          ];
+    });
+    const updated = await apiRequest<ChatParticipantSet>(
+      `/api/v1/chats/${chat.id}/participants`,
+      {
+        method: "PUT",
+        body: jsonBody({
+          expectedVersion: participantVersion.value,
+          identities,
+        }),
+      },
+    );
+    if (participantChat.value?.id === chat.id) applyParticipantSet(updated);
+    message.value = `聊天「${chat.displayName || chat.providerChatId}」的成员映射已保存。`;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    participantSaveBusy.value = false;
   }
 }
 
@@ -373,6 +484,7 @@ watch(
     messagePager.clear();
     exportPreview.value = null;
     exportConfirmed.value = false;
+    closeParticipantEditor();
   },
 );
 
@@ -439,12 +551,13 @@ onMounted(() => Promise.all([loadChats(true), loadExports(true)]));
                 <th>类型</th>
                 <th>已归档</th>
                 <th>最后发现</th>
+                <th>成员身份</th>
                 <th>监听</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!chats.length">
-                <td colspan="5" class="empty-cell">
+                <td colspan="6" class="empty-cell">
                   <strong>尚未发现聊天</strong>
                   <span class="empty-help"
                     >聊天列表由 BlueBubbles Webhook 首次投递消息后创建；REST
@@ -463,6 +576,30 @@ onMounted(() => Promise.all([loadChats(true), loadExports(true)]));
                 <td>{{ chat.type }}</td>
                 <td>{{ chat.messageCount }}</td>
                 <td>{{ new Date(chat.updatedAt).toLocaleString() }}</td>
+                <td>
+                  <button
+                    class="button secondary tiny"
+                    type="button"
+                    :disabled="
+                      !session.sensitiveActive ||
+                      participantBusy ||
+                      participantSaveBusy
+                    "
+                    :aria-busy="
+                      participantBusy && participantChat?.id === chat.id
+                    "
+                    @click="editParticipants(chat)"
+                  >
+                    <Users :size="15" />
+                    {{
+                      participantBusy && participantChat?.id === chat.id
+                        ? "读取中…"
+                        : participantChat?.id === chat.id
+                          ? "收起"
+                          : "成员映射"
+                    }}
+                  </button>
+                </td>
                 <td>
                   <button
                     class="switch-button"
@@ -488,6 +625,102 @@ onMounted(() => Promise.all([loadChats(true), loadExports(true)]));
             </tbody>
           </table>
         </div>
+        <article v-if="participantChat" class="participant-editor">
+          <header>
+            <div>
+              <p class="card-kicker">PARTICIPANT IDENTITIES</p>
+              <h3>
+                {{
+                  participantChat.displayName || participantChat.providerChatId
+                }}
+                · 成员映射
+              </h3>
+              <p>
+                只列出该聊天历史中实际出现过的发送者
+                ID。留空本名和昵称后保存即可删除对应映射。
+              </p>
+            </div>
+            <button
+              class="icon-button"
+              type="button"
+              :disabled="participantSaveBusy"
+              aria-label="关闭成员映射编辑器"
+              @click="closeParticipantEditor"
+            >
+              <X :size="16" />
+            </button>
+          </header>
+          <div v-if="participantBusy" class="empty-panel">
+            <Users :size="28" /><strong>正在读取历史成员…</strong>
+          </div>
+          <div v-else-if="participantDrafts.length === 0" class="empty-panel">
+            <Users :size="28" /><strong>尚未发现可配置的成员</strong
+            ><span>收到并归档非本人消息后，发送者 ID 会出现在这里。</span>
+          </div>
+          <div v-else class="table-shell participant-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>发送者 ID</th>
+                  <th>历史记录</th>
+                  <th>本名</th>
+                  <th>昵称</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="participant in participantDrafts"
+                  :key="participant.senderId"
+                >
+                  <td>
+                    <strong class="mono">{{ participant.senderId }}</strong>
+                    <span class="keyline">
+                      最后出现：{{
+                        new Date(participant.lastSeenAt).toLocaleString()
+                      }}
+                    </span>
+                  </td>
+                  <td>{{ participant.messageCount }} 条</td>
+                  <td>
+                    <input
+                      v-model="participant.realName"
+                      type="text"
+                      maxlength="120"
+                      autocomplete="off"
+                      placeholder="例如：刘某"
+                    />
+                  </td>
+                  <td>
+                    <input
+                      v-model="participant.nickname"
+                      type="text"
+                      maxlength="120"
+                      autocomplete="off"
+                      placeholder="例如：老大"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="form-actions">
+            <button
+              class="button primary"
+              type="button"
+              :disabled="
+                !session.sensitiveActive ||
+                participantBusy ||
+                participantSaveBusy
+              "
+              :aria-busy="participantSaveBusy"
+              @click="saveParticipants"
+            >
+              <Save :size="16" />{{
+                participantSaveBusy ? "保存中…" : "保存成员映射"
+              }}
+            </button>
+          </div>
+        </article>
         <CursorPagination
           :page="chatPager.pageNumber.value"
           :item-count="chats.length"

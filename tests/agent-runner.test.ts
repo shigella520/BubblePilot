@@ -106,7 +106,6 @@ async function setup(answer?: string) {
     messages: [{ role: "user", content: "What is new?" }],
     maxOutputTokens: 256,
     temperature: null,
-    timeoutMs: 10_000,
     maxOutputCharacters: 4_000,
     outputFormat: "text",
     protectedPrompt: null,
@@ -236,7 +235,6 @@ describe("AgentRunner", () => {
           Promise.resolve({
             maxAttempts: 2,
             attemptTimeoutMs: 8_000,
-            totalTimeoutMs: 18_000,
             retryDelayMs: 300,
             maxResults: 5,
             failurePolicy: "continue",

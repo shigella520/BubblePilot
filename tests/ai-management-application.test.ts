@@ -22,6 +22,7 @@ const config: AppConfig = {
   host: "127.0.0.1",
   port: 8080,
   databaseUrl: "postgresql://unused.example.test/bubblepilot",
+  databaseQueryTimeoutMs: 30_000,
   apiAccessToken,
   settingsEncryptionKey: "fictional-settings-encryption-key-32-chars",
   loginPasswordHash: "scrypt$16384$8$1$fictional-salt$fictional-key",
@@ -102,7 +103,6 @@ describe("AI management API", () => {
           {
             maxAttempts: 2,
             attemptTimeoutMs: 8_000,
-            totalTimeoutMs: 18_000,
             retryDelayMs: 300,
             maxResults: 5,
             failurePolicy: "mode-default",
@@ -190,7 +190,6 @@ describe("AI management API", () => {
       data: {
         maxAttempts: 2,
         attemptTimeoutMs: 8_000,
-        totalTimeoutMs: 18_000,
         retryDelayMs: 300,
         maxResults: 5,
         failurePolicy: "mode-default",
@@ -199,11 +198,13 @@ describe("AI management API", () => {
         updatedAt: null,
       },
     });
+    expect(
+      initial.json<{ data: Record<string, unknown> }>().data,
+    ).not.toHaveProperty("totalTimeoutMs");
 
     const payload = {
       maxAttempts: 3,
       attemptTimeoutMs: 10_000,
-      totalTimeoutMs: 25_000,
       retryDelayMs: 500,
       maxResults: 8,
       failurePolicy: "continue",
@@ -240,8 +241,7 @@ describe("AI management API", () => {
       url: "/api/v1/ai/search/settings",
       payload: {
         ...payload,
-        attemptTimeoutMs: 20_000,
-        totalTimeoutMs: 10_000,
+        attemptTimeoutMs: 500,
         expectedVersion: 1,
       },
     });

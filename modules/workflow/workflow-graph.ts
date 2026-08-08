@@ -44,7 +44,6 @@ export const workflowGraphSchema = z.object({
   name: z.string().min(1).max(120),
   startNodeId: nodeId,
   maxSteps: z.number().int().min(1).max(128).default(64),
-  maxExecutionMs: z.number().int().min(1_000).max(300_000).default(60_000),
   nodes: z
     .array(
       z.object({
@@ -72,6 +71,7 @@ const contextPaths = new Set([
   "context.event.chat.providerChatId",
   "context.history.messages",
   "context.history.count",
+  "context.history.participants",
 ]);
 
 export function validateWorkflowGraph(value: unknown): WorkflowGraphDefinition {

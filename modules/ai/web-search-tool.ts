@@ -98,7 +98,6 @@ function safeResultUrl(value: string): string | null {
 export interface SearxngWebSearchOptions {
   baseUrl: string;
   timeoutMs?: number;
-  totalTimeoutMs?: number;
   maxAttempts?: number;
   retryDelayMs?: number;
   maxResults?: number;
@@ -134,7 +133,6 @@ interface WebSearchTransportAttempt {
 interface ResolvedWebSearchExecutionOptions {
   maxAttempts: number;
   attemptTimeoutMs: number;
-  totalTimeoutMs: number;
   retryDelayMs: number;
   maxResults: number;
 }
@@ -187,7 +185,6 @@ function uniqueEngineFailures(
 export class SearxngWebSearchTool implements WebSearchTool {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
-  private readonly totalTimeoutMs: number;
   private readonly maxAttempts: number;
   private readonly retryDelayMs: number;
   private readonly maxResults: number;
@@ -201,7 +198,6 @@ export class SearxngWebSearchTool implements WebSearchTool {
   ) {
     this.baseUrl = options.baseUrl.replace(/\/+$/u, "");
     this.timeoutMs = options.timeoutMs ?? 8_000;
-    this.totalTimeoutMs = options.totalTimeoutMs ?? 18_000;
     this.maxAttempts = options.maxAttempts ?? 2;
     this.retryDelayMs = options.retryDelayMs ?? 300;
     this.maxResults = options.maxResults ?? 5;
@@ -240,7 +236,6 @@ export class SearxngWebSearchTool implements WebSearchTool {
     }
     const startedAt = Date.now();
     const executionOptions = this.resolveExecutionOptions(options);
-    const deadlineAt = startedAt + executionOptions.totalTimeoutMs;
     const siteConstraint = siteConstraintFromQuery(normalizedQuery);
     const auditEndpoint = new URL("search", `${this.baseUrl}/`);
     const requestDetails = {
@@ -254,7 +249,6 @@ export class SearxngWebSearchTool implements WebSearchTool {
       retry: {
         maxAttempts: executionOptions.maxAttempts,
         attemptTimeoutMs: executionOptions.attemptTimeoutMs,
-        totalTimeoutMs: executionOptions.totalTimeoutMs,
         retryDelayMs: executionOptions.retryDelayMs,
       },
       maxResults: executionOptions.maxResults,
@@ -269,7 +263,6 @@ export class SearxngWebSearchTool implements WebSearchTool {
       await this.searchWithRetry(
         normalizedQuery,
         "exact",
-        deadlineAt,
         executionOptions,
         requestDetails,
       ),
@@ -283,33 +276,27 @@ export class SearxngWebSearchTool implements WebSearchTool {
     let usableResults = exactResults;
     let relaxedSearchError: Readonly<Record<string, unknown>> | null = null;
     if (siteConstraint !== null && usableResults.length === 0) {
-      const remainingMs = Math.max(0, deadlineAt - Date.now());
-      if (remainingMs > 0) {
-        try {
-          const relaxedAttempt = await this.searchWithRetry(
-            siteConstraint.relaxedQuery,
-            "relaxed-site",
-            deadlineAt,
-            executionOptions,
-            {
-              ...requestDetails,
-              query: siteConstraint.relaxedQuery,
-            },
-          );
-          attempts.push(relaxedAttempt);
-          usableResults = relaxedAttempt.results.filter((result) =>
-            belongsToDomain(result, siteConstraint.domain),
-          );
-        } catch (error) {
-          if (!(error instanceof WebSearchToolError)) throw error;
-          relaxedSearchError = {
-            code: error.code,
-            requestDetails: error.requestDetails,
-            responseDetails: error.responseDetails,
-          };
-        }
-      } else {
-        relaxedSearchError = { code: "AI_WEB_SEARCH_TIMEOUT" };
+      try {
+        const relaxedAttempt = await this.searchWithRetry(
+          siteConstraint.relaxedQuery,
+          "relaxed-site",
+          executionOptions,
+          {
+            ...requestDetails,
+            query: siteConstraint.relaxedQuery,
+          },
+        );
+        attempts.push(relaxedAttempt);
+        usableResults = relaxedAttempt.results.filter((result) =>
+          belongsToDomain(result, siteConstraint.domain),
+        );
+      } catch (error) {
+        if (!(error instanceof WebSearchToolError)) throw error;
+        relaxedSearchError = {
+          code: error.code,
+          requestDetails: error.requestDetails,
+          responseDetails: error.responseDetails,
+        };
       }
     }
     const retainedResults = usableResults.slice(0, executionOptions.maxResults);
@@ -370,12 +357,6 @@ export class SearxngWebSearchTool implements WebSearchTool {
     return {
       maxAttempts: integer(options.maxAttempts, this.maxAttempts, 1, 5),
       attemptTimeoutMs,
-      totalTimeoutMs: integer(
-        options.totalTimeoutMs,
-        this.totalTimeoutMs,
-        1_000,
-        120_000,
-      ),
       retryDelayMs: integer(options.retryDelayMs, this.retryDelayMs, 0, 5_000),
       maxResults: integer(options.maxResults, this.maxResults, 1, 20),
     };
@@ -384,16 +365,13 @@ export class SearxngWebSearchTool implements WebSearchTool {
   private async searchWithRetry(
     query: string,
     strategy: SearxngSearchAttempt["strategy"],
-    deadlineAt: number,
     options: ResolvedWebSearchExecutionOptions,
     requestDetails: Readonly<Record<string, unknown>>,
   ): Promise<SearxngSearchAttempt> {
     const transportAttempts: WebSearchTransportAttempt[] = [];
     let lastError: WebSearchToolError | null = null;
     for (let attempt = 1; attempt <= options.maxAttempts; attempt += 1) {
-      const remainingMs = Math.max(0, deadlineAt - Date.now());
-      if (remainingMs === 0) break;
-      const timeoutMs = Math.min(options.attemptTimeoutMs, remainingMs);
+      const timeoutMs = options.attemptTimeoutMs;
       const attemptStartedAt = Date.now();
       try {
         const result = await this.searchOnce(
@@ -431,30 +409,22 @@ export class SearxngWebSearchTool implements WebSearchTool {
               : null,
           errorCode: lastError.code,
         });
-        if (
-          attempt >= options.maxAttempts ||
-          !this.isRetryable(lastError) ||
-          Date.now() >= deadlineAt
-        ) {
+        if (attempt >= options.maxAttempts || !this.isRetryable(lastError)) {
           break;
         }
         const jitteredDelayMs = Math.round(
           options.retryDelayMs * (0.75 + Math.random() * 0.5),
         );
-        const delayMs = Math.min(
-          jitteredDelayMs,
-          Math.max(0, deadlineAt - Date.now()),
-        );
-        if (delayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        if (jitteredDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, jitteredDelayMs));
         }
       }
     }
     const error =
       lastError ??
       new WebSearchToolError(
-        "AI_WEB_SEARCH_TIMEOUT",
-        "The web search service exhausted its total time budget.",
+        "AI_WEB_SEARCH_FAILED",
+        "The web search service did not complete an HTTP attempt.",
         { requestDetails },
       );
     throw new WebSearchToolError(error.code, error.message, {

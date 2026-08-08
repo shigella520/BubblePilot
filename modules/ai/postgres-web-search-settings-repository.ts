@@ -1,4 +1,6 @@
-import { Pool } from "pg";
+import type { Pool } from "pg";
+
+import { createPostgresPool } from "../shared/postgres-pool.js";
 
 import type { WebSearchFailurePolicy } from "./ai-types.js";
 import type {
@@ -9,7 +11,6 @@ import type {
 interface SettingsRow {
   max_attempts: number;
   attempt_timeout_ms: number;
-  total_timeout_ms: number;
   retry_delay_ms: number;
   max_results: number;
   failure_policy: WebSearchFailurePolicy;
@@ -17,15 +18,32 @@ interface SettingsRow {
   updated_at: Date;
 }
 
-const returning = `max_attempts, attempt_timeout_ms, total_timeout_ms,
-                    retry_delay_ms, max_results, failure_policy,
+const returning = `max_attempts, attempt_timeout_ms, retry_delay_ms,
+                    max_results, failure_policy,
                     version, updated_at`;
+
+// Migration 0021 made total_timeout_ms mandatory. Keep writing a derived
+// compatibility value while that legacy column exists; runtime behavior no
+// longer reads it as a separate budget.
+function legacyTotalTimeoutMs(input: {
+  maxAttempts: number;
+  attemptTimeoutMs: number;
+  retryDelayMs: number;
+}): number {
+  return Math.min(
+    120_000,
+    Math.max(
+      input.attemptTimeoutMs,
+      input.maxAttempts * input.attemptTimeoutMs +
+        Math.max(0, input.maxAttempts - 1) * input.retryDelayMs,
+    ),
+  );
+}
 
 function record(row: SettingsRow): WebSearchSettingsRecord {
   return {
     maxAttempts: row.max_attempts,
     attemptTimeoutMs: row.attempt_timeout_ms,
-    totalTimeoutMs: row.total_timeout_ms,
     retryDelayMs: row.retry_delay_ms,
     maxResults: row.max_results,
     failurePolicy: row.failure_policy,
@@ -37,8 +55,8 @@ function record(row: SettingsRow): WebSearchSettingsRecord {
 export class PostgresWebSearchSettingsRepository implements WebSearchSettingsRepository {
   private readonly pool: Pool;
 
-  constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl, max: 3 });
+  constructor(databaseUrl: string, queryTimeoutMs?: number) {
+    this.pool = createPostgresPool(databaseUrl, 3, queryTimeoutMs);
   }
 
   async find(): Promise<WebSearchSettingsRecord | null> {
@@ -55,7 +73,7 @@ export class PostgresWebSearchSettingsRepository implements WebSearchSettingsRep
     const values = [
       input.maxAttempts,
       input.attemptTimeoutMs,
-      input.totalTimeoutMs,
+      legacyTotalTimeoutMs(input),
       input.retryDelayMs,
       input.maxResults,
       input.failurePolicy,

@@ -166,7 +166,6 @@ export class AiRoutingService {
     }
 
     const startedAt = Date.now();
-    const deadline = startedAt + request.timeoutMs;
     let attemptCount = 0;
     let lastFailure: AiCallFailure | null = null;
     let probeBusy = false;
@@ -198,14 +197,6 @@ export class AiRoutingService {
           selection.nextAvailableAt === null
             ? null
             : Date.parse(selection.nextAvailableAt);
-        if (
-          availableAt !== null &&
-          availableAt < deadline &&
-          round < snapshot.route.retryPolicy.maxRounds
-        ) {
-          await delay(Math.max(0, availableAt - Date.now()));
-          continue;
-        }
         return {
           status: "failed",
           code: "AI_ROUTE_DEGRADED",
@@ -219,15 +210,6 @@ export class AiRoutingService {
       const nextRoundProviderIds = new Set<string>();
       let sequence = 0;
       for (const candidate of candidates) {
-        if (Date.now() >= deadline) {
-          return {
-            status: "failed",
-            code: "AI_NODE_TIMEOUT",
-            summary: "The AI node exhausted its total time budget.",
-            retryable: true,
-            attemptCount,
-          };
-        }
         let selectionHealthState = candidate.healthState;
         if (candidate.healthState !== "healthy") {
           const claimed = await this.repository.claimProviderProbe(
@@ -254,7 +236,6 @@ export class AiRoutingService {
           messages: request.messages,
           maxOutputTokens: request.maxOutputTokens,
           temperature: request.temperature,
-          timeoutMs: Math.max(1, deadline - Date.now()),
           clientRequestId: `${request.executionId}:${request.nodeId}:${round}:${sequence}`,
           ...(useHostedSearch ? { webSearch: request.webSearch } : {}),
           ...(!useHostedSearch && request.tools !== undefined
@@ -388,9 +369,6 @@ export class AiRoutingService {
       retryableProviderIds = nextRoundProviderIds;
       const waitMs =
         snapshot.route.retryPolicy.initialDelayMs * 2 ** (round - 1);
-      if (Date.now() + waitMs >= deadline) {
-        break;
-      }
       await delay(waitMs);
     }
 

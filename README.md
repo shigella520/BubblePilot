@@ -42,18 +42,20 @@ BubblePilot 接收 BlueBubbles 的新消息，在你指定的聊天中保存内�
 - **只处理你选择的聊天**：未启用监听的聊天只保留发现所需的最小元数据，不归档正文。
 - **自动化过程可解释**：入站、匹配、节点、AI 调用、搜索工具和回复状态都能在管理端追踪。
 - **AI 服务不被单点绑定**：多个 Provider 可按固定顺序 Retry、Fallback，并在连续故障后自动降级。
+- **群聊成员可以被准确识别**：按对话为历史 sender ID 配置本名和昵称，AI 只读取当前上下文实际出现成员的映射。
 - **数据保存在自己的实例**：PostgreSQL 是消息、配置、执行和审计记录的权威来源。
 
 ## 你可以用它做什么
 
-| 场景 | BubblePilot 提供的能力 |
-| --- | --- |
-| 保存重要对话 | 按聊天开启监听，搜索归档消息，并按授权范围导出 JSON Lines |
-| 创建群聊 Bot | 用聊天、发送者、消息类型、关键词、前缀、正则和时间窗口触发工作流 |
-| 编排消息流程 | 在画布中连接上下文、条件、变量、AI、回复和结束节点 |
-| 接入不同 AI | 管理多个 OpenAI 兼容 Provider、模型和路由，自动 Retry、Fallback 与恢复 |
+| 场景             | BubblePilot 提供的能力                                                       |
+| ---------------- | ---------------------------------------------------------------------------- |
+| 保存重要对话     | 按聊天开启监听，搜索归档消息，并按授权范围导出 JSON Lines                    |
+| 创建群聊 Bot     | 用聊天、发送者、消息类型、关键词、前缀、正则和时间窗口触发工作流             |
+| 识别群聊成员     | 从聊天历史发现 sender ID，按对话维护本名和昵称，由 AI 自动区分每句话的发言者 |
+| 编排消息流程     | 在画布中连接上下文、条件、变量、AI、回复和结束节点                           |
+| 接入不同 AI      | 管理多个 OpenAI 兼容 Provider、模型和路由，自动 Retry、Fallback 与恢复       |
 | 获取最新网页信息 | 由模型按需使用 Provider 托管搜索，或通过 Function Calling 调用自托管 SearXNG |
-| 排查失败 | 查看执行、节点、Provider Attempt、工具轨迹和出站状态，安全恢复死信 |
+| 排查失败         | 查看执行、节点、Provider Attempt、工具轨迹和出站状态，安全恢复死信           |
 
 联网搜索不是必需功能。关闭时 BubblePilot 仍可完成消息归档、普通工作流和不联网的 AI 回复。
 
@@ -170,18 +172,18 @@ unset BUBBLEPILOT_PLAIN_PASSWORD
 
 至少替换下面这些值；所有 `CHANGE_ME` 都必须处理：
 
-| 配置 | 填写内容 |
-| --- | --- |
-| `POSTGRES_PASSWORD` | 上一步生成的数据库密码 |
-| `DATABASE_URL` | 把连接串中的数据库密码改成与 `POSTGRES_PASSWORD` 相同 |
-| `API_ACCESS_TOKEN` | 独立随机值，用于管理 API 兼容访问 |
-| `SETTINGS_ENCRYPTION_KEY` | 独立随机值；用于加密数据库中的运行时凭据，部署后必须稳定保存 |
-| `BLUEBUBBLES_WEBHOOK_SECRET` | 独立随机值；稍后放入 Webhook URL |
-| `BLUEBUBBLES_SERVER_URL` | BlueBubbles Server 根地址，例如 `http://192.0.2.10:1234` |
-| `BLUEBUBBLES_ACCESS_TOKEN` | BlueBubbles Server 的 REST API Password |
-| `APP_LOGIN_PASSWORD_HASH` | 第一次生成的哈希，必须用单引号包裹 |
-| `SENSITIVE_OPERATION_PASSWORD_HASH` | 第二次生成的不同哈希，必须用单引号包裹 |
-| `SEARXNG_SECRET` | 独立随机值，即使暂不联网搜索也需要设置 |
+| 配置                                | 填写内容                                                     |
+| ----------------------------------- | ------------------------------------------------------------ |
+| `POSTGRES_PASSWORD`                 | 上一步生成的数据库密码                                       |
+| `DATABASE_URL`                      | 把连接串中的数据库密码改成与 `POSTGRES_PASSWORD` 相同        |
+| `API_ACCESS_TOKEN`                  | 独立随机值，用于管理 API 兼容访问                            |
+| `SETTINGS_ENCRYPTION_KEY`           | 独立随机值；用于加密数据库中的运行时凭据，部署后必须稳定保存 |
+| `BLUEBUBBLES_WEBHOOK_SECRET`        | 独立随机值；稍后放入 Webhook URL                             |
+| `BLUEBUBBLES_SERVER_URL`            | BlueBubbles Server 根地址，例如 `http://192.0.2.10:1234`     |
+| `BLUEBUBBLES_ACCESS_TOKEN`          | BlueBubbles Server 的 REST API Password                      |
+| `APP_LOGIN_PASSWORD_HASH`           | 第一次生成的哈希，必须用单引号包裹                           |
+| `SENSITIVE_OPERATION_PASSWORD_HASH` | 第二次生成的不同哈希，必须用单引号包裹                       |
+| `SEARXNG_SECRET`                    | 独立随机值，即使暂不联网搜索也需要设置                       |
 
 哈希包含 `$`，必须保留单引号：
 
@@ -194,7 +196,7 @@ SENSITIVE_OPERATION_PASSWORD_HASH='scrypt$...'
 
 - `MONITORED_CHAT_IDS`：已知 Chat GUID 时可提前写入，多个值以逗号分隔；留空时先通过 Webhook 发现聊天，再在管理端开启监听。
 - `MESSAGE_RETENTION_DAYS`：消息正文和附件元数据默认保留 90 天；设为 `0` 表示明确接受无限期保留风险。
-- `ENABLE_WEB_SEARCH`：默认 `false`，作为部署级安全总开关。开启后，重试、超时、结果数和失败兜底统一在 AI 页面的“联网搜索全局配置”中管理，保存后立即生效。
+- `ENABLE_WEB_SEARCH`：默认 `false`，作为部署级安全总开关。开启后，尝试次数、单次请求超时、退避、结果数和失败兜底统一在 AI 页面的“联网搜索全局配置”中管理，保存后立即生效。
 - `BUBBLEPILOT_IMAGE`：源码部署会由 Compose 本地构建；正式部署可固定为 `ghcr.io/shigella520/bubblepilot:1.0.0`，不要长期使用 `dev` 或 `latest`。
 
 ### 4. 启动并检查服务
@@ -227,7 +229,7 @@ https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_W
 
 ### 6. 配置 AI Provider（可选）
 
-1. 进入“AI Provider”，创建 Provider，填写接口类型、Base URL、模型、API Key 和超时。
+1. 进入“AI Provider”，创建 Provider，填写接口类型、Base URL、模型、API Key 和单次请求超时。
 2. 按 Provider 实际能力勾选 Function Calling 或托管搜索，再运行连接与能力测试。
 3. 创建一条 Provider 路由，选择候选顺序以及 Fallback、Retry、降级阈值和冷却时间。
 4. 若要联网搜索，确认 `.env` 中 `ENABLE_WEB_SEARCH=true`，且页面显示搜索后端可用。
@@ -243,12 +245,13 @@ API Key 会使用 `SETTINGS_ENCRYPTION_KEY` 加密保存到 PostgreSQL，之后�
 ```
 
 1. 在“消息触发器”中选择已监听聊天，填写关键词或前缀，并打开节点的启用开关。
-2. 需要组合固定说明、当前消息或上游结果时，加入“渲染文本”，在模板编辑器中插入 Context 内容并把 `text` 输出连接给下游。
-3. 在“AI 对话”中选择刚创建的 Provider 路由，设置提示词、输出上限和联网策略。
-4. 将 `AI 对话.text` 连接到 `回复消息.text`，再连接各节点的成功出口。
-5. 保存工作流并点击顶部“启用”，然后在目标聊天发送符合条件的消息，到“执行”页面检查每个节点和最终回复状态。
+2. 如需识别群聊成员，到“消息”页为目标聊天历史中出现的 sender ID 配置本名和昵称；加载上下文和 AI 节点会自动使用当前窗口涉及的映射。
+3. 需要组合固定说明、当前消息或上游结果时，加入“渲染文本”，在模板编辑器中插入 Context 内容并把 `text` 输出连接给下游。
+4. 在“AI 对话”中选择刚创建的 Provider 路由，设置提示词、输出上限和联网策略。
+5. 将 `AI 对话.text` 连接到 `回复消息.text`，再连接各节点的成功出口。
+6. 保存工作流并点击顶部“启用”，然后在目标聊天发送符合条件的消息，到“执行”页面检查每个节点和最终回复状态。
 
-“渲染文本”支持 `{{context.event.message.text}}`、`{{context.event.message.senderId}}` 和 `{{context.outputs.<动作ID>.<输出端口>}}` 等受控引用，适合昵称映射、固定背景与动态消息的组合。
+“渲染文本”支持 `{{context.event.message.text}}`、`{{context.event.message.senderId}}`、`{{context.history.participants}}` 和 `{{context.outputs.<动作ID>.<输出端口>}}` 等受控引用，适合固定背景与动态消息的组合；成员识别通常不需要手工渲染。
 
 不需要 AI 时，可以使用“消息触发器 → 回复消息 → 结束”创建固定回复自动化。
 
@@ -264,15 +267,15 @@ API Key 会使用 `SETTINGS_ENCRYPTION_KEY` 加密保存到 PostgreSQL，之后�
 
 ## 文档
 
-| 文档 | 适合什么时候阅读 |
-| --- | --- |
-| [文档中心](doc/README.md) | 查看全部文档及其权威范围 |
-| [产品与范围](doc/产品与范围.md) | 了解目标用户、已完成范围、验收和后续方向 |
-| [部署与运维](doc/部署与运维.md) | 首次配置、生产部署、备份、升级和排障 |
-| [技术设计](doc/技术设计.md) | 了解架构、数据边界、安全和模块职责 |
-| [事件与工作流设计](doc/事件与工作流设计.md) | 了解触发、节点、AI 路由、幂等和恢复语义 |
-| [接口与配置契约](doc/接口与配置契约.md) | 查询 API、权限、环境变量和机器契约 |
-| [开发与发布](doc/开发与发布.md) | 本地开发、验证、迁移、分支和发布流程 |
+| 文档                                        | 适合什么时候阅读                         |
+| ------------------------------------------- | ---------------------------------------- |
+| [文档中心](doc/README.md)                   | 查看全部文档及其权威范围                 |
+| [产品与范围](doc/产品与范围.md)             | 了解目标用户、已完成范围、验收和后续方向 |
+| [部署与运维](doc/部署与运维.md)             | 首次配置、生产部署、备份、升级和排障     |
+| [技术设计](doc/技术设计.md)                 | 了解架构、数据边界、安全和模块职责       |
+| [事件与工作流设计](doc/事件与工作流设计.md) | 了解触发、节点、AI 路由、幂等和恢复语义  |
+| [接口与配置契约](doc/接口与配置契约.md)     | 查询 API、权限、环境变量和机器契约       |
+| [开发与发布](doc/开发与发布.md)             | 本地开发、验证、迁移、分支和发布流程     |
 
 ## 许可证
 

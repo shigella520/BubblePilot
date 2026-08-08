@@ -42,6 +42,21 @@ describe("workflow search source display", () => {
     const node = parsed.nodes.find((item) => item.type === "ai-chat");
     expect(node?.config.webSearchSources).toBe("hidden");
   });
+
+  it("ignores legacy aggregate timeout fields", () => {
+    const legacy = definition() as ReturnType<typeof definition> & {
+      maxExecutionMs: number;
+    };
+    legacy.maxExecutionMs = 60_000;
+    const aiNode = legacy.nodes[0];
+    if (aiNode === undefined) throw new Error("Expected an AI node fixture.");
+    Object.assign(aiNode.config, { timeoutMs: 30_000 });
+
+    const parsed = parseWorkflowDefinition(legacy);
+    const parsedAi = parsed.nodes.find((item) => item.type === "ai-chat");
+    expect(parsed).not.toHaveProperty("maxExecutionMs");
+    expect(parsedAi?.config).not.toHaveProperty("timeoutMs");
+  });
 });
 
 describe("render-text workflow node", () => {
