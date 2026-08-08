@@ -88,6 +88,8 @@ correlationId
 
 适配器调用 BlueBubbles `POST /api/v1/message/text?password=<token>`，映射 `chatGuid`、`message`、`method`、稳定 `tempGuid`，可选引用消息映射为 `selectedMessageGuid` 与 `partIndex`。
 
+发送前，BlueBubbles 适配器会将模型偶尔生成的 Markdown 标记规范化为 iMessage 可读的纯文本：移除粗体、斜体、标题、引用、代码围栏等标记，将项目列表和表格转为普通文本，并把 Markdown 链接保留为“名称：URL”。该转换只作用于最终请求体，不修改工作流变量、AI 原始输出、入站消息或执行记录；普通 URL、数字列表和标识符保持不变。
+
 结果分类：
 
 - `confirmed`：供应商明确确认；
