@@ -30,7 +30,6 @@ export class WebSearchSettingsService {
       : {
           maxAttempts: stored.maxAttempts,
           attemptTimeoutMs: stored.attemptTimeoutMs,
-          totalTimeoutMs: stored.totalTimeoutMs,
           retryDelayMs: stored.retryDelayMs,
           maxResults: stored.maxResults,
           failurePolicy: stored.failurePolicy,

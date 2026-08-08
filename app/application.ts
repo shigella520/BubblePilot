@@ -125,6 +125,47 @@ const chatMonitoringBodySchema = z.object({
   expectedVersion: z.number().int().positive(),
 });
 
+const chatParticipantNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .refine((value) => !/[\p{Cc}\p{Cf}]/u.test(value), {
+    message: "Participant names must not contain control characters.",
+  });
+
+const chatParticipantIdentitySchema = z
+  .object({
+    senderId: z.string().trim().min(1).max(500),
+    realName: chatParticipantNameSchema.nullable(),
+    nickname: chatParticipantNameSchema.nullable(),
+  })
+  .strict()
+  .refine(
+    (identity) => identity.realName !== null || identity.nickname !== null,
+    { message: "A participant identity requires a real name or nickname." },
+  );
+
+const chatParticipantIdentitiesBodySchema = z
+  .object({
+    expectedVersion: z.number().int().positive(),
+    identities: z.array(chatParticipantIdentitySchema).max(100),
+  })
+  .strict()
+  .superRefine((body, context) => {
+    const senderIds = new Set<string>();
+    for (const [index, identity] of body.identities.entries()) {
+      if (senderIds.has(identity.senderId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["identities", index, "senderId"],
+          message: "Participant sender IDs must be unique.",
+        });
+      }
+      senderIds.add(identity.senderId);
+    }
+  });
+
 const messageSearchQuerySchema = pageQuerySchema
   .extend({
     chatId: z.string().uuid().optional(),
@@ -1065,6 +1106,61 @@ export function buildApplication(
           "CHAT_MONITORING_CONFLICT",
           "The chat monitoring state changed; refresh before retrying.",
           409,
+        );
+      }
+      return { data: result.value };
+    },
+  );
+
+  application.get(
+    "/api/v1/chats/:chatId/participants",
+    { preHandler: requireSensitive("chat.participants.view", "chat") },
+    async (request) => {
+      const parameters = chatParametersSchema.parse(request.params);
+      const participants = await repository.getChatParticipants(
+        parameters.chatId,
+      );
+      if (participants === null) {
+        throw new ApplicationError(
+          "CHAT_NOT_FOUND",
+          "The chat does not exist or is unavailable.",
+          404,
+        );
+      }
+      return { data: participants };
+    },
+  );
+
+  application.put(
+    "/api/v1/chats/:chatId/participants",
+    { preHandler: requireSensitive("chat.participants.update", "chat") },
+    async (request) => {
+      const parameters = chatParametersSchema.parse(request.params);
+      const body = chatParticipantIdentitiesBodySchema.parse(request.body);
+      const result = await repository.saveChatParticipantIdentities({
+        chatId: parameters.chatId,
+        expectedVersion: body.expectedVersion,
+        identities: body.identities,
+      });
+      if (result.status === "not-found") {
+        throw new ApplicationError(
+          "CHAT_NOT_FOUND",
+          "The chat does not exist or is unavailable.",
+          404,
+        );
+      }
+      if (result.status === "conflict") {
+        throw new ApplicationError(
+          "CHAT_PARTICIPANT_IDENTITIES_CONFLICT",
+          "The participant mapping changed; refresh before retrying.",
+          409,
+        );
+      }
+      if (result.status === "invalid-sender") {
+        throw new ApplicationError(
+          "CHAT_PARTICIPANT_NOT_DISCOVERED",
+          "Every mapped sender ID must already appear in this chat history.",
+          400,
         );
       }
       return { data: result.value };

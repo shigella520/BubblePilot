@@ -52,6 +52,7 @@ describe("Web admin authentication", () => {
       host: "127.0.0.1",
       port: 8080,
       databaseUrl: "postgresql://unused.example.test/bubblepilot",
+      databaseQueryTimeoutMs: 30_000,
       apiAccessToken: "fictional-api-access-token-32-chars-long",
       settingsEncryptionKey: "fictional-settings-encryption-key-32-chars",
       loginPasswordHash,

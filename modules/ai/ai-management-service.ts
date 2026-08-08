@@ -128,7 +128,6 @@ export class AiManagementService {
       // connectivity probe small, but large enough to receive its final OK.
       maxOutputTokens: 128,
       temperature: 0,
-      timeoutMs: provider.requestTimeoutMs,
     });
     let functionCalling: "verified" | "failed" | "unknown" = "unknown";
     let hostedWebSearch: "verified" | "failed" | "unknown" = "unknown";
@@ -147,7 +146,6 @@ export class AiManagementService {
         ],
         maxOutputTokens: 128,
         temperature: 0,
-        timeoutMs: provider.requestTimeoutMs,
         tools: [
           {
             name: "capability_probe",
@@ -189,7 +187,6 @@ export class AiManagementService {
         ],
         maxOutputTokens: 128,
         temperature: 0,
-        timeoutMs: provider.requestTimeoutMs,
         webSearch: "required",
       });
       totalDurationMs += searchProbe.durationMs;

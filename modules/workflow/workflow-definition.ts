@@ -123,7 +123,6 @@ const aiChatNodeSchema = z.object({
     systemPrompt: z.string().max(12_000).default(""),
     promptTemplate: z.string().min(1).max(12_000),
     includeLoadedContext: z.boolean().default(true),
-    timeoutMs: z.number().int().min(1_000).max(120_000).default(30_000),
     maxOutputTokens: z.number().int().min(1).max(8_192).default(1_024),
     maxOutputCharacters: z.number().int().min(1).max(12_000).default(4_000),
     temperature: z.number().min(0).max(2).nullable().default(null),
@@ -182,7 +181,6 @@ const rawWorkflowDefinitionSchema = z.object({
   name: z.string().min(1).max(120),
   startNodeId: nodeIdSchema,
   maxSteps: z.number().int().min(1).max(128).default(64),
-  maxExecutionMs: z.number().int().min(1_000).max(300_000).default(60_000),
   nodes: z.array(workflowNodeSchema).min(1).max(64),
 });
 
@@ -229,6 +227,7 @@ function validateSemantics(definition: WorkflowDefinition): void {
     "context.event.chat.displayName",
     "context.history.messages",
     "context.history.count",
+    "context.history.participants",
   ]);
   const allowedTemplateKeys = new Set<string>([
     "message.text",

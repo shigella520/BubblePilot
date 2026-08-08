@@ -27,7 +27,6 @@ const request = {
   ],
   maxOutputTokens: 128,
   temperature: 0.2,
-  timeoutMs: 5_000,
 };
 
 describe("OpenAiCompatibleClient", () => {
@@ -47,6 +46,7 @@ describe("OpenAiCompatibleClient", () => {
   });
 
   it("sends Chat Completions without exposing the secret in the result", async () => {
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
     const fetchImplementation = vi
       .fn<typeof fetch>()
       .mockResolvedValue(
@@ -76,6 +76,11 @@ describe("OpenAiCompatibleClient", () => {
       authorization: "Bearer server-secret",
       "content-type": "application/json",
     });
+    expect(timeoutSpy).toHaveBeenCalledWith(
+      expect.any(Function),
+      provider.requestTimeoutMs,
+    );
+    timeoutSpy.mockRestore();
     const payload = JSON.parse(
       typeof options?.body === "string" ? options.body : "null",
     ) as Record<string, unknown>;

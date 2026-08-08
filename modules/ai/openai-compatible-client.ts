@@ -558,8 +558,10 @@ export class OpenAiCompatibleClient implements AiClient {
     }
 
     const controller = new AbortController();
-    const timeoutMs = Math.min(request.timeoutMs, provider.requestTimeoutMs);
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      provider.requestTimeoutMs,
+    );
     try {
       const response = await this.fetchImplementation(endpoint, {
         method: "POST",

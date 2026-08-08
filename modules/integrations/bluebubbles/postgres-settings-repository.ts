@@ -1,4 +1,6 @@
-import { Pool } from "pg";
+import type { Pool } from "pg";
+
+import { createPostgresPool } from "../../shared/postgres-pool.js";
 
 import type {
   BlueBubblesSettingsRecord,
@@ -30,8 +32,8 @@ function record(row: SettingsRow): BlueBubblesSettingsRecord {
 export class PostgresBlueBubblesSettingsRepository implements BlueBubblesSettingsRepository {
   private readonly pool: Pool;
 
-  constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl, max: 5 });
+  constructor(databaseUrl: string, queryTimeoutMs?: number) {
+    this.pool = createPostgresPool(databaseUrl, 5, queryTimeoutMs);
   }
 
   async find(): Promise<BlueBubblesSettingsRecord | null> {

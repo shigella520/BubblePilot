@@ -27,7 +27,6 @@ export class InMemoryWebSearchSettingsRepository implements WebSearchSettingsRep
     const value: WebSearchSettingsRecord = {
       maxAttempts: input.maxAttempts,
       attemptTimeoutMs: input.attemptTimeoutMs,
-      totalTimeoutMs: input.totalTimeoutMs,
       retryDelayMs: input.retryDelayMs,
       maxResults: input.maxResults,
       failurePolicy: input.failurePolicy,

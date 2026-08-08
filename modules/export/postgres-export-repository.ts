@@ -1,4 +1,6 @@
-import { Pool, type PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
+
+import { createPostgresPool } from "../shared/postgres-pool.js";
 
 import type { DataExportRepository } from "./export-repository.js";
 import type {
@@ -161,8 +163,8 @@ function executionView(row: ExecutionRow): DataExportExecution {
 export class PostgresDataExportRepository implements DataExportRepository {
   private readonly pool: Pool;
 
-  constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl, max: 5 });
+  constructor(databaseUrl: string, queryTimeoutMs?: number) {
+    this.pool = createPostgresPool(databaseUrl, 5, queryTimeoutMs);
   }
 
   async createPreview(input: {

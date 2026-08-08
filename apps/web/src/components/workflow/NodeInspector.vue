@@ -20,6 +20,7 @@ const contextTemplateReferences = [
   { token: "context.event.provider", label: "当前消息 Provider" },
   { token: "context.history.messages", label: "聊天历史（JSON）" },
   { token: "context.history.count", label: "聊天历史数量" },
+  { token: "context.history.participants", label: "聊天成员映射（JSON）" },
 ];
 const props = defineProps<{
   node: any | null;
@@ -129,6 +130,9 @@ function templateReferences() {
           <option value="path:context.event.message.text">当前消息文本</option>
           <option value="path:context.history.messages">聊天历史消息</option>
           <option value="path:context.history.count">历史消息数量</option>
+          <option value="path:context.history.participants">
+            聊天成员映射
+          </option>
           <option
             v-for="reference in props.references ?? []"
             :key="referenceOptionValue(reference)"

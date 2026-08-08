@@ -142,7 +142,6 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
           name: "route-reference",
           startNodeId: "ai",
           maxSteps: 8,
-          maxExecutionMs: 10_000,
           nodes: [
             {
               id: "ai",

@@ -31,7 +31,6 @@ const routeRequest = (routeId: string): AiRouteRequest => ({
   messages: [{ role: "user", content: "Fictional prompt" }],
   maxOutputTokens: 128,
   temperature: null,
-  timeoutMs: 10_000,
   maxOutputCharacters: 4_000,
   outputFormat: "text",
   protectedPrompt: null,

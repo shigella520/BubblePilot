@@ -64,7 +64,6 @@ interface AiRoute {
 interface WebSearchSettings {
   maxAttempts: number;
   attemptTimeoutMs: number;
-  totalTimeoutMs: number;
   retryDelayMs: number;
   maxResults: number;
   failurePolicy: "mode-default" | "fail" | "continue";
@@ -76,7 +75,6 @@ type WebSearchSettingsForm = Pick<
   WebSearchSettings,
   | "maxAttempts"
   | "attemptTimeoutMs"
-  | "totalTimeoutMs"
   | "retryDelayMs"
   | "maxResults"
   | "failurePolicy"
@@ -114,7 +112,6 @@ const searchSettingsBusy = ref(false);
 const searchSettingsForm = reactive<WebSearchSettingsForm>({
   maxAttempts: 2,
   attemptTimeoutMs: 8000,
-  totalTimeoutMs: 18000,
   retryDelayMs: 300,
   maxResults: 5,
   failurePolicy: "mode-default",
@@ -176,7 +173,6 @@ function applySearchSettings(value: WebSearchSettings) {
   Object.assign(searchSettingsForm, {
     maxAttempts: value.maxAttempts,
     attemptTimeoutMs: value.attemptTimeoutMs,
-    totalTimeoutMs: value.totalTimeoutMs,
     retryDelayMs: value.retryDelayMs,
     maxResults: value.maxResults,
     failurePolicy: value.failurePolicy,
@@ -711,22 +707,12 @@ onMounted(load);
                 required
             /></label>
             <label
-              ><span>单次超时（毫秒）</span
+              ><span>单次请求超时（毫秒）</span
               ><input
                 v-model.number="searchSettingsForm.attemptTimeoutMs"
                 type="number"
                 min="1000"
                 max="60000"
-                step="500"
-                required
-            /></label>
-            <label
-              ><span>工具总预算（毫秒）</span
-              ><input
-                v-model.number="searchSettingsForm.totalTimeoutMs"
-                type="number"
-                min="1000"
-                max="120000"
                 step="500"
                 required
             /></label>
@@ -753,7 +739,7 @@ onMounted(load);
           </div>
           <p class="panel-description">
             内部 HTTP 重试不占用 Agent 工具调用次数。只重试超时、连接失败和 HTTP
-            429/502/503/504；总预算必须不小于单次超时。
+            429/502/503/504。每次 HTTP 尝试都独立使用上述单次超时。
           </p>
           <div class="form-actions">
             <button class="button" type="submit" :disabled="searchSettingsBusy">
@@ -950,7 +936,7 @@ onMounted(load);
                 autocomplete="new-password"
                 placeholder="例如 sk-…；本地 Ollama 无需填写" /></label
             ><label
-              ><span>超时（毫秒）</span
+              ><span>单次请求超时（毫秒）</span
               ><input
                 v-model.number="providerForm.requestTimeoutMs"
                 type="number"

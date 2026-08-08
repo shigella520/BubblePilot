@@ -204,6 +204,12 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         type: "number",
         description: "实际加载数量。",
       },
+      {
+        name: "participants",
+        label: "成员映射",
+        type: "json",
+        description: "仅包含当前上下文和当前消息中已出现成员的身份映射。",
+      },
     ],
     config: [
       {
@@ -283,6 +289,13 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         type: "text",
         required: true,
         description: "发送给 AI 的任务提示词。",
+      },
+      {
+        name: "includeLoadedContext",
+        label: "包含已加载聊天上下文",
+        type: "boolean",
+        description:
+          "开启时附带格式化聊天历史和成员标签；串联的后续 AI 可关闭，只处理上游输入。",
       },
       {
         name: "outputFormat",

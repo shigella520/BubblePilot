@@ -95,7 +95,6 @@ function defaultConfig(block: Block): Record<string, unknown> {
     values.template = "{{context.event.message.text}}";
   if (block.type === "ai-chat")
     Object.assign(values, {
-      timeoutMs: 60000,
       maxOutputTokens: 1024,
       maxOutputCharacters: 4000,
       temperature: null,
@@ -589,7 +588,6 @@ function toDefinition() {
       nodes.value[0]?.id ??
       "",
     maxSteps: 64,
-    maxExecutionMs: 60000,
     nodes: runtimeNodes,
   };
 }

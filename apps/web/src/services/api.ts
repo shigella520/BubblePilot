@@ -139,6 +139,10 @@ export function errorMessage(cause: unknown): string {
         "该触发器已有执行记录引用，不能直接删除。请先停用它；执行历史会保留以确保审计完整。",
       TRIGGER_NOT_FOUND: "触发器不存在，可能已被删除。",
       INVALID_WORKFLOW_DEFINITION: "工作流配置无效，请检查节点连接和必填项。",
+      CHAT_PARTICIPANT_IDENTITIES_CONFLICT:
+        "成员映射已被其他操作更新，请重新打开后再保存。",
+      CHAT_PARTICIPANT_NOT_DISCOVERED:
+        "成员映射中包含尚未在该聊天历史出现的发送者 ID。",
     };
     const message = knownMessages[cause.code] ?? cause.message;
     return cause.correlationId === null

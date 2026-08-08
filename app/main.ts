@@ -28,32 +28,44 @@ import { PostgresWorkflowRepository } from "../modules/workflow/postgres-workflo
 import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
 
 const config = loadConfig();
-const repository = new PostgresArchiveRepository(config.databaseUrl);
-const workflowRepository = new PostgresWorkflowRepository(config.databaseUrl);
+const repository = new PostgresArchiveRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
+const workflowRepository = new PostgresWorkflowRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
 const aiRepository = new PostgresAiRepository(
   config.databaseUrl,
   config.settingsEncryptionKey,
+  config.databaseQueryTimeoutMs,
 );
 const webSearchSettingsRepository = new PostgresWebSearchSettingsRepository(
   config.databaseUrl,
+  config.databaseQueryTimeoutMs,
 );
 const webSearchSettings = new WebSearchSettingsService(
   webSearchSettingsRepository,
   {
     maxAttempts: 2,
     attemptTimeoutMs: 8_000,
-    totalTimeoutMs: 18_000,
     retryDelayMs: 300,
     maxResults: 5,
     failurePolicy: "mode-default",
   },
 );
-const authRepository = new PostgresAuthRepository(config.databaseUrl);
+const authRepository = new PostgresAuthRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
 const dataExportRepository = new PostgresDataExportRepository(
   config.databaseUrl,
+  config.databaseQueryTimeoutMs,
 );
 const blueBubblesSettingsRepository = new PostgresBlueBubblesSettingsRepository(
   config.databaseUrl,
+  config.databaseQueryTimeoutMs,
 );
 const blueBubblesSettings = new BlueBubblesSettingsService(
   blueBubblesSettingsRepository,

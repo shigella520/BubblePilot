@@ -107,6 +107,29 @@ export interface ContextWindowOptions {
   excludeProviderMessageId: string | null;
 }
 
+export interface ChatParticipantIdentity {
+  senderId: string;
+  realName: string | null;
+  nickname: string | null;
+}
+
+export interface ChatParticipantView extends ChatParticipantIdentity {
+  messageCount: number;
+  lastSeenAt: string;
+}
+
+export interface ChatParticipantIdentitySet {
+  chatId: string;
+  version: number;
+  participants: readonly ChatParticipantView[];
+}
+
+export type ChatParticipantIdentityMutation =
+  | { status: "ok"; value: ChatParticipantIdentitySet }
+  | { status: "not-found" }
+  | { status: "conflict" }
+  | { status: "invalid-sender"; senderIds: readonly string[] };
+
 export interface ArchiveRepository {
   ingestMessage(
     envelope: MessageEnvelope,
@@ -129,6 +152,18 @@ export interface ArchiveRepository {
     enabled: boolean;
     expectedVersion: number;
   }): Promise<ChatMonitoringMutation>;
+  getChatParticipants(
+    chatId: string,
+  ): Promise<ChatParticipantIdentitySet | null>;
+  saveChatParticipantIdentities(input: {
+    chatId: string;
+    expectedVersion: number;
+    identities: readonly ChatParticipantIdentity[];
+  }): Promise<ChatParticipantIdentityMutation>;
+  resolveParticipantIdentities(
+    providerChatId: string,
+    senderIds: readonly string[],
+  ): Promise<readonly ChatParticipantIdentity[]>;
   listMessages(
     chatId: string,
     options: PageOptions,

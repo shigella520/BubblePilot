@@ -6,7 +6,6 @@ const base = {
   name: "chat assistant",
   startNodeId: "load-context",
   maxSteps: 16,
-  maxExecutionMs: 120000,
   nodes: [
     {
       id: "load-context",
@@ -67,6 +66,25 @@ const base = {
 describe("workflow graph validation", () => {
   it("accepts compatible data edges and context paths", () => {
     expect(validateWorkflowGraph(base).schemaVersion).toBe("1");
+    expect(
+      validateWorkflowGraph({
+        ...base,
+        nodes: base.nodes.map((node) =>
+          node.id === "ai"
+            ? {
+                ...node,
+                inputs: {
+                  ...node.inputs,
+                  prompt: {
+                    kind: "path" as const,
+                    path: "context.history.participants",
+                  },
+                },
+              }
+            : node,
+        ),
+      }).schemaVersion,
+    ).toBe("1");
   });
 
   it("rejects incompatible data edges", () => {

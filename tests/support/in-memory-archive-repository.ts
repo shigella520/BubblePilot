@@ -5,6 +5,9 @@ import type {
   ArchivedMessage,
   AutomationOutcome,
   ChatMonitoringMutation,
+  ChatParticipantIdentity,
+  ChatParticipantIdentityMutation,
+  ChatParticipantIdentitySet,
   ChatSummary,
   ContextMessage,
   ContextWindowOptions,
@@ -22,6 +25,8 @@ import type {
 
 interface StoredChat extends ChatSummary {
   messages: ArchivedMessage[];
+  participantIdentityVersion: number;
+  participantIdentities: Map<string, ChatParticipantIdentity>;
 }
 
 export class InMemoryArchiveRepository implements ArchiveRepository {
@@ -68,6 +73,8 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
       version: 1,
       updatedAt: now,
       messages: [],
+      participantIdentityVersion: 1,
+      participantIdentities: new Map(),
     };
     chat.updatedAt = now;
     this.chats.set(envelope.chat.providerChatId, chat);
@@ -261,6 +268,113 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
         updatedAt: chat.updatedAt,
       },
     });
+  }
+
+  getChatParticipants(
+    chatId: string,
+  ): Promise<ChatParticipantIdentitySet | null> {
+    const chat = [...this.chats.values()].find(
+      (candidate) => candidate.id === chatId,
+    );
+    if (chat === undefined) return Promise.resolve(null);
+    const participantMessages = new Map<
+      string,
+      { messageCount: number; lastSeenAt: string }
+    >();
+    for (const message of chat.messages) {
+      if (
+        message.isFromMe ||
+        message.senderId === null ||
+        message.senderId === ""
+      ) {
+        continue;
+      }
+      const existing = participantMessages.get(message.senderId);
+      participantMessages.set(message.senderId, {
+        messageCount: (existing?.messageCount ?? 0) + 1,
+        lastSeenAt:
+          existing === undefined || message.sentAt > existing.lastSeenAt
+            ? message.sentAt
+            : existing.lastSeenAt,
+      });
+    }
+    return Promise.resolve({
+      chatId,
+      version: chat.participantIdentityVersion,
+      participants: [...participantMessages.entries()]
+        .map(([senderId, discovered]) => ({
+          senderId,
+          realName: chat.participantIdentities.get(senderId)?.realName ?? null,
+          nickname: chat.participantIdentities.get(senderId)?.nickname ?? null,
+          ...discovered,
+        }))
+        .sort(
+          (left, right) =>
+            right.lastSeenAt.localeCompare(left.lastSeenAt) ||
+            left.senderId.localeCompare(right.senderId),
+        ),
+    });
+  }
+
+  async saveChatParticipantIdentities(input: {
+    chatId: string;
+    expectedVersion: number;
+    identities: readonly ChatParticipantIdentity[];
+  }): Promise<ChatParticipantIdentityMutation> {
+    const chat = [...this.chats.values()].find(
+      (candidate) => candidate.id === input.chatId,
+    );
+    if (chat === undefined) return { status: "not-found" };
+    if (chat.participantIdentityVersion !== input.expectedVersion) {
+      return { status: "conflict" };
+    }
+    const discovered = new Set(
+      chat.messages
+        .filter(
+          (message) =>
+            !message.isFromMe &&
+            message.senderId !== null &&
+            message.senderId !== "",
+        )
+        .map((message) => message.senderId as string),
+    );
+    const senderIds = input.identities.map((identity) => identity.senderId);
+    const invalidSenderIds = [
+      ...new Set(
+        senderIds.filter(
+          (senderId) =>
+            !discovered.has(senderId) ||
+            senderIds.indexOf(senderId) !== senderIds.lastIndexOf(senderId),
+        ),
+      ),
+    ];
+    if (invalidSenderIds.length > 0) {
+      return { status: "invalid-sender", senderIds: invalidSenderIds };
+    }
+    chat.participantIdentities = new Map(
+      input.identities.map((identity) => [identity.senderId, { ...identity }]),
+    );
+    chat.participantIdentityVersion += 1;
+    return {
+      status: "ok",
+      value: (await this.getChatParticipants(
+        input.chatId,
+      )) as ChatParticipantIdentitySet,
+    };
+  }
+
+  resolveParticipantIdentities(
+    providerChatId: string,
+    senderIds: readonly string[],
+  ): Promise<readonly ChatParticipantIdentity[]> {
+    const identities = this.chats.get(providerChatId)?.participantIdentities;
+    if (identities === undefined) return Promise.resolve([]);
+    return Promise.resolve(
+      [...new Set(senderIds)].flatMap((senderId) => {
+        const identity = identities.get(senderId);
+        return identity === undefined ? [] : [{ ...identity }];
+      }),
+    );
   }
 
   async listMessages(

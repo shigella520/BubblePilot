@@ -135,19 +135,19 @@ export class WorkflowEngine implements MessageAutomation {
   ): Promise<void> {
     const definition = trigger.definition;
     const nodes = new Map(definition.nodes.map((node) => [node.id, node]));
-    const deadline = Date.now() + definition.maxExecutionMs;
     const variables: Record<string, string> = {};
     const history: ContextMessage[] = [];
+    const participantIdentities = {};
     const outputs: Record<string, Record<string, unknown>> = {};
     let currentNodeId: string | null = definition.startNodeId;
     let steps = 0;
 
     while (currentNodeId !== null) {
       steps += 1;
-      if (steps > definition.maxSteps || Date.now() >= deadline) {
+      if (steps > definition.maxSteps) {
         await this.repository.finishExecution(execution.id, "dead-lettered", {
-          code: "WORKFLOW_BUDGET_EXHAUSTED",
-          summary: "The workflow exceeded its configured execution budget.",
+          code: "WORKFLOW_STEP_LIMIT_EXHAUSTED",
+          summary: "The workflow exceeded its configured step limit.",
         });
         return;
       }
@@ -199,9 +199,9 @@ export class WorkflowEngine implements MessageAutomation {
             executionId: execution.id,
             correlationId: execution.correlationId,
             envelope,
-            deadlineAt: deadline,
             variables,
             history,
+            participantIdentities,
             outputs,
           });
           await this.repository.finishNodeExecution({
@@ -241,9 +241,6 @@ export class WorkflowEngine implements MessageAutomation {
           }
           const waitMs = retry.initialDelayMs * 2 ** (attempt - 1);
           const nextRetryAt = new Date(Date.now() + waitMs);
-          if (nextRetryAt.getTime() >= deadline) {
-            break;
-          }
           await this.repository.markExecutionRetrying(
             execution.id,
             node.id,

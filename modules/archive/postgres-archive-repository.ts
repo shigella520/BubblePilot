@@ -1,12 +1,18 @@
 import { randomUUID } from "node:crypto";
 
-import { Pool, type PoolClient, type QueryResult } from "pg";
+import type { Pool, PoolClient, QueryResult } from "pg";
+
+import { createPostgresPool } from "../shared/postgres-pool.js";
 
 import type {
   ArchiveRepository,
   ArchivedMessage,
   AutomationOutcome,
   ChatMonitoringMutation,
+  ChatParticipantIdentity,
+  ChatParticipantIdentityMutation,
+  ChatParticipantIdentitySet,
+  ChatParticipantView,
   ChatSummary,
   ContextMessage,
   ContextWindowOptions,
@@ -79,6 +85,20 @@ interface ContextMessageRow {
   is_from_me: boolean;
 }
 
+interface ChatParticipantRow {
+  sender_id: string;
+  real_name: string | null;
+  nickname: string | null;
+  message_count: string;
+  last_seen_at: Date;
+}
+
+interface ParticipantIdentityRow {
+  sender_id: string;
+  real_name: string | null;
+  nickname: string | null;
+}
+
 function chatSummary(row: ChatRow): ChatSummary {
   return {
     id: row.id,
@@ -120,11 +140,29 @@ function inboundEventSummary(row: InboundEventRow): InboundEventSummary {
   };
 }
 
+function participantIdentity(
+  row: ParticipantIdentityRow,
+): ChatParticipantIdentity {
+  return {
+    senderId: row.sender_id,
+    realName: row.real_name,
+    nickname: row.nickname,
+  };
+}
+
+function participantView(row: ChatParticipantRow): ChatParticipantView {
+  return {
+    ...participantIdentity(row),
+    messageCount: Number(row.message_count),
+    lastSeenAt: row.last_seen_at.toISOString(),
+  };
+}
+
 export class PostgresArchiveRepository implements ArchiveRepository {
   private readonly pool: Pool;
 
-  constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl, max: 10 });
+  constructor(databaseUrl: string, queryTimeoutMs?: number) {
+    this.pool = createPostgresPool(databaseUrl, 10, queryTimeoutMs);
   }
 
   async ingestMessage(
@@ -430,6 +468,128 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     return { status: "ok", value: chat };
   }
 
+  getChatParticipants(
+    chatId: string,
+  ): Promise<ChatParticipantIdentitySet | null> {
+    return this.readChatParticipants(this.pool, chatId);
+  }
+
+  async saveChatParticipantIdentities(input: {
+    chatId: string;
+    expectedVersion: number;
+    identities: readonly ChatParticipantIdentity[];
+  }): Promise<ChatParticipantIdentityMutation> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const chat = await client.query<{ participant_identity_version: number }>(
+        `SELECT participant_identity_version
+         FROM chats WHERE id = $1 FOR UPDATE`,
+        [input.chatId],
+      );
+      const currentVersion = chat.rows[0]?.participant_identity_version;
+      if (currentVersion === undefined) {
+        await client.query("ROLLBACK");
+        return { status: "not-found" };
+      }
+      if (currentVersion !== input.expectedVersion) {
+        await client.query("ROLLBACK");
+        return { status: "conflict" };
+      }
+
+      const submittedIds = input.identities.map(
+        (identity) => identity.senderId,
+      );
+      const uniqueSubmittedIds = new Set(submittedIds);
+      const discovered =
+        submittedIds.length === 0
+          ? new Set<string>()
+          : new Set(
+              (
+                await client.query<{ sender_id: string }>(
+                  `SELECT DISTINCT sender_id
+                   FROM messages
+                   WHERE chat_id = $1
+                     AND is_from_me = FALSE
+                     AND sender_id = ANY($2::text[])`,
+                  [input.chatId, submittedIds],
+                )
+              ).rows.map((row) => row.sender_id),
+            );
+      const invalidSenderIds = [
+        ...new Set(
+          submittedIds.filter(
+            (senderId) =>
+              !discovered.has(senderId) ||
+              submittedIds.indexOf(senderId) !==
+                submittedIds.lastIndexOf(senderId),
+          ),
+        ),
+      ];
+      if (
+        invalidSenderIds.length > 0 ||
+        uniqueSubmittedIds.size !== submittedIds.length
+      ) {
+        await client.query("ROLLBACK");
+        return { status: "invalid-sender", senderIds: invalidSenderIds };
+      }
+
+      await client.query(
+        "DELETE FROM chat_participant_identities WHERE chat_id = $1",
+        [input.chatId],
+      );
+      for (const identity of input.identities) {
+        await client.query(
+          `INSERT INTO chat_participant_identities (
+             id, chat_id, sender_id, real_name, nickname
+           ) VALUES ($1, $2, $3, $4, $5)`,
+          [
+            randomUUID(),
+            input.chatId,
+            identity.senderId,
+            identity.realName,
+            identity.nickname,
+          ],
+        );
+      }
+      await client.query(
+        `UPDATE chats
+         SET participant_identity_version = participant_identity_version + 1
+         WHERE id = $1`,
+        [input.chatId],
+      );
+      const value = await this.readChatParticipants(client, input.chatId);
+      if (value === null) {
+        throw new Error("The updated chat participant mapping disappeared.");
+      }
+      await client.query("COMMIT");
+      return { status: "ok", value };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async resolveParticipantIdentities(
+    providerChatId: string,
+    senderIds: readonly string[],
+  ): Promise<readonly ChatParticipantIdentity[]> {
+    if (senderIds.length === 0) return [];
+    const result = await this.pool.query<ParticipantIdentityRow>(
+      `SELECT i.sender_id, i.real_name, i.nickname
+       FROM chat_participant_identities i
+       INNER JOIN chats c ON c.id = i.chat_id
+       WHERE c.provider = 'bluebubbles'
+         AND c.provider_chat_id = $1
+         AND i.sender_id = ANY($2::text[])
+       ORDER BY i.sender_id`,
+      [providerChatId, [...new Set(senderIds)]],
+    );
+    return result.rows.map(participantIdentity);
+  }
+
   async listMessages(
     chatId: string,
     options: PageOptions,
@@ -651,7 +811,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       const result = await this.pool.query<{ ready: boolean }>(
         `SELECT EXISTS (
            SELECT 1 FROM schema_migrations
-           WHERE name = '0009_message_content_retention.sql'
+           WHERE name = '0022_chat_participant_identities.sql'
          ) AS ready`,
       );
       return result.rows[0]?.ready === true;
@@ -734,6 +894,40 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     );
     const row = result.rows[0];
     return row === undefined ? null : chatSummary(row);
+  }
+
+  private async readChatParticipants(
+    queryable: Pool | PoolClient,
+    chatId: string,
+  ): Promise<ChatParticipantIdentitySet | null> {
+    const chat = await queryable.query<{
+      participant_identity_version: number;
+    }>(`SELECT participant_identity_version FROM chats WHERE id = $1`, [
+      chatId,
+    ]);
+    const version = chat.rows[0]?.participant_identity_version;
+    if (version === undefined) return null;
+    const participants = await queryable.query<ChatParticipantRow>(
+      `SELECT
+         m.sender_id, i.real_name, i.nickname,
+         COUNT(m.id)::text AS message_count,
+         MAX(m.sent_at) AS last_seen_at
+       FROM messages m
+       LEFT JOIN chat_participant_identities i
+         ON i.chat_id = m.chat_id AND i.sender_id = m.sender_id
+       WHERE m.chat_id = $1
+         AND m.is_from_me = FALSE
+         AND m.sender_id IS NOT NULL
+         AND m.sender_id <> ''
+       GROUP BY m.sender_id, i.real_name, i.nickname
+       ORDER BY MAX(m.sent_at) DESC, m.sender_id`,
+      [chatId],
+    );
+    return {
+      chatId,
+      version,
+      participants: participants.rows.map(participantView),
+    };
   }
 
   private async recordFailure(

@@ -251,6 +251,83 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
+  /api/v1/chats/{chatId}/participants:
+    get:
+      operationId: getChatParticipants
+      description: 返回该聊天历史中实际出现过的非本人 sender ID，以及按聊天隔离保存的本名和昵称映射。需要敏感操作授权。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: chatId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 聊天成员发现结果和独立的映射版本。
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: saveChatParticipantIdentities
+      description: 全量替换该聊天的成员映射；只能提交该聊天历史中已经出现过的 sender ID，空数组用于清除全部映射。请求正文不会写入审计 metadata。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: chatId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, identities]
+              properties:
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+                identities:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [senderId, realName, nickname]
+                    properties:
+                      senderId:
+                        type: string
+                        minLength: 1
+                        maxLength: 500
+                      realName:
+                        type: [string, "null"]
+                        minLength: 1
+                        maxLength: 120
+                      nickname:
+                        type: [string, "null"]
+                        minLength: 1
+                        maxLength: 120
+                    additionalProperties: false
+              additionalProperties: false
+      responses:
+        "200":
+          description: 成员映射已保存并返回新版本。
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/v1/chat-monitoring:
     get:
       operationId: listChatMonitoring
@@ -1273,7 +1350,6 @@ components:
       required:
         - maxAttempts
         - attemptTimeoutMs
-        - totalTimeoutMs
         - retryDelayMs
         - maxResults
         - failurePolicy
@@ -1288,11 +1364,6 @@ components:
           type: integer
           minimum: 1000
           maximum: 60000
-        totalTimeoutMs:
-          type: integer
-          minimum: 1000
-          maximum: 120000
-          description: 必须大于或等于单次 HTTP 超时。
         retryDelayMs:
           type: integer
           minimum: 0
@@ -1313,7 +1384,6 @@ components:
       required:
         - maxAttempts
         - attemptTimeoutMs
-        - totalTimeoutMs
         - retryDelayMs
         - maxResults
         - failurePolicy
@@ -1329,10 +1399,6 @@ components:
           type: integer
           minimum: 1000
           maximum: 60000
-        totalTimeoutMs:
-          type: integer
-          minimum: 1000
-          maximum: 120000
         retryDelayMs:
           type: integer
           minimum: 0

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
-import { Pool } from "pg";
+import type { Pool } from "pg";
+
+import { createPostgresPool } from "../shared/postgres-pool.js";
 
 import { parseTriggerConditions } from "./trigger-matcher.js";
 import { parseWorkflowDefinition } from "./workflow-definition.js";
@@ -291,8 +293,8 @@ function summary(value: string): string {
 export class PostgresWorkflowRepository implements WorkflowRepository {
   private readonly pool: Pool;
 
-  constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl, max: 10 });
+  constructor(databaseUrl: string, queryTimeoutMs?: number) {
+    this.pool = createPostgresPool(databaseUrl, 10, queryTimeoutMs);
   }
 
   async createWorkflow(

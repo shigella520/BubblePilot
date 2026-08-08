@@ -6,7 +6,6 @@ import { InMemoryWebSearchSettingsRepository } from "./support/in-memory-web-sea
 const defaults = {
   maxAttempts: 2,
   attemptTimeoutMs: 8_000,
-  totalTimeoutMs: 18_000,
   retryDelayMs: 300,
   maxResults: 5,
   failurePolicy: "mode-default" as const,
@@ -36,7 +35,6 @@ describe("WebSearchSettingsService", () => {
     const input = {
       maxAttempts: 3,
       attemptTimeoutMs: 10_000,
-      totalTimeoutMs: 25_000,
       retryDelayMs: 500,
       maxResults: 8,
       failurePolicy: "continue" as const,
@@ -48,7 +46,6 @@ describe("WebSearchSettingsService", () => {
       value: {
         maxAttempts: 3,
         attemptTimeoutMs: 10_000,
-        totalTimeoutMs: 25_000,
         retryDelayMs: 500,
         maxResults: 8,
         failurePolicy: "continue",
@@ -63,7 +60,6 @@ describe("WebSearchSettingsService", () => {
     await expect(service.resolve()).resolves.toEqual({
       maxAttempts: 3,
       attemptTimeoutMs: 10_000,
-      totalTimeoutMs: 25_000,
       retryDelayMs: 500,
       maxResults: 8,
       failurePolicy: "continue",
