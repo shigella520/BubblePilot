@@ -2,6 +2,10 @@ import type {
   IgnoredInboundEvent,
   MessageEnvelope,
 } from "../ingestion/message-envelope.js";
+import type {
+  LinkPreviewBundle,
+  LinkPreviewDiagnostic,
+} from "../ingestion/link-preview.js";
 
 export type IngestionStatus = "archived" | "ignored" | "duplicate";
 
@@ -53,6 +57,9 @@ export interface ArchivedMessage {
   contentType: "text" | "attachment" | "mixed" | "unknown";
   isFromMe: boolean;
   attachments: readonly unknown[];
+  linkPreview: LinkPreviewBundle;
+  linkPreviewDiagnostics: readonly LinkPreviewDiagnostic[];
+  linkPreviewFetchedAt: string | null;
   contentRedactedAt: string | null;
   createdAt: string;
 }
@@ -98,6 +105,7 @@ export interface ContextMessage {
   sentAt: string;
   body: string;
   isFromMe: boolean;
+  linkPreview: LinkPreviewBundle;
 }
 
 export interface ContextWindowOptions {
@@ -136,6 +144,12 @@ export interface ArchiveRepository {
     archiveEnabled: boolean,
   ): Promise<IngestionResult>;
   recordIgnoredEvent(event: IgnoredInboundEvent): Promise<IngestionResult>;
+  saveMessageLinkPreview(input: {
+    providerMessageId: string;
+    linkPreview: LinkPreviewBundle;
+    diagnostics: readonly LinkPreviewDiagnostic[];
+    fetchedAt: Date;
+  }): Promise<LinkPreviewBundle | null>;
   recordAutomationOutcome(
     provider: string,
     eventId: string,

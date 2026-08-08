@@ -22,6 +22,10 @@ import type {
   IgnoredInboundEvent,
   MessageEnvelope,
 } from "../../modules/ingestion/message-envelope.js";
+import type {
+  LinkPreviewBundle,
+  LinkPreviewDiagnostic,
+} from "../../modules/ingestion/link-preview.js";
 
 interface StoredChat extends ChatSummary {
   messages: ArchivedMessage[];
@@ -116,6 +120,9 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
       contentType: envelope.message.contentType,
       isFromMe: envelope.message.isFromMe,
       attachments: envelope.message.attachments,
+      linkPreview: envelope.message.linkPreview,
+      linkPreviewDiagnostics: [],
+      linkPreviewFetchedAt: null,
       contentRedactedAt: null,
       createdAt: now,
     };
@@ -128,6 +135,22 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
       messageId: message.id,
       automationOutcome: "evaluation-pending",
     };
+  }
+
+  saveMessageLinkPreview(input: {
+    providerMessageId: string;
+    linkPreview: LinkPreviewBundle;
+    diagnostics: readonly LinkPreviewDiagnostic[];
+    fetchedAt: Date;
+  }): Promise<LinkPreviewBundle | null> {
+    const message = [...this.chats.values()]
+      .flatMap((chat) => chat.messages)
+      .find((item) => item.providerMessageId === input.providerMessageId);
+    if (message === undefined) return Promise.resolve(null);
+    message.linkPreview = input.linkPreview;
+    message.linkPreviewDiagnostics = input.diagnostics;
+    message.linkPreviewFetchedAt = input.fetchedAt.toISOString();
+    return Promise.resolve(input.linkPreview);
   }
 
   async recordIgnoredEvent(
@@ -443,23 +466,34 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
     const selected: ContextMessage[] = [];
     let characters = 0;
     for (const message of [...messages].reverse()) {
+      const previewCharacters = message.linkPreview.items.reduce(
+        (total, item) =>
+          total +
+          item.url.length +
+          (item.title?.length ?? 0) +
+          (item.summary?.length ?? 0) +
+          (item.siteName?.length ?? 0),
+        0,
+      );
       if (
-        message.body === null ||
-        message.body.length === 0 ||
+        ((message.body === null || message.body.length === 0) &&
+          message.linkPreview.status !== "available") ||
         (!options.includeFromMe && message.isFromMe) ||
         message.providerMessageId === options.excludeProviderMessageId ||
         selected.length >= options.limit ||
-        characters + message.body.length > options.maxCharacters
+        characters + (message.body?.length ?? 0) + previewCharacters >
+          options.maxCharacters
       ) {
         continue;
       }
-      characters += message.body.length;
+      characters += (message.body?.length ?? 0) + previewCharacters;
       selected.push({
         providerMessageId: message.providerMessageId,
         senderId: message.senderId,
         sentAt: message.sentAt,
-        body: message.body,
+        body: message.body ?? "",
         isFromMe: message.isFromMe,
+        linkPreview: message.linkPreview,
       });
     }
     return Promise.resolve(selected.reverse());
@@ -484,6 +518,11 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
     for (const message of candidates) {
       message.body = null;
       message.attachments = [];
+      message.linkPreview = {
+        status: "redacted",
+        errorCode: null,
+        items: [],
+      };
       message.contentRedactedAt = input.now.toISOString();
     }
     return Promise.resolve(candidates.length);

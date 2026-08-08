@@ -13,7 +13,7 @@
     "metadata"
   ],
   "properties": {
-    "schemaVersion": { "const": "1" },
+    "schemaVersion": { "const": "2" },
     "eventId": { "type": "string", "minLength": 1 },
     "correlationId": { "type": "string", "format": "uuid" },
     "provider": { "const": "bluebubbles" },
@@ -37,6 +37,7 @@
         "contentType",
         "isFromMe",
         "attachments",
+        "linkPreview",
         "contentHash"
       ],
       "properties": {
@@ -64,6 +65,60 @@
             },
             "additionalProperties": false
           }
+        },
+        "linkPreview": {
+          "type": "object",
+          "required": ["status", "errorCode", "items"],
+          "properties": {
+            "status": {
+              "enum": [
+                "not-requested",
+                "pending",
+                "available",
+                "unavailable",
+                "failed",
+                "redacted"
+              ]
+            },
+            "errorCode": { "type": ["string", "null"] },
+            "items": {
+              "type": "array",
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "required": [
+                  "source",
+                  "url",
+                  "originalUrl",
+                  "title",
+                  "summary",
+                  "siteName",
+                  "imageAvailable",
+                  "iconAvailable"
+                ],
+                "properties": {
+                  "source": { "enum": ["bluebubbles", "open-graph"] },
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "maxLength": 2048
+                  },
+                  "originalUrl": {
+                    "type": ["string", "null"],
+                    "format": "uri",
+                    "maxLength": 2048
+                  },
+                  "title": { "type": ["string", "null"], "maxLength": 500 },
+                  "summary": { "type": ["string", "null"], "maxLength": 2000 },
+                  "siteName": { "type": ["string", "null"], "maxLength": 200 },
+                  "imageAvailable": { "type": "boolean" },
+                  "iconAvailable": { "type": "boolean" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
         },
         "contentHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
       },

@@ -1,4 +1,6 @@
-export const MESSAGE_ENVELOPE_SCHEMA_VERSION = "1" as const;
+import type { LinkPreviewBundle } from "./link-preview.js";
+
+export const MESSAGE_ENVELOPE_SCHEMA_VERSION = "2" as const;
 
 export interface MessageAttachment {
   providerAttachmentId: string;
@@ -25,6 +27,7 @@ export interface MessageEnvelope {
     contentType: "text" | "attachment" | "mixed" | "unknown";
     isFromMe: boolean;
     attachments: readonly MessageAttachment[];
+    linkPreview: LinkPreviewBundle;
     contentHash: string;
   };
   metadata: {

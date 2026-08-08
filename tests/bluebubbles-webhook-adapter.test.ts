@@ -20,7 +20,7 @@ describe("BlueBubblesWebhookAdapter", () => {
       return;
     }
     expect(result.envelope).toMatchObject({
-      schemaVersion: "1",
+      schemaVersion: "2",
       eventId: "new-message:fake-message-guid-001",
       correlationId,
       provider: "bluebubbles",

@@ -27,6 +27,9 @@ class InMemoryBlueBubblesSettingsRepository implements BlueBubblesSettingsReposi
       encryptedWebhookSecret: input.encryptedWebhookSecret,
       sendMethod: input.sendMethod,
       requestTimeoutMs: input.requestTimeoutMs,
+      linkPreviewEnabled: input.linkPreviewEnabled,
+      openGraphFallbackEnabled: input.openGraphFallbackEnabled,
+      openGraphTimeoutMs: input.openGraphTimeoutMs,
       version: input.expectedVersion + 1,
       updatedAt: new Date().toISOString(),
     };
@@ -54,6 +57,9 @@ describe("BlueBubblesSettingsService", () => {
         webhookSecret: "e".repeat(32),
         sendMethod: "private-api",
         requestTimeoutMs: 30_000,
+        linkPreviewEnabled: true,
+        openGraphFallbackEnabled: true,
+        openGraphTimeoutMs: 5_000,
       },
     );
 
@@ -68,6 +74,9 @@ describe("BlueBubblesSettingsService", () => {
         serverUrl: "https://bluebubbles.internal.test",
         sendMethod: "apple-script",
         requestTimeoutMs: 45_000,
+        linkPreviewEnabled: true,
+        openGraphFallbackEnabled: true,
+        openGraphTimeoutMs: 5_000,
         expectedVersion: 0,
       }),
     ).resolves.toMatchObject({
@@ -101,12 +110,18 @@ describe("BlueBubblesSettingsService", () => {
         webhookSecret: "e".repeat(32),
         sendMethod: "private-api",
         requestTimeoutMs: 30_000,
+        linkPreviewEnabled: true,
+        openGraphFallbackEnabled: true,
+        openGraphTimeoutMs: 5_000,
       },
     );
     await service.update({
       serverUrl: "https://one.example.test",
       sendMethod: "private-api",
       requestTimeoutMs: 30_000,
+      linkPreviewEnabled: true,
+      openGraphFallbackEnabled: true,
+      openGraphTimeoutMs: 5_000,
       expectedVersion: 0,
     });
     await expect(
@@ -114,6 +129,9 @@ describe("BlueBubblesSettingsService", () => {
         serverUrl: "https://stale.example.test",
         sendMethod: "private-api",
         requestTimeoutMs: 30_000,
+        linkPreviewEnabled: true,
+        openGraphFallbackEnabled: true,
+        openGraphTimeoutMs: 5_000,
         expectedVersion: 0,
       }),
     ).resolves.toEqual({ status: "conflict" });
@@ -150,6 +168,9 @@ describe("BlueBubblesSettingsService", () => {
         webhookSecret: "e".repeat(32),
         sendMethod: "private-api",
         requestTimeoutMs: 30_000,
+        linkPreviewEnabled: true,
+        openGraphFallbackEnabled: true,
+        openGraphTimeoutMs: 5_000,
       },
       fetchImplementation,
     );

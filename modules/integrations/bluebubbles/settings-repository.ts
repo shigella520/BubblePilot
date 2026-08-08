@@ -6,6 +6,9 @@ export interface BlueBubblesSettingsRecord {
   encryptedWebhookSecret: string;
   sendMethod: BlueBubblesSendMethod;
   requestTimeoutMs: number;
+  linkPreviewEnabled: boolean;
+  openGraphFallbackEnabled: boolean;
+  openGraphTimeoutMs: number;
   version: number;
   updatedAt: string;
 }
@@ -18,6 +21,9 @@ export interface BlueBubblesSettingsRepository {
     encryptedWebhookSecret: string;
     sendMethod: BlueBubblesSendMethod;
     requestTimeoutMs: number;
+    linkPreviewEnabled: boolean;
+    openGraphFallbackEnabled: boolean;
+    openGraphTimeoutMs: number;
     expectedVersion: number;
   }): Promise<
     { status: "ok"; value: BlueBubblesSettingsRecord } | { status: "conflict" }
