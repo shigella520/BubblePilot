@@ -5,6 +5,7 @@ import type {
   ReplyGateway,
   SendReplyCommand,
 } from "./reply-gateway.js";
+import { normalizeIMessageText } from "./imessage-text.js";
 
 const successResponseSchema = z
   .object({
@@ -47,7 +48,7 @@ export class BlueBubblesRestReplyGateway implements ReplyGateway {
     try {
       const payload: Record<string, unknown> = {
         chatGuid: command.providerChatId,
-        message: command.text,
+        message: normalizeIMessageText(command.text),
         method: this.options.method,
         tempGuid: command.providerTempGuid,
       };

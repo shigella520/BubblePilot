@@ -56,6 +56,36 @@ describe("BlueBubblesRestReplyGateway", () => {
     });
   });
 
+  it("normalizes Markdown before sending text to BlueBubbles", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ data: {} }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const gateway = new BlueBubblesRestReplyGateway({
+      serverUrl: "https://bluebubbles.example.test",
+      accessToken: "fictional-token",
+      method: "private-api",
+      timeoutMs: 5_000,
+      fetchImplementation,
+    });
+
+    await gateway.sendReply({
+      ...command,
+      text: "1. **虚构成员**：查看[来源](https://example.test/source)",
+    });
+
+    const requestOptions = fetchImplementation.mock.calls[0]?.[1];
+    const requestBody: unknown =
+      typeof requestOptions?.body === "string"
+        ? JSON.parse(requestOptions.body)
+        : null;
+    expect(requestBody).toMatchObject({
+      message: "1. 虚构成员：查看来源：https://example.test/source",
+    });
+  });
+
   it("classifies rate limits as retryable and network ambiguity as unknown", async () => {
     const rateLimited = new BlueBubblesRestReplyGateway({
       serverUrl: "https://bluebubbles.example.test",
