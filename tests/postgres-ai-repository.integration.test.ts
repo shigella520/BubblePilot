@@ -147,7 +147,17 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
               id: "ai",
               type: "ai-chat",
               version: 1,
-              config: { providerRouteId: route.value.id },
+              config: {
+                providerRouteId: route.value.id,
+                promptTemplate: "Answer the fictional test message.",
+              },
+              onSuccess: "done",
+            },
+            {
+              id: "done",
+              type: "end",
+              version: 1,
+              config: {},
             },
           ],
         }),
