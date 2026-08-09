@@ -34,6 +34,7 @@ function probeCheck(
   durationMs: number,
   verified = result.status === "succeeded",
   mismatchCode: string | null = null,
+  responsePreview: string | null = null,
 ): AiProviderTestCheck {
   return {
     name,
@@ -44,7 +45,21 @@ function probeCheck(
       result.status === "failed" ? result.code : verified ? null : mismatchCode,
     httpStatus: result.diagnostics?.httpStatus ?? null,
     providerRequestId: result.diagnostics?.providerRequestId ?? null,
+    responsePreview,
   };
+}
+
+function probeResponsePreview(result: AiCallResult): string | null {
+  if (result.status === "failed") return null;
+  const sanitized = Array.from(result.text, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || (codePoint >= 127 && codePoint <= 159)
+      ? " "
+      : character;
+  }).join("");
+  const normalized = sanitized.replace(/\s+/gu, " ").trim();
+  if (normalized.length === 0) return "(empty response)";
+  return normalized.length <= 160 ? normalized : `${normalized.slice(0, 159)}…`;
 }
 
 function checkMessage(check: AiProviderTestCheck): string {
@@ -333,6 +348,7 @@ export class AiManagementService {
           imageProbe.durationMs,
           imageVerified,
           "AI_IMAGE_PROBE_MISMATCH",
+          imageVerified ? null : probeResponsePreview(imageProbe.result),
         ),
       );
     }

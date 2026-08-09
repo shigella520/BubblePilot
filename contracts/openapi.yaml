@@ -1136,7 +1136,7 @@ paths:
         - $ref: "#/components/parameters/AiProviderId"
       responses:
         "200":
-          description: 返回基础连接和已声明能力的独立检查结果，包括尝试次数、耗时、脱敏错误码、HTTP 状态和 Provider 请求 ID。图片检查使用固定的可识别测试图，对可重试故障最多尝试两次。
+          description: 返回基础连接和已声明能力的独立检查结果，包括尝试次数、耗时、脱敏错误码、HTTP 状态和 Provider 请求 ID。图片检查使用固定的可识别测试图，对可重试故障最多尝试两次；HTTP 成功但识别不匹配时，返回最多 160 字符的固定探测回复预览，不包含用户内容。
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/ai/providers/{providerId}/health/reset:

@@ -229,6 +229,7 @@ export interface AiProviderTestCheck {
   errorCode: string | null;
   httpStatus: number | null;
   providerRequestId: string | null;
+  responsePreview: string | null;
 }
 
 export interface AiRouteSnapshot {

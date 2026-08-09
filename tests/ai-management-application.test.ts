@@ -152,6 +152,26 @@ class RetryingImageAiClient implements AiClient {
   }
 }
 
+class MismatchingImageAiClient implements AiClient {
+  call(
+    _provider: AiProviderRecord,
+    request: AiChatRequest,
+  ): Promise<AiCallResult> {
+    const hasImage = request.messages.some(
+      (message) =>
+        typeof message.content !== "string" &&
+        message.content.some((part) => part.type === "image"),
+    );
+    return Promise.resolve({
+      status: "succeeded",
+      text: hasImage
+        ? `I cannot inspect this image.\n${"x".repeat(200)}`
+        : "OK",
+      durationMs: 7,
+    });
+  }
+}
+
 describe("AI management API", () => {
   let repository: InMemoryAiRepository;
   let client: SuccessfulAiClient;
@@ -345,6 +365,54 @@ describe("AI management API", () => {
       },
     );
     expect(retryClient.imageAttempts).toBe(2);
+  });
+
+  it("returns a bounded preview for a mismatching fixed image probe", async () => {
+    const mismatchRepository = new InMemoryAiRepository(() => now);
+    const created = await mismatchRepository.createProvider({
+      name: "Mismatching image provider",
+      apiKind: "responses",
+      baseUrl: "https://ai.example.test/v1",
+      model: "fictional-vision-model",
+      secretRef: "PRIMARY_AI_KEY",
+      parameters: {},
+      requestTimeoutMs: 30_000,
+      enabled: true,
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: true,
+      },
+    });
+    expect(created.status).toBe("ok");
+    if (created.status !== "ok") return;
+    const service = new AiManagementService(
+      mismatchRepository,
+      new MismatchingImageAiClient(),
+      new EnvironmentSecretResolver({
+        PRIMARY_AI_KEY: "primary-server-secret",
+      }),
+    );
+
+    const result = await service.testProvider(created.value.id);
+    expect(result).toMatchObject({
+      success: true,
+      checks: [
+        { name: "connectivity", responsePreview: null },
+        {
+          name: "imageInput",
+          status: "failed",
+          errorCode: "AI_IMAGE_PROBE_MISMATCH",
+        },
+      ],
+    });
+    const imageCheck = result?.checks.find(
+      (check) => check.name === "imageInput",
+    );
+    expect(imageCheck?.responsePreview).toHaveLength(160);
+    expect(imageCheck?.responsePreview).toMatch(
+      /^I cannot inspect this image\. x+/u,
+    );
   });
 
   it("manages global native image settings with optimistic concurrency", async () => {

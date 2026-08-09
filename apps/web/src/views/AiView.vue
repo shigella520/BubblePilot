@@ -497,6 +497,7 @@ async function providerAction(
           errorCode: string | null;
           httpStatus: number | null;
           providerRequestId: string | null;
+          responsePreview: string | null;
         }>;
       }>(`/api/v1/ai/providers/${item.id}/test`, { method: "POST" });
       feedback = result.success
@@ -507,6 +508,15 @@ async function providerAction(
       feedbackIsError =
         !result.success ||
         result.checks.some((check) => check.status === "failed");
+      const imageMismatch = result.checks.find(
+        (check) =>
+          check.name === "imageInput" &&
+          check.errorCode === "AI_IMAGE_PROBE_MISMATCH" &&
+          check.responsePreview !== null,
+      );
+      if (imageMismatch?.responsePreview) {
+        feedback += ` 固定图片探测回复：${imageMismatch.responsePreview}`;
+      }
       await load();
     }
     if (action === "reset") {
