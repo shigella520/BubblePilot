@@ -4,6 +4,7 @@ import { parseBlueBubblesLinkPreviews } from "../modules/integrations/bluebubble
 import {
   OpenGraphClient,
   OpenGraphFetchError,
+  createPinnedLookup,
   isPublicResourceAddressAllowed,
 } from "../modules/integrations/bluebubbles/open-graph-client.js";
 
@@ -66,6 +67,23 @@ describe("BlueBubbles link preview parser", () => {
 });
 
 describe("Open Graph public network guard", () => {
+  it("returns the pinned address in Node single and all lookup modes", () => {
+    const pinnedLookup = createPinnedLookup("69.63.200.84", 4);
+    pinnedLookup(
+      "images.example.test",
+      { all: false },
+      (error, value, family) => {
+        expect(error).toBeNull();
+        expect(value).toBe("69.63.200.84");
+        expect(family).toBe(4);
+      },
+    );
+    pinnedLookup("images.example.test", { all: true }, (error, value) => {
+      expect(error).toBeNull();
+      expect(value).toEqual([{ address: "69.63.200.84", family: 4 }]);
+    });
+  });
+
   it.each([
     ["69.63.200.84", 4],
     ["::ffff:69.63.200.84", 6],
