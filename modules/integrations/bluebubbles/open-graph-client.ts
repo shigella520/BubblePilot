@@ -10,7 +10,7 @@ import type { LinkPreviewItem } from "../../ingestion/link-preview.js";
 const maxBodyBytes = 1_048_576;
 const maxRedirects = 3;
 
-const blocked = new BlockList();
+const blockedIpv4 = new BlockList();
 for (const [network, prefix] of [
   ["0.0.0.0", 8],
   ["10.0.0.0", 8],
@@ -27,20 +27,20 @@ for (const [network, prefix] of [
   ["224.0.0.0", 4],
   ["240.0.0.0", 4],
 ] as const) {
-  blocked.addSubnet(network, prefix, "ipv4");
+  blockedIpv4.addSubnet(network, prefix, "ipv4");
 }
 const proxyFakeAddresses = new BlockList();
 proxyFakeAddresses.addSubnet("198.18.0.0", 15, "ipv4");
+const blockedIpv6 = new BlockList();
 for (const [network, prefix] of [
   ["::", 128],
   ["::1", 128],
-  ["::ffff:0:0", 96],
   ["fc00::", 7],
   ["fe80::", 10],
   ["ff00::", 8],
   ["2001:db8::", 32],
 ] as const) {
-  blocked.addSubnet(network, prefix, "ipv6");
+  blockedIpv6.addSubnet(network, prefix, "ipv6");
 }
 
 export class OpenGraphFetchError extends Error {
@@ -109,8 +109,12 @@ function isBlockedAddress(
   family: 4 | 6,
   allowProxyFakeAddress: boolean,
 ): boolean {
-  const type = family === 4 ? "ipv4" : "ipv6";
-  if (!blocked.check(address, type)) return false;
+  const blocked =
+    family === 4
+      ? blockedIpv4.check(address, "ipv4")
+      : blockedIpv6.check(address, "ipv6") ||
+        blockedIpv4.check(address, "ipv6");
+  if (!blocked) return false;
   return !(
     allowProxyFakeAddress &&
     family === 4 &&

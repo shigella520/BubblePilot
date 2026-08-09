@@ -66,6 +66,25 @@ describe("BlueBubbles link preview parser", () => {
 });
 
 describe("Open Graph public network guard", () => {
+  it.each([
+    ["69.63.200.84", 4],
+    ["::ffff:69.63.200.84", 6],
+  ] as const)("allows public address %s", (address, family) => {
+    expect(
+      isPublicResourceAddressAllowed("images.example.test", address, family),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["192.168.31.6", 4],
+    ["::ffff:192.168.31.6", 6],
+    ["198.18.56.135", 4],
+  ] as const)("blocks restricted address %s by default", (address, family) => {
+    expect(
+      isPublicResourceAddressAllowed("images.example.test", address, family),
+    ).toBe(false);
+  });
+
   it("allows proxy fake IPs only for an exact trusted image hostname", () => {
     const policy = { trustedProxyHosts: ["images.example.test"] };
     expect(
