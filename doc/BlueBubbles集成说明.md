@@ -50,6 +50,7 @@ https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_W
   → 转换带版本的 MessageEnvelope
   → 更新 Chat 并判断监听状态
   → 在事务中保存 Message、InboundEvent 和自动化判定
+  → 对候选链接卡片提取有限元数据并更新 Message
   → 匹配启用工作流并调度执行
 ```
 
@@ -71,8 +72,27 @@ https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_W
 | `data.text` | `message.text` | 只在监听范围内保存 |
 | `data.isFromMe` | `message.isFromMe` | 生产触发器用于阻止 Bot 回复循环 |
 | `data.attachments[]` | `message.attachments[]` | 只保存 GUID、MIME、文件名和字节数 |
+| `data.hasPayloadData` | `message.linkPreview.status` | 存在卡片载荷时标记为待解析；正文含 HTTP(S) URL 时也会标记 |
 
 原始 Payload 只计算稳定 SHA-256，不整包保存，也不写入普通日志。机器合同见 `contracts/bluebubbles-webhook.schema.json` 和 `contracts/message-envelope.schema.json`。
+
+## 链接卡片预览
+
+对于新入站、已监听且可能包含链接卡片的消息，BubblePilot 先归档基础消息，再按以下顺序补充预览：
+
+1. 使用消息 GUID 调用 BlueBubbles `GET /api/v1/message/{guid}?with=payloadData`，有限重试后解析 `NSKeyedArchive` 中的 Rich Link 元数据；
+2. BlueBubbles 没有可用标题、摘要或站点名，且设置中启用了兜底时，从消息或卡片中取首个 HTTP(S) URL，安全请求公开网页的 Open Graph/Twitter/HTML 元数据；
+3. 保存统一的 URL、原始 URL、标题、摘要、站点名、图片/图标是否存在，以及能够解析出的公开卡片主图 URL；不保存原始 `payloadData`。卡片解析阶段不持久化或下载图片二进制。
+
+Open Graph 客户端只允许无凭据的 HTTP/HTTPS 与 80/443 端口，DNS 解析后固定公开地址，阻止本机、私网、链路本地、保留地址和 IPv4 映射 IPv6；每次重定向都会重新校验。响应必须是 HTML，正文最多 1 MiB，重定向最多 3 次。超时、HTTP 状态和稳定错误码只写入有限诊断，不保存网页原文。
+
+解析是 fail-open：失败时记录 `unavailable` 或 `failed`，但消息仍继续匹配和执行工作流。设置页可全局关闭卡片解析、关闭 Open Graph 兜底或调整 OG 单次请求超时。配置只影响新消息，不对历史消息回填。
+
+## AI 原生图片输入
+
+管理员在 AI 页面启用全局原生图片输入后，AI 节点可以读取当前消息的图片附件和链接卡片主图；节点开启“包含已加载聊天上下文”时，还会按时间倒序选取有限历史图片。附件通过 BlueBubbles `GET /api/v1/attachment/{guid}/download?original=false` 临时获取；卡片主图复用 Open Graph 客户端的 DNS 固定、私网阻断、重定向复检和大小限制。只接受经文件魔数确认的 JPEG、PNG、GIF 或 WebP。
+
+图片仅在节点请求内编码为 Data URL，Agent 多轮和 Provider Fallback 复用同一份内存内容；数据库不保存原图、Base64、附件 GUID或完整卡片图片 URL。下载、校验、能力匹配或诊断写入失败都按文本降级处理，不中断工作流，且模型会收到不得声称已经看过图片的限制提示。
 
 ## 出站回复
 

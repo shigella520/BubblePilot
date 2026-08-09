@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient, QueryResult } from "pg";
 
 import { createPostgresPool } from "../shared/postgres-pool.js";
+import type { MessageAttachment } from "../ingestion/message-envelope.js";
 
 import type {
   ArchiveRepository,
@@ -27,6 +28,12 @@ import type {
   IgnoredInboundEvent,
   MessageEnvelope,
 } from "../ingestion/message-envelope.js";
+import {
+  linkPreviewItemSchema,
+  linkPreviewStatusSchema,
+  type LinkPreviewBundle,
+  type LinkPreviewDiagnostic,
+} from "../ingestion/link-preview.js";
 
 interface IdentifierRow {
   id: string;
@@ -67,6 +74,11 @@ interface MessageRow {
   content_type: "text" | "attachment" | "mixed" | "unknown";
   is_from_me: boolean;
   attachments: unknown[];
+  link_preview_status: string;
+  link_previews: unknown;
+  link_preview_error_code: string | null;
+  link_preview_diagnostics: unknown;
+  link_preview_fetched_at: Date | null;
   content_redacted_at: Date | null;
   created_at: Date;
 }
@@ -83,6 +95,10 @@ interface ContextMessageRow {
   sent_at: Date;
   body: string;
   is_from_me: boolean;
+  attachments: unknown;
+  link_preview_status: string;
+  link_previews: unknown;
+  link_preview_error_code: string | null;
 }
 
 interface ChatParticipantRow {
@@ -122,9 +138,51 @@ function archivedMessage(row: MessageRow): ArchivedMessage {
     contentType: row.content_type,
     isFromMe: row.is_from_me,
     attachments: row.attachments,
+    linkPreview: linkPreviewBundle(row),
+    linkPreviewDiagnostics: Array.isArray(row.link_preview_diagnostics)
+      ? (row.link_preview_diagnostics as LinkPreviewDiagnostic[])
+      : [],
+    linkPreviewFetchedAt: row.link_preview_fetched_at?.toISOString() ?? null,
     contentRedactedAt: row.content_redacted_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
   };
+}
+
+function linkPreviewBundle(row: {
+  link_preview_status: string;
+  link_previews: unknown;
+  link_preview_error_code: string | null;
+}): LinkPreviewBundle {
+  const status = linkPreviewStatusSchema.safeParse(row.link_preview_status);
+  const items = Array.isArray(row.link_previews)
+    ? row.link_previews.flatMap((item) => {
+        const parsed = linkPreviewItemSchema.safeParse(item);
+        return parsed.success ? [parsed.data] : [];
+      })
+    : [];
+  return {
+    status: status.success ? status.data : "failed",
+    errorCode: row.link_preview_error_code,
+    items,
+  };
+}
+
+function messageAttachments(value: unknown): readonly MessageAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item !== "object" || item === null) return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.providerAttachmentId !== "string") return [];
+    return [
+      {
+        providerAttachmentId: record.providerAttachmentId,
+        mimeType: typeof record.mimeType === "string" ? record.mimeType : null,
+        fileName: typeof record.fileName === "string" ? record.fileName : null,
+        sizeBytes:
+          typeof record.sizeBytes === "number" ? record.sizeBytes : null,
+      },
+    ];
+  });
 }
 
 function inboundEventSummary(row: InboundEventRow): InboundEventSummary {
@@ -249,8 +307,10 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       const message = await client.query<IdentifierRow>(
         `INSERT INTO messages (
            id, provider, provider_message_id, chat_id, sender_id, sent_at, body,
-           content_type, is_from_me, content_hash, attachments, source_event_id
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
+           content_type, is_from_me, content_hash, attachments, source_event_id,
+           link_preview_status, link_previews, link_preview_error_code
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12,
+                   $13, $14::jsonb, $15)
          ON CONFLICT (provider, provider_message_id) DO NOTHING
          RETURNING id`,
         [
@@ -266,6 +326,9 @@ export class PostgresArchiveRepository implements ArchiveRepository {
           envelope.message.contentHash,
           JSON.stringify(envelope.message.attachments),
           eventId,
+          envelope.message.linkPreview.status,
+          JSON.stringify(envelope.message.linkPreview.items),
+          envelope.message.linkPreview.errorCode,
         ],
       );
 
@@ -294,6 +357,38 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     } finally {
       client.release();
     }
+  }
+
+  async saveMessageLinkPreview(input: {
+    providerMessageId: string;
+    linkPreview: LinkPreviewBundle;
+    diagnostics: readonly LinkPreviewDiagnostic[];
+    fetchedAt: Date;
+  }): Promise<LinkPreviewBundle | null> {
+    const result = await this.pool.query<{
+      link_preview_status: string;
+      link_previews: unknown;
+      link_preview_error_code: string | null;
+    }>(
+      `UPDATE messages
+       SET link_preview_status = $2,
+           link_previews = $3::jsonb,
+           link_preview_error_code = $4,
+           link_preview_diagnostics = $5::jsonb,
+           link_preview_fetched_at = $6
+       WHERE provider = 'bluebubbles' AND provider_message_id = $1
+       RETURNING link_preview_status, link_previews, link_preview_error_code`,
+      [
+        input.providerMessageId,
+        input.linkPreview.status,
+        JSON.stringify(input.linkPreview.items),
+        input.linkPreview.errorCode,
+        JSON.stringify(input.diagnostics.slice(0, 5)),
+        input.fetchedAt,
+      ],
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : linkPreviewBundle(row);
   }
 
   async recordIgnoredEvent(
@@ -597,7 +692,9 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body, m.content_type,
-         m.is_from_me, m.attachments, m.content_redacted_at, m.created_at
+         m.is_from_me, m.attachments, m.link_preview_status, m.link_previews,
+         m.link_preview_error_code, m.link_preview_diagnostics,
+         m.link_preview_fetched_at, m.content_redacted_at, m.created_at
        FROM messages m
        INNER JOIN chats c ON c.id = m.chat_id
        WHERE m.chat_id = $1
@@ -626,7 +723,9 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
          m.content_type, m.is_from_me, m.attachments, m.content_redacted_at,
-         m.created_at,
+         m.created_at, m.link_preview_status, m.link_previews,
+         m.link_preview_error_code, m.link_preview_diagnostics,
+         m.link_preview_fetched_at,
          c.id AS chat_id, c.provider_chat_id,
          c.display_name AS chat_display_name
        FROM messages m
@@ -670,18 +769,21 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     options: ContextWindowOptions,
   ): Promise<readonly ContextMessage[]> {
     const result = await this.pool.query<ContextMessageRow>(
-      `SELECT provider_message_id, sender_id, sent_at, body, is_from_me
+      `SELECT provider_message_id, sender_id, sent_at, body, is_from_me, attachments,
+              link_preview_status, link_previews, link_preview_error_code
        FROM (
          SELECT m.provider_message_id, m.sender_id, m.sent_at,
-                LEFT(m.body, $5) AS body,
-                m.is_from_me, m.id
+                LEFT(COALESCE(m.body, ''), $5) AS body,
+                m.is_from_me, m.id, m.attachments, m.link_preview_status, m.link_previews,
+                m.link_preview_error_code
          FROM messages m
          INNER JOIN chats c ON c.id = m.chat_id
          WHERE c.provider = 'bluebubbles'
            AND c.provider_chat_id = $1
            AND c.enabled = TRUE
-           AND m.body IS NOT NULL
-           AND m.body <> ''
+           AND ((m.body IS NOT NULL AND m.body <> '')
+                OR m.link_preview_status = 'available'
+                OR m.attachments <> '[]'::jsonb)
            AND ($2::boolean OR m.is_from_me = FALSE)
            AND ($3::text IS NULL OR m.provider_message_id <> $3)
          ORDER BY m.sent_at DESC, m.id DESC
@@ -699,16 +801,31 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const selected: ContextMessage[] = [];
     let characters = 0;
     for (const row of result.rows.reverse()) {
-      if (characters + row.body.length > options.maxCharacters) {
+      const linkPreview = linkPreviewBundle(row);
+      const previewCharacters = linkPreview.items.reduce(
+        (total, item) =>
+          total +
+          item.url.length +
+          (item.title?.length ?? 0) +
+          (item.summary?.length ?? 0) +
+          (item.siteName?.length ?? 0),
+        0,
+      );
+      if (
+        characters + row.body.length + previewCharacters >
+        options.maxCharacters
+      ) {
         continue;
       }
-      characters += row.body.length;
+      characters += row.body.length + previewCharacters;
       selected.push({
         providerMessageId: row.provider_message_id,
         senderId: row.sender_id,
         sentAt: row.sent_at.toISOString(),
         body: row.body,
         isFromMe: row.is_from_me,
+        attachments: messageAttachments(row.attachments),
+        linkPreview,
       });
     }
     return selected.reverse();
@@ -769,6 +886,9 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          UPDATE messages m
          SET body = NULL,
              attachments = '[]'::jsonb,
+             link_preview_status = 'redacted',
+             link_previews = '[]'::jsonb,
+             link_preview_error_code = NULL,
              content_redacted_at = $2
          FROM candidates c
          WHERE m.id = c.id
@@ -811,7 +931,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       const result = await this.pool.query<{ ready: boolean }>(
         `SELECT EXISTS (
            SELECT 1 FROM schema_migrations
-           WHERE name = '0022_chat_participant_identities.sql'
+           WHERE name = '0023_message_link_previews.sql'
          ) AS ready`,
       );
       return result.rows[0]?.ready === true;

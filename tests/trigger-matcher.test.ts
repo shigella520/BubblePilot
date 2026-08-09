@@ -8,7 +8,7 @@ import {
 
 function envelope(sentAt: string): MessageEnvelope {
   return {
-    schemaVersion: "1",
+    schemaVersion: "3",
     eventId: "new-message:fictional-time-window-message",
     correlationId: "00000000-0000-4000-8000-000000000901",
     provider: "bluebubbles",
@@ -25,6 +25,11 @@ function envelope(sentAt: string): MessageEnvelope {
       contentType: "text",
       isFromMe: false,
       attachments: [],
+      linkPreview: {
+        status: "not-requested",
+        errorCode: null,
+        items: [],
+      },
       contentHash: `sha256:${"0".repeat(64)}`,
     },
     metadata: {

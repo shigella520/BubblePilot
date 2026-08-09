@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   GripVertical,
+  Image,
   Plus,
   RefreshCw,
   Route,
@@ -35,10 +36,15 @@ interface Provider {
   enabled: boolean;
   sortOrder: number;
   version: number;
-  capabilities: { functionCalling: boolean; hostedWebSearch: boolean };
+  capabilities: {
+    functionCalling: boolean;
+    hostedWebSearch: boolean;
+    imageInput?: boolean;
+  };
   capabilityProbe: {
     functionCalling: "verified" | "failed" | "unknown";
     hostedWebSearch: "verified" | "failed" | "unknown";
+    imageInput?: "verified" | "failed" | "unknown";
     checkedAt: string | null;
   };
   health: {
@@ -71,6 +77,25 @@ interface WebSearchSettings {
   version: number;
   updatedAt: string | null;
 }
+interface ImageInputSettings {
+  enabled: boolean;
+  includeAttachments: boolean;
+  includeLinkPreviewImages: boolean;
+  maxCurrentAttachments: number;
+  maxHistoryImages: number;
+  maxTotalImages: number;
+  maxImageBytes: number;
+  maxTotalBytes: number;
+  fetchTimeoutMs: number;
+  detail: "low" | "high" | "auto";
+  source: "defaults" | "database";
+  version: number;
+  updatedAt: string | null;
+}
+type ImageInputSettingsForm = Omit<
+  ImageInputSettings,
+  "source" | "version" | "updatedAt"
+>;
 type WebSearchSettingsForm = Pick<
   WebSearchSettings,
   | "maxAttempts"
@@ -92,6 +117,7 @@ interface ProviderForm {
   enabled: boolean;
   functionCalling: boolean;
   hostedWebSearch: boolean;
+  imageInput: boolean;
 }
 
 function scrollToSection(id: string) {
@@ -109,6 +135,20 @@ const routes = ref<AiRoute[]>([]);
 const searchStatus = ref({ enabled: false, backend: "searxng", ready: false });
 const searchSettings = ref<WebSearchSettings | null>(null);
 const searchSettingsBusy = ref(false);
+const imageInputSettings = ref<ImageInputSettings | null>(null);
+const imageInputSettingsBusy = ref(false);
+const imageInputSettingsForm = reactive<ImageInputSettingsForm>({
+  enabled: false,
+  includeAttachments: true,
+  includeLinkPreviewImages: true,
+  maxCurrentAttachments: 4,
+  maxHistoryImages: 2,
+  maxTotalImages: 6,
+  maxImageBytes: 10 * 1024 * 1024,
+  maxTotalBytes: 20 * 1024 * 1024,
+  fetchTimeoutMs: 15000,
+  detail: "high",
+});
 const searchSettingsForm = reactive<WebSearchSettingsForm>({
   maxAttempts: 2,
   attemptTimeoutMs: 8000,
@@ -142,6 +182,7 @@ const providerForm = reactive<ProviderForm>({
   enabled: true,
   functionCalling: false,
   hostedWebSearch: false,
+  imageInput: false,
 });
 const routeForm = reactive({
   id: "",
@@ -179,6 +220,22 @@ function applySearchSettings(value: WebSearchSettings) {
   });
 }
 
+function applyImageInputSettings(value: ImageInputSettings) {
+  imageInputSettings.value = value;
+  Object.assign(imageInputSettingsForm, {
+    enabled: value.enabled,
+    includeAttachments: value.includeAttachments,
+    includeLinkPreviewImages: value.includeLinkPreviewImages,
+    maxCurrentAttachments: value.maxCurrentAttachments,
+    maxHistoryImages: value.maxHistoryImages,
+    maxTotalImages: value.maxTotalImages,
+    maxImageBytes: value.maxImageBytes,
+    maxTotalBytes: value.maxTotalBytes,
+    fetchTimeoutMs: value.fetchTimeoutMs,
+    detail: value.detail,
+  });
+}
+
 function routeToggleLabel(item: AiRoute) {
   if (routeToggleBusyIds.has(item.id)) {
     return item.enabled ? "停用中…" : "启用中…";
@@ -209,24 +266,56 @@ async function load() {
   message.value = "";
   messageIsError.value = false;
   try {
-    const [providerData, routeData, statusData, settingsData] =
-      await Promise.all([
-        apiRequest<Provider[]>("/api/v1/ai/providers"),
-        apiRequest<AiRoute[]>("/api/v1/ai/routes"),
-        apiRequest<{ enabled: boolean; backend: string; ready: boolean }>(
-          "/api/v1/ai/search/status",
-        ),
-        apiRequest<WebSearchSettings>("/api/v1/ai/search/settings"),
-      ]);
+    const [
+      providerData,
+      routeData,
+      statusData,
+      settingsData,
+      imageSettingsData,
+    ] = await Promise.all([
+      apiRequest<Provider[]>("/api/v1/ai/providers"),
+      apiRequest<AiRoute[]>("/api/v1/ai/routes"),
+      apiRequest<{ enabled: boolean; backend: string; ready: boolean }>(
+        "/api/v1/ai/search/status",
+      ),
+      apiRequest<WebSearchSettings>("/api/v1/ai/search/settings"),
+      apiRequest<ImageInputSettings>("/api/v1/ai/image-input/settings"),
+    ]);
     providers.value = providerData;
     routes.value = routeData;
     searchStatus.value = statusData;
     applySearchSettings(settingsData);
+    applyImageInputSettings(imageSettingsData);
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
   } finally {
     busy.value = false;
+  }
+}
+async function saveImageInputSettings() {
+  if (imageInputSettingsBusy.value || imageInputSettings.value === null) return;
+  imageInputSettingsBusy.value = true;
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    const saved = await apiRequest<ImageInputSettings>(
+      "/api/v1/ai/image-input/settings",
+      {
+        method: "PUT",
+        body: jsonBody({
+          ...imageInputSettingsForm,
+          expectedVersion: imageInputSettings.value.version,
+        }),
+      },
+    );
+    applyImageInputSettings(saved);
+    message.value = "原生图片输入全局配置已保存并立即生效。";
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    imageInputSettingsBusy.value = false;
   }
 }
 
@@ -269,6 +358,7 @@ function resetProvider() {
     enabled: true,
     functionCalling: false,
     hostedWebSearch: false,
+    imageInput: false,
   });
 }
 function editProvider(item: Provider) {
@@ -285,6 +375,7 @@ function editProvider(item: Provider) {
     enabled: item.enabled,
     functionCalling: item.capabilities?.functionCalling ?? false,
     hostedWebSearch: item.capabilities?.hostedWebSearch ?? false,
+    imageInput: item.capabilities?.imageInput ?? false,
   });
   document
     .querySelector("#provider-form")
@@ -309,6 +400,7 @@ async function saveProvider() {
       capabilities: {
         functionCalling: providerForm.functionCalling,
         hostedWebSearch: providerForm.hostedWebSearch,
+        imageInput: providerForm.imageInput,
       },
       ...(providerForm.id
         ? { expectedVersion: providerForm.expectedVersion }
@@ -393,13 +485,38 @@ async function providerAction(
         message: string;
         durationMs: number;
         errorCode: string | null;
+        checks: Array<{
+          name:
+            | "connectivity"
+            | "functionCalling"
+            | "hostedWebSearch"
+            | "imageInput";
+          status: "verified" | "failed";
+          attempts: number;
+          durationMs: number;
+          errorCode: string | null;
+          httpStatus: number | null;
+          providerRequestId: string | null;
+          responsePreview: string | null;
+        }>;
       }>(`/api/v1/ai/providers/${item.id}/test`, { method: "POST" });
       feedback = result.success
         ? `AI Provider「${item.name}」连接测试成功：${result.message}（${result.model} · ${result.durationMs} ms）。`
         : `AI Provider「${item.name}」连接测试失败：${result.message}${
             result.errorCode === null ? "" : `（${result.errorCode}）`
           }（${result.durationMs} ms）。`;
-      feedbackIsError = !result.success;
+      feedbackIsError =
+        !result.success ||
+        result.checks.some((check) => check.status === "failed");
+      const imageMismatch = result.checks.find(
+        (check) =>
+          check.name === "imageInput" &&
+          check.errorCode === "AI_IMAGE_PROBE_MISMATCH" &&
+          check.responsePreview !== null,
+      );
+      if (imageMismatch?.responsePreview) {
+        feedback += ` 固定图片探测回复：${imageMismatch.responsePreview}`;
+      }
       await load();
     }
     if (action === "reset") {
@@ -750,6 +867,132 @@ onMounted(load);
           </div>
         </form>
       </section>
+      <section id="image-input-settings" class="admin-panel">
+        <div class="panel-head">
+          <div>
+            <p class="card-kicker">NATIVE MULTIMODAL INPUT</p>
+            <h2>原生图片输入</h2>
+          </div>
+          <span class="state-badge">全局配置</span>
+        </div>
+        <p class="panel-description">
+          启用后，所有 AI
+          对话会自动携带当前消息图片、链接卡片主图和最近历史图片。图片由
+          BubblePilot 安全下载后通过 Provider
+          原生多模态协议发送；失败时降级为文本回复。
+        </p>
+        <form
+          v-if="imageInputSettings"
+          class="settings-form boxed-form"
+          @submit.prevent="saveImageInputSettings"
+        >
+          <h3><Image :size="18" />图片来源与质量</h3>
+          <div class="field-grid">
+            <label class="checkbox-field"
+              ><input
+                v-model="imageInputSettingsForm.enabled"
+                type="checkbox"
+              /><span>启用原生图片输入</span></label
+            >
+            <label class="checkbox-field"
+              ><input
+                v-model="imageInputSettingsForm.includeAttachments"
+                type="checkbox"
+              /><span>包含图片附件</span></label
+            >
+            <label class="checkbox-field"
+              ><input
+                v-model="imageInputSettingsForm.includeLinkPreviewImages"
+                type="checkbox"
+              /><span>包含链接卡片主图</span></label
+            >
+            <label
+              ><span>图片细节等级</span
+              ><select v-model="imageInputSettingsForm.detail">
+                <option value="high">high（推荐）</option>
+                <option value="low">low（低成本）</option>
+                <option value="auto">auto（由 Provider 决定）</option>
+              </select></label
+            >
+          </div>
+          <details class="advanced-settings">
+            <summary>高级限制（通常无需修改）</summary>
+            <p class="panel-description">
+              用于限制图片数量、内存占用和下载等待时间。默认值适合大多数部署。
+            </p>
+            <div class="field-grid">
+              <label
+                ><span>当前消息最多附件</span
+                ><input
+                  v-model.number="imageInputSettingsForm.maxCurrentAttachments"
+                  type="number"
+                  min="1"
+                  max="10"
+                  required
+              /></label>
+              <label
+                ><span>最近历史图片数</span
+                ><input
+                  v-model.number="imageInputSettingsForm.maxHistoryImages"
+                  type="number"
+                  min="0"
+                  max="10"
+                  required
+              /></label>
+              <label
+                ><span>单次最多图片</span
+                ><input
+                  v-model.number="imageInputSettingsForm.maxTotalImages"
+                  type="number"
+                  min="1"
+                  max="20"
+                  required
+              /></label>
+              <label
+                ><span>单张图片上限（字节，默认 10 MiB）</span
+                ><input
+                  v-model.number="imageInputSettingsForm.maxImageBytes"
+                  type="number"
+                  min="1024"
+                  max="52428800"
+                  step="1024"
+                  required
+              /></label>
+              <label
+                ><span>单次图片总上限（字节，默认 20 MiB）</span
+                ><input
+                  v-model.number="imageInputSettingsForm.maxTotalBytes"
+                  type="number"
+                  min="1024"
+                  max="104857600"
+                  step="1024"
+                  required
+              /></label>
+              <label
+                ><span>下载超时（毫秒）</span
+                ><input
+                  v-model.number="imageInputSettingsForm.fetchTimeoutMs"
+                  type="number"
+                  min="1000"
+                  max="60000"
+                  step="500"
+                  required
+              /></label>
+            </div>
+          </details>
+          <div class="form-actions">
+            <button
+              class="button"
+              type="submit"
+              :disabled="imageInputSettingsBusy"
+            >
+              <Save :size="16" />{{
+                imageInputSettingsBusy ? "保存中…" : "保存图片配置"
+              }}
+            </button>
+          </div>
+        </form>
+      </section>
       <section id="providers" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -826,6 +1069,10 @@ onMounted(load);
                 ><span v-if="item.capabilities.hostedWebSearch"
                   >托管搜索：{{
                     probeLabel(item.capabilityProbe.hostedWebSearch)
+                  }}</span
+                ><span v-if="item.capabilities.imageInput"
+                  >图片输入：{{
+                    probeLabel(item.capabilityProbe.imageInput ?? "unknown")
                   }}</span
                 >
               </footer>
@@ -941,7 +1188,7 @@ onMounted(load);
                 v-model.number="providerForm.requestTimeoutMs"
                 type="number"
                 min="1000"
-                max="120000"
+                max="360000"
                 required /></label
             ><label class="wide-field"
               ><span>默认参数（JSON）</span
@@ -954,6 +1201,10 @@ onMounted(load);
             <label class="checkbox-field"
               ><input v-model="providerForm.hostedWebSearch" type="checkbox" />
               <span>支持 Provider 托管联网搜索</span></label
+            >
+            <label class="checkbox-field"
+              ><input v-model="providerForm.imageInput" type="checkbox" />
+              <span>支持原生图片输入</span></label
             >
           </div>
           <div class="form-actions">

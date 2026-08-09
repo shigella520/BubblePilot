@@ -78,6 +78,11 @@ describe("bounded data export API", () => {
       contentType: "text",
       isFromMe: false,
       attachments: [],
+      linkPreview: {
+        status: "not-requested",
+        errorCode: null,
+        items: [],
+      },
       contentRedactedAt: null,
       createdAt: "2026-08-03T08:00:01.000Z",
     });

@@ -13,6 +13,9 @@ interface SettingsRow {
   encrypted_webhook_secret: string;
   send_method: "private-api" | "apple-script";
   request_timeout_ms: number;
+  link_preview_enabled: boolean;
+  open_graph_fallback_enabled: boolean;
+  open_graph_timeout_ms: number;
   version: number;
   updated_at: Date;
 }
@@ -24,6 +27,9 @@ function record(row: SettingsRow): BlueBubblesSettingsRecord {
     encryptedWebhookSecret: row.encrypted_webhook_secret,
     sendMethod: row.send_method,
     requestTimeoutMs: row.request_timeout_ms,
+    linkPreviewEnabled: row.link_preview_enabled,
+    openGraphFallbackEnabled: row.open_graph_fallback_enabled,
+    openGraphTimeoutMs: row.open_graph_timeout_ms,
     version: row.version,
     updatedAt: row.updated_at.toISOString(),
   };
@@ -39,7 +45,9 @@ export class PostgresBlueBubblesSettingsRepository implements BlueBubblesSetting
   async find(): Promise<BlueBubblesSettingsRecord | null> {
     const result = await this.pool.query<SettingsRow>(
       `SELECT server_url, encrypted_access_token, encrypted_webhook_secret,
-              send_method, request_timeout_ms, version, updated_at
+              send_method, request_timeout_ms, link_preview_enabled,
+              open_graph_fallback_enabled, open_graph_timeout_ms,
+              version, updated_at
        FROM bluebubbles_settings WHERE id = 1`,
     );
     return result.rows[0] === undefined ? null : record(result.rows[0]);
@@ -51,6 +59,9 @@ export class PostgresBlueBubblesSettingsRepository implements BlueBubblesSetting
     encryptedWebhookSecret: string;
     sendMethod: "private-api" | "apple-script";
     requestTimeoutMs: number;
+    linkPreviewEnabled: boolean;
+    openGraphFallbackEnabled: boolean;
+    openGraphTimeoutMs: number;
     expectedVersion: number;
   }): Promise<
     { status: "ok"; value: BlueBubblesSettingsRecord } | { status: "conflict" }
@@ -60,18 +71,25 @@ export class PostgresBlueBubblesSettingsRepository implements BlueBubblesSetting
         ? await this.pool.query<SettingsRow>(
             `INSERT INTO bluebubbles_settings (
                id, server_url, encrypted_access_token,
-               encrypted_webhook_secret, send_method, request_timeout_ms
-             ) VALUES (1, $1, $2, $3, $4, $5)
+               encrypted_webhook_secret, send_method, request_timeout_ms,
+               link_preview_enabled, open_graph_fallback_enabled,
+               open_graph_timeout_ms
+             ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (id) DO NOTHING
              RETURNING server_url, encrypted_access_token,
                        encrypted_webhook_secret, send_method,
-                       request_timeout_ms, version, updated_at`,
+                       request_timeout_ms, link_preview_enabled,
+                       open_graph_fallback_enabled, open_graph_timeout_ms,
+                       version, updated_at`,
             [
               input.serverUrl,
               input.encryptedAccessToken,
               input.encryptedWebhookSecret,
               input.sendMethod,
               input.requestTimeoutMs,
+              input.linkPreviewEnabled,
+              input.openGraphFallbackEnabled,
+              input.openGraphTimeoutMs,
             ],
           )
         : await this.pool.query<SettingsRow>(
@@ -81,18 +99,26 @@ export class PostgresBlueBubblesSettingsRepository implements BlueBubblesSetting
                  encrypted_webhook_secret = $3,
                  send_method = $4,
                  request_timeout_ms = $5,
+                 link_preview_enabled = $6,
+                 open_graph_fallback_enabled = $7,
+                 open_graph_timeout_ms = $8,
                  version = version + 1,
                  updated_at = NOW()
-             WHERE id = 1 AND version = $6
+             WHERE id = 1 AND version = $9
              RETURNING server_url, encrypted_access_token,
                        encrypted_webhook_secret, send_method,
-                       request_timeout_ms, version, updated_at`,
+                       request_timeout_ms, link_preview_enabled,
+                       open_graph_fallback_enabled, open_graph_timeout_ms,
+                       version, updated_at`,
             [
               input.serverUrl,
               input.encryptedAccessToken,
               input.encryptedWebhookSecret,
               input.sendMethod,
               input.requestTimeoutMs,
+              input.linkPreviewEnabled,
+              input.openGraphFallbackEnabled,
+              input.openGraphTimeoutMs,
               input.expectedVersion,
             ],
           );
@@ -107,7 +133,7 @@ export class PostgresBlueBubblesSettingsRepository implements BlueBubblesSetting
       const result = await this.pool.query<{ ready: boolean }>(
         `SELECT EXISTS (
            SELECT 1 FROM schema_migrations
-           WHERE name = '0010_bluebubbles_settings.sql'
+           WHERE name = '0023_message_link_previews.sql'
          ) AS ready`,
       );
       return result.rows[0]?.ready === true;

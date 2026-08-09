@@ -31,23 +31,29 @@
   <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
 </p>
 
-BubblePilot 接收 BlueBubbles 的新訊息，只在你指定的聊天中保存內容、比對觸發條件並執行視覺化工作流程。工作流程可以讀取最近對話、呼叫一個或多個 OpenAI 相容服務、按需搜尋網頁，再把結果安全地回覆到原聊天。
+BubblePilot 接收 BlueBubbles 的新訊息，只在你指定的聊天中保存內容、比對觸發條件並執行視覺化工作流程。工作流程可以讀取最近對話和圖片、呼叫一個或多個 OpenAI 相容服務、按需搜尋網頁，再把結果安全地回覆到原聊天。
 
 - **只處理你選擇的聊天**：未啟用監聽的聊天只保留發現所需的最小中繼資料，不歸檔正文。
 - **自動化過程可解釋**：入站、比對、節點、AI 呼叫、搜尋工具和回覆狀態都能在管理端追蹤。
 - **AI 服務不被單點綁定**：多個 Provider 可按固定順序 Retry、Fallback，並在連續故障後自動降級。
+- **群聊成員可以被準確識別**：依聊天為歷史 sender ID 設定本名和暱稱，AI 只讀取目前上下文實際出現成員的映射。
+- **連結卡片也能成為 AI 上下文**：優先解析 BlueBubbles 中繼資料，必要時安全讀取公開 Open Graph，並保存有限診斷。
+- **圖片可由原生多模態模型理解**：在全域安全限制內暫時讀取目前附件、卡片主圖和有限歷史圖片，失敗時明確降級為文字。
 - **資料保存在自己的實例**：PostgreSQL 是訊息、設定、執行和稽核記錄的權威來源。
 
 ## 核心能力
 
-| 場景 | BubblePilot 提供的能力 |
-| --- | --- |
-| 保存重要對話 | 按聊天啟用監聽、搜尋歸檔訊息，並在授權後匯出 JSON Lines |
-| 建立群聊 Bot | 使用聊天、傳送者、訊息類型、關鍵字、前綴、正規表示式和時間窗口觸發 |
-| 編排訊息流程 | 在畫布中連接上下文、條件、變數、AI、回覆和結束節點 |
-| 接入不同 AI | 管理 OpenAI 相容 Provider 和路由，自動 Retry、Fallback 與恢復 |
-| 取得最新網頁資訊 | 使用 Provider 託管搜尋，或透過 Function Calling 呼叫自託管 SearXNG |
-| 排查失敗 | 查看執行、節點、Provider Attempt、工具軌跡和出站狀態 |
+| 場景             | BubblePilot 提供的能力                                                    |
+| ---------------- | ------------------------------------------------------------------------- |
+| 保存重要對話     | 按聊天啟用監聽、搜尋歸檔訊息，並在授權後匯出 JSON Lines                   |
+| 建立群聊 Bot     | 使用聊天、傳送者、訊息類型、關鍵字、前綴、正規表示式和時間窗口觸發        |
+| 識別群聊成員     | 從聊天歷史發現 sender ID，依聊天維護本名與暱稱，讓 AI 分辨每句話的發言者  |
+| 理解連結卡片     | 歸檔標題、摘要和網站名稱，讓 AI 使用卡片上下文但不宣稱已閱讀完整網頁      |
+| 理解聊天圖片     | 將目前圖片附件、連結卡片主圖和有限歷史圖片送入已驗證的原生多模態 Provider |
+| 編排訊息流程     | 在畫布中連接上下文、條件、變數、AI、回覆和結束節點                        |
+| 接入不同 AI      | 管理 OpenAI 相容 Provider 和路由，自動 Retry、Fallback 與恢復             |
+| 取得最新網頁資訊 | 使用 Provider 託管搜尋，或透過 Function Calling 呼叫自託管 SearXNG        |
+| 排查失敗         | 查看執行、節點、Provider Attempt、工具軌跡和出站狀態                      |
 
 聯網搜尋是可選功能。關閉後仍可使用訊息歸檔、一般工作流程和不聯網的 AI 回覆。
 
@@ -64,6 +70,12 @@ BlueBubbles 只負責收發 iMessage；BubblePilot 保存自己的監聽設定�
 左側展示視覺化工作流程編排，右側展示節點、AI Provider、聯網搜尋和出站回覆的完整執行軌跡。點擊圖片可查看原始清晰度。
 
 [![BubblePilot 工作流程編排與執行追蹤](assets/preview/bubblepilot-usage.png)](assets/preview/bubblepilot-usage.png)
+
+啟用原生圖片輸入後，AI Bot 可以直接理解 iMessage 圖片附件和連結卡片主圖。圖片只在目前 AI 節點執行期間安全讀取並傳送給已驗證的多模態 Provider；取得或視覺呼叫失敗時會明確降級為文字，不中斷整個工作流程。
+
+<p align="center">
+  <a href="assets/preview/bubblepilot-multimodal-chat.jpg"><img src="assets/preview/bubblepilot-multimodal-chat.jpg" width="294" alt="BubblePilot 在 iMessage 中識別聊天圖片" /></a>
+</p>
 
 ## 10 分鐘完成首次設定
 
@@ -157,18 +169,18 @@ unset BUBBLEPILOT_PLAIN_PASSWORD
 
 所有 `CHANGE_ME` 都必須替換：
 
-| 設定 | 填寫內容 |
-| --- | --- |
-| `POSTGRES_PASSWORD` | 產生的資料庫密碼 |
-| `DATABASE_URL` | 連線字串中的密碼必須與 `POSTGRES_PASSWORD` 相同 |
-| `API_ACCESS_TOKEN` | 獨立的隨機管理 API 相容 Token |
-| `SETTINGS_ENCRYPTION_KEY` | 獨立且穩定的隨機值，用來加密 PostgreSQL 中的執行期憑證 |
-| `BLUEBUBBLES_WEBHOOK_SECRET` | 放入 Webhook URL 的獨立隨機值 |
-| `BLUEBUBBLES_SERVER_URL` | BlueBubbles 根地址，例如 `http://192.0.2.10:1234` |
-| `BLUEBUBBLES_ACCESS_TOKEN` | BlueBubbles REST API Password |
-| `APP_LOGIN_PASSWORD_HASH` | 第一組雜湊，必須用單引號包裹 |
-| `SENSITIVE_OPERATION_PASSWORD_HASH` | 第二組不同的雜湊，必須用單引號包裹 |
-| `SEARXNG_SECRET` | 獨立隨機值，即使暫不搜尋也需要設定 |
+| 設定                                | 填寫內容                                               |
+| ----------------------------------- | ------------------------------------------------------ |
+| `POSTGRES_PASSWORD`                 | 產生的資料庫密碼                                       |
+| `DATABASE_URL`                      | 連線字串中的密碼必須與 `POSTGRES_PASSWORD` 相同        |
+| `API_ACCESS_TOKEN`                  | 獨立的隨機管理 API 相容 Token                          |
+| `SETTINGS_ENCRYPTION_KEY`           | 獨立且穩定的隨機值，用來加密 PostgreSQL 中的執行期憑證 |
+| `BLUEBUBBLES_WEBHOOK_SECRET`        | 放入 Webhook URL 的獨立隨機值                          |
+| `BLUEBUBBLES_SERVER_URL`            | BlueBubbles 根地址，例如 `http://192.0.2.10:1234`      |
+| `BLUEBUBBLES_ACCESS_TOKEN`          | BlueBubbles REST API Password                          |
+| `APP_LOGIN_PASSWORD_HASH`           | 第一組雜湊，必須用單引號包裹                           |
+| `SENSITIVE_OPERATION_PASSWORD_HASH` | 第二組不同的雜湊，必須用單引號包裹                     |
+| `SEARXNG_SECRET`                    | 獨立隨機值，即使暫不搜尋也需要設定                     |
 
 ```dotenv
 APP_LOGIN_PASSWORD_HASH='scrypt$...'
@@ -180,7 +192,7 @@ SENSITIVE_OPERATION_PASSWORD_HASH='scrypt$...'
 - `MONITORED_CHAT_IDS`：已知 Chat GUID 時可提前填入，多個值用逗號分隔；留空時先用 Webhook 發現聊天，再到管理端開啟監聽。
 - `MESSAGE_RETENTION_DAYS`：正文與附件中繼資料預設保留 90 天；`0` 表示明確接受永久保留風險。
 - `ENABLE_WEB_SEARCH`：預設 `false`，作為部署層級的安全總開關。開啟後，重試、逾時、結果數與失敗後備統一在 AI 頁面的「聯網搜尋全域設定」管理，儲存後立即生效。
-- `BUBBLEPILOT_IMAGE`：原始碼部署由 Compose 本機建置；正式部署可固定為 `ghcr.io/shigella520/bubblepilot:1.0.0`，不要長期使用 `dev` 或 `latest`。
+- `BUBBLEPILOT_IMAGE`：原始碼部署由 Compose 本機建置；正式部署可固定為 `ghcr.io/shigella520/bubblepilot:1.1.0`，不要長期使用 `dev` 或 `latest`。
 
 ### 4. 啟動並檢查服務
 
@@ -213,9 +225,10 @@ https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_W
 ### 6. 設定 AI Provider（可選）
 
 1. 進入「AI Provider」，填寫介面類型、Base URL、模型、API Key 和逾時。
-2. 只在 Provider 支援時開啟 Function Calling 或託管搜尋，再執行連線和能力測試。
+2. 只在 Provider 支援時開啟 Function Calling、託管搜尋或原生圖片輸入，再執行各項獨立能力測試。
 3. 建立 Provider 路由，設定候選順序、Fallback、Retry、降級門檻和冷卻時間。
 4. 若要搜尋，確認 `.env` 中 `ENABLE_WEB_SEARCH=true`，且頁面顯示搜尋後端可用。
+5. 若要理解圖片，先確認 Provider 的圖片輸入能力已驗證，再於同一頁啟用全域原生圖片輸入；工作流程節點不需另行設定。
 
 API Key 會使用 `SETTINGS_ENCRYPTION_KEY` 加密保存到 PostgreSQL，之後不會在頁面、介面或日誌中回顯。
 

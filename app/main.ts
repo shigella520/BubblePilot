@@ -9,6 +9,9 @@ import { PostgresAiRepository } from "../modules/ai/postgres-ai-repository.js";
 import { PostgresWebSearchSettingsRepository } from "../modules/ai/postgres-web-search-settings-repository.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import { WebSearchSettingsService } from "../modules/ai/web-search-settings-service.js";
+import { PostgresImageInputSettingsRepository } from "../modules/ai/postgres-image-input-settings-repository.js";
+import { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
+import { NativeImageInputService } from "../modules/ai/native-image-input.js";
 import { AuthService } from "../modules/auth/auth-service.js";
 import { PostgresAuthRepository } from "../modules/auth/postgres-auth-repository.js";
 import { DataExportService } from "../modules/export/export-service.js";
@@ -22,6 +25,7 @@ import { ManagedBlueBubblesReplyGateway } from "../modules/integrations/bluebubb
 import { PostgresBlueBubblesSettingsRepository } from "../modules/integrations/bluebubbles/postgres-settings-repository.js";
 import { SettingsCipher } from "../modules/integrations/bluebubbles/settings-cipher.js";
 import { BlueBubblesSettingsService } from "../modules/integrations/bluebubbles/settings-service.js";
+import { ManagedLinkPreviewEnricher } from "../modules/integrations/bluebubbles/link-preview-enricher.js";
 import { createDefaultNodeRegistry } from "../modules/workflow/node-registry.js";
 import { InProcessWorkflowExecutionDispatcher } from "../modules/workflow/execution-dispatcher.js";
 import { PostgresWorkflowRepository } from "../modules/workflow/postgres-workflow-repository.js";
@@ -55,6 +59,25 @@ const webSearchSettings = new WebSearchSettingsService(
     failurePolicy: "mode-default",
   },
 );
+const imageInputSettingsRepository = new PostgresImageInputSettingsRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
+const imageInputSettings = new ImageInputSettingsService(
+  imageInputSettingsRepository,
+  {
+    enabled: false,
+    includeAttachments: true,
+    includeLinkPreviewImages: true,
+    maxCurrentAttachments: 4,
+    maxHistoryImages: 2,
+    maxTotalImages: 6,
+    maxImageBytes: 10 * 1024 * 1024,
+    maxTotalBytes: 20 * 1024 * 1024,
+    fetchTimeoutMs: 15_000,
+    detail: "high",
+  },
+);
 const authRepository = new PostgresAuthRepository(
   config.databaseUrl,
   config.databaseQueryTimeoutMs,
@@ -76,6 +99,9 @@ const blueBubblesSettings = new BlueBubblesSettingsService(
     webhookSecret: config.blueBubblesWebhookSecret,
     sendMethod: config.blueBubblesSendMethod,
     requestTimeoutMs: config.blueBubblesRequestTimeoutMs,
+    linkPreviewEnabled: true,
+    openGraphFallbackEnabled: true,
+    openGraphTimeoutMs: 5_000,
   },
 );
 const messageRetention =
@@ -119,12 +145,19 @@ const aiAgent = new AgentRunner(
   webSearchSettings,
 );
 const replyGateway = new ManagedBlueBubblesReplyGateway(blueBubblesSettings);
+const linkPreviewEnricher = new ManagedLinkPreviewEnricher(blueBubblesSettings);
+const nativeImageInput = new NativeImageInputService(
+  imageInputSettings,
+  blueBubblesSettings,
+  aiRepository,
+);
 const workflowEngine = new WorkflowEngine(
   workflowRepository,
   createDefaultNodeRegistry(workflowRepository, replyGateway, {
     archive: repository,
     aiRouting,
     aiAgent,
+    imageInput: nativeImageInput,
   }),
   {
     maxConcurrency: config.workflowMaxConcurrency,
@@ -142,6 +175,7 @@ const application = buildApplication(config, repository, {
     management: aiManagement,
     searchTool: webSearchTool,
     searchSettings: webSearchSettings,
+    imageInputSettings,
   },
   workflow: {
     repository: workflowRepository,
@@ -152,7 +186,7 @@ const application = buildApplication(config, repository, {
     repository: dataExportRepository,
     service: new DataExportService(dataExportRepository),
   },
-  blueBubbles: { settings: blueBubblesSettings },
+  blueBubbles: { settings: blueBubblesSettings, linkPreviewEnricher },
   ...(messageRetention === undefined ? {} : { messageRetention }),
 });
 

@@ -7,6 +7,7 @@ import type {
   AiCallResult,
   AiChatMessage,
   AiChatRequest,
+  AiContentPart,
   AiProviderRecord,
   AiToolCall,
 } from "./ai-types.js";
@@ -152,17 +153,57 @@ function failure(input: Omit<AiCallFailure, "status">): AiCallFailure {
   return { status: "failed", ...input };
 }
 
+function textContent(content: string | readonly AiContentPart[]): string {
+  return typeof content === "string"
+    ? content
+    : content
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
+}
+
+function chatContent(content: string | readonly AiContentPart[]) {
+  if (typeof content === "string") return content;
+  return content.flatMap((part) =>
+    part.type === "text"
+      ? [{ type: "text", text: part.text }]
+      : [
+          { type: "text", text: `[图片：${part.label}]` },
+          {
+            type: "image_url",
+            image_url: { url: part.dataUrl, detail: part.detail },
+          },
+        ],
+  );
+}
+
+function responsesContent(content: string | readonly AiContentPart[]) {
+  if (typeof content === "string") return content;
+  return content.flatMap((part) =>
+    part.type === "text"
+      ? [{ type: "input_text", text: part.text }]
+      : [
+          { type: "input_text", text: `[图片：${part.label}]` },
+          {
+            type: "input_image",
+            image_url: part.dataUrl,
+            detail: part.detail,
+          },
+        ],
+  );
+}
+
 function chatMessages(messages: readonly AiChatMessage[]) {
   return messages.map((message) =>
     message.role === "tool"
       ? {
           role: "tool",
-          content: message.content,
+          content: textContent(message.content),
           tool_call_id: message.toolCallId,
         }
       : {
           role: message.role,
-          content: message.content,
+          content: chatContent(message.content),
           ...(message.toolCalls === undefined
             ? {}
             : {
@@ -183,12 +224,18 @@ function responseInput(messages: readonly AiChatMessage[]) {
       items.push({
         type: "function_call_output",
         call_id: message.toolCallId ?? "missing-tool-call-id",
-        output: message.content,
+        output: textContent(message.content),
       });
       continue;
     }
-    if (message.content.length > 0) {
-      items.push({ role: message.role, content: message.content });
+    if (
+      textContent(message.content).length > 0 ||
+      Array.isArray(message.content)
+    ) {
+      items.push({
+        role: message.role,
+        content: responsesContent(message.content),
+      });
     }
     for (const call of message.toolCalls ?? []) {
       items.push({
@@ -418,7 +465,7 @@ function baseDiagnostics(
     requestHash: sha256(requestBody),
     requestMessageCount: request.messages.length,
     requestCharacters: request.messages.reduce(
-      (total, message) => total + message.content.length,
+      (total, message) => total + textContent(message.content).length,
       0,
     ),
     responseBytes: null,

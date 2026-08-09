@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   FileClock,
+  Image,
   RefreshCw,
   RotateCcw,
   Route,
@@ -113,6 +114,21 @@ interface ExecutionDetail extends Execution {
     errorCode: string | null;
     requestDetails: Record<string, unknown> | null;
     responseDetails: Record<string, unknown> | null;
+    createdAt: string;
+  }>;
+  aiImageInputs: Array<{
+    id: string;
+    nodeId: string;
+    source: "attachment" | "link-preview";
+    sourceHash: string;
+    hostName: string | null;
+    status: "succeeded" | "skipped" | "failed";
+    declaredMimeType: string | null;
+    actualMimeType: string | null;
+    bytes: number | null;
+    durationMs: number;
+    detail: "low" | "high" | "auto";
+    errorCode: string | null;
     createdAt: string;
   }>;
 }
@@ -739,6 +755,43 @@ function resetAuditPage(): Promise<boolean> {
                 class="empty-panel compact"
               >
                 本次执行没有 AI 调用。
+              </div>
+              <h3>AI 图片输入</h3>
+              <article
+                v-for="item in detail.aiImageInputs"
+                :key="item.id"
+                class="trace-item"
+              >
+                <Image :size="17" />
+                <div>
+                  <strong>{{ item.source }} · {{ item.status }}</strong>
+                  <p>
+                    {{ item.durationMs }} ms · {{ item.bytes ?? "—" }} B ·
+                    {{
+                      item.actualMimeType ||
+                      item.declaredMimeType ||
+                      "未知 MIME"
+                    }}
+                    · detail={{ item.detail }}
+                  </p>
+                  <span v-if="item.hostName" class="keyline"
+                    >主机：{{ item.hostName }}</span
+                  >
+                  <span v-if="item.errorCode" class="table-status danger">{{
+                    item.errorCode
+                  }}</span>
+                  <details class="keyline">
+                    <summary>诊断标识</summary>
+                    <code>source={{ item.sourceHash }}</code>
+                    <code>node={{ item.nodeId }}</code>
+                  </details>
+                </div>
+              </article>
+              <div
+                v-if="!detail.aiImageInputs.length"
+                class="empty-panel compact"
+              >
+                本次执行没有图片输入。
               </div>
               <h3>AI 工具调用</h3>
               <article

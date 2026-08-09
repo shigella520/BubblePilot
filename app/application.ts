@@ -14,6 +14,8 @@ import type { AiManagementService } from "../modules/ai/ai-management-service.js
 import type { WebSearchTool } from "../modules/ai/web-search-tool.js";
 import type { WebSearchSettingsService } from "../modules/ai/web-search-settings-service.js";
 import { webSearchSettingsUpdateSchema } from "../modules/ai/web-search-settings-types.js";
+import type { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
+import { imageInputSettingsUpdateSchema } from "../modules/ai/image-input-settings-types.js";
 import type {
   AiMutationResult,
   AiRepository,
@@ -49,6 +51,7 @@ import {
 } from "../modules/export/export-types.js";
 import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/webhook-adapter.js";
 import type { BlueBubblesSettingsService } from "../modules/integrations/bluebubbles/settings-service.js";
+import type { LinkPreviewEnricher } from "../modules/integrations/bluebubbles/link-preview-enricher.js";
 import { blueBubblesSettingsUpdateSchema } from "../modules/integrations/bluebubbles/settings-types.js";
 import { IngestionService } from "../modules/ingestion/ingestion-service.js";
 import { FixedWindowRateLimiter } from "../modules/reliability/rate-limiter.js";
@@ -248,6 +251,7 @@ export interface ApplicationOptions {
     management: AiManagementService;
     searchTool?: WebSearchTool;
     searchSettings?: WebSearchSettingsService;
+    imageInputSettings?: ImageInputSettingsService;
   };
   workflow?: {
     repository: WorkflowRepository;
@@ -260,6 +264,7 @@ export interface ApplicationOptions {
   };
   blueBubbles?: {
     settings: BlueBubblesSettingsService;
+    linkPreviewEnricher?: LinkPreviewEnricher;
   };
   messageRetention?: MessageRetentionWorker;
 }
@@ -523,6 +528,7 @@ export function buildApplication(
     new BlueBubblesWebhookAdapter(),
     repository,
     config.monitoredChatIds,
+    options.blueBubbles?.linkPreviewEnricher,
   );
   const adminRateLimiter = new FixedWindowRateLimiter(
     config.adminRateLimitMax,
@@ -626,6 +632,8 @@ export function buildApplication(
       options.workflow?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.searchSettings?.repository.isReady() ?? Promise.resolve(true),
+      options.ai?.imageInputSettings?.repository.isReady() ??
+        Promise.resolve(true),
       options.dataExport?.repository.isReady() ?? Promise.resolve(true),
       options.blueBubbles?.settings.repository.isReady() ??
         Promise.resolve(true),
@@ -1405,6 +1413,48 @@ export function buildApplication(
     );
 
     application.get(
+      "/api/v1/ai/image-input/settings",
+      { preHandler: requireAdmin },
+      async () => {
+        if (options.ai?.imageInputSettings === undefined)
+          throw new ApplicationError(
+            "AI_IMAGE_INPUT_SETTINGS_UNAVAILABLE",
+            "Image input settings are unavailable.",
+            503,
+          );
+        return { data: await options.ai.imageInputSettings.view() };
+      },
+    );
+
+    application.put(
+      "/api/v1/ai/image-input/settings",
+      {
+        preHandler: requireAuditedAdmin(
+          "ai.image-input.settings.update",
+          "ai-image-input-settings",
+        ),
+      },
+      async (request) => {
+        if (options.ai?.imageInputSettings === undefined)
+          throw new ApplicationError(
+            "AI_IMAGE_INPUT_SETTINGS_UNAVAILABLE",
+            "Image input settings are unavailable.",
+            503,
+          );
+        const result = await options.ai.imageInputSettings.update(
+          imageInputSettingsUpdateSchema.parse(request.body),
+        );
+        if (result.status === "conflict")
+          throw new ApplicationError(
+            "AI_IMAGE_INPUT_SETTINGS_CONFLICT",
+            "Image input settings changed; refresh before retrying.",
+            409,
+          );
+        return { data: result.value };
+      },
+    );
+
+    application.get(
       "/api/v1/ai/providers",
       { preHandler: requireAdmin },
       async () => ({ data: await ai.listProviders() }),
@@ -1697,6 +1747,8 @@ export function buildApplication(
             aiToolExecutions:
               (await options.ai?.repository.listToolExecutions(executionId)) ??
               [],
+            aiImageInputs:
+              (await options.ai?.repository.listImageInputs(executionId)) ?? [],
           };
     };
 
@@ -1919,7 +1971,7 @@ export function buildApplication(
       (request) => {
         const body = triggerPreviewBodySchema.parse(request.body);
         const sample: MessageEnvelope = {
-          schemaVersion: "1",
+          schemaVersion: "3",
           eventId: "preview:fictional-event",
           correlationId: request.id,
           provider: "bluebubbles",
@@ -1936,6 +1988,11 @@ export function buildApplication(
             contentType: body.sample.contentType,
             isFromMe: body.sample.isFromMe,
             attachments: [],
+            linkPreview: {
+              status: "not-requested",
+              errorCode: null,
+              items: [],
+            },
             contentHash: `sha256:${"0".repeat(64)}`,
           },
           metadata: {
@@ -2282,6 +2339,7 @@ export function buildApplication(
       options.workflow?.repository.close() ?? Promise.resolve(),
       options.ai?.repository.close() ?? Promise.resolve(),
       options.ai?.searchSettings?.repository.close() ?? Promise.resolve(),
+      options.ai?.imageInputSettings?.repository.close() ?? Promise.resolve(),
       options.dataExport?.repository.close() ?? Promise.resolve(),
       options.blueBubbles?.settings.repository.close() ?? Promise.resolve(),
     ]);

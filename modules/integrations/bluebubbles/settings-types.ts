@@ -8,6 +8,9 @@ export interface BlueBubblesRuntimeSettings {
   webhookSecret: string;
   sendMethod: BlueBubblesSendMethod;
   requestTimeoutMs: number;
+  linkPreviewEnabled: boolean;
+  openGraphFallbackEnabled: boolean;
+  openGraphTimeoutMs: number;
 }
 
 export interface BlueBubblesSettingsView {
@@ -16,6 +19,9 @@ export interface BlueBubblesSettingsView {
   webhookSecretConfigured: boolean;
   sendMethod: BlueBubblesSendMethod;
   requestTimeoutMs: number;
+  linkPreviewEnabled: boolean;
+  openGraphFallbackEnabled: boolean;
+  openGraphTimeoutMs: number;
   source: "environment" | "database";
   version: number;
   updatedAt: string | null;
@@ -37,6 +43,9 @@ export const blueBubblesSettingsUpdateSchema = z.object({
   webhookSecret: z.string().min(32).max(4_096).optional(),
   sendMethod: z.enum(["private-api", "apple-script"]),
   requestTimeoutMs: z.number().int().min(1_000).max(120_000),
+  linkPreviewEnabled: z.boolean().default(true),
+  openGraphFallbackEnabled: z.boolean().default(true),
+  openGraphTimeoutMs: z.number().int().min(1_000).max(15_000).default(5_000),
   expectedVersion: z.number().int().nonnegative(),
 });
 

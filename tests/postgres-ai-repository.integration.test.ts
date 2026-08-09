@@ -147,7 +147,17 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
               id: "ai",
               type: "ai-chat",
               version: 1,
-              config: { providerRouteId: route.value.id },
+              config: {
+                providerRouteId: route.value.id,
+                promptTemplate: "Answer the fictional test message.",
+              },
+              onSuccess: "done",
+            },
+            {
+              id: "done",
+              type: "end",
+              version: 1,
+              config: {},
             },
           ],
         }),
@@ -275,6 +285,34 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         responseDetails: {
           retainedResultCount: 1,
         },
+      },
+    ]);
+    await repository.recordImageInput({
+      executionId: diagnosticExecutionId,
+      nodeId: "ai-node",
+      source: "link-preview",
+      sourceHash: "b".repeat(64),
+      hostName: "images.example.test",
+      status: "succeeded",
+      declaredMimeType: null,
+      actualMimeType: "image/png",
+      bytes: 68,
+      durationMs: 12,
+      detail: "low",
+      errorCode: null,
+    });
+    await expect(
+      repository.listImageInputs(diagnosticExecutionId, "ai-node"),
+    ).resolves.toMatchObject([
+      {
+        executionId: diagnosticExecutionId,
+        nodeId: "ai-node",
+        source: "link-preview",
+        sourceHash: "b".repeat(64),
+        hostName: "images.example.test",
+        status: "succeeded",
+        actualMimeType: "image/png",
+        bytes: 68,
       },
     ]);
     await inspectionPool.query(

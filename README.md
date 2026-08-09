@@ -37,12 +37,14 @@
   </a>
 </p>
 
-BubblePilot 接收 BlueBubbles 的新消息，在你指定的聊天中保存内容、匹配触发条件并执行可视化工作流。工作流可以读取最近对话、调用一个或多个 OpenAI 兼容服务、按需联网搜索，再把结果安全地回复到原聊天。
+BubblePilot 接收 BlueBubbles 的新消息，在你指定的聊天中保存内容、匹配触发条件并执行可视化工作流。工作流可以读取最近对话和图片、调用一个或多个 OpenAI 兼容服务、按需联网搜索，再把结果安全地回复到原聊天。
 
 - **只处理你选择的聊天**：未启用监听的聊天只保留发现所需的最小元数据，不归档正文。
 - **自动化过程可解释**：入站、匹配、节点、AI 调用、搜索工具和回复状态都能在管理端追踪。
 - **AI 服务不被单点绑定**：多个 Provider 可按固定顺序 Retry、Fallback，并在连续故障后自动降级。
 - **群聊成员可以被准确识别**：按对话为历史 sender ID 配置本名和昵称，AI 只读取当前上下文实际出现成员的映射。
+- **链接卡片也能进入 AI 上下文**：优先解析 BlueBubbles 卡片元数据，必要时安全读取公网 Open Graph，并保留来源和诊断。
+- **图片可由原生多模态模型理解**：按全局安全边界临时读取当前附件、卡片主图和有限历史图片，失败时自动降级为文本。
 - **数据保存在自己的实例**：PostgreSQL 是消息、配置、执行和审计记录的权威来源。
 
 ## 你可以用它做什么
@@ -52,6 +54,8 @@ BubblePilot 接收 BlueBubbles 的新消息，在你指定的聊天中保存内�
 | 保存重要对话     | 按聊天开启监听，搜索归档消息，并按授权范围导出 JSON Lines                    |
 | 创建群聊 Bot     | 用聊天、发送者、消息类型、关键词、前缀、正则和时间窗口触发工作流             |
 | 识别群聊成员     | 从聊天历史发现 sender ID，按对话维护本名和昵称，由 AI 自动区分每句话的发言者 |
+| 理解链接卡片     | 归档标题、摘要和站点信息，让 AI 在不声称读取全文的前提下理解链接上下文       |
+| 理解聊天图片     | 将当前图片附件、链接卡片主图和有限历史图片送入已验证的原生多模态 Provider    |
 | 编排消息流程     | 在画布中连接上下文、条件、变量、AI、回复和结束节点                           |
 | 接入不同 AI      | 管理多个 OpenAI 兼容 Provider、模型和路由，自动 Retry、Fallback 与恢复       |
 | 获取最新网页信息 | 由模型按需使用 Provider 托管搜索，或通过 Function Calling 调用自托管 SearXNG |
@@ -72,6 +76,14 @@ BlueBubbles 只负责收发 iMessage；BubblePilot 保存自己的监听配置�
 左侧展示可视化工作流编排，右侧展示节点、AI Provider、联网搜索和出站回复的完整执行轨迹。点击图片可查看原始清晰度。
 
 [![BubblePilot 工作流编排与执行追踪](assets/preview/bubblepilot-usage.png)](assets/preview/bubblepilot-usage.png)
+
+启用原生图片输入后，AI Bot 可以直接理解 iMessage 图片附件和链接卡片主图。图片只在当前 AI 节点执行期间安全读取并发送给已验证的多模态 Provider；图片获取或视觉调用失败时会明确降级为文本，不阻断整个工作流。
+
+<p align="center">
+  <a href="assets/preview/bubblepilot-multimodal-chat.jpg"><img src="assets/preview/bubblepilot-multimodal-chat.jpg" width="294" alt="BubblePilot 在 iMessage 中识别聊天图片" /></a>
+</p>
+
+<p align="center">BubblePilot 在真实 iMessage 对话中识别图片并自然回复。</p>
 
 ## 10 分钟完成首次配置
 
@@ -197,7 +209,7 @@ SENSITIVE_OPERATION_PASSWORD_HASH='scrypt$...'
 - `MONITORED_CHAT_IDS`：已知 Chat GUID 时可提前写入，多个值以逗号分隔；留空时先通过 Webhook 发现聊天，再在管理端开启监听。
 - `MESSAGE_RETENTION_DAYS`：消息正文和附件元数据默认保留 90 天；设为 `0` 表示明确接受无限期保留风险。
 - `ENABLE_WEB_SEARCH`：默认 `false`，作为部署级安全总开关。开启后，尝试次数、单次请求超时、退避、结果数和失败兜底统一在 AI 页面的“联网搜索全局配置”中管理，保存后立即生效。
-- `BUBBLEPILOT_IMAGE`：源码部署会由 Compose 本地构建；正式部署可固定为 `ghcr.io/shigella520/bubblepilot:1.0.0`，不要长期使用 `dev` 或 `latest`。
+- `BUBBLEPILOT_IMAGE`：源码部署会由 Compose 本地构建；正式部署可固定为 `ghcr.io/shigella520/bubblepilot:1.1.0`，不要长期使用 `dev` 或 `latest`。
 
 ### 4. 启动并检查服务
 
@@ -230,9 +242,10 @@ https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_W
 ### 6. 配置 AI Provider（可选）
 
 1. 进入“AI Provider”，创建 Provider，填写接口类型、Base URL、模型、API Key 和单次请求超时。
-2. 按 Provider 实际能力勾选 Function Calling 或托管搜索，再运行连接与能力测试。
+2. 按 Provider 实际能力勾选 Function Calling、托管搜索或原生图片输入，再运行连接与能力测试。
 3. 创建一条 Provider 路由，选择候选顺序以及 Fallback、Retry、降级阈值和冷却时间。
 4. 若要联网搜索，确认 `.env` 中 `ENABLE_WEB_SEARCH=true`，且页面显示搜索后端可用。
+5. 若要让 AI 理解图片，先确认 Provider 的图片能力探测为“已验证”，再在同一页面开启全局“原生图片输入”；工作流节点无需单独配置。
 
 API Key 会使用 `SETTINGS_ENCRYPTION_KEY` 加密保存到 PostgreSQL，之后不会在页面、接口或日志中回显。
 

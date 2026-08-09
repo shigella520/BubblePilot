@@ -48,6 +48,29 @@ interface MessageResult {
   contentRedactedAt: string | null;
   contentType: string;
   isFromMe: boolean;
+  linkPreview: {
+    status: string;
+    errorCode: string | null;
+    items: Array<{
+      source: "bluebubbles" | "open-graph";
+      url: string;
+      originalUrl: string | null;
+      title: string | null;
+      summary: string | null;
+      siteName: string | null;
+      imageAvailable: boolean;
+      iconAvailable: boolean;
+    }>;
+  };
+  linkPreviewDiagnostics: Array<{
+    source: string;
+    attempt: number;
+    status: string;
+    durationMs: number;
+    httpStatus: number | null;
+    code: string | null;
+  }>;
+  linkPreviewFetchedAt: string | null;
   executions: Array<{
     id: string;
     triggerName: string;
@@ -807,6 +830,45 @@ onMounted(() => Promise.all([loadChats(true), loadExports(true)]));
               </details>
             </template>
             <p v-else>{{ item.body || `【${item.contentType}】` }}</p>
+            <div
+              v-if="item.linkPreview.status !== 'not-requested'"
+              class="message-link-preview"
+            >
+              <header>
+                <strong>链接卡片</strong>
+                <span>{{ item.linkPreview.status }}</span>
+              </header>
+              <article
+                v-for="preview in item.linkPreview.items"
+                :key="preview.url"
+              >
+                <a
+                  :href="preview.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ preview.title || preview.siteName || preview.url }}
+                </a>
+                <p v-if="preview.summary">{{ preview.summary }}</p>
+                <small>
+                  {{ preview.source }} · 图片{{
+                    preview.imageAvailable ? "可用" : "无"
+                  }}
+                  · 图标{{ preview.iconAvailable ? "可用" : "无" }}
+                </small>
+              </article>
+              <details v-if="item.linkPreviewDiagnostics.length">
+                <summary>解析诊断</summary>
+                <p
+                  v-for="diagnostic in item.linkPreviewDiagnostics"
+                  :key="`${diagnostic.source}-${diagnostic.attempt}`"
+                >
+                  {{ diagnostic.source }} #{{ diagnostic.attempt }} ·
+                  {{ diagnostic.status }} · {{ diagnostic.durationMs }} ms
+                  <span v-if="diagnostic.code"> · {{ diagnostic.code }}</span>
+                </p>
+              </details>
+            </div>
             <footer>
               <span>{{
                 item.isFromMe ? "我发送" : item.senderId || "未知发送者"

@@ -52,6 +52,9 @@ interface MessageRow {
   content_type: string;
   is_from_me: boolean;
   attachments: unknown;
+  link_previews: unknown;
+  link_preview_status: string;
+  link_preview_error_code: string | null;
   content_redacted_at: Date | null;
   created_at: Date;
 }
@@ -135,6 +138,11 @@ function messageView(row: MessageRow): DataExportMessage {
     contentType: row.content_type,
     isFromMe: row.is_from_me,
     attachments: Array.isArray(row.attachments) ? row.attachments : [],
+    linkPreview: {
+      status: row.link_preview_status,
+      errorCode: row.link_preview_error_code,
+      items: Array.isArray(row.link_previews) ? row.link_previews : [],
+    },
     contentRedactedAt: row.content_redacted_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
   };
@@ -490,7 +498,8 @@ export class PostgresDataExportRepository implements DataExportRepository {
       `SELECT COUNT(*)::bigint AS record_count,
               COALESCE(SUM(
                 OCTET_LENGTH(COALESCE(m.body, ''))
-                + OCTET_LENGTH(m.attachments::text) + 512
+                + OCTET_LENGTH(m.attachments::text)
+                + OCTET_LENGTH(m.link_previews::text) + 512
               ), 0)::bigint AS estimated_bytes
        FROM messages m
        INNER JOIN chats c ON c.id = m.chat_id
@@ -552,6 +561,8 @@ export class PostgresDataExportRepository implements DataExportRepository {
           `SELECT m.id, m.provider_message_id, m.chat_id, c.provider_chat_id,
                   c.display_name AS chat_display_name, m.sender_id, m.sent_at,
                   m.body, m.content_type, m.is_from_me, m.attachments,
+                  m.link_preview_status, m.link_previews,
+                  m.link_preview_error_code,
                   m.content_redacted_at, m.created_at
            FROM messages m
            INNER JOIN chats c ON c.id = m.chat_id

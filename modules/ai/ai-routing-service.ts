@@ -3,6 +3,8 @@ import type { AiRepository } from "./ai-repository.js";
 import type {
   AiCallFailure,
   AiCallResult,
+  AiChatMessage,
+  AiContentPart,
   AiProviderHealth,
   AiRouteRequest,
   AiRouteResult,
@@ -113,6 +115,57 @@ function supportsLocalTools(provider: AiRouteSnapshot["providers"][number]) {
   );
 }
 
+function supportsImageInput(provider: AiRouteSnapshot["providers"][number]) {
+  return (
+    provider.capabilities?.imageInput === true &&
+    provider.capabilityProbe?.imageInput === "verified"
+  );
+}
+
+function requestHasImages(request: AiRouteRequest): boolean {
+  return request.messages.some(
+    (message) =>
+      typeof message.content !== "string" &&
+      message.content.some((part: AiContentPart) => part.type === "image"),
+  );
+}
+
+function withoutImages(messages: readonly AiChatMessage[]): AiChatMessage[] {
+  const stripped = messages.map((message) => ({
+    ...message,
+    content:
+      typeof message.content !== "string"
+        ? message.content.filter((part) => part.type !== "image")
+        : message.content,
+  }));
+  const warning: AiChatMessage = {
+    role: "system",
+    content:
+      "BubblePilot could not provide the referenced images to an available provider. Do not claim to have seen or analyzed them; answer only from the remaining text and clearly state the limitation when it matters.",
+  };
+  const firstNonSystem = stripped.findIndex(
+    (message) => message.role !== "system",
+  );
+  return firstNonSystem < 0
+    ? [...stripped, warning]
+    : [
+        ...stripped.slice(0, firstNonSystem),
+        warning,
+        ...stripped.slice(firstNonSystem),
+      ];
+}
+
+function mayDegradeImages(result: AiRouteResult): boolean {
+  return (
+    result.status === "failed" &&
+    ![
+      "AI_CONTENT_SAFETY_REJECTED",
+      "AI_OUTPUT_PROMPT_DISCLOSURE",
+      "AI_OUTPUT_SECRET_DISCLOSURE",
+    ].includes(result.code)
+  );
+}
+
 export class AiRoutingService {
   constructor(
     private readonly repository: AiRepository,
@@ -122,6 +175,20 @@ export class AiRoutingService {
   ) {}
 
   async execute(request: AiRouteRequest): Promise<AiRouteResult> {
+    const withImages = requestHasImages(request);
+    const result = await this.executeOnce(request);
+    if (!withImages || !mayDegradeImages(result)) return result;
+    const degraded = await this.executeOnce({
+      ...request,
+      messages: withoutImages(request.messages),
+    });
+    return {
+      ...degraded,
+      attemptCount: result.attemptCount + degraded.attemptCount,
+    };
+  }
+
+  private async executeOnce(request: AiRouteRequest): Promise<AiRouteResult> {
     if (
       request.webSearch !== undefined &&
       request.webSearch !== "disabled" &&
@@ -147,6 +214,7 @@ export class AiRoutingService {
               (provider) =>
                 provider.enabled &&
                 isProviderSecretConfigured(provider, this.secrets) &&
+                (!requestHasImages(request) || supportsImageInput(provider)) &&
                 (request.webSearch === undefined ||
                   request.webSearch === "disabled" ||
                   supportsHostedSearch(provider) ||

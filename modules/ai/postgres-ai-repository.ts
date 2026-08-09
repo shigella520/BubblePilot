@@ -13,6 +13,8 @@ import {
   type AiCandidateSelection,
   type AiFailureCategory,
   type AiProviderAttemptView,
+  type AiImageInputRecordInput,
+  type AiImageInputView,
   type AiProviderCapabilityProbe,
   type AiProviderConfiguration,
   type AiProviderHealth,
@@ -38,10 +40,12 @@ interface ProviderRow {
   capabilities: {
     functionCalling: boolean;
     hostedWebSearch: boolean;
+    imageInput: boolean;
   };
   capability_probe: {
     functionCalling: "verified" | "failed" | "unknown";
     hostedWebSearch: "verified" | "failed" | "unknown";
+    imageInput: "verified" | "failed" | "unknown";
     checkedAt: string | null;
   };
   enabled: boolean;
@@ -353,6 +357,7 @@ export class PostgresAiRepository implements AiRepository {
             configuration.capabilities ?? {
               functionCalling: false,
               hostedWebSearch: false,
+              imageInput: false,
             },
           ),
         ],
@@ -413,6 +418,7 @@ export class PostgresAiRepository implements AiRepository {
             configuration.capabilities ?? {
               functionCalling: false,
               hostedWebSearch: false,
+              imageInput: false,
             },
           ),
         ],
@@ -1116,6 +1122,74 @@ export class PostgresAiRepository implements AiRepository {
       errorCode: row.error_code,
       requestDetails: row.request_details,
       responseDetails: row.response_details,
+      createdAt: row.created_at.toISOString(),
+    }));
+  }
+
+  async recordImageInput(input: AiImageInputRecordInput): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO ai_image_inputs (
+         id, execution_id, node_id, source, source_hash, host_name, status,
+         declared_mime_type, actual_mime_type, bytes, duration_ms, detail,
+         error_code
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      [
+        randomUUID(),
+        input.executionId,
+        input.nodeId,
+        input.source,
+        input.sourceHash,
+        input.hostName,
+        input.status,
+        input.declaredMimeType,
+        input.actualMimeType,
+        input.bytes,
+        input.durationMs,
+        input.detail,
+        input.errorCode,
+      ],
+    );
+  }
+
+  async listImageInputs(
+    executionId: string,
+    nodeId?: string,
+  ): Promise<readonly AiImageInputView[]> {
+    const result = await this.pool.query<{
+      id: string;
+      execution_id: string;
+      node_id: string;
+      source: "attachment" | "link-preview";
+      source_hash: string;
+      host_name: string | null;
+      status: "succeeded" | "skipped" | "failed";
+      declared_mime_type: string | null;
+      actual_mime_type: string | null;
+      bytes: number | null;
+      duration_ms: number;
+      detail: "low" | "high" | "auto";
+      error_code: string | null;
+      created_at: Date;
+    }>(
+      `SELECT * FROM ai_image_inputs
+       WHERE execution_id = $1 AND ($2::text IS NULL OR node_id = $2)
+       ORDER BY created_at, id`,
+      [executionId, nodeId ?? null],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      executionId: row.execution_id,
+      nodeId: row.node_id,
+      source: row.source,
+      sourceHash: row.source_hash,
+      hostName: row.host_name,
+      status: row.status,
+      declaredMimeType: row.declared_mime_type,
+      actualMimeType: row.actual_mime_type,
+      bytes: row.bytes,
+      durationMs: row.duration_ms,
+      detail: row.detail,
+      errorCode: row.error_code,
       createdAt: row.created_at.toISOString(),
     }));
   }

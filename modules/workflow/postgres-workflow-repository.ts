@@ -24,6 +24,10 @@ import type {
   WorkflowVersionStatus,
 } from "./workflow-repository.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
+import {
+  linkPreviewItemSchema,
+  linkPreviewStatusSchema,
+} from "../ingestion/link-preview.js";
 import type { TriggerConditions } from "./trigger-matcher.js";
 import type {
   WorkflowDefinition,
@@ -102,6 +106,9 @@ interface RecoveryEnvelopeRow {
   is_from_me: boolean;
   content_hash: string;
   attachments: unknown;
+  link_preview_status: string;
+  link_previews: unknown;
+  link_preview_error_code: string | null;
   provider_chat_id: string;
   chat_type: MessageEnvelope["chat"]["type"];
   display_name: string | null;
@@ -772,6 +779,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         `SELECT
            m.provider_message_id, m.sender_id, m.sent_at, m.body,
            m.content_type, m.is_from_me, m.content_hash, m.attachments,
+           m.link_preview_status, m.link_previews, m.link_preview_error_code,
            c.provider_chat_id, c.type AS chat_type, c.display_name,
            i.payload_hash, i.event_type, t.name AS trigger_name,
            v.workflow_id, e.workflow_version_id, v.version AS workflow_version,
@@ -829,7 +837,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         throw new Error("The recovery execution could not be read.");
       }
       const envelope: MessageEnvelope = {
-        schemaVersion: "1",
+        schemaVersion: "3",
         eventId: sourceRow.external_event_id,
         correlationId,
         provider: "bluebubbles",
@@ -846,6 +854,18 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           contentType: context.content_type,
           isFromMe: context.is_from_me,
           attachments: messageAttachments(context.attachments),
+          linkPreview: {
+            status:
+              linkPreviewStatusSchema.safeParse(context.link_preview_status)
+                .data ?? "failed",
+            errorCode: context.link_preview_error_code,
+            items: Array.isArray(context.link_previews)
+              ? context.link_previews.flatMap((item) => {
+                  const parsed = linkPreviewItemSchema.safeParse(item);
+                  return parsed.success ? [parsed.data] : [];
+                })
+              : [],
+          },
           contentHash: context.content_hash,
         },
         metadata: {

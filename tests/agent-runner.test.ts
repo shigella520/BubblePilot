@@ -521,6 +521,7 @@ describe("AgentRunner", () => {
     const sourceInstruction = client.requests[0]?.messages.find(
       (message) =>
         message.role === "system" &&
+        typeof message.content === "string" &&
         message.content.includes("do not include URLs"),
     );
     expect(sourceInstruction?.content).toContain("do not include URLs");

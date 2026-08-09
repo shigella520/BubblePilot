@@ -31,23 +31,29 @@
   <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
 </p>
 
-BubblePilot receives new-message events from BlueBubbles, archives only the chats you choose, matches triggers, and runs visual workflows. A workflow can load recent conversation context, call one or more OpenAI-compatible providers, search the web when needed, and safely reply to the original chat.
+BubblePilot receives new-message events from BlueBubbles, archives only the chats you choose, matches triggers, and runs visual workflows. A workflow can load recent conversation context and images, call one or more OpenAI-compatible providers, search the web when needed, and safely reply to the original chat.
 
 - **Selective archiving:** unmonitored chats keep only the minimum metadata needed for discovery; message bodies are not archived.
 - **Explainable automation:** inbound decisions, nodes, AI attempts, search tools, and outgoing delivery states are traceable in the Web UI.
 - **No single AI dependency:** providers can Retry and Fallback in a fixed order, with automatic degradation after repeated failures.
+- **Group-chat participants stay identifiable:** configure real names and nicknames for sender IDs already seen in each chat; AI only receives mappings that occur in the current context.
+- **Link cards become usable context:** prefer BlueBubbles metadata, safely fall back to public Open Graph, and retain bounded diagnostics.
+- **Native multimodal models can understand images:** temporarily load current attachments, link-card images, and a bounded recent-image history under instance-wide safety limits, with explicit text fallback on failure.
 - **Your instance owns the data:** PostgreSQL is authoritative for messages, configuration, executions, and audit records.
 
 ## What you can build
 
-| Use case | BubblePilot capability |
-| --- | --- |
-| Archive important conversations | Enable monitoring per chat, search archived messages, and export an authorized JSON Lines snapshot |
-| Create a group-chat bot | Trigger on chat, sender, content type, keyword, prefix, regex, or time window |
-| Design message workflows | Connect context, condition, variable, AI, reply, and end nodes on a visual canvas |
-| Use multiple AI services | Manage OpenAI-compatible providers and routes with Retry, Fallback, degradation, and recovery |
-| Answer with current web information | Use provider-hosted search or Function Calling with the bundled private SearXNG service |
-| Diagnose failures | Inspect executions, node traces, provider attempts, tool calls, and outgoing delivery state |
+| Use case                            | BubblePilot capability                                                                                               |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Archive important conversations     | Enable monitoring per chat, search archived messages, and export an authorized JSON Lines snapshot                   |
+| Create a group-chat bot             | Trigger on chat, sender, content type, keyword, prefix, regex, or time window                                        |
+| Identify chat participants          | Maintain real names and nicknames per chat so AI can distinguish each historical speaker                             |
+| Understand link cards               | Archive titles, summaries, and site names so AI can use card context without claiming it read the full page          |
+| Understand chat images              | Send current image attachments, link-card images, and bounded recent images to a verified native multimodal provider |
+| Design message workflows            | Connect context, condition, variable, AI, reply, and end nodes on a visual canvas                                    |
+| Use multiple AI services            | Manage OpenAI-compatible providers and routes with Retry, Fallback, degradation, and recovery                        |
+| Answer with current web information | Use provider-hosted search or Function Calling with the bundled private SearXNG service                              |
+| Diagnose failures                   | Inspect executions, node traces, provider attempts, tool calls, and outgoing delivery state                          |
 
 Web search is optional. With it disabled, archiving, regular workflows, and non-search AI replies continue to work.
 
@@ -64,6 +70,12 @@ BlueBubbles remains the iMessage gateway. BubblePilot owns its monitoring rules,
 The workflow canvas is shown on the left; the complete node, AI provider, web-search, and outgoing-delivery trace is shown on the right. Click the image to view it at full resolution.
 
 [![BubblePilot workflow canvas and execution trace](assets/preview/bubblepilot-usage.png)](assets/preview/bubblepilot-usage.png)
+
+With native image input enabled, an AI bot can understand iMessage image attachments and link-card images. Images are fetched only for the current AI node and sent to a verified multimodal provider; download or vision failures explicitly fall back to text without failing the whole workflow.
+
+<p align="center">
+  <a href="assets/preview/bubblepilot-multimodal-chat.jpg"><img src="assets/preview/bubblepilot-multimodal-chat.jpg" width="294" alt="BubblePilot understanding an image in iMessage" /></a>
+</p>
 
 ## First working automation in 10 minutes
 
@@ -165,18 +177,18 @@ unset BUBBLEPILOT_PLAIN_PASSWORD
 
 Replace every `CHANGE_ME` value. The minimum required settings are:
 
-| Setting | Value |
-| --- | --- |
-| `POSTGRES_PASSWORD` | The generated database password |
-| `DATABASE_URL` | The same database password inside the connection string |
-| `API_ACCESS_TOKEN` | A unique random management API compatibility token |
-| `SETTINGS_ENCRYPTION_KEY` | A unique stable key used to encrypt runtime credentials in PostgreSQL |
-| `BLUEBUBBLES_WEBHOOK_SECRET` | A unique random value used in the webhook URL |
-| `BLUEBUBBLES_SERVER_URL` | The BlueBubbles root URL, for example `http://192.0.2.10:1234` |
-| `BLUEBUBBLES_ACCESS_TOKEN` | The BlueBubbles REST API Password |
-| `APP_LOGIN_PASSWORD_HASH` | The first hash, enclosed in single quotes |
-| `SENSITIVE_OPERATION_PASSWORD_HASH` | The second, different hash, enclosed in single quotes |
-| `SEARXNG_SECRET` | A unique random value, required even while search is disabled |
+| Setting                             | Value                                                                 |
+| ----------------------------------- | --------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD`                 | The generated database password                                       |
+| `DATABASE_URL`                      | The same database password inside the connection string               |
+| `API_ACCESS_TOKEN`                  | A unique random management API compatibility token                    |
+| `SETTINGS_ENCRYPTION_KEY`           | A unique stable key used to encrypt runtime credentials in PostgreSQL |
+| `BLUEBUBBLES_WEBHOOK_SECRET`        | A unique random value used in the webhook URL                         |
+| `BLUEBUBBLES_SERVER_URL`            | The BlueBubbles root URL, for example `http://192.0.2.10:1234`        |
+| `BLUEBUBBLES_ACCESS_TOKEN`          | The BlueBubbles REST API Password                                     |
+| `APP_LOGIN_PASSWORD_HASH`           | The first hash, enclosed in single quotes                             |
+| `SENSITIVE_OPERATION_PASSWORD_HASH` | The second, different hash, enclosed in single quotes                 |
+| `SEARXNG_SECRET`                    | A unique random value, required even while search is disabled         |
 
 The password hashes contain `$`, so keep the single quotes:
 
@@ -190,7 +202,7 @@ Optional settings:
 - `MONITORED_CHAT_IDS`: comma-separated Chat GUIDs to monitor from the first event. If empty, discover chats through the webhook and enable them in the Web UI.
 - `MESSAGE_RETENTION_DAYS`: archived bodies and attachment metadata are kept for 90 days by default. `0` explicitly accepts indefinite retention.
 - `ENABLE_WEB_SEARCH`: defaults to `false` and acts as the deployment-level safety switch. Once enabled, manage retries, timeouts, result limits, and failure fallback from the AI page's global Web Search settings; saved changes apply immediately.
-- `BUBBLEPILOT_IMAGE`: source deployments build locally. For a release deployment, pin `ghcr.io/shigella520/bubblepilot:1.0.0` instead of relying on `dev` or `latest`.
+- `BUBBLEPILOT_IMAGE`: source deployments build locally. For a release deployment, pin `ghcr.io/shigella520/bubblepilot:1.1.0` instead of relying on `dev` or `latest`.
 
 ### 4. Start and check the stack
 
@@ -223,9 +235,10 @@ Disable query-string access logging for this webhook path. The secret is carried
 ### 6. Configure an AI provider (optional)
 
 1. Open **AI Provider** and add the API kind, Base URL, model, API key, and timeout.
-2. Enable Function Calling or hosted search only when the provider supports it, then run the connection and capability tests.
+2. Enable Function Calling, hosted search, or native image input only when the provider supports it, then run the independent capability tests.
 3. Create a provider route with its candidate order, Fallback, Retry, degradation threshold, and cooldown.
 4. For web search, set `ENABLE_WEB_SEARCH=true` and confirm that the page reports the search backend as ready.
+5. For image understanding, first confirm that image input is verified for the provider, then enable the instance-wide native image setting on the same page. Workflow nodes need no image-specific configuration.
 
 The API key is encrypted in PostgreSQL with `SETTINGS_ENCRYPTION_KEY` and is never returned by the UI, API, or logs.
 

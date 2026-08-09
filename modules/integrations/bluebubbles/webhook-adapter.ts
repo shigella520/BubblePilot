@@ -8,6 +8,7 @@ import {
   type MessageEnvelope,
   type NormalizedInboundEvent,
 } from "../../ingestion/message-envelope.js";
+import { emptyLinkPreview } from "../../ingestion/link-preview.js";
 
 const ADAPTER_VERSION = "1";
 
@@ -51,6 +52,7 @@ const newMessageSchema = z
     handle: handleSchema.nullable().optional(),
     chats: z.array(chatSchema).min(1),
     attachments: z.array(attachmentSchema).default([]),
+    hasPayloadData: z.boolean().optional(),
   })
   .passthrough();
 
@@ -135,6 +137,8 @@ export class BlueBubblesWebhookAdapter {
       }),
     );
     const text = data.text ?? null;
+    const linkPreviewRequested =
+      data.hasPayloadData === true || /https?:\/\/[^\s<]+/iu.test(text ?? "");
     const sentAt = new Date(data.dateCreated);
     if (Number.isNaN(sentAt.getTime())) {
       throw new InvalidWebhookError(
@@ -162,6 +166,9 @@ export class BlueBubblesWebhookAdapter {
           contentType: contentType(text, attachments),
           isFromMe: data.isFromMe,
           attachments,
+          linkPreview: emptyLinkPreview(
+            linkPreviewRequested ? "pending" : "not-requested",
+          ),
           contentHash: sha256(JSON.stringify({ text, attachments })),
         },
         metadata: {

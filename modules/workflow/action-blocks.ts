@@ -134,6 +134,13 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         label: "字段",
         type: "select",
         required: true,
+        options: [
+          { value: "message.text", label: "消息正文" },
+          { value: "message.senderId", label: "发送者 ID" },
+          { value: "message.contentType", label: "消息类型" },
+          { value: "message.linkPreviewStatus", label: "链接预览状态" },
+          { value: "chat.providerChatId", label: "Chat ID" },
+        ],
         description: "事件字段。",
       },
       {
@@ -141,6 +148,13 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         label: "运算符",
         type: "select",
         required: true,
+        options: [
+          { value: "exists", label: "存在" },
+          { value: "equals", label: "等于" },
+          { value: "contains", label: "包含" },
+          { value: "starts-with", label: "开头为" },
+          { value: "matches", label: "正则匹配" },
+        ],
         description: "匹配方式。",
       },
       {
