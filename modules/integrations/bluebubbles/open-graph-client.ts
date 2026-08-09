@@ -193,6 +193,19 @@ export interface PublicResource {
   headers: IncomingHttpHeaders;
 }
 
+export function createPinnedLookup(
+  address: string,
+  family: 4 | 6,
+): LookupFunction {
+  return (_hostname, options, callback) => {
+    if (options.all === true) {
+      callback(null, [{ address, family }]);
+      return;
+    }
+    callback(null, address, family);
+  };
+}
+
 async function requestBuffer(
   url: URL,
   timeoutMs: number,
@@ -205,9 +218,7 @@ async function requestBuffer(
   body: Buffer;
 }> {
   const selected = await resolvePublicAddress(url.hostname, policy);
-  const pinnedLookup: LookupFunction = (_hostname, _options, callback) => {
-    callback(null, selected.address, selected.family);
-  };
+  const pinnedLookup = createPinnedLookup(selected.address, selected.family);
   return new Promise((resolve, reject) => {
     let settled = false;
     const succeed = (value: {
