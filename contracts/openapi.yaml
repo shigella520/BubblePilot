@@ -1666,7 +1666,7 @@ components:
         requestTimeoutMs:
           type: integer
           minimum: 1000
-          maximum: 120000
+          maximum: 360000
           default: 30000
         enabled:
           type: boolean

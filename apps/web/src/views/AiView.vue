@@ -1188,7 +1188,7 @@ onMounted(load);
                 v-model.number="providerForm.requestTimeoutMs"
                 type="number"
                 min="1000"
-                max="120000"
+                max="360000"
                 required /></label
             ><label class="wide-field"
               ><span>默认参数（JSON）</span

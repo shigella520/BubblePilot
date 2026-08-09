@@ -32,7 +32,7 @@ const aiProviderConfigurationBaseSchema = z.object({
       message: "A provider can define at most 20 parameters.",
     })
     .default({}),
-  requestTimeoutMs: z.number().int().min(1_000).max(120_000).default(30_000),
+  requestTimeoutMs: z.number().int().min(1_000).max(360_000).default(30_000),
   enabled: z.boolean().default(true),
   capabilities: z
     .object({
