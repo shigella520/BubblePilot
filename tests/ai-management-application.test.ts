@@ -211,6 +211,7 @@ describe("AI management API", () => {
             enabled: false,
             includeAttachments: true,
             includeLinkPreviewImages: true,
+            trustedLinkPreviewHosts: [],
             maxCurrentAttachments: 4,
             maxHistoryImages: 2,
             maxTotalImages: 6,
@@ -483,6 +484,7 @@ describe("AI management API", () => {
       enabled: true,
       includeAttachments: true,
       includeLinkPreviewImages: true,
+      trustedLinkPreviewHosts: ["images.example.test"],
       maxCurrentAttachments: 3,
       maxHistoryImages: 2,
       maxTotalImages: 5,
@@ -499,7 +501,13 @@ describe("AI management API", () => {
     });
     expect(updated.statusCode).toBe(200);
     expect(updated.json()).toMatchObject({
-      data: { enabled: true, detail: "auto", source: "database", version: 1 },
+      data: {
+        enabled: true,
+        detail: "auto",
+        trustedLinkPreviewHosts: ["images.example.test"],
+        source: "database",
+        version: 1,
+      },
     });
 
     const stale = await request({

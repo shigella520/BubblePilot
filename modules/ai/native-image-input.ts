@@ -152,6 +152,15 @@ function historyCandidates(
   for (let offset = history.length - 1; offset >= 0; offset -= 1) {
     const message = history[offset];
     if (message === undefined) continue;
+    const preview = message.linkPreview.items.find(
+      (item) => item.imageUrl !== null,
+    );
+    if (settings.includeLinkPreviewImages && preview !== undefined)
+      result.push({
+        source: "link-preview",
+        preview,
+        label: `历史消息 ${offset + 1} 的链接卡片主图`,
+      });
     if (settings.includeAttachments) {
       for (const [index, attachment] of message.attachments
         .filter(isDeclaredImage)
@@ -163,15 +172,6 @@ function historyCandidates(
         });
       }
     }
-    const preview = message.linkPreview.items.find(
-      (item) => item.imageUrl !== null,
-    );
-    if (settings.includeLinkPreviewImages && preview !== undefined)
-      result.push({
-        source: "link-preview",
-        preview,
-        label: `历史消息 ${offset + 1} 的链接卡片主图`,
-      });
     if (result.length >= settings.maxHistoryImages) break;
   }
   return result.slice(0, settings.maxHistoryImages);
@@ -272,6 +272,7 @@ export class NativeImageInputService {
             settings.fetchTimeoutMs,
             settings.maxImageBytes,
             "image/avif,image/webp,image/png,image/jpeg,image/gif;q=0.8",
+            { trustedProxyHosts: settings.trustedLinkPreviewHosts },
           );
           body = resource.body;
         }

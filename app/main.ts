@@ -69,6 +69,7 @@ const imageInputSettings = new ImageInputSettingsService(
     enabled: false,
     includeAttachments: true,
     includeLinkPreviewImages: true,
+    trustedLinkPreviewHosts: [],
     maxCurrentAttachments: 4,
     maxHistoryImages: 2,
     maxTotalImages: 6,

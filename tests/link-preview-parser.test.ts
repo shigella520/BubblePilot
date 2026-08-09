@@ -4,6 +4,7 @@ import { parseBlueBubblesLinkPreviews } from "../modules/integrations/bluebubble
 import {
   OpenGraphClient,
   OpenGraphFetchError,
+  isPublicResourceAddressAllowed,
 } from "../modules/integrations/bluebubbles/open-graph-client.js";
 
 function archive() {
@@ -65,6 +66,34 @@ describe("BlueBubbles link preview parser", () => {
 });
 
 describe("Open Graph public network guard", () => {
+  it("allows proxy fake IPs only for an exact trusted image hostname", () => {
+    const policy = { trustedProxyHosts: ["images.example.test"] };
+    expect(
+      isPublicResourceAddressAllowed(
+        "images.example.test",
+        "198.18.56.135",
+        4,
+        policy,
+      ),
+    ).toBe(true);
+    expect(
+      isPublicResourceAddressAllowed(
+        "cdn.images.example.test",
+        "198.18.56.135",
+        4,
+        policy,
+      ),
+    ).toBe(false);
+    expect(
+      isPublicResourceAddressAllowed(
+        "images.example.test",
+        "192.168.31.6",
+        4,
+        policy,
+      ),
+    ).toBe(false);
+  });
+
   it.each([
     "http://127.0.0.1/",
     "http://10.0.0.1/",

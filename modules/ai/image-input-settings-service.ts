@@ -25,6 +25,7 @@ export class ImageInputSettingsService {
       enabled: stored.enabled,
       includeAttachments: stored.includeAttachments,
       includeLinkPreviewImages: stored.includeLinkPreviewImages,
+      trustedLinkPreviewHosts: stored.trustedLinkPreviewHosts,
       maxCurrentAttachments: stored.maxCurrentAttachments,
       maxHistoryImages: stored.maxHistoryImages,
       maxTotalImages: stored.maxTotalImages,

@@ -758,11 +758,12 @@ class AiChatNodeHandler extends BaseNodeHandler {
           ...preparedImages.parts,
         ],
       });
-    } else if ((preparedImages?.failedCount ?? 0) > 0) {
+    }
+    if ((preparedImages?.failedCount ?? 0) > 0) {
       messages.push({
         role: "system",
         content:
-          "BubblePilot failed to load one or more referenced images. Do not claim to have seen or analyzed them; answer only from available text and state the limitation when relevant.",
+          "BubblePilot failed to load one or more referenced images. You may analyze successfully attached images, but do not claim to have seen or analyzed failed images; distinguish them by label and state the limitation when relevant.",
       });
     }
 
