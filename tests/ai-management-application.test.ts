@@ -80,7 +80,7 @@ class SuccessfulAiClient implements AiClient {
     ) {
       return Promise.resolve({
         status: "succeeded",
-        text: "VISION 731",
+        text: "green red blue",
         durationMs: 7,
       });
     }
@@ -146,7 +146,7 @@ class RetryingImageAiClient implements AiClient {
     }
     return Promise.resolve({
       status: "succeeded",
-      text: "The image reads VISION 731.",
+      text: "绿色、蓝色、红色",
       durationMs: 7,
     });
   }
@@ -314,8 +314,8 @@ describe("AI management API", () => {
         ? undefined
         : imageContent?.find((part) => part.type === "text");
     expect(imagePart?.dataUrl).toMatch(/^data:image\/png;base64,/u);
-    expect(textPart?.text).toContain("Image capability test v2");
-    expect(client.requests[3]).toMatchObject({ maxOutputTokens: 512 });
+    expect(textPart?.text).toContain("Image capability test v3");
+    expect(client.requests[3]).toMatchObject({ maxOutputTokens: 128 });
     await expect(repository.getProvider(providerId)).resolves.toMatchObject({
       capabilityProbe: {
         functionCalling: "verified",
