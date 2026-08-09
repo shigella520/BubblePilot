@@ -21,7 +21,7 @@ import {
 } from "./secret-resolver.js";
 
 const imageCapabilityProbeDataUrl =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAvElEQVR4nO2QwQkAMAyEsv/S7RSJCMK9T3HezOp23w8Adv8C0QC7f4FogN2/QDTA7l8gGmD3LxANsPsXiAbY/QtEA+z+BaIBdv8C0QC7f4FogN2/QDTA7l8gGmD3LxANsPsXiAbY/QtEA+z+BaIBdv8C0QC7f4FogN2/QDTA7l8gGmD3LxANsPsXiAbY/QtEA+z+BaIBdv8C0QC7f4FogN2/QDTA7l8gGmD3LxANsPsXiAbY/QtEA+z+24AP5WHpWrATTmoAAAAASUVORK5CYII=";
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUAAAABgCAIAAADjKTx/AAAD8ElEQVR4nO3TQZZkIQhEUfe/6apxD9oDEqBR/91ppoD4Y/0AsLVuDwDgHAEGjBFgwBgBBowRYMAYAQaMEWDAGAEGjBFgwBgBBowRYMAYAQaMEWDAGAEGjBFgwBgBBowRYMAYAQaMEWDAGAEGjBFgwBgBBowRYMBYNMDrX7ke27NLJzVGpbJuZOXMlVfoO5uqXCGsLLxRbT2BdtH/FcbqW3RqKmFl3cgEWEZYWXij2noC7aL/K4zVt+jUVMLKupEJsIywsvBGtfUE2kX/Vxirb9GpqYSVdSMTYBlhZeGNausJtIv+rzBW36JTUwkr60YmwDLCysIb1dYTaBf9X2Esx7MVb9638sne2uRe31SV5QzvigDrvXnfynd2a5N7fVNVljO8KwKs9+Z9K9/ZrU3u9U1VWc7wrgiw3pv3rXxntza51zdVZTnDuyLAem/et/Kd3drkXt9UleUM74oA671538p3dmuTt8Yw+uoIsN6b911bfVMJjY1h9NURYL0377u2+qYSGhvD6KsjwHpv3ndt9U0lNDaG0VdHgPXevO/a6ptKaGwMo6/uLwd4X6ryQffN3He279c+X3v9k3bR/7V9WH1n96XefMK+s32/9vna65+0i/6v7cPqO7sv9eYT9p3t+7XP117/pF30f20fVt/Zfak3n7DvbN+vfb72+iftov9r+7D6zu5LvfmEfWf7fu3ztdc/aXd4bOq9HT+dN8+mKv/nw25/hVvPLRxj+AoEWN/3zbOpymsrNZXwCmNuveABAqzv++bZVOW1lZpKeIUxt17wAAHW933zbKry2kpNJbzCmFsveIAA6/u+eTZVeW2lphJeYcytFzxAgPV93zybqry2UlMJrzDm1gseIMD6vm+eTVVeW6mphFcYc+sFDxBgfd83z6Yqr63UVMIrjLn1ggcIsL7vm2dTlddWairhFcbcesEDBFjf982zqcprKzWV8Apjbr3gAU0D4YUrhJVvzVxplCoVexzB2VuNjl5DsBxh5VB3TZWp+6e2Iyw1NnOlUapU7HEEZ281OnoNwXKElUPdNVWm7p/ajrDU2MyVRqlSsccRnL3V6Og1BMsRVg5111SZun9qO8JSYzNXGqVKxR5HcPZWo6PXECxHWDnUXVNl6v6p7QhLjc1caZQqFXscwdlbjY5eQ7AcYeVQd3lFAGMIMGCMAAPGCDBgjAADxggwYIwAA8YIMGCMAAPGCDBgjAADxggwYIwAA8YIMGCMAAPGCDBgjAADxggwYIwAA8YIMGCMAAPGCDBgjAADxggwYIwAA8YIMGCMAAPGCDBgjAADxggwYIwAA8YIMGCMAAPGCDBgjAADxggwYIwAA8Z+Aa+3BZurxA9AAAAAAElFTkSuQmCC";
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -83,23 +83,10 @@ function checkMessage(check: AiProviderTestCheck): string {
 
 function imageProbeAnswerVerified(result: AiCallResult): boolean {
   if (result.status === "failed") return false;
-  const englishWords = result.text
-    .toLocaleLowerCase("en-US")
-    .replace(/[^a-z]+/gu, " ")
-    .trim()
-    .split(/\s+/u);
-  const red = englishWords.indexOf("red");
-  const green = englishWords.indexOf("green");
-  const blue = englishWords.indexOf("blue");
-  if (red >= 0 && red < green && green < blue) return true;
-
-  const chinese = result.text.replace(/\s+/gu, "");
-  const redChinese = chinese.indexOf("红");
-  const greenChinese = chinese.indexOf("绿");
-  const blueChinese = chinese.indexOf("蓝");
-  return (
-    redChinese >= 0 && redChinese < greenChinese && greenChinese < blueChinese
-  );
+  const normalized = result.text.toLocaleUpperCase("en-US");
+  const word = normalized.indexOf("VISION");
+  const code = normalized.indexOf("731");
+  return word >= 0 && word < code;
 }
 
 async function probeWithRetry(
@@ -321,7 +308,7 @@ export class AiManagementService {
               content: [
                 {
                   type: "text",
-                  text: "Capability test. Identify the three vertical color bands from left to right. Reply with only the three English color names separated by spaces.",
+                  text: "Image capability test v2. Read the large text shown in this image. Reply with only that text.",
                 },
                 {
                   type: "image",
