@@ -19,9 +19,10 @@ import {
   isProviderSecretConfigured,
   type SecretResolver,
 } from "./secret-resolver.js";
-
-const imageCapabilityProbeDataUrl =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAvElEQVR4nO2QwQkAMAyEsv/S7RSJCMK9T3HezOp23w8Adv8C0QC7f4FogN2/QDTA7l8gGmD3LxANsPsXiAbY/QtEA+z+BaIBdv8C0QC7f4FogN2/QDTA7l8gGmD3LxANsPsXiAbY/QtEA+z+BaIBdv8C0QC7f4FogN2/QDTA7l8gGmD3LxANsPsXiAbY/QtEA+z+BaIBdv8C0QC7f4FogN2/QDTA7l8gGmD3LxANsPsXiAbY/QtEA+z+BaIBdv8C0QC7f4FogN2/QDTA7l8gGmD3LxANsPsXiAbY/QtEA+z+24AP5WHpWrATTmoAAAAASUVORK5CYII=";
+import {
+  imageCapabilityProbeDataUrl,
+  isValidImageCapabilityProbeDataUrl,
+} from "./image-capability-probe.js";
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -118,6 +119,7 @@ export class AiManagementService {
     private readonly secrets: SecretResolver,
     private readonly localWebSearchEnabled = false,
     private readonly searchTool?: WebSearchTool,
+    private readonly imageProbeDataUrl = imageCapabilityProbeDataUrl,
   ) {}
 
   async listProviders(): Promise<readonly AiProviderView[]> {
@@ -301,46 +303,67 @@ export class AiManagementService {
       );
     }
     if (result.status === "succeeded" && provider.capabilities?.imageInput) {
-      const imageProbe = await probeWithRetry(
-        this.client,
-        provider,
-        {
-          messages: [
+      if (!isValidImageCapabilityProbeDataUrl(this.imageProbeDataUrl)) {
+        imageInput = "failed";
+        checks.push(
+          probeCheck(
+            "imageInput",
             {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: "Image capability test v3. List the three dominant colors visible in the attached image. Reply with only three color names.",
-                },
-                {
-                  type: "image",
-                  dataUrl: imageCapabilityProbeDataUrl,
-                  detail: "low",
-                  label: "capability probe",
-                },
-              ],
+              status: "failed",
+              category: "configuration",
+              code: "AI_IMAGE_PROBE_ASSET_INVALID",
+              summary: "The built-in image capability probe is invalid.",
+              retryable: false,
+              fallbackAllowed: false,
+              countsForDegrade: false,
+              durationMs: 0,
             },
-          ],
-          maxOutputTokens: 128,
-          temperature: 0,
-        },
-        2,
-      );
-      totalDurationMs += imageProbe.durationMs;
-      const imageVerified = imageProbeAnswerVerified(imageProbe.result);
-      imageInput = imageVerified ? "verified" : "failed";
-      checks.push(
-        probeCheck(
-          "imageInput",
-          imageProbe.result,
-          imageProbe.attempts,
-          imageProbe.durationMs,
-          imageVerified,
-          "AI_IMAGE_PROBE_MISMATCH",
-          imageVerified ? null : probeResponsePreview(imageProbe.result),
-        ),
-      );
+            0,
+            0,
+          ),
+        );
+      } else {
+        const imageProbe = await probeWithRetry(
+          this.client,
+          provider,
+          {
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: "Image capability test v3. List the three dominant colors visible in the attached image. Reply with only three color names.",
+                  },
+                  {
+                    type: "image",
+                    dataUrl: this.imageProbeDataUrl,
+                    detail: "low",
+                    label: "capability probe",
+                  },
+                ],
+              },
+            ],
+            maxOutputTokens: 128,
+            temperature: 0,
+          },
+          2,
+        );
+        totalDurationMs += imageProbe.durationMs;
+        const imageVerified = imageProbeAnswerVerified(imageProbe.result);
+        imageInput = imageVerified ? "verified" : "failed";
+        checks.push(
+          probeCheck(
+            "imageInput",
+            imageProbe.result,
+            imageProbe.attempts,
+            imageProbe.durationMs,
+            imageVerified,
+            "AI_IMAGE_PROBE_MISMATCH",
+            imageVerified ? null : probeResponsePreview(imageProbe.result),
+          ),
+        );
+      }
     }
     if (result.status === "succeeded") {
       await this.repository.updateProviderCapabilityProbe(providerId, {

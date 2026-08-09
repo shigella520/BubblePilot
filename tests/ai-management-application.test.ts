@@ -372,6 +372,55 @@ describe("AI management API", () => {
     expect(retryClient.imageAttempts).toBe(2);
   });
 
+  it("rejects an invalid built-in image before calling the provider", async () => {
+    const probeRepository = new InMemoryAiRepository(() => now);
+    const probeClient = new SuccessfulAiClient();
+    const created = await probeRepository.createProvider({
+      name: "Invalid image probe provider",
+      apiKind: "responses",
+      baseUrl: "https://ai.example.test/v1",
+      model: "fictional-vision-model",
+      secretRef: "PRIMARY_AI_KEY",
+      parameters: {},
+      requestTimeoutMs: 30_000,
+      enabled: true,
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: true,
+      },
+    });
+    expect(created.status).toBe("ok");
+    if (created.status !== "ok") return;
+    const service = new AiManagementService(
+      probeRepository,
+      probeClient,
+      new EnvironmentSecretResolver({
+        PRIMARY_AI_KEY: "primary-server-secret",
+      }),
+      false,
+      undefined,
+      "data:image/png;base64,AAAA",
+    );
+
+    await expect(service.testProvider(created.value.id)).resolves.toMatchObject(
+      {
+        success: true,
+        checks: [
+          { name: "connectivity", status: "verified" },
+          {
+            name: "imageInput",
+            status: "failed",
+            attempts: 0,
+            durationMs: 0,
+            errorCode: "AI_IMAGE_PROBE_ASSET_INVALID",
+          },
+        ],
+      },
+    );
+    expect(probeClient.requests).toHaveLength(1);
+  });
+
   it("returns a bounded preview for a mismatching fixed image probe", async () => {
     const mismatchRepository = new InMemoryAiRepository(() => now);
     const created = await mismatchRepository.createProvider({
