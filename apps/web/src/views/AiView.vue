@@ -861,7 +861,7 @@ onMounted(load);
           class="settings-form boxed-form"
           @submit.prevent="saveImageInputSettings"
         >
-          <h3><Image :size="18" />图片执行参数</h3>
+          <h3><Image :size="18" />图片来源与质量</h3>
           <div class="field-grid">
             <label class="checkbox-field"
               ><input
@@ -882,63 +882,6 @@ onMounted(load);
               /><span>包含链接卡片主图</span></label
             >
             <label
-              ><span>当前消息最多附件</span
-              ><input
-                v-model.number="imageInputSettingsForm.maxCurrentAttachments"
-                type="number"
-                min="1"
-                max="10"
-                required
-            /></label>
-            <label
-              ><span>最近历史图片数</span
-              ><input
-                v-model.number="imageInputSettingsForm.maxHistoryImages"
-                type="number"
-                min="0"
-                max="10"
-                required
-            /></label>
-            <label
-              ><span>单次最多图片</span
-              ><input
-                v-model.number="imageInputSettingsForm.maxTotalImages"
-                type="number"
-                min="1"
-                max="20"
-                required
-            /></label>
-            <label
-              ><span>单张最大字节数</span
-              ><input
-                v-model.number="imageInputSettingsForm.maxImageBytes"
-                type="number"
-                min="1024"
-                max="52428800"
-                step="1048576"
-                required
-            /></label>
-            <label
-              ><span>单次图片总字节数</span
-              ><input
-                v-model.number="imageInputSettingsForm.maxTotalBytes"
-                type="number"
-                min="1024"
-                max="104857600"
-                step="1048576"
-                required
-            /></label>
-            <label
-              ><span>下载超时（毫秒）</span
-              ><input
-                v-model.number="imageInputSettingsForm.fetchTimeoutMs"
-                type="number"
-                min="1000"
-                max="60000"
-                step="500"
-                required
-            /></label>
-            <label
               ><span>图片细节等级</span
               ><select v-model="imageInputSettingsForm.detail">
                 <option value="high">high（推荐）</option>
@@ -947,6 +890,71 @@ onMounted(load);
               </select></label
             >
           </div>
+          <details class="advanced-settings">
+            <summary>高级限制（通常无需修改）</summary>
+            <p class="panel-description">
+              用于限制图片数量、内存占用和下载等待时间。默认值适合大多数部署。
+            </p>
+            <div class="field-grid">
+              <label
+                ><span>当前消息最多附件</span
+                ><input
+                  v-model.number="imageInputSettingsForm.maxCurrentAttachments"
+                  type="number"
+                  min="1"
+                  max="10"
+                  required
+              /></label>
+              <label
+                ><span>最近历史图片数</span
+                ><input
+                  v-model.number="imageInputSettingsForm.maxHistoryImages"
+                  type="number"
+                  min="0"
+                  max="10"
+                  required
+              /></label>
+              <label
+                ><span>单次最多图片</span
+                ><input
+                  v-model.number="imageInputSettingsForm.maxTotalImages"
+                  type="number"
+                  min="1"
+                  max="20"
+                  required
+              /></label>
+              <label
+                ><span>单张图片上限（字节，默认 10 MiB）</span
+                ><input
+                  v-model.number="imageInputSettingsForm.maxImageBytes"
+                  type="number"
+                  min="1024"
+                  max="52428800"
+                  step="1024"
+                  required
+              /></label>
+              <label
+                ><span>单次图片总上限（字节，默认 20 MiB）</span
+                ><input
+                  v-model.number="imageInputSettingsForm.maxTotalBytes"
+                  type="number"
+                  min="1024"
+                  max="104857600"
+                  step="1024"
+                  required
+              /></label>
+              <label
+                ><span>下载超时（毫秒）</span
+                ><input
+                  v-model.number="imageInputSettingsForm.fetchTimeoutMs"
+                  type="number"
+                  min="1000"
+                  max="60000"
+                  step="500"
+                  required
+              /></label>
+            </div>
+          </details>
           <div class="form-actions">
             <button
               class="button"

@@ -1345,6 +1345,22 @@ td .keyline {
   margin: 0;
   font-size: 17px;
 }
+.advanced-settings {
+  padding: 14px 16px;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.42);
+}
+.advanced-settings summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.advanced-settings[open] summary {
+  margin-bottom: 12px;
+}
+.advanced-settings .panel-description {
+  margin: 0 0 14px;
+}
 .field-grid,
 .filter-grid {
   display: grid;
