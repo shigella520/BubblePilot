@@ -6,6 +6,7 @@ export interface ImageInputRuntimeSettings {
   enabled: boolean;
   includeAttachments: boolean;
   includeLinkPreviewImages: boolean;
+  trustedLinkPreviewHosts: readonly string[];
   maxCurrentAttachments: number;
   maxHistoryImages: number;
   maxTotalImages: number;
@@ -25,6 +26,20 @@ const runtimeFields = {
   enabled: z.boolean(),
   includeAttachments: z.boolean(),
   includeLinkPreviewImages: z.boolean(),
+  trustedLinkPreviewHosts: z
+    .array(
+      z
+        .string()
+        .trim()
+        .toLowerCase()
+        .max(253)
+        .regex(
+          /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u,
+          "Trusted image hosts must be exact DNS hostnames without a scheme, port, path, or wildcard.",
+        ),
+    )
+    .max(32)
+    .transform((hosts) => [...new Set(hosts)]),
   maxCurrentAttachments: z.number().int().min(1).max(10),
   maxHistoryImages: z.number().int().min(0).max(10),
   maxTotalImages: z.number().int().min(1).max(20),

@@ -1416,6 +1416,7 @@ components:
           enabled,
           includeAttachments,
           includeLinkPreviewImages,
+          trustedLinkPreviewHosts,
           maxCurrentAttachments,
           maxHistoryImages,
           maxTotalImages,
@@ -1429,6 +1430,10 @@ components:
         enabled: { type: boolean }
         includeAttachments: { type: boolean }
         includeLinkPreviewImages: { type: boolean }
+        trustedLinkPreviewHosts:
+          type: array
+          maxItems: 32
+          items: { type: string, maxLength: 253 }
         maxCurrentAttachments: { type: integer, minimum: 1, maximum: 10 }
         maxHistoryImages: { type: integer, minimum: 0, maximum: 10 }
         maxTotalImages: { type: integer, minimum: 1, maximum: 20 }
@@ -1445,6 +1450,7 @@ components:
           enabled,
           includeAttachments,
           includeLinkPreviewImages,
+          trustedLinkPreviewHosts,
           maxCurrentAttachments,
           maxHistoryImages,
           maxTotalImages,
@@ -1460,6 +1466,10 @@ components:
         enabled: { type: boolean }
         includeAttachments: { type: boolean }
         includeLinkPreviewImages: { type: boolean }
+        trustedLinkPreviewHosts:
+          type: array
+          maxItems: 32
+          items: { type: string, maxLength: 253 }
         maxCurrentAttachments: { type: integer, minimum: 1, maximum: 10 }
         maxHistoryImages: { type: integer, minimum: 0, maximum: 10 }
         maxTotalImages: { type: integer, minimum: 1, maximum: 20 }

@@ -29,6 +29,8 @@ for (const [network, prefix] of [
 ] as const) {
   blocked.addSubnet(network, prefix, "ipv4");
 }
+const proxyFakeAddresses = new BlockList();
+proxyFakeAddresses.addSubnet("198.18.0.0", 15, "ipv4");
 for (const [network, prefix] of [
   ["::", 128],
   ["::1", 128],
@@ -84,12 +86,54 @@ function validateUrl(value: string, base?: URL): URL {
   return url;
 }
 
-function isBlockedAddress(address: string, family: 4 | 6): boolean {
-  return blocked.check(address, family === 4 ? "ipv4" : "ipv6");
+export interface PublicResourceFetchPolicy {
+  trustedProxyHosts?: readonly string[];
+}
+
+function normalizedHost(value: string): string {
+  return value.toLowerCase().replace(/\.$/u, "");
+}
+
+function trustsProxyFakeAddress(
+  hostname: string,
+  policy: PublicResourceFetchPolicy,
+): boolean {
+  const candidate = normalizedHost(hostname);
+  return (policy.trustedProxyHosts ?? []).some(
+    (host) => normalizedHost(host) === candidate,
+  );
+}
+
+function isBlockedAddress(
+  address: string,
+  family: 4 | 6,
+  allowProxyFakeAddress: boolean,
+): boolean {
+  const type = family === 4 ? "ipv4" : "ipv6";
+  if (!blocked.check(address, type)) return false;
+  return !(
+    allowProxyFakeAddress &&
+    family === 4 &&
+    proxyFakeAddresses.check(address, "ipv4")
+  );
+}
+
+export function isPublicResourceAddressAllowed(
+  hostname: string,
+  address: string,
+  family: 4 | 6,
+  policy: PublicResourceFetchPolicy = {},
+): boolean {
+  return !isBlockedAddress(
+    address,
+    family,
+    trustsProxyFakeAddress(hostname, policy),
+  );
 }
 
 async function resolvePublicAddress(
   hostname: string,
+  policy: PublicResourceFetchPolicy,
 ): Promise<{ address: string; family: 4 | 6 }> {
   const normalizedHostname =
     hostname.startsWith("[") && hostname.endsWith("]")
@@ -113,7 +157,12 @@ async function resolvePublicAddress(
     addresses.some(
       (item) =>
         (item.family !== 4 && item.family !== 6) ||
-        isBlockedAddress(item.address, item.family),
+        !isPublicResourceAddressAllowed(
+          normalizedHostname,
+          item.address,
+          item.family,
+          policy,
+        ),
     )
   ) {
     throw new OpenGraphFetchError(
@@ -145,12 +194,13 @@ async function requestBuffer(
   timeoutMs: number,
   maximumBytes = maxBodyBytes,
   accept = "text/html,application/xhtml+xml;q=0.9",
+  policy: PublicResourceFetchPolicy = {},
 ): Promise<{
   status: number;
   headers: IncomingHttpHeaders;
   body: Buffer;
 }> {
-  const selected = await resolvePublicAddress(url.hostname);
+  const selected = await resolvePublicAddress(url.hostname, policy);
   const pinnedLookup: LookupFunction = (_hostname, _options, callback) => {
     callback(null, selected.address, selected.family);
   };
@@ -226,10 +276,17 @@ export async function fetchPublicResource(
   timeoutMs: number,
   maximumBytes = maxBodyBytes,
   accept = "*/*",
+  policy: PublicResourceFetchPolicy = {},
 ): Promise<PublicResource> {
   let url = validateUrl(initialUrl);
   for (let redirect = 0; redirect <= maxRedirects; redirect += 1) {
-    const response = await requestBuffer(url, timeoutMs, maximumBytes, accept);
+    const response = await requestBuffer(
+      url,
+      timeoutMs,
+      maximumBytes,
+      accept,
+      policy,
+    );
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.location;
       if (location === undefined || redirect === maxRedirects)

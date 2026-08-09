@@ -34,6 +34,7 @@ describe.runIf(testDatabaseUrl !== undefined)(
         enabled: true,
         includeAttachments: true,
         includeLinkPreviewImages: true,
+        trustedLinkPreviewHosts: ["images.example.test"],
         maxCurrentAttachments: 3,
         maxHistoryImages: 2,
         maxTotalImages: 5,
@@ -45,7 +46,12 @@ describe.runIf(testDatabaseUrl !== undefined)(
       });
       expect(created).toMatchObject({
         status: "ok",
-        value: { enabled: true, detail: "auto", version: 1 },
+        value: {
+          enabled: true,
+          detail: "auto",
+          trustedLinkPreviewHosts: ["images.example.test"],
+          version: 1,
+        },
       });
 
       await expect(
@@ -53,6 +59,7 @@ describe.runIf(testDatabaseUrl !== undefined)(
           enabled: false,
           includeAttachments: true,
           includeLinkPreviewImages: true,
+          trustedLinkPreviewHosts: [],
           maxCurrentAttachments: 4,
           maxHistoryImages: 2,
           maxTotalImages: 6,

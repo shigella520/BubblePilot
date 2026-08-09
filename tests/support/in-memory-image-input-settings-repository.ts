@@ -22,6 +22,7 @@ export class InMemoryImageInputSettingsRepository implements ImageInputSettingsR
       enabled: input.enabled,
       includeAttachments: input.includeAttachments,
       includeLinkPreviewImages: input.includeLinkPreviewImages,
+      trustedLinkPreviewHosts: input.trustedLinkPreviewHosts,
       maxCurrentAttachments: input.maxCurrentAttachments,
       maxHistoryImages: input.maxHistoryImages,
       maxTotalImages: input.maxTotalImages,

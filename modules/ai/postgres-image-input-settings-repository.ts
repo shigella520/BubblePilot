@@ -11,6 +11,7 @@ interface SettingsRow {
   enabled: boolean;
   include_attachments: boolean;
   include_link_preview_images: boolean;
+  trusted_link_preview_hosts: unknown;
   max_current_attachments: number;
   max_history_images: number;
   max_total_images: number;
@@ -23,6 +24,7 @@ interface SettingsRow {
 }
 
 const returning = `enabled, include_attachments, include_link_preview_images,
+  trusted_link_preview_hosts,
   max_current_attachments, max_history_images, max_total_images,
   max_image_bytes, max_total_bytes, fetch_timeout_ms, detail,
   version, updated_at`;
@@ -32,6 +34,11 @@ function record(row: SettingsRow): ImageInputSettingsRecord {
     enabled: row.enabled,
     includeAttachments: row.include_attachments,
     includeLinkPreviewImages: row.include_link_preview_images,
+    trustedLinkPreviewHosts: Array.isArray(row.trusted_link_preview_hosts)
+      ? row.trusted_link_preview_hosts.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
     maxCurrentAttachments: row.max_current_attachments,
     maxHistoryImages: row.max_history_images,
     maxTotalImages: row.max_total_images,
@@ -66,6 +73,7 @@ export class PostgresImageInputSettingsRepository implements ImageInputSettingsR
       input.enabled,
       input.includeAttachments,
       input.includeLinkPreviewImages,
+      JSON.stringify(input.trustedLinkPreviewHosts),
       input.maxCurrentAttachments,
       input.maxHistoryImages,
       input.maxTotalImages,
@@ -79,21 +87,24 @@ export class PostgresImageInputSettingsRepository implements ImageInputSettingsR
         ? await this.pool.query<SettingsRow>(
             `INSERT INTO ai_image_input_settings (
                id, enabled, include_attachments, include_link_preview_images,
+               trusted_link_preview_hosts,
                max_current_attachments, max_history_images, max_total_images,
                max_image_bytes, max_total_bytes, fetch_timeout_ms, detail
-             ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ) VALUES (1, $1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11)
              ON CONFLICT (id) DO NOTHING RETURNING ${returning}`,
             values,
           )
         : await this.pool.query<SettingsRow>(
             `UPDATE ai_image_input_settings SET
                enabled = $1, include_attachments = $2,
-               include_link_preview_images = $3, max_current_attachments = $4,
-               max_history_images = $5, max_total_images = $6,
-               max_image_bytes = $7, max_total_bytes = $8,
-               fetch_timeout_ms = $9, detail = $10,
+               include_link_preview_images = $3,
+               trusted_link_preview_hosts = $4::jsonb,
+               max_current_attachments = $5,
+               max_history_images = $6, max_total_images = $7,
+               max_image_bytes = $8, max_total_bytes = $9,
+               fetch_timeout_ms = $10, detail = $11,
                version = version + 1, updated_at = NOW()
-             WHERE id = 1 AND version = $11 RETURNING ${returning}`,
+             WHERE id = 1 AND version = $12 RETURNING ${returning}`,
             [...values, input.expectedVersion],
           );
     const row = result.rows[0];
@@ -106,7 +117,7 @@ export class PostgresImageInputSettingsRepository implements ImageInputSettingsR
     const result = await this.pool.query<{ present: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM schema_migrations
-         WHERE name = '0024_ai_image_input.sql'
+         WHERE name = '0026_ai_trusted_image_hosts.sql'
        ) AS present`,
     );
     return result.rows[0]?.present ?? false;

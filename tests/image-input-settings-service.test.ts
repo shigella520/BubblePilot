@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
-import type { ImageInputSettingsUpdate } from "../modules/ai/image-input-settings-types.js";
+import {
+  imageInputSettingsUpdateSchema,
+  type ImageInputSettingsUpdate,
+} from "../modules/ai/image-input-settings-types.js";
 import { InMemoryImageInputSettingsRepository } from "./support/in-memory-image-input-settings-repository.js";
 
 const defaults = {
   enabled: false,
   includeAttachments: true,
   includeLinkPreviewImages: true,
+  trustedLinkPreviewHosts: [],
   maxCurrentAttachments: 4,
   maxHistoryImages: 2,
   maxTotalImages: 6,
@@ -18,6 +22,32 @@ const defaults = {
 };
 
 describe("ImageInputSettingsService", () => {
+  it("normalizes exact trusted hosts and rejects wildcard or URL values", () => {
+    expect(
+      imageInputSettingsUpdateSchema.parse({
+        ...defaults,
+        trustedLinkPreviewHosts: [
+          " Images.Example.Test ",
+          "images.example.test",
+        ],
+        expectedVersion: 0,
+      }).trustedLinkPreviewHosts,
+    ).toEqual(["images.example.test"]);
+    for (const host of [
+      "*.example.test",
+      "https://images.example.test",
+      "images.example.test:443",
+    ]) {
+      expect(
+        imageInputSettingsUpdateSchema.safeParse({
+          ...defaults,
+          trustedLinkPreviewHosts: [host],
+          expectedVersion: 0,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it("uses disabled application defaults before settings are saved", async () => {
     const service = new ImageInputSettingsService(
       new InMemoryImageInputSettingsRepository(
