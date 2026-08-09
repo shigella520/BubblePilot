@@ -493,6 +493,7 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
         sentAt: message.sentAt,
         body: message.body ?? "",
         isFromMe: message.isFromMe,
+        attachments: message.attachments as ContextMessage["attachments"],
         linkPreview: message.linkPreview,
       });
     }

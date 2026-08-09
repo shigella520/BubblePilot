@@ -122,6 +122,10 @@ export function parseBlueBubblesLinkPreviews(
     const originalUrl = httpUrl(resolvedString(metadata.originalURL, objects));
     const url = httpUrl(resolvedString(metadata.URL, objects)) ?? originalUrl;
     if (url === null) continue;
+    const imageUrl =
+      httpUrl(resolvedString(metadata.imageURL, objects)) ??
+      httpUrl(resolvedString(metadata.imageMetadata, objects)) ??
+      httpUrl(resolvedString(metadata.image, objects));
     const item: LinkPreviewItem = {
       source: "bluebubbles",
       url,
@@ -133,9 +137,12 @@ export function parseBlueBubblesLinkPreviews(
         200,
       ),
       imageAvailable:
+        imageUrl !== null ||
         referenceAvailable(metadata.image, objects) ||
         referenceAvailable(metadata.images, objects) ||
         referenceAvailable(metadata.imageMetadata, objects),
+      imageUrl,
+      imageSource: imageUrl === null ? null : "bluebubbles",
       iconAvailable:
         referenceAvailable(metadata.icon, objects) ||
         referenceAvailable(metadata.icons, objects) ||

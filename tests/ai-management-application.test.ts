@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApplication } from "../app/application.js";
 import type { AppConfig } from "../app/config.js";
 import { AiManagementService } from "../modules/ai/ai-management-service.js";
+import { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
 import type { AiClient } from "../modules/ai/openai-compatible-client.js";
 import type {
   AiCallResult,
@@ -14,6 +15,7 @@ import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import { WebSearchSettingsService } from "../modules/ai/web-search-settings-service.js";
 import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
+import { InMemoryImageInputSettingsRepository } from "./support/in-memory-image-input-settings-repository.js";
 import { InMemoryWebSearchSettingsRepository } from "./support/in-memory-web-search-settings-repository.js";
 
 const apiAccessToken = "fictional-api-access-token-32-chars-long";
@@ -108,6 +110,23 @@ describe("AI management API", () => {
             failurePolicy: "mode-default",
           },
         ),
+        imageInputSettings: new ImageInputSettingsService(
+          new InMemoryImageInputSettingsRepository(
+            () => new Date("2026-08-09T00:00:00.000Z"),
+          ),
+          {
+            enabled: false,
+            includeAttachments: true,
+            includeLinkPreviewImages: true,
+            maxCurrentAttachments: 4,
+            maxHistoryImages: 2,
+            maxTotalImages: 6,
+            maxImageBytes: 10_485_760,
+            maxTotalBytes: 20_971_520,
+            fetchTimeoutMs: 15_000,
+            detail: "high",
+          },
+        ),
       },
     });
   });
@@ -150,7 +169,7 @@ describe("AI management API", () => {
     }>().data;
   }
 
-  it("probes and persists configured hosted search capability", async () => {
+  it("independently probes and persists configured provider capabilities", async () => {
     const created = await request({
       method: "POST",
       url: "/api/v1/ai/providers",
@@ -160,7 +179,11 @@ describe("AI management API", () => {
         baseUrl: "https://ai.example.test/v1",
         model: "fictional-model",
         secretRef: "PRIMARY_AI_KEY",
-        capabilities: { functionCalling: true, hostedWebSearch: true },
+        capabilities: {
+          functionCalling: true,
+          hostedWebSearch: true,
+          imageInput: true,
+        },
       },
     });
     const providerId = created.json<{ data: { id: string } }>().data.id;
@@ -169,14 +192,62 @@ describe("AI management API", () => {
       url: `/api/v1/ai/providers/${providerId}/test`,
     });
     expect(tested.statusCode).toBe(200);
-    expect(client.requests).toHaveLength(3);
+    expect(client.requests).toHaveLength(4);
     expect(client.requests[1]).toMatchObject({ toolChoice: "required" });
     expect(client.requests[2]).toMatchObject({ webSearch: "required" });
+    expect(client.requests[3]?.messages[0]?.content).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "image" })]),
+    );
     await expect(repository.getProvider(providerId)).resolves.toMatchObject({
       capabilityProbe: {
         functionCalling: "verified",
         hostedWebSearch: "verified",
+        imageInput: "verified",
       },
+    });
+  });
+
+  it("manages global native image settings with optimistic concurrency", async () => {
+    const initial = await request({
+      method: "GET",
+      url: "/api/v1/ai/image-input/settings",
+    });
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json()).toMatchObject({
+      data: { enabled: false, source: "defaults", version: 0 },
+    });
+
+    const payload = {
+      enabled: true,
+      includeAttachments: true,
+      includeLinkPreviewImages: true,
+      maxCurrentAttachments: 3,
+      maxHistoryImages: 2,
+      maxTotalImages: 5,
+      maxImageBytes: 5_242_880,
+      maxTotalBytes: 15_728_640,
+      fetchTimeoutMs: 12_000,
+      detail: "auto",
+      expectedVersion: 0,
+    };
+    const updated = await request({
+      method: "PUT",
+      url: "/api/v1/ai/image-input/settings",
+      payload,
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({
+      data: { enabled: true, detail: "auto", source: "database", version: 1 },
+    });
+
+    const stale = await request({
+      method: "PUT",
+      url: "/api/v1/ai/image-input/settings",
+      payload,
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toMatchObject({
+      error: { code: "AI_IMAGE_INPUT_SETTINGS_CONFLICT" },
     });
   });
 

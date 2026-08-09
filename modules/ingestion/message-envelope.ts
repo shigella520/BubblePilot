@@ -1,6 +1,6 @@
 import type { LinkPreviewBundle } from "./link-preview.js";
 
-export const MESSAGE_ENVELOPE_SCHEMA_VERSION = "2" as const;
+export const MESSAGE_ENVELOPE_SCHEMA_VERSION = "3" as const;
 
 export interface MessageAttachment {
   providerAttachmentId: string;

@@ -955,6 +955,59 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/ai/image-input/settings:
+    get:
+      operationId: getAiImageInputSettings
+      description: 返回所有 AI 节点共享的原生图片输入参数。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 当前原生图片输入配置。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ImageInputSettingsView"
+        "401":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: updateAiImageInputSettings
+      description: 保存原生图片输入全局配置，新执行立即生效。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageInputSettingsUpdate"
+      responses:
+        "200":
+          description: 配置已保存。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ImageInputSettingsView"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /api/v1/ai/providers/reorder:
     put:
       operationId: reorderAiProviders
@@ -1356,6 +1409,68 @@ components:
         type: integer
         minimum: 1
   schemas:
+    ImageInputSettingsUpdate:
+      type: object
+      required:
+        [
+          enabled,
+          includeAttachments,
+          includeLinkPreviewImages,
+          maxCurrentAttachments,
+          maxHistoryImages,
+          maxTotalImages,
+          maxImageBytes,
+          maxTotalBytes,
+          fetchTimeoutMs,
+          detail,
+          expectedVersion,
+        ]
+      properties:
+        enabled: { type: boolean }
+        includeAttachments: { type: boolean }
+        includeLinkPreviewImages: { type: boolean }
+        maxCurrentAttachments: { type: integer, minimum: 1, maximum: 10 }
+        maxHistoryImages: { type: integer, minimum: 0, maximum: 10 }
+        maxTotalImages: { type: integer, minimum: 1, maximum: 20 }
+        maxImageBytes: { type: integer, minimum: 1024, maximum: 52428800 }
+        maxTotalBytes: { type: integer, minimum: 1024, maximum: 104857600 }
+        fetchTimeoutMs: { type: integer, minimum: 1000, maximum: 60000 }
+        detail: { enum: [low, high, auto] }
+        expectedVersion: { type: integer, minimum: 0 }
+      additionalProperties: false
+    ImageInputSettingsView:
+      type: object
+      required:
+        [
+          enabled,
+          includeAttachments,
+          includeLinkPreviewImages,
+          maxCurrentAttachments,
+          maxHistoryImages,
+          maxTotalImages,
+          maxImageBytes,
+          maxTotalBytes,
+          fetchTimeoutMs,
+          detail,
+          source,
+          version,
+          updatedAt,
+        ]
+      properties:
+        enabled: { type: boolean }
+        includeAttachments: { type: boolean }
+        includeLinkPreviewImages: { type: boolean }
+        maxCurrentAttachments: { type: integer, minimum: 1, maximum: 10 }
+        maxHistoryImages: { type: integer, minimum: 0, maximum: 10 }
+        maxTotalImages: { type: integer, minimum: 1, maximum: 20 }
+        maxImageBytes: { type: integer, minimum: 1024, maximum: 52428800 }
+        maxTotalBytes: { type: integer, minimum: 1024, maximum: 104857600 }
+        fetchTimeoutMs: { type: integer, minimum: 1000, maximum: 60000 }
+        detail: { enum: [low, high, auto] }
+        source: { enum: [defaults, database] }
+        version: { type: integer, minimum: 0 }
+        updatedAt: { type: [string, "null"], format: date-time }
+      additionalProperties: false
     WebSearchSettingsUpdate:
       type: object
       required:
@@ -1556,6 +1671,14 @@ components:
         enabled:
           type: boolean
           default: true
+        capabilities:
+          type: object
+          required: [functionCalling, hostedWebSearch, imageInput]
+          properties:
+            functionCalling: { type: boolean, default: false }
+            hostedWebSearch: { type: boolean, default: false }
+            imageInput: { type: boolean, default: false }
+          additionalProperties: false
     AiRouteConfiguration:
       type: object
       required: [name]

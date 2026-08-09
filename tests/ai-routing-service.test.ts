@@ -6,6 +6,7 @@ import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
 import type { AiClient } from "../modules/ai/openai-compatible-client.js";
 import type {
   AiCallResult,
+  AiChatRequest,
   AiProviderConfiguration,
   AiProviderRecord,
   AiRouteRequest,
@@ -62,6 +63,7 @@ function secretResolver(
 class FakeAiClient implements AiClient {
   readonly calls: string[] = [];
   readonly providerSnapshots: AiProviderRecord[] = [];
+  readonly requests: AiChatRequest[] = [];
 
   constructor(
     private readonly callProvider: (
@@ -70,9 +72,13 @@ class FakeAiClient implements AiClient {
     ) => AiCallResult | Promise<AiCallResult>,
   ) {}
 
-  async call(provider: AiProviderRecord): Promise<AiCallResult> {
+  async call(
+    provider: AiProviderRecord,
+    request: AiChatRequest,
+  ): Promise<AiCallResult> {
     this.calls.push(provider.id);
     this.providerSnapshots.push(structuredClone(provider));
+    this.requests.push(structuredClone(request));
     return this.callProvider(provider, this.calls.length);
   }
 }
@@ -123,6 +129,117 @@ async function route(
 }
 
 describe("AiRoutingService", () => {
+  it("routes native image input only to a provider with a verified capability", async () => {
+    const repository = new InMemoryAiRepository();
+    const textOnly = await provider(repository, "Primary");
+    const vision = await provider(repository, "Backup");
+    Object.assign(repository.providers.get(textOnly.id)!, {
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: false,
+      },
+      capabilityProbe: {
+        functionCalling: "unknown",
+        hostedWebSearch: "unknown",
+        imageInput: "failed",
+        checkedAt: new Date().toISOString(),
+      },
+    });
+    Object.assign(repository.providers.get(vision.id)!, {
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: true,
+      },
+      capabilityProbe: {
+        functionCalling: "unknown",
+        hostedWebSearch: "unknown",
+        imageInput: "verified",
+        checkedAt: new Date().toISOString(),
+      },
+    });
+    const configuredRoute = await route(repository, [textOnly.id, vision.id]);
+    const client = new FakeAiClient(() => ({
+      status: "succeeded",
+      text: "Image understood",
+      durationMs: 1,
+    }));
+    const service = new AiRoutingService(repository, client, secretResolver());
+
+    await expect(
+      service.execute({
+        ...routeRequest(configuredRoute.id),
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Describe the fictional image." },
+              {
+                type: "image",
+                dataUrl: "data:image/png;base64,ZmFrZQ==",
+                detail: "low",
+                label: "Fictional image",
+              },
+            ],
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({ status: "succeeded", providerId: vision.id });
+    expect(client.calls).toEqual([vision.id]);
+  });
+
+  it("falls back to text with an explicit limitation when no vision provider is available", async () => {
+    const repository = new InMemoryAiRepository();
+    const textOnly = await provider(repository, "Primary");
+    const configuredRoute = await route(repository, [textOnly.id]);
+    const client = new FakeAiClient(() => ({
+      status: "succeeded",
+      text: "Text-only answer",
+      durationMs: 1,
+    }));
+    const service = new AiRoutingService(repository, client, secretResolver());
+
+    await expect(
+      service.execute({
+        ...routeRequest(configuredRoute.id),
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "What does this show?" },
+              {
+                type: "image",
+                dataUrl: "data:image/png;base64,ZmFrZQ==",
+                detail: "low",
+                label: "Fictional image",
+              },
+            ],
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      providerId: textOnly.id,
+      attemptCount: 1,
+    });
+    expect(client.requests).toHaveLength(1);
+    const limitation = client.requests[0]?.messages.find(
+      (message) =>
+        message.role === "system" && typeof message.content === "string",
+    );
+    expect(limitation?.content).toContain(
+      "could not provide the referenced images",
+    );
+    expect(
+      client.requests[0]?.messages.some(
+        (message) =>
+          typeof message.content !== "string" &&
+          message.content.some((part) => part.type === "image"),
+      ),
+    ).toBe(false);
+  });
+
   it("filters search routes to providers with verified hosted search", async () => {
     const repository = new InMemoryAiRepository();
     const primary = await provider(repository, "Primary");

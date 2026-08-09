@@ -131,6 +131,7 @@ export class AiManagementService {
     });
     let functionCalling: "verified" | "failed" | "unknown" = "unknown";
     let hostedWebSearch: "verified" | "failed" | "unknown" = "unknown";
+    let imageInput: "verified" | "failed" | "unknown" = "unknown";
     const capabilityMessages: string[] = [];
     let totalDurationMs = result.durationMs;
     if (
@@ -196,10 +197,40 @@ export class AiManagementService {
         `Hosted web search ${hostedWebSearch === "verified" ? "verified" : "failed"}`,
       );
     }
+    if (result.status === "succeeded" && provider.capabilities?.imageInput) {
+      const imageProbe = await this.client.call(provider, {
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Capability test. If you can receive the image, reply with OK.",
+              },
+              {
+                type: "image",
+                dataUrl:
+                  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl9sAAAAASUVORK5CYII=",
+                detail: "low",
+                label: "capability probe",
+              },
+            ],
+          },
+        ],
+        maxOutputTokens: 128,
+        temperature: 0,
+      });
+      totalDurationMs += imageProbe.durationMs;
+      imageInput = imageProbe.status === "succeeded" ? "verified" : "failed";
+      capabilityMessages.push(
+        `Image input ${imageInput === "verified" ? "verified" : "failed"}`,
+      );
+    }
     if (result.status === "succeeded") {
       await this.repository.updateProviderCapabilityProbe(providerId, {
         functionCalling,
         hostedWebSearch,
+        imageInput,
         checkedAt: new Date().toISOString(),
       });
     }
@@ -331,6 +362,7 @@ export class AiManagementService {
       capabilities: configuration.capabilities ?? {
         functionCalling: false,
         hostedWebSearch: false,
+        imageInput: false,
       },
     };
   }
@@ -352,6 +384,7 @@ export class AiManagementService {
       capabilityProbe: provider.capabilityProbe ?? {
         functionCalling: "unknown",
         hostedWebSearch: "unknown",
+        imageInput: "unknown",
         checkedAt: null,
       },
     };

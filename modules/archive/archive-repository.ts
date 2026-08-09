@@ -1,5 +1,6 @@
 import type {
   IgnoredInboundEvent,
+  MessageAttachment,
   MessageEnvelope,
 } from "../ingestion/message-envelope.js";
 import type {
@@ -105,6 +106,7 @@ export interface ContextMessage {
   sentAt: string;
   body: string;
   isFromMe: boolean;
+  attachments: readonly MessageAttachment[];
   linkPreview: LinkPreviewBundle;
 }
 

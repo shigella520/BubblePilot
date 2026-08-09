@@ -124,6 +124,63 @@ describe("OpenAiCompatibleClient", () => {
     });
   });
 
+  it.each([
+    ["chat-completions" as const, "text", "image_url"],
+    ["responses" as const, "input_text", "input_image"],
+  ])(
+    "serializes native image content for %s",
+    async (apiKind, textType, imageType) => {
+      const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+        apiKind === "chat-completions"
+          ? new Response(
+              JSON.stringify({ choices: [{ message: { content: "Seen" } }] }),
+              { status: 200 },
+            )
+          : new Response(JSON.stringify({ output_text: "Seen" }), {
+              status: 200,
+            }),
+      );
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+        fetchImplementation,
+      );
+      await client.call(
+        { ...provider, apiKind },
+        {
+          ...request,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Inspect this image" },
+                {
+                  type: "image",
+                  dataUrl: "data:image/png;base64,AAAA",
+                  detail: "high",
+                  label: "current attachment",
+                },
+              ],
+            },
+          ],
+        },
+      );
+      const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+      const payload = JSON.parse(typeof body === "string" ? body : "null") as
+        | { messages: Array<{ content: Array<{ type: string }> }> }
+        | { input: Array<{ content: Array<{ type: string }> }> };
+      const content =
+        "messages" in payload
+          ? payload.messages[0]?.content
+          : payload.input[0]?.content;
+      expect(content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: textType }),
+          expect.objectContaining({ type: imageType }),
+        ]),
+      );
+    },
+  );
+
   it("records response shape, request IDs, token usage, and cache counters without content", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

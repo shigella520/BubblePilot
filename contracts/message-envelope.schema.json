@@ -13,7 +13,7 @@
     "metadata"
   ],
   "properties": {
-    "schemaVersion": { "const": "2" },
+    "schemaVersion": { "const": "3" },
     "eventId": { "type": "string", "minLength": 1 },
     "correlationId": { "type": "string", "format": "uuid" },
     "provider": { "const": "bluebubbles" },
@@ -94,6 +94,8 @@
                   "summary",
                   "siteName",
                   "imageAvailable",
+                  "imageUrl",
+                  "imageSource",
                   "iconAvailable"
                 ],
                 "properties": {
@@ -112,6 +114,14 @@
                   "summary": { "type": ["string", "null"], "maxLength": 2000 },
                   "siteName": { "type": ["string", "null"], "maxLength": 200 },
                   "imageAvailable": { "type": "boolean" },
+                  "imageUrl": {
+                    "type": ["string", "null"],
+                    "format": "uri",
+                    "maxLength": 2048
+                  },
+                  "imageSource": {
+                    "enum": ["bluebubbles", "open-graph", null]
+                  },
                   "iconAvailable": { "type": "boolean" }
                 },
                 "additionalProperties": false

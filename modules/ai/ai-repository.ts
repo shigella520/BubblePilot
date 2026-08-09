@@ -2,6 +2,8 @@ import type {
   AiAttemptRecordInput,
   AiCandidateSelection,
   AiProviderAttemptView,
+  AiImageInputRecordInput,
+  AiImageInputView,
   AiProviderConfiguration,
   AiProviderCapabilityProbe,
   AiProviderHealth,
@@ -91,6 +93,11 @@ export interface AiRepository {
     executionId: string,
     nodeId?: string,
   ): Promise<readonly AiToolExecutionView[]>;
+  recordImageInput(input: AiImageInputRecordInput): Promise<void>;
+  listImageInputs(
+    executionId: string,
+    nodeId?: string,
+  ): Promise<readonly AiImageInputView[]>;
   isReady(): Promise<boolean>;
   close(): Promise<void>;
 }

@@ -8,6 +8,8 @@ export const linkPreviewItemSchema = z.object({
   summary: z.string().max(2_000).nullable(),
   siteName: z.string().max(200).nullable(),
   imageAvailable: z.boolean(),
+  imageUrl: z.string().url().max(2_048).nullable().default(null),
+  imageSource: z.enum(["bluebubbles", "open-graph"]).nullable().default(null),
   iconAvailable: z.boolean(),
 });
 

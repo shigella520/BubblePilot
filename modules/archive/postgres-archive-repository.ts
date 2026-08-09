@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient, QueryResult } from "pg";
 
 import { createPostgresPool } from "../shared/postgres-pool.js";
+import type { MessageAttachment } from "../ingestion/message-envelope.js";
 
 import type {
   ArchiveRepository,
@@ -94,6 +95,7 @@ interface ContextMessageRow {
   sent_at: Date;
   body: string;
   is_from_me: boolean;
+  attachments: unknown;
   link_preview_status: string;
   link_previews: unknown;
   link_preview_error_code: string | null;
@@ -163,6 +165,24 @@ function linkPreviewBundle(row: {
     errorCode: row.link_preview_error_code,
     items,
   };
+}
+
+function messageAttachments(value: unknown): readonly MessageAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item !== "object" || item === null) return [];
+    const record = item as Record<string, unknown>;
+    if (typeof record.providerAttachmentId !== "string") return [];
+    return [
+      {
+        providerAttachmentId: record.providerAttachmentId,
+        mimeType: typeof record.mimeType === "string" ? record.mimeType : null,
+        fileName: typeof record.fileName === "string" ? record.fileName : null,
+        sizeBytes:
+          typeof record.sizeBytes === "number" ? record.sizeBytes : null,
+      },
+    ];
+  });
 }
 
 function inboundEventSummary(row: InboundEventRow): InboundEventSummary {
@@ -749,19 +769,21 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     options: ContextWindowOptions,
   ): Promise<readonly ContextMessage[]> {
     const result = await this.pool.query<ContextMessageRow>(
-      `SELECT provider_message_id, sender_id, sent_at, body, is_from_me,
+      `SELECT provider_message_id, sender_id, sent_at, body, is_from_me, attachments,
               link_preview_status, link_previews, link_preview_error_code
        FROM (
          SELECT m.provider_message_id, m.sender_id, m.sent_at,
                 LEFT(COALESCE(m.body, ''), $5) AS body,
-                m.is_from_me, m.id, m.link_preview_status, m.link_previews,
+                m.is_from_me, m.id, m.attachments, m.link_preview_status, m.link_previews,
                 m.link_preview_error_code
          FROM messages m
          INNER JOIN chats c ON c.id = m.chat_id
          WHERE c.provider = 'bluebubbles'
            AND c.provider_chat_id = $1
            AND c.enabled = TRUE
-           AND ((m.body IS NOT NULL AND m.body <> '') OR m.link_preview_status = 'available')
+           AND ((m.body IS NOT NULL AND m.body <> '')
+                OR m.link_preview_status = 'available'
+                OR m.attachments <> '[]'::jsonb)
            AND ($2::boolean OR m.is_from_me = FALSE)
            AND ($3::text IS NULL OR m.provider_message_id <> $3)
          ORDER BY m.sent_at DESC, m.id DESC
@@ -802,6 +824,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
         sentAt: row.sent_at.toISOString(),
         body: row.body,
         isFromMe: row.is_from_me,
+        attachments: messageAttachments(row.attachments),
         linkPreview,
       });
     }

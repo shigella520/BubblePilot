@@ -9,6 +9,8 @@ import type {
   AiCandidate,
   AiCandidateSelection,
   AiProviderAttemptView,
+  AiImageInputRecordInput,
+  AiImageInputView,
   AiProviderCapabilityProbe,
   AiProviderConfiguration,
   AiProviderHealth,
@@ -31,6 +33,7 @@ export class InMemoryAiRepository implements AiRepository {
   readonly routes = new Map<string, AiProviderRouteRecord>();
   readonly attempts: AiProviderAttemptView[] = [];
   readonly toolExecutions: AiToolExecutionView[] = [];
+  readonly imageInputs: AiImageInputView[] = [];
   readonly healthEvents: Array<{
     providerId: string;
     from: AiProviderHealth["state"];
@@ -510,6 +513,30 @@ export class InMemoryAiRepository implements AiRepository {
   ): Promise<readonly AiToolExecutionView[]> {
     return Promise.resolve(
       this.toolExecutions
+        .filter(
+          (item) =>
+            item.executionId === executionId &&
+            (nodeId === undefined || item.nodeId === nodeId),
+        )
+        .map(cloned),
+    );
+  }
+
+  recordImageInput(input: AiImageInputRecordInput): Promise<void> {
+    this.imageInputs.push({
+      ...cloned(input),
+      id: randomUUID(),
+      createdAt: this.timestamp(),
+    });
+    return Promise.resolve();
+  }
+
+  listImageInputs(
+    executionId: string,
+    nodeId?: string,
+  ): Promise<readonly AiImageInputView[]> {
+    return Promise.resolve(
+      this.imageInputs
         .filter(
           (item) =>
             item.executionId === executionId &&

@@ -277,6 +277,34 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         },
       },
     ]);
+    await repository.recordImageInput({
+      executionId: diagnosticExecutionId,
+      nodeId: "ai-node",
+      source: "link-preview",
+      sourceHash: "b".repeat(64),
+      hostName: "images.example.test",
+      status: "succeeded",
+      declaredMimeType: null,
+      actualMimeType: "image/png",
+      bytes: 68,
+      durationMs: 12,
+      detail: "low",
+      errorCode: null,
+    });
+    await expect(
+      repository.listImageInputs(diagnosticExecutionId, "ai-node"),
+    ).resolves.toMatchObject([
+      {
+        executionId: diagnosticExecutionId,
+        nodeId: "ai-node",
+        source: "link-preview",
+        sourceHash: "b".repeat(64),
+        hostName: "images.example.test",
+        status: "succeeded",
+        actualMimeType: "image/png",
+        bytes: 68,
+      },
+    ]);
     await inspectionPool.query(
       "DELETE FROM workflow_executions WHERE id = $1",
       [diagnosticExecutionId],

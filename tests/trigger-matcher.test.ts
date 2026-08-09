@@ -8,7 +8,7 @@ import {
 
 function envelope(sentAt: string): MessageEnvelope {
   return {
-    schemaVersion: "2",
+    schemaVersion: "3",
     eventId: "new-message:fictional-time-window-message",
     correlationId: "00000000-0000-4000-8000-000000000901",
     provider: "bluebubbles",

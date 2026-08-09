@@ -837,7 +837,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         throw new Error("The recovery execution could not be read.");
       }
       const envelope: MessageEnvelope = {
-        schemaVersion: "2",
+        schemaVersion: "3",
         eventId: sourceRow.external_event_id,
         correlationId,
         provider: "bluebubbles",

@@ -37,13 +37,14 @@
   </a>
 </p>
 
-BubblePilot 接收 BlueBubbles 的新消息，在你指定的聊天中保存内容、匹配触发条件并执行可视化工作流。工作流可以读取最近对话、调用一个或多个 OpenAI 兼容服务、按需联网搜索，再把结果安全地回复到原聊天。
+BubblePilot 接收 BlueBubbles 的新消息，在你指定的聊天中保存内容、匹配触发条件并执行可视化工作流。工作流可以读取最近对话和图片、调用一个或多个 OpenAI 兼容服务、按需联网搜索，再把结果安全地回复到原聊天。
 
 - **只处理你选择的聊天**：未启用监听的聊天只保留发现所需的最小元数据，不归档正文。
 - **自动化过程可解释**：入站、匹配、节点、AI 调用、搜索工具和回复状态都能在管理端追踪。
 - **AI 服务不被单点绑定**：多个 Provider 可按固定顺序 Retry、Fallback，并在连续故障后自动降级。
 - **群聊成员可以被准确识别**：按对话为历史 sender ID 配置本名和昵称，AI 只读取当前上下文实际出现成员的映射。
 - **链接卡片也能进入 AI 上下文**：优先解析 BlueBubbles 卡片元数据，必要时安全读取公网 Open Graph，并保留来源和诊断。
+- **图片可由原生多模态模型理解**：按全局安全边界临时读取当前附件、卡片主图和有限历史图片，失败时自动降级为文本。
 - **数据保存在自己的实例**：PostgreSQL 是消息、配置、执行和审计记录的权威来源。
 
 ## 你可以用它做什么
@@ -54,6 +55,7 @@ BubblePilot 接收 BlueBubbles 的新消息，在你指定的聊天中保存内�
 | 创建群聊 Bot     | 用聊天、发送者、消息类型、关键词、前缀、正则和时间窗口触发工作流             |
 | 识别群聊成员     | 从聊天历史发现 sender ID，按对话维护本名和昵称，由 AI 自动区分每句话的发言者 |
 | 理解链接卡片     | 归档标题、摘要和站点信息，让 AI 在不声称读取全文的前提下理解链接上下文       |
+| 理解聊天图片     | 将当前图片附件、链接卡片主图和有限历史图片送入已验证的原生多模态 Provider   |
 | 编排消息流程     | 在画布中连接上下文、条件、变量、AI、回复和结束节点                           |
 | 接入不同 AI      | 管理多个 OpenAI 兼容 Provider、模型和路由，自动 Retry、Fallback 与恢复       |
 | 获取最新网页信息 | 由模型按需使用 Provider 托管搜索，或通过 Function Calling 调用自托管 SearXNG |
@@ -232,9 +234,10 @@ https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_W
 ### 6. 配置 AI Provider（可选）
 
 1. 进入“AI Provider”，创建 Provider，填写接口类型、Base URL、模型、API Key 和单次请求超时。
-2. 按 Provider 实际能力勾选 Function Calling 或托管搜索，再运行连接与能力测试。
+2. 按 Provider 实际能力勾选 Function Calling、托管搜索或原生图片输入，再运行连接与能力测试。
 3. 创建一条 Provider 路由，选择候选顺序以及 Fallback、Retry、降级阈值和冷却时间。
 4. 若要联网搜索，确认 `.env` 中 `ENABLE_WEB_SEARCH=true`，且页面显示搜索后端可用。
+5. 若要让 AI 理解图片，先确认 Provider 的图片能力探测为“已验证”，再在同一页面开启全局“原生图片输入”；工作流节点无需单独配置。
 
 API Key 会使用 `SETTINGS_ENCRYPTION_KEY` 加密保存到 PostgreSQL，之后不会在页面、接口或日志中回显。
 

@@ -331,6 +331,8 @@ describe("AI workflow", () => {
             summary: "Fictional summary",
             siteName: "Example Test",
             imageAvailable: true,
+            imageUrl: null,
+            imageSource: null,
             iconAvailable: false,
           },
         ],

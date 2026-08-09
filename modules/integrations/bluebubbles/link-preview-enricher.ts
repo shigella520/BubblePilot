@@ -46,7 +46,10 @@ function urls(text: string | null): readonly string[] {
 function usable(items: readonly LinkPreviewItem[]): boolean {
   return items.some(
     (item) =>
-      item.title !== null || item.summary !== null || item.siteName !== null,
+      item.title !== null ||
+      item.summary !== null ||
+      item.siteName !== null ||
+      item.imageUrl !== null,
   );
 }
 
@@ -97,6 +100,7 @@ export class ManagedLinkPreviewEnricher implements LinkPreviewEnricher {
 
     const diagnostics: LinkPreviewDiagnostic[] = [];
     let blueBubblesItems: readonly LinkPreviewItem[] = [];
+    let usableBlueBubblesItems: readonly LinkPreviewItem[] = [];
     let fallbackUrl = urls(envelope.message.text)[0] ?? null;
     let finalCode: string | null = null;
 
@@ -136,15 +140,24 @@ export class ManagedLinkPreviewEnricher implements LinkPreviewEnricher {
             httpStatus: response.status,
             code: null,
           });
-          if (usable(blueBubblesItems))
-            return {
-              linkPreview: {
-                status: "available",
-                errorCode: null,
-                items: blueBubblesItems.slice(0, 4),
-              },
-              diagnostics,
-            };
+          if (usable(blueBubblesItems)) {
+            usableBlueBubblesItems = blueBubblesItems;
+            if (
+              !settings.openGraphFallbackEnabled ||
+              blueBubblesItems.every(
+                (item) => !item.imageAvailable || item.imageUrl !== null,
+              )
+            )
+              return {
+                linkPreview: {
+                  status: "available",
+                  errorCode: null,
+                  items: blueBubblesItems.slice(0, 4),
+                },
+                diagnostics,
+              };
+            break;
+          }
           finalCode = "LINK_PREVIEW_BLUEBUBBLES_EMPTY";
           continue;
         }
@@ -201,7 +214,21 @@ export class ManagedLinkPreviewEnricher implements LinkPreviewEnricher {
               linkPreview: {
                 status: "available",
                 errorCode: null,
-                items: [item],
+                items:
+                  usableBlueBubblesItems.length === 0
+                    ? [item]
+                    : usableBlueBubblesItems
+                        .slice(0, 4)
+                        .map((existing, itemIndex) =>
+                          itemIndex === 0 && item.imageUrl !== null
+                            ? {
+                                ...existing,
+                                imageAvailable: true,
+                                imageUrl: item.imageUrl,
+                                imageSource: item.imageSource,
+                              }
+                            : existing,
+                        ),
               },
               diagnostics,
             };
@@ -239,6 +266,15 @@ export class ManagedLinkPreviewEnricher implements LinkPreviewEnricher {
     const hadOperationalFailure = diagnostics.some(
       (item) => item.status === "failed",
     );
+    if (usableBlueBubblesItems.length > 0)
+      return {
+        linkPreview: {
+          status: "available",
+          errorCode: null,
+          items: usableBlueBubblesItems.slice(0, 4),
+        },
+        diagnostics,
+      };
     return {
       linkPreview: emptyLinkPreview(
         hadOperationalFailure ? "failed" : "unavailable",

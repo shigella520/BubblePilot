@@ -133,15 +133,18 @@ async function resolvePublicAddress(
   return { address: selected.address, family: selected.family };
 }
 
-interface FetchBufferResult {
+export interface PublicResource {
   url: URL;
   body: Buffer;
   status: number;
+  headers: IncomingHttpHeaders;
 }
 
 async function requestBuffer(
   url: URL,
   timeoutMs: number,
+  maximumBytes = maxBodyBytes,
+  accept = "text/html,application/xhtml+xml;q=0.9",
 ): Promise<{
   status: number;
   headers: IncomingHttpHeaders;
@@ -173,7 +176,7 @@ async function requestBuffer(
         method: "GET",
         lookup: pinnedLookup,
         headers: {
-          accept: "text/html,application/xhtml+xml;q=0.9",
+          accept,
           "user-agent": "BubblePilot-LinkPreview/1.0",
         },
       },
@@ -183,7 +186,7 @@ async function requestBuffer(
         response.on("data", (chunk: Buffer | string) => {
           const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           bytes += buffer.length;
-          if (bytes > maxBodyBytes) {
+          if (bytes > maximumBytes) {
             response.destroy(
               new OpenGraphFetchError(
                 "LINK_PREVIEW_OG_RESPONSE_TOO_LARGE",
@@ -218,13 +221,15 @@ async function requestBuffer(
   });
 }
 
-async function fetchHtml(
+export async function fetchPublicResource(
   initialUrl: string,
   timeoutMs: number,
-): Promise<FetchBufferResult> {
+  maximumBytes = maxBodyBytes,
+  accept = "*/*",
+): Promise<PublicResource> {
   let url = validateUrl(initialUrl);
   for (let redirect = 0; redirect <= maxRedirects; redirect += 1) {
-    const response = await requestBuffer(url, timeoutMs);
+    const response = await requestBuffer(url, timeoutMs, maximumBytes, accept);
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.location;
       if (location === undefined || redirect === maxRedirects)
@@ -242,19 +247,37 @@ async function fetchHtml(
         "The page returned an unsuccessful response.",
         response.status,
       );
-    const contentType = response.headers["content-type"] ?? "";
-    if (!/^text\/html\b|^application\/xhtml\+xml\b/iu.test(contentType))
-      throw new OpenGraphFetchError(
-        "LINK_PREVIEW_OG_INVALID_CONTENT_TYPE",
-        "The URL did not return HTML.",
-        response.status,
-      );
-    return { url, body: response.body, status: response.status };
+    return {
+      url,
+      body: response.body,
+      status: response.status,
+      headers: response.headers,
+    };
   }
   throw new OpenGraphFetchError(
     "LINK_PREVIEW_OG_REDIRECT_FAILED",
     "The redirect chain is too long.",
   );
+}
+
+async function fetchHtml(
+  initialUrl: string,
+  timeoutMs: number,
+): Promise<PublicResource> {
+  const response = await fetchPublicResource(
+    initialUrl,
+    timeoutMs,
+    maxBodyBytes,
+    "text/html,application/xhtml+xml;q=0.9",
+  );
+  const contentType = response.headers["content-type"] ?? "";
+  if (!/^text\/html\b|^application\/xhtml\+xml\b/iu.test(contentType))
+    throw new OpenGraphFetchError(
+      "LINK_PREVIEW_OG_INVALID_CONTENT_TYPE",
+      "The URL did not return HTML.",
+      response.status,
+    );
+  return response;
 }
 
 function meta(
@@ -282,7 +305,22 @@ export class OpenGraphClient {
       2_000,
     );
     const siteName = clean(meta($, "og:site_name"), 200);
-    if (title === null && summary === null && siteName === null) return null;
+    const imageValue = clean(meta($, "og:image", "twitter:image"), 2_048);
+    let imageUrl: string | null = null;
+    if (imageValue !== null) {
+      try {
+        imageUrl = validateUrl(imageValue, response.url).toString();
+      } catch {
+        imageUrl = null;
+      }
+    }
+    if (
+      title === null &&
+      summary === null &&
+      siteName === null &&
+      imageUrl === null
+    )
+      return null;
     return {
       source: "open-graph",
       url: response.url.toString(),
@@ -290,8 +328,9 @@ export class OpenGraphClient {
       title,
       summary,
       siteName,
-      imageAvailable:
-        clean(meta($, "og:image", "twitter:image"), 2_048) !== null,
+      imageAvailable: imageUrl !== null,
+      imageUrl,
+      imageSource: imageUrl === null ? null : "open-graph",
       iconAvailable:
         $("link[rel~='icon'],link[rel='apple-touch-icon']").length > 0,
     };

@@ -38,8 +38,13 @@ const aiProviderConfigurationBaseSchema = z.object({
     .object({
       functionCalling: z.boolean().default(false),
       hostedWebSearch: z.boolean().default(false),
+      imageInput: z.boolean().default(false),
     })
-    .default({ functionCalling: false, hostedWebSearch: false }),
+    .default({
+      functionCalling: false,
+      hostedWebSearch: false,
+      imageInput: false,
+    }),
 });
 
 // API keys are optional: local OpenAI-compatible servers such as Ollama do
@@ -116,10 +121,12 @@ export interface WebSearchExecutionOptions {
 export interface AiProviderCapabilities {
   functionCalling: boolean;
   hostedWebSearch: boolean;
+  imageInput?: boolean;
 }
 export interface AiProviderCapabilityProbe {
   functionCalling: AiCapabilityProbeState;
   hostedWebSearch: AiCapabilityProbeState;
+  imageInput?: AiCapabilityProbeState;
   checkedAt: string | null;
 }
 export type AiProviderParameters = Readonly<
@@ -228,9 +235,23 @@ export interface AiCandidateSelection {
   nextAvailableAt: string | null;
 }
 
+export interface AiTextContentPart {
+  type: "text";
+  text: string;
+}
+
+export interface AiImageContentPart {
+  type: "image";
+  dataUrl: string;
+  detail: "low" | "high" | "auto";
+  label: string;
+}
+
+export type AiContentPart = AiTextContentPart | AiImageContentPart;
+
 export interface AiChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content: string | readonly AiContentPart[];
   toolCallId?: string;
   toolCalls?: readonly AiToolCall[];
 }
@@ -400,6 +421,26 @@ export interface AiToolExecutionRecordInput {
 }
 
 export interface AiToolExecutionView extends AiToolExecutionRecordInput {
+  id: string;
+  createdAt: string;
+}
+
+export interface AiImageInputRecordInput {
+  executionId: string;
+  nodeId: string;
+  source: "attachment" | "link-preview";
+  sourceHash: string;
+  hostName: string | null;
+  status: "succeeded" | "skipped" | "failed";
+  declaredMimeType: string | null;
+  actualMimeType: string | null;
+  bytes: number | null;
+  durationMs: number;
+  detail: "low" | "high" | "auto";
+  errorCode: string | null;
+}
+
+export interface AiImageInputView extends AiImageInputRecordInput {
   id: string;
   createdAt: string;
 }

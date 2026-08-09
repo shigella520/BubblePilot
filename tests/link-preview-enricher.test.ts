@@ -8,7 +8,7 @@ import { SettingsCipher } from "../modules/integrations/bluebubbles/settings-cip
 import { BlueBubblesSettingsService } from "../modules/integrations/bluebubbles/settings-service.js";
 
 const envelope: MessageEnvelope = {
-  schemaVersion: "2",
+  schemaVersion: "3",
   eventId: "fictional-event",
   correlationId: "fictional-correlation",
   provider: "bluebubbles",
@@ -125,6 +125,8 @@ describe("ManagedLinkPreviewEnricher", () => {
         summary: null,
         siteName: "Example Test",
         imageAvailable: false,
+        imageUrl: null,
+        imageSource: null,
         iconAvailable: true,
       }),
     );
