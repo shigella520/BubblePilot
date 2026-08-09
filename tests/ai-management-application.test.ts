@@ -80,7 +80,7 @@ class SuccessfulAiClient implements AiClient {
     ) {
       return Promise.resolve({
         status: "succeeded",
-        text: "RED GREEN BLUE",
+        text: "The image shows red, green, and blue vertical bands.",
         durationMs: 7,
       });
     }
@@ -146,7 +146,7 @@ class RetryingImageAiClient implements AiClient {
     }
     return Promise.resolve({
       status: "succeeded",
-      text: "red green blue",
+      text: "从左到右依次是红色、绿色、蓝色。",
       durationMs: 7,
     });
   }

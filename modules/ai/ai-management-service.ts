@@ -68,11 +68,23 @@ function checkMessage(check: AiProviderTestCheck): string {
 
 function imageProbeAnswerVerified(result: AiCallResult): boolean {
   if (result.status === "failed") return false;
-  const normalized = result.text
+  const englishWords = result.text
     .toLocaleLowerCase("en-US")
     .replace(/[^a-z]+/gu, " ")
-    .trim();
-  return normalized === "red green blue";
+    .trim()
+    .split(/\s+/u);
+  const red = englishWords.indexOf("red");
+  const green = englishWords.indexOf("green");
+  const blue = englishWords.indexOf("blue");
+  if (red >= 0 && red < green && green < blue) return true;
+
+  const chinese = result.text.replace(/\s+/gu, "");
+  const redChinese = chinese.indexOf("红");
+  const greenChinese = chinese.indexOf("绿");
+  const blueChinese = chinese.indexOf("蓝");
+  return (
+    redChinese >= 0 && redChinese < greenChinese && greenChinese < blueChinese
+  );
 }
 
 async function probeWithRetry(
