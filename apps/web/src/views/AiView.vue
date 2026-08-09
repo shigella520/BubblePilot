@@ -485,13 +485,28 @@ async function providerAction(
         message: string;
         durationMs: number;
         errorCode: string | null;
+        checks: Array<{
+          name:
+            | "connectivity"
+            | "functionCalling"
+            | "hostedWebSearch"
+            | "imageInput";
+          status: "verified" | "failed";
+          attempts: number;
+          durationMs: number;
+          errorCode: string | null;
+          httpStatus: number | null;
+          providerRequestId: string | null;
+        }>;
       }>(`/api/v1/ai/providers/${item.id}/test`, { method: "POST" });
       feedback = result.success
         ? `AI Provider「${item.name}」连接测试成功：${result.message}（${result.model} · ${result.durationMs} ms）。`
         : `AI Provider「${item.name}」连接测试失败：${result.message}${
             result.errorCode === null ? "" : `（${result.errorCode}）`
           }（${result.durationMs} ms）。`;
-      feedbackIsError = !result.success;
+      feedbackIsError =
+        !result.success ||
+        result.checks.some((check) => check.status === "failed");
       await load();
     }
     if (action === "reset") {

@@ -71,9 +71,82 @@ class SuccessfulAiClient implements AiClient {
         durationMs: 7,
       });
     }
+    if (
+      request.messages.some(
+        (message) =>
+          typeof message.content !== "string" &&
+          message.content.some((part) => part.type === "image"),
+      )
+    ) {
+      return Promise.resolve({
+        status: "succeeded",
+        text: "RED GREEN BLUE",
+        durationMs: 7,
+      });
+    }
     return Promise.resolve({
       status: "succeeded",
       text: "OK",
+      durationMs: 7,
+    });
+  }
+}
+
+class RetryingImageAiClient implements AiClient {
+  imageAttempts = 0;
+
+  call(
+    _provider: AiProviderRecord,
+    request: AiChatRequest,
+  ): Promise<AiCallResult> {
+    const hasImage = request.messages.some(
+      (message) =>
+        typeof message.content !== "string" &&
+        message.content.some((part) => part.type === "image"),
+    );
+    if (!hasImage) {
+      return Promise.resolve({
+        status: "succeeded",
+        text: "OK",
+        durationMs: 3,
+      });
+    }
+    this.imageAttempts += 1;
+    if (this.imageAttempts === 1) {
+      return Promise.resolve({
+        status: "failed",
+        category: "server-error",
+        code: "AI_PROVIDER_HTTP_503",
+        summary: "The AI provider returned HTTP 503.",
+        retryable: true,
+        fallbackAllowed: true,
+        countsForDegrade: true,
+        durationMs: 5,
+        diagnostics: {
+          clientRequestId: null,
+          providerRequestId: "probe-request-1",
+          httpStatus: 503,
+          requestHash: "request-hash",
+          requestMessageCount: 1,
+          requestCharacters: 1,
+          responseBytes: 1,
+          responseBodyHash: "response-hash",
+          responseFinishReason: null,
+          responseContentCharacters: 0,
+          responseReasoningCharacters: 0,
+          promptTokens: null,
+          completionTokens: null,
+          reasoningTokens: null,
+          totalTokens: null,
+          cachedPromptTokens: null,
+          cacheWritePromptTokens: null,
+          cacheMissPromptTokens: null,
+        },
+      });
+    }
+    return Promise.resolve({
+      status: "succeeded",
+      text: "red green blue",
       durationMs: 7,
     });
   }
@@ -192,12 +265,32 @@ describe("AI management API", () => {
       url: `/api/v1/ai/providers/${providerId}/test`,
     });
     expect(tested.statusCode).toBe(200);
+    expect(tested.json()).toMatchObject({
+      data: {
+        checks: [
+          { name: "connectivity", status: "verified", attempts: 1 },
+          { name: "functionCalling", status: "verified", attempts: 1 },
+          { name: "hostedWebSearch", status: "verified", attempts: 1 },
+          {
+            name: "imageInput",
+            status: "verified",
+            attempts: 1,
+            errorCode: null,
+          },
+        ],
+      },
+    });
     expect(client.requests).toHaveLength(4);
     expect(client.requests[1]).toMatchObject({ toolChoice: "required" });
     expect(client.requests[2]).toMatchObject({ webSearch: "required" });
-    expect(client.requests[3]?.messages[0]?.content).toEqual(
-      expect.arrayContaining([expect.objectContaining({ type: "image" })]),
-    );
+    const imageContent = client.requests[3]?.messages[0]?.content;
+    expect(Array.isArray(imageContent)).toBe(true);
+    const imagePart =
+      typeof imageContent === "string"
+        ? undefined
+        : imageContent?.find((part) => part.type === "image");
+    expect(imagePart?.dataUrl).toMatch(/^data:image\/png;base64,/u);
+    expect(client.requests[3]).toMatchObject({ maxOutputTokens: 512 });
     await expect(repository.getProvider(providerId)).resolves.toMatchObject({
       capabilityProbe: {
         functionCalling: "verified",
@@ -205,6 +298,53 @@ describe("AI management API", () => {
         imageInput: "verified",
       },
     });
+  });
+
+  it("retries transient image probe failures and returns per-check diagnostics", async () => {
+    const retryRepository = new InMemoryAiRepository(() => now);
+    const retryClient = new RetryingImageAiClient();
+    const created = await retryRepository.createProvider({
+      name: "Retrying image provider",
+      apiKind: "responses",
+      baseUrl: "https://ai.example.test/v1",
+      model: "fictional-vision-model",
+      secretRef: "PRIMARY_AI_KEY",
+      parameters: {},
+      requestTimeoutMs: 30_000,
+      enabled: true,
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: true,
+      },
+    });
+    expect(created.status).toBe("ok");
+    if (created.status !== "ok") return;
+    const service = new AiManagementService(
+      retryRepository,
+      retryClient,
+      new EnvironmentSecretResolver({
+        PRIMARY_AI_KEY: "primary-server-secret",
+      }),
+    );
+
+    await expect(service.testProvider(created.value.id)).resolves.toMatchObject(
+      {
+        success: true,
+        durationMs: 15,
+        checks: [
+          { name: "connectivity", status: "verified", attempts: 1 },
+          {
+            name: "imageInput",
+            status: "verified",
+            attempts: 2,
+            durationMs: 12,
+            errorCode: null,
+          },
+        ],
+      },
+    );
+    expect(retryClient.imageAttempts).toBe(2);
   });
 
   it("manages global native image settings with optimistic concurrency", async () => {

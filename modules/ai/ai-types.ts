@@ -218,6 +218,17 @@ export interface AiProviderTestResult {
   durationMs: number;
   errorCode: string | null;
   message: string;
+  checks: readonly AiProviderTestCheck[];
+}
+
+export interface AiProviderTestCheck {
+  name: "connectivity" | "functionCalling" | "hostedWebSearch" | "imageInput";
+  status: "verified" | "failed";
+  attempts: number;
+  durationMs: number;
+  errorCode: string | null;
+  httpStatus: number | null;
+  providerRequestId: string | null;
 }
 
 export interface AiRouteSnapshot {

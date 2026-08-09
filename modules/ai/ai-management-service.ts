@@ -3,10 +3,13 @@ import type { WebSearchTool } from "./web-search-tool.js";
 import type { AiMutationResult, AiRepository } from "./ai-repository.js";
 import {
   normalizeAiBaseUrl,
+  type AiCallResult,
+  type AiChatRequest,
   type AiProviderConfiguration,
   type AiProviderRecord,
   type AiProviderRouteRecord,
   type AiProviderRouteView,
+  type AiProviderTestCheck,
   type AiProviderTestResult,
   type AiProviderView,
   type AiRouteConfiguration,
@@ -16,6 +19,80 @@ import {
   isProviderSecretConfigured,
   type SecretResolver,
 } from "./secret-resolver.js";
+
+const imageCapabilityProbeDataUrl =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAxUlEQVR4nO3bQRHAIBQDUZSskoqo7CqJjqrg9mZQwLTAT3bP6urqe+6ud1fXsUHZoHxB+cVyBuWQzi021/y8gzwU81DMSzqjRmaxDKuZ5hN3TB40gZlEMYliItdk0gnt02qk9plebIpDzWqa1VTP6eYDL4TuCP4SPmgAqiHMIHhB8MIoBuIM5RoMOJz0gORD2o+KQEWIihAVISpCVISoCFERRkUYFYGKEBUhKkJUhKgIURGiIkRFGBVhVAQqQlSEqAhdUBF+LeLBpY8yGo4AAAAASUVORK5CYII=";
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function probeCheck(
+  name: AiProviderTestCheck["name"],
+  result: AiCallResult,
+  attempts: number,
+  durationMs: number,
+  verified = result.status === "succeeded",
+  mismatchCode: string | null = null,
+): AiProviderTestCheck {
+  return {
+    name,
+    status: verified ? "verified" : "failed",
+    attempts,
+    durationMs,
+    errorCode:
+      result.status === "failed" ? result.code : verified ? null : mismatchCode,
+    httpStatus: result.diagnostics?.httpStatus ?? null,
+    providerRequestId: result.diagnostics?.providerRequestId ?? null,
+  };
+}
+
+function checkMessage(check: AiProviderTestCheck): string {
+  const labels: Record<AiProviderTestCheck["name"], string> = {
+    connectivity: "Connection",
+    functionCalling: "Function Calling",
+    hostedWebSearch: "Hosted web search",
+    imageInput: "Image input",
+  };
+  if (check.status === "verified") {
+    return `${labels[check.name]} verified`;
+  }
+  const diagnostics = [
+    check.errorCode,
+    check.httpStatus === null ? null : `HTTP ${check.httpStatus}`,
+    `${check.attempts} attempt${check.attempts === 1 ? "" : "s"}`,
+    `${check.durationMs} ms`,
+  ].filter((part): part is string => part !== null);
+  return `${labels[check.name]} failed (${diagnostics.join(", ")})`;
+}
+
+function imageProbeAnswerVerified(result: AiCallResult): boolean {
+  if (result.status === "failed") return false;
+  const normalized = result.text
+    .toLocaleLowerCase("en-US")
+    .replace(/[^a-z]+/gu, " ")
+    .trim();
+  return normalized === "red green blue";
+}
+
+async function probeWithRetry(
+  client: AiClient,
+  provider: AiProviderRecord,
+  request: AiChatRequest,
+  maxAttempts: number,
+): Promise<{ result: AiCallResult; attempts: number; durationMs: number }> {
+  let attempts = 0;
+  let durationMs = 0;
+  let result: AiCallResult;
+  do {
+    attempts += 1;
+    result = await client.call(provider, request);
+    durationMs += result.durationMs;
+    if (result.status === "succeeded" || !result.retryable) break;
+    if (attempts < maxAttempts) await delay(250);
+  } while (attempts < maxAttempts);
+  return { result, attempts, durationMs };
+}
 
 export class AiManagementService {
   constructor(
@@ -132,7 +209,9 @@ export class AiManagementService {
     let functionCalling: "verified" | "failed" | "unknown" = "unknown";
     let hostedWebSearch: "verified" | "failed" | "unknown" = "unknown";
     let imageInput: "verified" | "failed" | "unknown" = "unknown";
-    const capabilityMessages: string[] = [];
+    const checks: AiProviderTestCheck[] = [
+      probeCheck("connectivity", result, 1, result.durationMs),
+    ];
     let totalDurationMs = result.durationMs;
     if (
       result.status === "succeeded" &&
@@ -170,8 +249,15 @@ export class AiManagementService {
           false)
           ? "verified"
           : "failed";
-      capabilityMessages.push(
-        `Function Calling ${functionCalling === "verified" ? "verified" : "failed"}`,
+      checks.push(
+        probeCheck(
+          "functionCalling",
+          functionProbe,
+          1,
+          functionProbe.durationMs,
+          functionCalling === "verified",
+          "AI_FUNCTION_PROBE_MISMATCH",
+        ),
       );
     }
     if (
@@ -193,37 +279,49 @@ export class AiManagementService {
       totalDurationMs += searchProbe.durationMs;
       hostedWebSearch =
         searchProbe.status === "succeeded" ? "verified" : "failed";
-      capabilityMessages.push(
-        `Hosted web search ${hostedWebSearch === "verified" ? "verified" : "failed"}`,
+      checks.push(
+        probeCheck("hostedWebSearch", searchProbe, 1, searchProbe.durationMs),
       );
     }
     if (result.status === "succeeded" && provider.capabilities?.imageInput) {
-      const imageProbe = await this.client.call(provider, {
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Capability test. If you can receive the image, reply with OK.",
-              },
-              {
-                type: "image",
-                dataUrl:
-                  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl9sAAAAASUVORK5CYII=",
-                detail: "low",
-                label: "capability probe",
-              },
-            ],
-          },
-        ],
-        maxOutputTokens: 128,
-        temperature: 0,
-      });
+      const imageProbe = await probeWithRetry(
+        this.client,
+        provider,
+        {
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Capability test. Identify the three vertical color bands from left to right. Reply with only the three English color names separated by spaces.",
+                },
+                {
+                  type: "image",
+                  dataUrl: imageCapabilityProbeDataUrl,
+                  detail: "low",
+                  label: "capability probe",
+                },
+              ],
+            },
+          ],
+          maxOutputTokens: 512,
+          temperature: 0,
+        },
+        2,
+      );
       totalDurationMs += imageProbe.durationMs;
-      imageInput = imageProbe.status === "succeeded" ? "verified" : "failed";
-      capabilityMessages.push(
-        `Image input ${imageInput === "verified" ? "verified" : "failed"}`,
+      const imageVerified = imageProbeAnswerVerified(imageProbe.result);
+      imageInput = imageVerified ? "verified" : "failed";
+      checks.push(
+        probeCheck(
+          "imageInput",
+          imageProbe.result,
+          imageProbe.attempts,
+          imageProbe.durationMs,
+          imageVerified,
+          "AI_IMAGE_PROBE_MISMATCH",
+        ),
       );
     }
     if (result.status === "succeeded") {
@@ -241,10 +339,8 @@ export class AiManagementService {
           model: provider.model,
           durationMs: totalDurationMs,
           errorCode: null,
-          message: [
-            "The AI provider connection succeeded.",
-            ...capabilityMessages,
-          ].join(" "),
+          message: [...checks.map(checkMessage)].join(" "),
+          checks,
         }
       : {
           success: false,
@@ -252,7 +348,8 @@ export class AiManagementService {
           model: provider.model,
           durationMs: totalDurationMs,
           errorCode: result.code,
-          message: result.summary,
+          message: checkMessage(checks[0]!),
+          checks,
         };
   }
 
