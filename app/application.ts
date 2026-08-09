@@ -632,6 +632,8 @@ export function buildApplication(
       options.workflow?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.searchSettings?.repository.isReady() ?? Promise.resolve(true),
+      options.ai?.imageInputSettings?.repository.isReady() ??
+        Promise.resolve(true),
       options.dataExport?.repository.isReady() ?? Promise.resolve(true),
       options.blueBubbles?.settings.repository.isReady() ??
         Promise.resolve(true),
