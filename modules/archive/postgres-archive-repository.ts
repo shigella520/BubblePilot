@@ -90,6 +90,7 @@ interface MessageSearchRow extends MessageRow {
 }
 
 interface ContextMessageRow {
+  message_index: string;
   provider_message_id: string;
   sender_id: string | null;
   sent_at: Date;
@@ -304,13 +305,25 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       }
 
       const messageId = randomUUID();
+      const allocatedIndex = await client.query<{ message_index: string }>(
+        `UPDATE chats
+         SET next_message_index = next_message_index + 1
+         WHERE id = $1
+         RETURNING (next_message_index - 1)::text AS message_index`,
+        [persistedChatId],
+      );
+      const messageIndex = allocatedIndex.rows[0]?.message_index;
+      if (messageIndex === undefined) {
+        throw new Error("The archived message did not receive an index.");
+      }
       const message = await client.query<IdentifierRow>(
         `INSERT INTO messages (
            id, provider, provider_message_id, chat_id, sender_id, sent_at, body,
            content_type, is_from_me, content_hash, attachments, source_event_id,
-           link_preview_status, link_previews, link_preview_error_code
+           link_preview_status, link_previews, link_preview_error_code,
+           message_index
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12,
-                   $13, $14::jsonb, $15)
+                   $13, $14::jsonb, $15, $16)
          ON CONFLICT (provider, provider_message_id) DO NOTHING
          RETURNING id`,
         [
@@ -329,6 +342,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
           envelope.message.linkPreview.status,
           JSON.stringify(envelope.message.linkPreview.items),
           envelope.message.linkPreview.errorCode,
+          messageIndex,
         ],
       );
 
@@ -769,10 +783,10 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     options: ContextWindowOptions,
   ): Promise<readonly ContextMessage[]> {
     const result = await this.pool.query<ContextMessageRow>(
-      `SELECT provider_message_id, sender_id, sent_at, body, is_from_me, attachments,
+      `SELECT message_index::text, provider_message_id, sender_id, sent_at, body, is_from_me, attachments,
               link_preview_status, link_previews, link_preview_error_code
        FROM (
-         SELECT m.provider_message_id, m.sender_id, m.sent_at,
+         SELECT m.message_index, m.provider_message_id, m.sender_id, m.sent_at,
                 LEFT(COALESCE(m.body, ''), $5) AS body,
                 m.is_from_me, m.id, m.attachments, m.link_preview_status, m.link_previews,
                 m.link_preview_error_code
@@ -844,7 +858,10 @@ export class PostgresArchiveRepository implements ArchiveRepository {
         await client.query("ROLLBACK");
         return 0;
       }
-      const redacted = await client.query<IdentifierRow>(
+      const redacted = await client.query<{
+        id: string;
+        chat_id: string;
+      }>(
         `WITH candidates AS (
            SELECT m.id
            FROM messages m
@@ -892,11 +909,32 @@ export class PostgresArchiveRepository implements ArchiveRepository {
              content_redacted_at = $2
          FROM candidates c
          WHERE m.id = c.id
-         RETURNING m.id`,
+         RETURNING m.id, m.chat_id`,
         [input.before, input.now, input.limit],
       );
       const redactedCount = redacted.rowCount ?? 0;
       if (redactedCount > 0) {
+        const chatIds = [
+          ...new Set(redacted.rows.map((message) => message.chat_id)),
+        ];
+        await client.query(
+          `UPDATE conversation_context_compressions operation
+           SET status = 'failed',
+               error_code = 'CONTEXT_SUMMARY_REDACTED_BY_RETENTION',
+               completed_at = NOW()
+           FROM conversation_context_states state
+           WHERE operation.context_state_id = state.id
+             AND state.chat_id = ANY($1::uuid[])
+             AND operation.status = 'running'`,
+          [chatIds],
+        );
+        await client.query(
+          `UPDATE conversation_context_states
+           SET summary = '', covered_through_index = 0,
+               version = version + 1, status = 'idle', updated_at = NOW()
+           WHERE chat_id = ANY($1::uuid[])`,
+          [chatIds],
+        );
         await client.query(
           `INSERT INTO audit_events (
              id, actor_type, actor_session_id, action, target_type, target_id,

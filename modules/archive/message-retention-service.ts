@@ -28,6 +28,7 @@ export class MessageRetentionService {
     private readonly repository: ArchiveRepository,
     readonly retentionDays: number,
     private readonly batchLimit = 10_000,
+    private readonly afterRedaction?: () => void | Promise<void>,
   ) {
     if (!Number.isInteger(retentionDays) || retentionDays <= 0) {
       throw new Error("Message retention days must be a positive integer.");
@@ -49,6 +50,7 @@ export class MessageRetentionService {
       retentionDays: this.retentionDays,
       correlationId,
     });
+    if (redactedCount > 0) await this.afterRedaction?.();
     return {
       correlationId,
       cutoffAt: cutoff.toISOString(),

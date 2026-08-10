@@ -90,6 +90,9 @@ function defaultConfig(block: Block): Record<string, unknown> {
       messageLimit: 10,
       characterLimit: 6000,
       includeFromMe: true,
+      summaryEnabled: false,
+      summaryProviderRouteId: "",
+      compressionBatchSize: 10,
     });
   if (block.type === "render-text")
     values.template = "{{context.event.message.text}}";

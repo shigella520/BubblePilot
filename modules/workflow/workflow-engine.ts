@@ -137,6 +137,10 @@ export class WorkflowEngine implements MessageAutomation {
     const nodes = new Map(definition.nodes.map((node) => [node.id, node]));
     const variables: Record<string, string> = {};
     const history: ContextMessage[] = [];
+    let historySummary: {
+      text: string;
+      coveredThroughIndex: string;
+    } | null = null;
     const participantIdentities = {};
     const outputs: Record<string, Record<string, unknown>> = {};
     let currentNodeId: string | null = definition.startNodeId;
@@ -199,10 +203,17 @@ export class WorkflowEngine implements MessageAutomation {
         try {
           const result = await handler.execute(node, {
             executionId: execution.id,
+            workflowId: execution.workflowId,
             correlationId: execution.correlationId,
             envelope,
             variables,
             history,
+            get historySummary() {
+              return historySummary;
+            },
+            set historySummary(value) {
+              historySummary = value;
+            },
             participantIdentities,
             outputs,
           });

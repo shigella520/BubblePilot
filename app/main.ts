@@ -30,6 +30,7 @@ import { createDefaultNodeRegistry } from "../modules/workflow/node-registry.js"
 import { InProcessWorkflowExecutionDispatcher } from "../modules/workflow/execution-dispatcher.js";
 import { PostgresWorkflowRepository } from "../modules/workflow/postgres-workflow-repository.js";
 import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
+import { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
 
 const config = loadConfig();
 const repository = new PostgresArchiveRepository(
@@ -105,12 +106,6 @@ const blueBubblesSettings = new BlueBubblesSettingsService(
     openGraphTimeoutMs: 5_000,
   },
 );
-const messageRetention =
-  config.messageRetentionDays > 0
-    ? new MessageRetentionWorker(
-        new MessageRetentionService(repository, config.messageRetentionDays),
-      )
-    : undefined;
 const authService = new AuthService(authRepository, {
   loginPasswordHash: config.loginPasswordHash,
   sensitiveOperationPasswordHash: config.sensitiveOperationPasswordHash,
@@ -145,6 +140,22 @@ const aiAgent = new AgentRunner(
   aiRepository,
   webSearchSettings,
 );
+const conversationContext = new ConversationContextService(
+  config.databaseUrl,
+  aiRouting,
+  config.databaseQueryTimeoutMs,
+);
+const messageRetention =
+  config.messageRetentionDays > 0
+    ? new MessageRetentionWorker(
+        new MessageRetentionService(
+          repository,
+          config.messageRetentionDays,
+          10_000,
+          () => conversationContext.invalidateAll(),
+        ),
+      )
+    : undefined;
 const replyGateway = new ManagedBlueBubblesReplyGateway(blueBubblesSettings);
 const linkPreviewEnricher = new ManagedLinkPreviewEnricher(blueBubblesSettings);
 const nativeImageInput = new NativeImageInputService(
@@ -159,6 +170,7 @@ const workflowEngine = new WorkflowEngine(
     aiRouting,
     aiAgent,
     imageInput: nativeImageInput,
+    conversationContext,
   }),
   {
     maxConcurrency: config.workflowMaxConcurrency,
@@ -182,6 +194,7 @@ const application = buildApplication(config, repository, {
     repository: workflowRepository,
     engine: workflowEngine,
     dispatcher: workflowDispatcher,
+    contextState: conversationContext,
   },
   dataExport: {
     repository: dataExportRepository,

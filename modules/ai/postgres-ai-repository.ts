@@ -834,8 +834,14 @@ export class PostgresAiRepository implements AiRepository {
           AND workflow.status = 'active'
           AND workflow.deleted_at IS NULL
          CROSS JOIN LATERAL jsonb_array_elements(w.definition -> 'nodes') AS node
-         WHERE node ->> 'type' = 'ai-chat'
-           AND node -> 'config' ->> 'providerRouteId' = $1
+         WHERE (
+           (node ->> 'type' = 'ai-chat'
+             AND node -> 'config' ->> 'providerRouteId' = $1)
+           OR
+           (node ->> 'type' = 'load-context'
+             AND node -> 'config' ->> 'summaryEnabled' = 'true'
+             AND node -> 'config' ->> 'summaryProviderRouteId' = $1)
+         )
          LIMIT 1`,
         [routeId],
       );

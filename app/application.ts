@@ -257,6 +257,7 @@ export interface ApplicationOptions {
     repository: WorkflowRepository;
     engine: MessageAutomation;
     dispatcher?: WorkflowExecutionDispatcher;
+    contextState?: { close(): Promise<void> };
   };
   dataExport?: {
     repository: DataExportRepository;
@@ -1851,12 +1852,21 @@ export function buildApplication(
           "disabled" | "auto" | "required"
         >();
         for (const node of candidate?.definition.nodes ?? []) {
-          if (node.type !== "ai-chat") continue;
-          const policy = node.config.webSearch ?? "disabled";
-          const current = routePolicies.get(node.config.providerRouteId);
+          const routeId =
+            node.type === "ai-chat"
+              ? node.config.providerRouteId
+              : node.type === "load-context" && node.config.summaryEnabled
+                ? node.config.summaryProviderRouteId
+                : undefined;
+          if (routeId === undefined) continue;
+          const policy =
+            node.type === "ai-chat"
+              ? (node.config.webSearch ?? "disabled")
+              : "disabled";
+          const current = routePolicies.get(routeId);
           const rank = { disabled: 0, auto: 1, required: 2 };
           if (current === undefined || rank[policy] > rank[current]) {
-            routePolicies.set(node.config.providerRouteId, policy);
+            routePolicies.set(routeId, policy);
           }
         }
         for (const [routeId, webSearch] of routePolicies) {
@@ -2337,6 +2347,7 @@ export function buildApplication(
       repository.close(),
       options.auth?.close() ?? Promise.resolve(),
       options.workflow?.repository.close() ?? Promise.resolve(),
+      options.workflow?.contextState?.close() ?? Promise.resolve(),
       options.ai?.repository.close() ?? Promise.resolve(),
       options.ai?.searchSettings?.repository.close() ?? Promise.resolve(),
       options.ai?.imageInputSettings?.repository.close() ?? Promise.resolve(),

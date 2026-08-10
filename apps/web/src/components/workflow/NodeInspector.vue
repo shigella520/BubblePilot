@@ -117,6 +117,10 @@ function templateReferences() {
   });
   return [...contextTemplateReferences, ...outputs];
 }
+function configVisible(item: any): boolean {
+  if (!item.visibleWhen) return true;
+  return props.config[item.visibleWhen.field] === item.visibleWhen.equals;
+}
 </script>
 <template>
   <aside v-if="node" class="workflow-node-inspector">
@@ -170,7 +174,7 @@ function templateReferences() {
       >
     </div>
     <div
-      v-for="item in node.data.block.config"
+      v-for="item in node.data.block.config.filter(configVisible)"
       :key="item.name"
       class="workflow-inspector-field"
     >
