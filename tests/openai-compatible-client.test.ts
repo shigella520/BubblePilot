@@ -315,6 +315,7 @@ describe("OpenAiCompatibleClient", () => {
     const result = await client.call(provider, {
       ...request,
       clientRequestId: "execution:node:1:1",
+      sessionId: "bp_fictional-stable-session",
     });
 
     expect(result).toMatchObject({
@@ -336,6 +337,7 @@ describe("OpenAiCompatibleClient", () => {
     expect(JSON.stringify(result.diagnostics)).not.toContain("Answer");
     expect(fetchImplementation.mock.calls[0]?.[1]?.headers).toMatchObject({
       "x-client-request-id": "execution:node:1:1",
+      "session-id": "bp_fictional-stable-session",
     });
   });
 

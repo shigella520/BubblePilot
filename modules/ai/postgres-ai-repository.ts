@@ -38,6 +38,7 @@ interface ProviderRow {
   encrypted_secret: string | null;
   parameters: Record<string, string | number | boolean>;
   request_timeout_ms: number;
+  session_affinity: "disabled" | "session-id-header";
   capabilities: {
     functionCalling: boolean;
     hostedWebSearch: boolean;
@@ -145,7 +146,7 @@ interface ToolExecutionRow {
 
 const providerSelect = `SELECT
   id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-  request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
+  request_timeout_ms, session_affinity, enabled, sort_order, version, capabilities, capability_probe,
   created_at, updated_at
 FROM ai_providers`;
 
@@ -179,6 +180,7 @@ function providerRecord(
         : cipher.decrypt(row.encrypted_secret),
     parameters: row.parameters,
     requestTimeoutMs: row.request_timeout_ms,
+    sessionAffinity: row.session_affinity,
     enabled: row.enabled,
     capabilities: row.capabilities,
     capabilityProbe: row.capability_probe,
@@ -340,8 +342,8 @@ export class PostgresAiRepository implements AiRepository {
       await client.query(
         `INSERT INTO ai_providers (
            id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-           request_timeout_ms, enabled, sort_order, capabilities
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12::jsonb)`,
+           request_timeout_ms, session_affinity, enabled, sort_order, capabilities
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13::jsonb)`,
         [
           id,
           configuration.name,
@@ -354,6 +356,7 @@ export class PostgresAiRepository implements AiRepository {
             : this.cipher.encrypt(configuration.secret),
           JSON.stringify(configuration.parameters),
           configuration.requestTimeoutMs,
+          configuration.sessionAffinity ?? "disabled",
           configuration.enabled,
           order.rows[0]?.sort_order ?? 100,
           JSON.stringify(
@@ -398,10 +401,11 @@ export class PostgresAiRepository implements AiRepository {
            secret_ref = $7, encrypted_secret = COALESCE($11, encrypted_secret), parameters = $8::jsonb,
            request_timeout_ms = $9, enabled = $10,
            capabilities = $12::jsonb,
+           session_affinity = $13,
            version = version + 1, updated_at = NOW()
          WHERE id = $1 AND version = $2 AND deleted_at IS NULL
         RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                   request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
+                   request_timeout_ms, session_affinity, enabled, sort_order, version, capabilities, capability_probe,
                    created_at, updated_at`,
         [
           providerId,
@@ -424,6 +428,7 @@ export class PostgresAiRepository implements AiRepository {
               imageInput: false,
             },
           ),
+          configuration.sessionAffinity ?? "disabled",
         ],
       );
       const row = result.rows[0];

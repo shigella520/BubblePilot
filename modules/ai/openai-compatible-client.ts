@@ -726,6 +726,9 @@ export class OpenAiCompatibleClient implements AiClient {
           ...(request.clientRequestId === undefined
             ? {}
             : { "x-client-request-id": request.clientRequestId }),
+          ...(request.sessionId === undefined
+            ? {}
+            : { "session-id": request.sessionId }),
           accept: "application/json",
           "content-type": "application/json",
         },

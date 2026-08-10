@@ -129,6 +129,63 @@ async function route(
 }
 
 describe("AiRoutingService", () => {
+  it("keeps the affinity session stable while request trace ids remain unique", async () => {
+    const repository = new InMemoryAiRepository();
+    const primary = await provider(repository, "primary");
+    Object.assign(repository.providers.get(primary.id)!, {
+      sessionAffinity: "session-id-header",
+    });
+    const configuredRoute = await route(repository, [primary.id], {
+      rounds: 2,
+      threshold: 10,
+    });
+    const client = new FakeAiClient((_, callNumber) =>
+      callNumber === 1
+        ? timeoutFailure()
+        : { status: "succeeded", text: "Stable answer", durationMs: 1 },
+    );
+    const service = new AiRoutingService(repository, client, secretResolver());
+    const firstRequest = {
+      ...routeRequest(configuredRoute.id),
+      sessionAffinityKey: "hashed-fictional-chat-workflow-node",
+    };
+
+    await expect(service.execute(firstRequest)).resolves.toMatchObject({
+      status: "succeeded",
+    });
+    await expect(
+      service.execute({ ...firstRequest, executionId: randomUUID() }),
+    ).resolves.toMatchObject({ status: "succeeded" });
+
+    expect(client.requests.map((request) => request.sessionId)).toHaveLength(3);
+    expect(
+      new Set(client.requests.map((request) => request.sessionId)).size,
+    ).toBe(1);
+    expect(client.requests[0]?.sessionId).toMatch(/^bp_[a-f0-9]{64}$/u);
+    expect(
+      new Set(client.requests.map((request) => request.clientRequestId)).size,
+    ).toBe(3);
+  });
+
+  it("does not send an affinity session unless the provider enables it", async () => {
+    const repository = new InMemoryAiRepository();
+    const primary = await provider(repository, "primary");
+    const configuredRoute = await route(repository, [primary.id]);
+    const client = new FakeAiClient(() => ({
+      status: "succeeded",
+      text: "Answer",
+      durationMs: 1,
+    }));
+    const service = new AiRoutingService(repository, client, secretResolver());
+
+    await service.execute({
+      ...routeRequest(configuredRoute.id),
+      sessionAffinityKey: "hashed-fictional-chat-workflow-node",
+    });
+
+    expect(client.requests[0]?.sessionId).toBeUndefined();
+  });
+
   it("routes native image input only to a provider with a verified capability", async () => {
     const repository = new InMemoryAiRepository();
     const textOnly = await provider(repository, "Primary");

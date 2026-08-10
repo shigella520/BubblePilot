@@ -929,6 +929,14 @@ class AiChatNodeHandler extends BaseNodeHandler {
             node.id,
           ].join("\u0000"),
         ),
+        sessionAffinityKey: sha256(
+          [
+            context.envelope.provider,
+            context.envelope.chat.providerChatId,
+            context.workflowId,
+            node.id,
+          ].join("\u0000"),
+        ),
       });
     } catch (error) {
       throw new WorkflowExecutionError(

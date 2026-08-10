@@ -1678,6 +1678,10 @@ components:
           minimum: 1000
           maximum: 360000
           default: 30000
+        sessionAffinity:
+          enum: [disabled, session-id-header]
+          default: disabled
+          description: Sends a stable, hashed Session-Id per provider, chat, workflow, and AI node when enabled.
         enabled:
           type: boolean
           default: true

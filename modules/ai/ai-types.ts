@@ -33,6 +33,9 @@ const aiProviderConfigurationBaseSchema = z.object({
     })
     .default({}),
   requestTimeoutMs: z.number().int().min(1_000).max(360_000).default(30_000),
+  sessionAffinity: z
+    .enum(["disabled", "session-id-header"])
+    .default("disabled"),
   enabled: z.boolean().default(true),
   capabilities: z
     .object({
@@ -108,6 +111,7 @@ export const aiRouteEnabledSchema = z.object({
 });
 
 export type AiApiKind = "chat-completions" | "responses";
+export type AiSessionAffinity = "disabled" | "session-id-header";
 export type AiCapabilityProbeState = "verified" | "failed" | "unknown";
 export type WebSearchPolicy = "disabled" | "auto" | "required";
 export type WebSearchSourceDisplay = "full" | "compact" | "hidden";
@@ -143,6 +147,7 @@ export interface AiProviderConfiguration {
   secret?: string | null | undefined;
   parameters: AiProviderParameters;
   requestTimeoutMs: number;
+  sessionAffinity?: AiSessionAffinity;
   enabled: boolean;
   capabilities?: AiProviderCapabilities | undefined;
 }
@@ -285,6 +290,7 @@ export interface AiChatRequest {
   maxOutputTokens: number;
   temperature: number | null;
   clientRequestId?: string;
+  sessionId?: string;
   promptTraceKey?: string;
   webSearch?: WebSearchPolicy | undefined;
   maxToolCalls?: number;
@@ -443,6 +449,7 @@ export interface AiRouteRequest {
   preferredProviderId?: string;
   agentTurn?: number;
   promptTraceKey?: string;
+  sessionAffinityKey?: string;
 }
 
 export interface AiToolExecutionRecordInput {

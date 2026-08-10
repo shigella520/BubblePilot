@@ -30,6 +30,7 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       secretRef: "FICTIONAL_PRIMARY_KEY",
       parameters: {},
       requestTimeoutMs: 5_000,
+      sessionAffinity: "session-id-header",
       enabled: true,
     });
     const backup = await repository.createProvider({
@@ -47,6 +48,7 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
     if (primary.status !== "ok" || backup.status !== "ok") {
       return;
     }
+    expect(primary.value.sessionAffinity).toBe("session-id-header");
 
     const reordered = await repository.reorderProviders([
       { id: backup.value.id, expectedVersion: backup.value.version },
