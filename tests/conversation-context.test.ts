@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONTEXT_HARD_CHARACTER_LIMIT,
   contextAppendOnlyLimit,
+  contextCompressionBatchRange,
   conversationContextCacheKey,
   conversationContextProfileHash,
   contextCompressionPlan,
@@ -147,6 +148,22 @@ describe("conversation context summary contract", () => {
         compressionBatchSize: 10,
       }),
     ).toEqual({ reason: "initial-catchup", count: 10 });
+    expect(
+      contextCompressionBatchRange({
+        candidateCount: 83,
+        messageLimit: 50,
+        count: 10,
+        reason: "initial-catchup",
+      }),
+    ).toEqual({ start: 23, end: 33 });
+    expect(
+      contextCompressionBatchRange({
+        candidateCount: 60,
+        messageLimit: 50,
+        count: 10,
+        reason: "message-threshold",
+      }),
+    ).toEqual({ start: 0, end: 10 });
   });
 
   it("allows temporary overflow but compacts at the absolute safety limit", () => {

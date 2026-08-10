@@ -113,6 +113,19 @@ export function contextCompressionPlan(input: {
   return { reason: null, count: 0 };
 }
 
+export function contextCompressionBatchRange(input: {
+  candidateCount: number;
+  messageLimit: number;
+  count: number;
+  reason: ContextCompressionReason;
+}): { start: number; end: number } {
+  if (input.reason === "initial-catchup") {
+    const end = Math.max(0, input.candidateCount - input.messageLimit);
+    return { start: Math.max(0, end - input.count), end };
+  }
+  return { start: 0, end: input.count };
+}
+
 export interface ConversationContextResult {
   summary: string;
   messages: readonly ContextMessage[];
@@ -345,7 +358,13 @@ export class ConversationContextService {
     };
 
     if (compressionCount > 0) {
-      const desiredBatch = candidates.slice(0, compressionCount);
+      const batchRange = contextCompressionBatchRange({
+        candidateCount: candidates.length,
+        messageLimit: input.messageLimit,
+        count: compressionCount,
+        reason: compressionReason ?? "message-threshold",
+      });
+      const desiredBatch = candidates.slice(batchRange.start, batchRange.end);
       const batch = this.boundedCompressionBatch(desiredBatch);
       const first = batch[0];
       const last = batch.at(-1);
