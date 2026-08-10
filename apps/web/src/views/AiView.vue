@@ -1083,7 +1083,7 @@ onMounted(load);
                 <span>{{ item.model }}</span
                 ><span>{{ item.requestTimeoutMs / 1000 }}s</span
                 ><span v-if="item.sessionAffinity === 'session-id-header'"
-                  >固定 Session-Id</span
+                  >固定会话与缓存键</span
                 >
                 ><span>{{
                   item.secretConfigured ? "API Key 已配置" : "API Key 未配置"
@@ -1227,9 +1227,7 @@ onMounted(load);
               ><span>会话亲和</span
               ><select v-model="providerForm.sessionAffinity">
                 <option value="disabled">关闭（默认）</option>
-                <option value="session-id-header">
-                  固定 Session-Id 请求头
-                </option>
+                <option value="session-id-header">固定会话与缓存键</option>
               </select></label
             >
             <label class="checkbox-field"

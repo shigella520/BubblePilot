@@ -1681,7 +1681,7 @@ components:
         sessionAffinity:
           enum: [disabled, session-id-header]
           default: disabled
-          description: Sends a stable, hashed Session-Id per provider, chat, workflow, and AI node when enabled.
+          description: Sends a stable, hashed Session-Id and, for Responses, the same prompt_cache_key per provider, chat, workflow, and AI node when enabled.
         enabled:
           type: boolean
           default: true
