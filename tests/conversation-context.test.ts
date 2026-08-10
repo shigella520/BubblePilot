@@ -44,6 +44,37 @@ function definition(config: Record<string, unknown>) {
   };
 }
 
+function contextMessage(
+  id: string,
+  overrides: Partial<ContextMessage> = {},
+): ContextMessage {
+  return {
+    providerMessageId: id,
+    senderId: "user@example.test",
+    sentAt: `2026-08-10T00:00:${id.padStart(2, "0")}.000Z`,
+    body: `message-${id}`,
+    isFromMe: false,
+    attachments: [],
+    linkPreview: emptyLinkPreview(),
+    ...overrides,
+  };
+}
+
+function sharedMessagePrefixLength(
+  left: ReturnType<typeof conversationHistoryMessages>,
+  right: ReturnType<typeof conversationHistoryMessages>,
+): number {
+  const limit = Math.min(left.length, right.length);
+  let index = 0;
+  while (
+    index < limit &&
+    JSON.stringify(left[index]) === JSON.stringify(right[index])
+  ) {
+    index += 1;
+  }
+  return index;
+}
+
 describe("conversation context summary contract", () => {
   it("keeps existing load-context definitions summary-disabled", () => {
     const parsed = parseWorkflowDefinition(definition({}));
@@ -193,23 +224,18 @@ describe("conversation context summary contract", () => {
   });
 
   it("serializes history as exact append-only provider message blocks", () => {
-    const message = (id: string, isFromMe = false): ContextMessage => ({
-      providerMessageId: id,
-      senderId: isFromMe ? null : "user@example.test",
-      sentAt: `2026-08-10T00:00:0${id}.000Z`,
-      body: `message-${id}`,
-      isFromMe,
-      attachments: [],
-      linkPreview: emptyLinkPreview(),
-    });
     const previous = conversationHistoryMessages(
       "stable summary",
-      [message("1"), message("2", true)],
+      [contextMessage("1"), contextMessage("2", { isFromMe: true })],
       {},
     );
     const next = conversationHistoryMessages(
       "stable summary",
-      [message("1"), message("2", true), message("3")],
+      [
+        contextMessage("1"),
+        contextMessage("2", { isFromMe: true }),
+        contextMessage("3"),
+      ],
       {},
     );
     expect(next.slice(0, previous.length)).toEqual(previous);
@@ -218,5 +244,86 @@ describe("conversation context summary contract", () => {
       "user",
       "assistant",
     ]);
+  });
+
+  it("rebuilds the affected history prefix when a participant mapping changes", () => {
+    const history: ContextMessage[] = [
+      {
+        providerMessageId: "member-message",
+        senderId: "member@example.test",
+        sentAt: "2026-08-10T00:00:00.000Z",
+        body: "Fictional member message",
+        isFromMe: false,
+        attachments: [],
+        linkPreview: emptyLinkPreview(),
+      },
+    ];
+    const before = conversationHistoryMessages("stable summary", history, {});
+    const after = conversationHistoryMessages("stable summary", history, {
+      "member@example.test": {
+        senderId: "member@example.test",
+        realName: "林一",
+        nickname: "队长",
+      },
+    });
+    expect(before[0]).toEqual(after[0]);
+    expect(before[1]).not.toEqual(after[1]);
+    expect(after[1]?.content).toContain("林一（昵称：队长");
+  });
+
+  it("treats a summary update as an intentional cache-prefix boundary", () => {
+    const history = [contextMessage("11"), contextMessage("12")];
+    const before = conversationHistoryMessages(
+      "summary version one",
+      history,
+      {},
+    );
+    const after = conversationHistoryMessages(
+      "summary version two",
+      history,
+      {},
+    );
+
+    expect(sharedMessagePrefixLength(before, after)).toBe(0);
+    expect(before.slice(1)).toEqual(after.slice(1));
+  });
+
+  it("keeps messages before a newly enriched link preview stable", () => {
+    const stable = contextMessage("21");
+    const pending = contextMessage("22");
+    const enriched = contextMessage("22", {
+      linkPreview: {
+        status: "available",
+        errorCode: null,
+        items: [
+          {
+            source: "open-graph",
+            url: "https://article.example.test/cache-prefix",
+            originalUrl: null,
+            title: "Fictional cache article",
+            summary: "Fictional preview summary",
+            siteName: "Example Test",
+            imageAvailable: false,
+            imageUrl: null,
+            imageSource: null,
+            iconAvailable: false,
+          },
+        ],
+      },
+    });
+    const before = conversationHistoryMessages(
+      "stable summary",
+      [stable, pending],
+      {},
+    );
+    const after = conversationHistoryMessages(
+      "stable summary",
+      [stable, enriched],
+      {},
+    );
+
+    expect(sharedMessagePrefixLength(before, after)).toBe(2);
+    expect(before[2]).not.toEqual(after[2]);
+    expect(after[2]?.content).toContain("<link_previews");
   });
 });

@@ -88,6 +88,21 @@ class CapturingReplyGateway implements ReplyGateway {
   }
 }
 
+function sharedMessagePrefixLength(
+  left: readonly AiChatRequest["messages"][number][],
+  right: readonly AiChatRequest["messages"][number][],
+): number {
+  const limit = Math.min(left.length, right.length);
+  let index = 0;
+  while (
+    index < limit &&
+    JSON.stringify(left[index]) === JSON.stringify(right[index])
+  ) {
+    index += 1;
+  }
+  return index;
+}
+
 describe("AI workflow", () => {
   let archive: InMemoryArchiveRepository;
   let workflows: InMemoryWorkflowRepository;
@@ -446,11 +461,6 @@ describe("AI workflow", () => {
         content:
           '<chat_history trust="untrusted_chat_history">\n[2026-08-29T10:40:00.000Z] [发送者: 林一（昵称：队长；ID：fictional-user@example.test）] /ask what happened?\n</chat_history>',
       },
-      {
-        role: "user",
-        content:
-          "<current_input>\n紧邻此标记之前的最后一个 <chat_history> 消息块是当前输入，请将它作为本次回答目标。\n</current_input>",
-      },
     ]);
     expect(aiClient.requests[1]?.messages).toEqual([
       { role: "system", content: "Polish the upstream draft." },
@@ -513,6 +523,167 @@ describe("AI workflow", () => {
     expect(detail.body).not.toContain("fictional-server-secret");
     expect(detail.body).not.toContain("Earlier fictional context");
     expect(detail.body).not.toContain("Fictional AI answer");
+  });
+
+  it("keeps each complete text-turn prompt as the next turn's exact prefix", async () => {
+    const definition = {
+      schemaVersion: "1",
+      name: "cache-prefix",
+      startNodeId: "load-history",
+      maxSteps: 4,
+      nodes: [
+        {
+          id: "load-history",
+          type: "load-context",
+          version: 1,
+          config: {
+            messageLimit: 20,
+            characterLimit: 20_000,
+            includeFromMe: true,
+            summaryEnabled: false,
+            compressionBatchSize: 10,
+          },
+          onSuccess: "ask-ai",
+          onFailure: "done",
+        },
+        {
+          id: "ask-ai",
+          type: "ai-chat",
+          version: 1,
+          config: {
+            providerRouteId: routeId,
+            systemPrompt: "Stable fictional system prompt.",
+            promptTemplate: "Answer the latest fictional message.",
+            includeLoadedContext: true,
+            maxOutputTokens: 128,
+            maxOutputCharacters: 1_000,
+            temperature: 0,
+            webSearchSources: "full",
+            outputFormat: "text",
+            outputVariable: "answer",
+          },
+          inputs: {
+            messages: {
+              kind: "output",
+              blockId: "load-history",
+              port: "messages",
+            },
+            prompt: { kind: "path", path: "context.event.message.text" },
+          },
+          onSuccess: "done",
+          onFailure: "done",
+        },
+        {
+          id: "done",
+          type: "end",
+          version: 1,
+          config: { result: "succeeded" },
+        },
+      ],
+    } satisfies WorkflowDefinition;
+    const created = await application.inject({
+      method: "POST",
+      url: "/api/v1/workflows",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: { name: "Cache prefix", definition },
+    });
+    expect(created.statusCode).toBe(201);
+    const workflow = created.json<{
+      data: { workflowId: string; version: number };
+    }>().data;
+    const published = await application.inject({
+      method: "POST",
+      url: `/api/v1/workflows/${workflow.workflowId}/versions/${workflow.version}/publish`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(published.statusCode).toBe(200);
+    const trigger = await application.inject({
+      method: "POST",
+      url: "/api/v1/triggers",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: {
+        name: "Cache command",
+        workflowId: workflow.workflowId,
+        workflowVersion: workflow.version,
+        enabled: true,
+        conditions: {
+          chatIds: [monitoredChatId],
+          senderIds: [],
+          contentTypes: ["text"],
+          text: { kind: "prefix", value: "/cache", caseSensitive: false },
+        },
+      },
+    });
+    expect(trigger.statusCode).toBe(201);
+
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({
+        messageGuid: "cache-history",
+        text: "Stable earlier context",
+      }),
+    });
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({
+        messageGuid: "cache-turn-one",
+        text: "/cache first turn",
+      }),
+    });
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({
+        messageGuid: "cache-bot-reply",
+        text: "Stable fictional Bot reply",
+        isFromMe: true,
+      }),
+    });
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({
+        messageGuid: "cache-turn-two",
+        text: "/cache second turn",
+      }),
+    });
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({
+        messageGuid: "cache-bot-reply-two",
+        text: "Second stable fictional Bot reply",
+        isFromMe: true,
+      }),
+    });
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({
+        messageGuid: "cache-turn-three",
+        text: "/cache third turn",
+      }),
+    });
+
+    expect(aiClient.requests).toHaveLength(3);
+    const first = aiClient.requests[0]?.messages ?? [];
+    const second = aiClient.requests[1]?.messages ?? [];
+    const third = aiClient.requests[2]?.messages ?? [];
+    expect(sharedMessagePrefixLength(first, second)).toBe(first.length);
+    expect(sharedMessagePrefixLength(second, third)).toBe(second.length);
+    expect(second.slice(0, first.length)).toEqual(first);
+    expect(third.slice(0, second.length)).toEqual(second);
+    expect(second.length).toBeGreaterThan(first.length);
+    expect(third.length).toBeGreaterThan(second.length);
+    expect(JSON.stringify(aiClient.requests)).not.toContain("current_input");
   });
 
   it("rejects publishing a workflow whose AI route is unavailable", async () => {
