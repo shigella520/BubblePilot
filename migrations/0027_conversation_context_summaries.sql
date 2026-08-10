@@ -24,6 +24,26 @@ FROM (
 ) latest
 WHERE chats.id = latest.id;
 
+CREATE FUNCTION assign_chat_message_index()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.message_index IS NULL THEN
+    UPDATE chats
+    SET next_message_index = next_message_index + 1
+    WHERE id = NEW.chat_id
+    RETURNING next_message_index - 1 INTO NEW.message_index;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER messages_assign_chat_message_index
+BEFORE INSERT ON messages
+FOR EACH ROW
+EXECUTE FUNCTION assign_chat_message_index();
+
 ALTER TABLE messages
   ALTER COLUMN message_index SET NOT NULL,
   ADD CONSTRAINT messages_chat_message_index_unique UNIQUE (chat_id, message_index);
