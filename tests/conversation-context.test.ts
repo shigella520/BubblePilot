@@ -10,6 +10,7 @@ import {
 } from "../modules/workflow/conversation-context-service.js";
 import { conversationHistoryMessages } from "../modules/workflow/node-registry.js";
 import type { ContextMessage } from "../modules/archive/archive-repository.js";
+import type { PreparedImageInputItem } from "../modules/ai/native-image-input.js";
 import { emptyLinkPreview } from "../modules/ingestion/link-preview.js";
 import { parseWorkflowDefinition } from "../modules/workflow/workflow-definition.js";
 
@@ -244,6 +245,59 @@ describe("conversation context summary contract", () => {
       "user",
       "assistant",
     ]);
+  });
+
+  it("keeps historical images beside their owning message across appended turns", () => {
+    const imageItems: PreparedImageInputItem[] = [
+      {
+        providerMessageId: "1",
+        part: {
+          type: "image",
+          dataUrl: "data:image/png;base64,ZmFrZS1pbWFnZQ==",
+          detail: "high",
+          label: "紧邻上一条消息的图片附件 1",
+        },
+      },
+    ];
+    const previous = conversationHistoryMessages(
+      "stable summary",
+      [contextMessage("1")],
+      {},
+      imageItems,
+    );
+    const next = conversationHistoryMessages(
+      "stable summary",
+      [
+        contextMessage("1"),
+        contextMessage("2", { isFromMe: true }),
+        contextMessage("3"),
+      ],
+      {},
+      imageItems,
+    );
+    const third = conversationHistoryMessages(
+      "stable summary",
+      [
+        contextMessage("1"),
+        contextMessage("2", { isFromMe: true }),
+        contextMessage("3"),
+        contextMessage("4", { isFromMe: true }),
+        contextMessage("5"),
+      ],
+      {},
+      imageItems,
+    );
+
+    expect(next.slice(0, previous.length)).toEqual(previous);
+    expect(third.slice(0, next.length)).toEqual(next);
+    expect(previous).toHaveLength(3);
+    expect(previous[2]).toMatchObject({
+      role: "user",
+      content: [
+        { type: "text" },
+        { type: "image", label: "紧邻上一条消息的图片附件 1" },
+      ],
+    });
   });
 
   it("rebuilds the affected history prefix when a participant mapping changes", () => {

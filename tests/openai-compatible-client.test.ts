@@ -102,6 +102,31 @@ describe("OpenAiCompatibleClient", () => {
     expect(JSON.stringify(second.diagnostics?.requestTrace)).not.toContain(
       "ZmFrZS1pbWFnZQ",
     );
+
+    await client.call(responsesProvider, {
+      ...request,
+      promptTraceKey: "fictional-chat:workflow:node:inline-images",
+      messages: [...request.messages, imageTail],
+    });
+    const ownerAdjacent = await client.call(responsesProvider, {
+      ...request,
+      promptTraceKey: "fictional-chat:workflow:node:inline-images",
+      messages: [
+        ...request.messages,
+        imageTail,
+        { role: "assistant", content: "Fictional earlier answer" },
+        { role: "user", content: "Fictional next question" },
+      ],
+    });
+    expect(ownerAdjacent.status).toBe("succeeded");
+    if (ownerAdjacent.status !== "succeeded") return;
+    expect(ownerAdjacent.diagnostics?.requestTrace).toMatchObject({
+      previousItemCount: 3,
+      sharedPrefixItemCount: 3,
+      configurationMatchesPrevious: true,
+      previousRequestIsExactPrefix: true,
+      divergenceIndex: null,
+    });
   });
 
   it("rejects missing and placeholder server secrets before network access", async () => {
