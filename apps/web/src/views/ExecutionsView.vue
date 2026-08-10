@@ -99,6 +99,28 @@ interface ExecutionDetail extends Execution {
       cachedPromptTokens: number | null;
       cacheWritePromptTokens: number | null;
       cacheMissPromptTokens: number | null;
+      requestTrace?: {
+        traceKeyHash: string;
+        apiKind: "chat-completions" | "responses";
+        requestHash: string;
+        configurationHash: string;
+        previousRequestHash: string | null;
+        previousItemCount: number | null;
+        sharedPrefixItemCount: number | null;
+        configurationMatchesPrevious: boolean | null;
+        previousRequestIsExactPrefix: boolean | null;
+        divergenceIndex: number | null;
+        items: Array<{
+          index: number;
+          role: string;
+          contentKinds: string[];
+          textCharacters: number;
+          imageCount: number;
+          imageBytes: number;
+          itemHash: string;
+          prefixHash: string;
+        }>;
+      } | null;
     } | null;
   }>;
   aiToolExecutions: Array<{
@@ -747,6 +769,76 @@ function resetAuditPage(): Promise<boolean> {
                     <code v-if="item.diagnostics.responseBodyHash"
                       >response={{ item.diagnostics.responseBodyHash }}</code
                     >
+                  </details>
+                  <details
+                    v-if="item.diagnostics?.requestTrace"
+                    class="keyline"
+                  >
+                    <summary>AI 请求结构追踪</summary>
+                    <p>
+                      接口 {{ item.diagnostics.requestTrace.apiKind }} · 当前
+                      {{ item.diagnostics.requestTrace.items.length }} 项 ·
+                      上一请求
+                      {{
+                        item.diagnostics.requestTrace.previousItemCount ?? "—"
+                      }}
+                      项 · 共同前缀
+                      {{
+                        item.diagnostics.requestTrace.sharedPrefixItemCount ??
+                        "—"
+                      }}
+                      项
+                    </p>
+                    <p>
+                      上一请求是完整前缀：{{
+                        item.diagnostics.requestTrace
+                          .previousRequestIsExactPrefix === null
+                          ? "无基线"
+                          : item.diagnostics.requestTrace
+                                .previousRequestIsExactPrefix
+                            ? "是"
+                            : "否"
+                      }}
+                      · 配置一致：{{
+                        item.diagnostics.requestTrace
+                          .configurationMatchesPrevious === null
+                          ? "无基线"
+                          : item.diagnostics.requestTrace
+                                .configurationMatchesPrevious
+                            ? "是"
+                            : "否"
+                      }}
+                      · 首个差异项：{{
+                        item.diagnostics.requestTrace.divergenceIndex ?? "—"
+                      }}
+                    </p>
+                    <code
+                      >trace={{
+                        item.diagnostics.requestTrace.traceKeyHash
+                      }}</code
+                    >
+                    <code
+                      >config={{
+                        item.diagnostics.requestTrace.configurationHash
+                      }}</code
+                    >
+                    <div
+                      v-for="traceItem in item.diagnostics.requestTrace.items"
+                      :key="item.id + '-trace-' + traceItem.index"
+                      class="trace-item"
+                    >
+                      <strong
+                        >#{{ traceItem.index }} · {{ traceItem.role }}</strong
+                      >
+                      <span>
+                        {{ traceItem.contentKinds.join(", ") || "text" }} · 文本
+                        {{ traceItem.textCharacters }} 字符 · 图片
+                        {{ traceItem.imageCount }} 张 /
+                        {{ traceItem.imageBytes }} B
+                      </span>
+                      <code>item={{ traceItem.itemHash }}</code>
+                      <code>prefix={{ traceItem.prefixHash }}</code>
+                    </div>
                   </details>
                 </div>
               </article>

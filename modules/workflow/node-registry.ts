@@ -867,6 +867,14 @@ class AiChatNodeHandler extends BaseNodeHandler {
           : { webSearch: node.config.webSearch }),
         webSearchSources: node.config.webSearchSources,
         protectedPrompt: systemPrompt.length === 0 ? null : systemPrompt,
+        promptTraceKey: sha256(
+          [
+            context.envelope.provider,
+            context.envelope.chat.providerChatId,
+            context.workflowId,
+            node.id,
+          ].join("\u0000"),
+        ),
       });
     } catch (error) {
       throw new WorkflowExecutionError(

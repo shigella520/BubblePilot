@@ -85,6 +85,15 @@ const environmentSchema = z
         z.boolean(),
       )
       .default(false),
+    AI_REQUEST_TRACE_ENABLED: z
+      .preprocess(
+        (value) =>
+          typeof value === "string"
+            ? ["1", "true", "yes", "on"].includes(value.toLowerCase())
+            : value,
+        z.boolean(),
+      )
+      .default(false),
     SEARXNG_BASE_URL: z.string().url().default("http://searxng:8080"),
     SEARXNG_ENGINES: z.string().default(""),
     SEARXNG_LANGUAGE: z
@@ -179,6 +188,7 @@ export interface AppConfig {
   blueBubblesSendMethod: "private-api" | "apple-script";
   blueBubblesRequestTimeoutMs: number;
   enableWebSearch?: boolean;
+  aiRequestTraceEnabled?: boolean;
   searxngBaseUrl?: string;
   searxngEngines?: readonly string[];
   searxngLanguage?: string;
@@ -232,6 +242,7 @@ export function loadConfig(
     blueBubblesSendMethod: parsed.BLUEBUBBLES_SEND_METHOD,
     blueBubblesRequestTimeoutMs: parsed.BLUEBUBBLES_REQUEST_TIMEOUT_MS,
     enableWebSearch: parsed.ENABLE_WEB_SEARCH,
+    aiRequestTraceEnabled: parsed.AI_REQUEST_TRACE_ENABLED,
     searxngBaseUrl: parsed.SEARXNG_BASE_URL.replace(/\/+$/u, ""),
     searxngEngines,
     searxngLanguage: parsed.SEARXNG_LANGUAGE,

@@ -30,6 +30,80 @@ const request = {
 };
 
 describe("OpenAiCompatibleClient", () => {
+  it("traces the exact multimodal divergence without storing prompt content", async () => {
+    const responsesProvider: AiProviderRecord = {
+      ...provider,
+      apiKind: "responses",
+    };
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            status: "completed",
+            output_text: "Fictional answer",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+      true,
+    );
+    const imageTail = {
+      role: "user" as const,
+      content: [
+        { type: "text" as const, text: "Fictional image label" },
+        {
+          type: "image" as const,
+          dataUrl: "data:image/png;base64,ZmFrZS1pbWFnZQ==",
+          detail: "high" as const,
+          label: "fictional-image",
+        },
+      ],
+    };
+    const first = await client.call(responsesProvider, {
+      ...request,
+      promptTraceKey: "fictional-chat:workflow:node:turn-1",
+      messages: [...request.messages, imageTail],
+    });
+    const second = await client.call(responsesProvider, {
+      ...request,
+      promptTraceKey: "fictional-chat:workflow:node:turn-1",
+      messages: [
+        ...request.messages,
+        { role: "assistant", content: "Fictional earlier answer" },
+        { role: "user", content: "Fictional next question" },
+        imageTail,
+      ],
+    });
+
+    expect(first.status).toBe("succeeded");
+    expect(second.status).toBe("succeeded");
+    if (second.status !== "succeeded") return;
+    expect(second.diagnostics?.requestTrace).toMatchObject({
+      apiKind: "responses",
+      previousItemCount: 3,
+      sharedPrefixItemCount: 2,
+      configurationMatchesPrevious: true,
+      previousRequestIsExactPrefix: false,
+      divergenceIndex: 2,
+    });
+    expect(second.diagnostics?.requestTrace?.items[4]).toMatchObject({
+      role: "user",
+      contentKinds: ["input_image", "input_text"],
+      imageCount: 1,
+      imageBytes: 10,
+    });
+    expect(JSON.stringify(second.diagnostics?.requestTrace)).not.toContain(
+      "Fictional next question",
+    );
+    expect(JSON.stringify(second.diagnostics?.requestTrace)).not.toContain(
+      "ZmFrZS1pbWFnZQ",
+    );
+  });
+
   it("rejects missing and placeholder server secrets before network access", async () => {
     const fetchImplementation = vi.fn<typeof fetch>();
     const client = new OpenAiCompatibleClient(

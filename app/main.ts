@@ -113,7 +113,11 @@ const authService = new AuthService(authRepository, {
   sensitiveOperationTtlSeconds: config.sensitiveOperationTtlSeconds,
 });
 const secretResolver = new EnvironmentSecretResolver();
-const aiClient = new OpenAiCompatibleClient(secretResolver);
+const aiClient = new OpenAiCompatibleClient(
+  secretResolver,
+  undefined,
+  config.aiRequestTraceEnabled ?? false,
+);
 const aiRouting = new AiRoutingService(
   aiRepository,
   aiClient,

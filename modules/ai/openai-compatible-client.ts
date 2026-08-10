@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { sha256 } from "../../app/canonical-json.js";
+import { hashJson, sha256 } from "../../app/canonical-json.js";
 import type {
   AiCallDiagnostics,
   AiCallFailure,
@@ -9,6 +9,8 @@ import type {
   AiChatRequest,
   AiContentPart,
   AiProviderRecord,
+  AiRequestTrace,
+  AiRequestTraceItem,
   AiToolCall,
 } from "./ai-types.js";
 import {
@@ -143,6 +145,98 @@ interface ParsedResponse {
   contentCharacters: number | null;
   reasoningCharacters: number | null;
   toolCalls: readonly AiToolCall[];
+}
+
+interface PreviousPromptTrace {
+  requestHash: string;
+  configurationHash: string;
+  itemHashes: readonly string[];
+}
+
+function dataUrlBytes(value: string): number {
+  const match = /^data:[^,]*;base64,(.*)$/su.exec(value);
+  if (match?.[1] === undefined) return 0;
+  const encoded = match[1].replace(/\s/gu, "");
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((encoded.length * 3) / 4) - padding);
+}
+
+function promptItemMetrics(item: unknown) {
+  const contentKinds = new Set<string>();
+  let textCharacters = 0;
+  let imageCount = 0;
+  let imageBytes = 0;
+
+  const visit = (value: unknown, key: string | null = null): void => {
+    if (typeof value === "string") {
+      if (key === "image_url" || key === "url") {
+        const bytes = dataUrlBytes(value);
+        if (bytes > 0) {
+          imageBytes += bytes;
+          return;
+        }
+      }
+      if (["content", "text", "output", "arguments"].includes(key ?? "")) {
+        textCharacters += value.length;
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((part) => visit(part, key));
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (typeof record.type === "string") {
+      contentKinds.add(record.type);
+      if (["input_image", "image_url"].includes(record.type)) imageCount += 1;
+    }
+    Object.entries(record).forEach(([nestedKey, nestedValue]) =>
+      visit(nestedValue, nestedKey),
+    );
+  };
+  visit(item);
+  return {
+    contentKinds: [...contentKinds].sort(),
+    textCharacters,
+    imageCount,
+    imageBytes,
+  };
+}
+
+function traceItems(items: readonly unknown[]): readonly AiRequestTraceItem[] {
+  const hashes: string[] = [];
+  return items.map((item, index) => {
+    const itemHash = hashJson(item);
+    hashes.push(itemHash);
+    const record =
+      item !== null && typeof item === "object"
+        ? (item as Record<string, unknown>)
+        : {};
+    const metrics = promptItemMetrics(item);
+    return {
+      index,
+      role:
+        typeof record.role === "string"
+          ? record.role
+          : typeof record.type === "string"
+            ? record.type
+            : "unknown",
+      ...metrics,
+      itemHash,
+      prefixHash: hashJson(hashes),
+    };
+  });
+}
+
+function sharedPrefixLength(
+  previous: readonly string[],
+  current: readonly string[],
+): number {
+  const limit = Math.min(previous.length, current.length);
+  let index = 0;
+  while (index < limit && previous[index] === current[index]) index += 1;
+  return index;
 }
 
 function elapsed(startedAt: number): number {
@@ -457,6 +551,7 @@ function tokenDiagnostics(body: unknown) {
 function baseDiagnostics(
   request: AiChatRequest,
   requestBody: string,
+  requestTrace: AiRequestTrace | null,
 ): AiCallDiagnostics {
   return {
     clientRequestId: request.clientRequestId?.slice(0, 512) ?? null,
@@ -480,6 +575,7 @@ function baseDiagnostics(
     cachedPromptTokens: null,
     cacheWritePromptTokens: null,
     cacheMissPromptTokens: null,
+    requestTrace,
   };
 }
 
@@ -512,10 +608,12 @@ export interface AiClient {
 
 export class OpenAiCompatibleClient implements AiClient {
   private readonly fetchImplementation: typeof fetch;
+  private readonly promptTraceHistory = new Map<string, PreviousPromptTrace>();
 
   constructor(
     private readonly secrets: SecretResolver,
     fetchImplementation?: typeof fetch,
+    private readonly promptTraceEnabled = false,
   ) {
     this.fetchImplementation = fetchImplementation ?? fetch;
   }
@@ -589,7 +687,18 @@ export class OpenAiCompatibleClient implements AiClient {
       payload.temperature = request.temperature;
     }
     const requestBody = JSON.stringify(payload);
-    const initialDiagnostics = baseDiagnostics(request, requestBody);
+    const requestHash = sha256(requestBody);
+    const requestTrace = this.buildRequestTrace(
+      provider,
+      request,
+      payload,
+      requestHash,
+    );
+    const initialDiagnostics = baseDiagnostics(
+      request,
+      requestBody,
+      requestTrace,
+    );
     const secret = resolveProviderSecret(provider, this.secrets);
     if (!isProviderSecretConfigured(provider, this.secrets)) {
       return failure({
@@ -699,5 +808,67 @@ export class OpenAiCompatibleClient implements AiClient {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private buildRequestTrace(
+    provider: AiProviderRecord,
+    request: AiChatRequest,
+    payload: Readonly<Record<string, unknown>>,
+    requestHash: string,
+  ): AiRequestTrace | null {
+    if (!this.promptTraceEnabled || request.promptTraceKey === undefined) {
+      return null;
+    }
+    const itemsValue =
+      provider.apiKind === "responses" ? payload.input : payload.messages;
+    const items = traceItems(Array.isArray(itemsValue) ? itemsValue : []);
+    const configuration = { ...payload };
+    delete configuration.input;
+    delete configuration.messages;
+    const configurationHash = hashJson(configuration);
+    const traceKeyHash = sha256(request.promptTraceKey);
+    const historyKey = `${provider.id}:${provider.apiKind}:${provider.model}:${traceKeyHash}`;
+    const previous = this.promptTraceHistory.get(historyKey);
+    const itemHashes = items.map((item) => item.itemHash);
+    const sharedPrefixItemCount =
+      previous === undefined
+        ? null
+        : sharedPrefixLength(previous.itemHashes, itemHashes);
+    const configurationMatchesPrevious =
+      previous === undefined
+        ? null
+        : previous.configurationHash === configurationHash;
+    const previousRequestIsExactPrefix =
+      previous === undefined || sharedPrefixItemCount === null
+        ? null
+        : configurationMatchesPrevious === true &&
+          sharedPrefixItemCount === previous.itemHashes.length;
+    const trace: AiRequestTrace = {
+      traceKeyHash,
+      apiKind: provider.apiKind,
+      requestHash,
+      configurationHash,
+      previousRequestHash: previous?.requestHash ?? null,
+      previousItemCount: previous?.itemHashes.length ?? null,
+      sharedPrefixItemCount,
+      configurationMatchesPrevious,
+      previousRequestIsExactPrefix,
+      divergenceIndex:
+        previous === undefined ||
+        sharedPrefixItemCount === previous.itemHashes.length
+          ? null
+          : sharedPrefixItemCount,
+      items,
+    };
+    this.promptTraceHistory.set(historyKey, {
+      requestHash,
+      configurationHash,
+      itemHashes,
+    });
+    if (this.promptTraceHistory.size > 1_024) {
+      const oldest = this.promptTraceHistory.keys().next().value;
+      if (oldest !== undefined) this.promptTraceHistory.delete(oldest);
+    }
+    return trace;
   }
 }
