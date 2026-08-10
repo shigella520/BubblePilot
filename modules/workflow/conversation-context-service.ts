@@ -81,7 +81,10 @@ export function contextCompressionPlan(input: {
   ) {
     return {
       reason: "initial-catchup",
-      count: input.eligibleCount - input.messageLimit,
+      count: Math.min(
+        input.compressionBatchSize,
+        input.eligibleCount - input.messageLimit,
+      ),
     };
   }
   let remainingCharacters =
@@ -394,28 +397,6 @@ export class ConversationContextService {
               durationMs,
               errorCode: null,
             };
-            if (
-              committed &&
-              compressionReason === "initial-catchup" &&
-              batch.length < desiredBatch.length
-            ) {
-              const followup = await this.load(input);
-              const followupCompression = followup.compression;
-              return {
-                ...followup,
-                cacheHit,
-                compressionReason,
-                compression:
-                  followupCompression.status === "succeeded" ||
-                  followupCompression.status === "superseded"
-                    ? {
-                        ...followupCompression,
-                        fromIndex: first.messageIndex,
-                        durationMs: durationMs + followupCompression.durationMs,
-                      }
-                    : followupCompression,
-              };
-            }
           } else {
             await this.failCompression(claim, result.code, durationMs);
             this.cache.delete(cacheKey);

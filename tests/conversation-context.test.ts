@@ -124,7 +124,7 @@ describe("conversation context summary contract", () => {
     ).toEqual({ reason: "message-threshold", count: 10 });
   });
 
-  it("catches up the initial backlog in the first compression", () => {
+  it("advances an initial backlog by only one compression cycle", () => {
     expect(
       contextCompressionPlan({
         coveredThroughIndex: "0",
@@ -135,7 +135,7 @@ describe("conversation context summary contract", () => {
         characterLimit: 3_000,
         compressionBatchSize: 10,
       }),
-    ).toEqual({ reason: "initial-catchup", count: 33 });
+    ).toEqual({ reason: "initial-catchup", count: 10 });
     expect(
       contextCompressionPlan({
         coveredThroughIndex: "20",
@@ -146,7 +146,7 @@ describe("conversation context summary contract", () => {
         characterLimit: 3_000,
         compressionBatchSize: 10,
       }),
-    ).toEqual({ reason: "initial-catchup", count: 33 });
+    ).toEqual({ reason: "initial-catchup", count: 10 });
   });
 
   it("allows temporary overflow but compacts at the absolute safety limit", () => {
