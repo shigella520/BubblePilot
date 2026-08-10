@@ -25,6 +25,7 @@ export interface ActionConfigDefinition {
   required?: boolean;
   options?: readonly { value: string; label: string }[];
   emptyLabel?: string;
+  visibleWhen?: Readonly<{ field: string; equals: string | boolean }>;
   description: string;
 }
 
@@ -224,6 +225,18 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         type: "json",
         description: "仅包含当前上下文和当前消息中已出现成员的身份映射。",
       },
+      {
+        name: "summary",
+        label: "历史摘要",
+        type: "string",
+        description: "已覆盖更早消息的有效摘要；未启用或尚未生成时为空。",
+      },
+      {
+        name: "summaryCoveredThroughIndex",
+        label: "摘要覆盖游标",
+        type: "string",
+        description: "摘要已经覆盖到的稳定消息索引。",
+      },
     ],
     config: [
       {
@@ -245,6 +258,27 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         label: "包含自己消息",
         type: "boolean",
         description: "是否包含机器人发送的消息。",
+      },
+      {
+        name: "summaryEnabled",
+        label: "启用历史摘要",
+        type: "boolean",
+        description: "用增量摘要保留近期窗口之前的重要历史；默认关闭。",
+      },
+      {
+        name: "summaryProviderRouteId",
+        label: "摘要 Provider 路由",
+        type: "select",
+        required: true,
+        visibleWhen: { field: "summaryEnabled", equals: true },
+        description: "只用于生成增量历史摘要，不影响下游 AI 节点路由。",
+      },
+      {
+        name: "compressionBatchSize",
+        label: "单次压缩消息数",
+        type: "number",
+        visibleWhen: { field: "summaryEnabled", equals: true },
+        description: "未摘要消息超出近期窗口后，每次压缩的最早消息数量。",
       },
     ],
   },

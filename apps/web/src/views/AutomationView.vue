@@ -255,11 +255,12 @@ async function load() {
       ),
     ]);
     actionBlocks.value = actionBlocks.value.map((block) =>
-      block.type === "ai-chat"
+      block.type === "ai-chat" || block.type === "load-context"
         ? {
             ...block,
             config: block.config.map((item: any) =>
-              item.name === "providerRouteId"
+              item.name === "providerRouteId" ||
+              item.name === "summaryProviderRouteId"
                 ? {
                     ...item,
                     options: aiRoutes.value.map((route) => ({

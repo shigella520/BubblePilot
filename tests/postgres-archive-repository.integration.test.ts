@@ -77,6 +77,17 @@ describe.runIf(testDatabaseUrl !== undefined)(
       });
       expect(messages).toHaveLength(1);
       expect(messages[0]?.providerMessageId).toBe(`fake-message-${suffix}`);
+      const database = new Client({ connectionString: testDatabaseUrl });
+      await database.connect();
+      try {
+        const indexed = await database.query<{ message_index: string }>(
+          `SELECT message_index::text FROM messages WHERE id = $1`,
+          [first.messageId],
+        );
+        expect(indexed.rows[0]?.message_index).toBe("1");
+      } finally {
+        await database.end();
+      }
 
       const mapped = await repository.saveChatParticipantIdentities({
         chatId: chat?.id ?? randomUUID(),

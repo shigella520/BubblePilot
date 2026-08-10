@@ -168,6 +168,8 @@ describe("AI workflow", () => {
             messageLimit: 3,
             characterLimit: 1_000,
             includeFromMe: true,
+            summaryEnabled: false,
+            compressionBatchSize: 10,
           },
           onSuccess: "map-question",
           onFailure: "failed",

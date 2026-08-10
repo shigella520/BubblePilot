@@ -12,7 +12,13 @@ describe("MessageRetentionService", () => {
     const repository = {
       redactExpiredMessageContent,
     } as unknown as ArchiveRepository;
-    const service = new MessageRetentionService(repository, 90, 2);
+    const afterRedaction = vi.fn();
+    const service = new MessageRetentionService(
+      repository,
+      90,
+      2,
+      afterRedaction,
+    );
     const now = new Date("2026-08-03T12:00:00.000Z");
 
     const result = await service.run(now);
@@ -32,6 +38,7 @@ describe("MessageRetentionService", () => {
     expect(result.correlationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
     );
+    expect(afterRedaction).toHaveBeenCalledOnce();
   });
 
   it("exposes failures without allowing overlapping scheduled runs", async () => {
