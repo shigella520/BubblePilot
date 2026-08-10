@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CONTEXT_HARD_CHARACTER_LIMIT,
+  contextAppendOnlyLimit,
   conversationContextCacheKey,
   conversationContextProfileHash,
+  contextCompressionPlan,
 } from "../modules/workflow/conversation-context-service.js";
+import { conversationHistoryMessages } from "../modules/workflow/node-registry.js";
+import type { ContextMessage } from "../modules/archive/archive-repository.js";
+import { emptyLinkPreview } from "../modules/ingestion/link-preview.js";
 import { parseWorkflowDefinition } from "../modules/workflow/workflow-definition.js";
 
 const routeId = "11111111-1111-4111-8111-111111111111";
@@ -85,5 +91,115 @@ describe("conversation context summary contract", () => {
         }),
       ]).size,
     ).toBe(5);
+  });
+
+  it("keeps the raw window append-only until the compression boundary", () => {
+    expect(contextAppendOnlyLimit(50, 10)).toBe(59);
+    for (const eligibleCount of [50, 51, 58, 59]) {
+      expect(
+        contextCompressionPlan({
+          coveredThroughIndex: "20",
+          summaryCharacters: 200,
+          eligibleCount,
+          messageCharacterCounts: Array.from(
+            { length: eligibleCount },
+            () => 100,
+          ),
+          messageLimit: 50,
+          characterLimit: 3_000,
+          compressionBatchSize: 10,
+        }),
+      ).toEqual({ reason: null, count: 0 });
+    }
+    expect(
+      contextCompressionPlan({
+        coveredThroughIndex: "20",
+        summaryCharacters: 200,
+        eligibleCount: 60,
+        messageCharacterCounts: Array.from({ length: 60 }, () => 100),
+        messageLimit: 50,
+        characterLimit: 3_000,
+        compressionBatchSize: 10,
+      }),
+    ).toEqual({ reason: "message-threshold", count: 10 });
+  });
+
+  it("catches up the initial backlog in the first compression", () => {
+    expect(
+      contextCompressionPlan({
+        coveredThroughIndex: "0",
+        summaryCharacters: 0,
+        eligibleCount: 83,
+        messageCharacterCounts: Array.from({ length: 83 }, () => 100),
+        messageLimit: 50,
+        characterLimit: 3_000,
+        compressionBatchSize: 10,
+      }),
+    ).toEqual({ reason: "initial-catchup", count: 33 });
+    expect(
+      contextCompressionPlan({
+        coveredThroughIndex: "20",
+        summaryCharacters: 300,
+        eligibleCount: 83,
+        messageCharacterCounts: Array.from({ length: 83 }, () => 100),
+        messageLimit: 50,
+        characterLimit: 3_000,
+        compressionBatchSize: 10,
+      }),
+    ).toEqual({ reason: "initial-catchup", count: 33 });
+  });
+
+  it("allows temporary overflow but compacts at the absolute safety limit", () => {
+    expect(
+      contextCompressionPlan({
+        coveredThroughIndex: "20",
+        summaryCharacters: 100,
+        eligibleCount: 55,
+        messageCharacterCounts: Array.from({ length: 55 }, () => 500),
+        messageLimit: 50,
+        characterLimit: 3_000,
+        compressionBatchSize: 10,
+      }),
+    ).toEqual({ reason: null, count: 0 });
+    const plan = contextCompressionPlan({
+      coveredThroughIndex: "20",
+      summaryCharacters: 100,
+      eligibleCount: 55,
+      messageCharacterCounts: Array.from({ length: 55 }, () => 600),
+      messageLimit: 50,
+      characterLimit: 3_000,
+      compressionBatchSize: 10,
+    });
+    expect(100 + 55 * 600).toBeGreaterThan(CONTEXT_HARD_CHARACTER_LIMIT);
+    expect(plan.reason).toBe("safety-limit");
+    expect(plan.count).toBeGreaterThan(0);
+  });
+
+  it("serializes history as exact append-only provider message blocks", () => {
+    const message = (id: string, isFromMe = false): ContextMessage => ({
+      providerMessageId: id,
+      senderId: isFromMe ? null : "user@example.test",
+      sentAt: `2026-08-10T00:00:0${id}.000Z`,
+      body: `message-${id}`,
+      isFromMe,
+      attachments: [],
+      linkPreview: emptyLinkPreview(),
+    });
+    const previous = conversationHistoryMessages(
+      "stable summary",
+      [message("1"), message("2", true)],
+      {},
+    );
+    const next = conversationHistoryMessages(
+      "stable summary",
+      [message("1"), message("2", true), message("3")],
+      {},
+    );
+    expect(next.slice(0, previous.length)).toEqual(previous);
+    expect(previous.map((item) => item.role)).toEqual([
+      "user",
+      "user",
+      "assistant",
+    ]);
   });
 });

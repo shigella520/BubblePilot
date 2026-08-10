@@ -251,7 +251,8 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         label: "字符上限",
         type: "number",
         required: true,
-        description: "上下文字符上限。",
+        description:
+          "压缩后的目标字符数；压缩批次内可临时增长，绝对上限为 32,000 字符。",
       },
       {
         name: "includeFromMe",
@@ -278,7 +279,8 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         label: "单次压缩消息数",
         type: "number",
         visibleWhen: { field: "summaryEnabled", equals: true },
-        description: "未摘要消息超出近期窗口后，每次压缩的最早消息数量。",
+        description:
+          "压缩周期包含的消息块数量；周期内只追加，到达边界后压缩最早一批。",
       },
     ],
   },
