@@ -52,11 +52,90 @@ interface CompressionClaim {
   state: ContextState;
 }
 
+export type ContextCompressionReason =
+  "initial-catchup" | "message-threshold" | "safety-limit";
+
+export const CONTEXT_HARD_CHARACTER_LIMIT = 32_000;
+
+export function contextAppendOnlyLimit(
+  messageLimit: number,
+  compressionBatchSize: number,
+): number {
+  return messageLimit + compressionBatchSize - 1;
+}
+
+export function contextCompressionPlan(input: {
+  coveredThroughIndex: string;
+  summaryCharacters: number;
+  eligibleCount: number;
+  messageCharacterCounts: readonly number[];
+  messageLimit: number;
+  characterLimit: number;
+  compressionBatchSize: number;
+}): { reason: ContextCompressionReason | null; count: number } {
+  const threshold = input.messageLimit + input.compressionBatchSize;
+  if (
+    input.eligibleCount > input.messageLimit &&
+    ((input.coveredThroughIndex === "0" && input.summaryCharacters === 0) ||
+      input.eligibleCount > threshold)
+  ) {
+    return {
+      reason: "initial-catchup",
+      count: Math.min(
+        input.compressionBatchSize,
+        input.eligibleCount - input.messageLimit,
+      ),
+    };
+  }
+  let remainingCharacters =
+    input.summaryCharacters +
+    input.messageCharacterCounts.reduce((total, value) => total + value, 0);
+  if (
+    remainingCharacters > CONTEXT_HARD_CHARACTER_LIMIT &&
+    input.eligibleCount > 1
+  ) {
+    let count = 0;
+    while (
+      count < input.messageCharacterCounts.length - 1 &&
+      remainingCharacters > input.characterLimit
+    ) {
+      remainingCharacters -= input.messageCharacterCounts[count] ?? 0;
+      count += 1;
+    }
+    return { reason: "safety-limit", count: Math.max(1, count) };
+  }
+  if (input.eligibleCount >= threshold) {
+    return {
+      reason: "message-threshold",
+      count: input.compressionBatchSize,
+    };
+  }
+  return { reason: null, count: 0 };
+}
+
+export function contextCompressionBatchRange(input: {
+  candidateCount: number;
+  messageLimit: number;
+  count: number;
+  reason: ContextCompressionReason;
+}): { start: number; end: number } {
+  if (input.reason === "initial-catchup") {
+    const end = Math.max(0, input.candidateCount - input.messageLimit);
+    return { start: Math.max(0, end - input.count), end };
+  }
+  return { start: 0, end: input.count };
+}
+
 export interface ConversationContextResult {
   summary: string;
   messages: readonly ContextMessage[];
   cacheHit: boolean;
+  summaryVersion: number;
   coveredThroughIndex: string;
+  uncompressedMessageCount: number;
+  contextCharacters: number;
+  temporaryOverflowCharacters: number;
+  compressionReason: ContextCompressionReason | null;
   compression:
     | { status: "not-needed" | "busy" }
     | {
@@ -251,17 +330,42 @@ export class ConversationContextService {
     }
 
     const threshold = input.messageLimit + input.compressionBatchSize;
+    const eligibleCount = await this.countMessages(
+      input,
+      state.coveredThroughIndex,
+    );
+    const inspectionLimit = Math.max(threshold, eligibleCount);
     const candidates = await this.loadOldestMessages(
       input,
       state.coveredThroughIndex,
-      threshold,
+      inspectionLimit,
     );
+    const compressionPlan = contextCompressionPlan({
+      coveredThroughIndex: state.coveredThroughIndex,
+      summaryCharacters: state.summary.length,
+      eligibleCount,
+      messageCharacterCounts: candidates.map((message) =>
+        this.messagesCharacters([message]),
+      ),
+      messageLimit: input.messageLimit,
+      characterLimit: input.characterLimit,
+      compressionBatchSize: input.compressionBatchSize,
+    });
+    const compressionReason = compressionPlan.reason;
+    const compressionCount = compressionPlan.count;
     let compression: ConversationContextResult["compression"] = {
       status: "not-needed",
     };
 
-    if (candidates.length >= threshold) {
-      const batch = candidates.slice(0, input.compressionBatchSize);
+    if (compressionCount > 0) {
+      const batchRange = contextCompressionBatchRange({
+        candidateCount: candidates.length,
+        messageLimit: input.messageLimit,
+        count: compressionCount,
+        reason: compressionReason ?? "message-threshold",
+      });
+      const desiredBatch = candidates.slice(batchRange.start, batchRange.end);
+      const batch = this.boundedCompressionBatch(desiredBatch);
       const first = batch[0];
       const last = batch.at(-1);
       if (first !== undefined && last !== undefined) {
@@ -328,22 +432,104 @@ export class ConversationContextService {
     }
 
     const summary = state.summary.slice(0, input.characterLimit);
-    const remainingCharacters = Math.max(
-      0,
-      input.characterLimit - summary.length,
-    );
-    const messages = await this.loadRecentMessages(
+    const uncompressedMessageCount = await this.countMessages(
       input,
       state.coveredThroughIndex,
-      remainingCharacters,
     );
+    const appendOnlyLimit = contextAppendOnlyLimit(
+      input.messageLimit,
+      input.compressionBatchSize,
+    );
+    const messages =
+      compression.status === "failed" || compression.status === "busy"
+        ? await this.loadFallbackMessages(
+            input,
+            state.coveredThroughIndex,
+            Math.max(0, input.characterLimit - summary.length),
+          )
+        : await this.loadOldestMessages(
+            input,
+            state.coveredThroughIndex,
+            appendOnlyLimit,
+          );
+    const contextCharacters =
+      summary.length + this.messagesCharacters(messages);
     return {
       summary,
       messages,
       cacheHit,
+      summaryVersion: state.version,
       coveredThroughIndex: state.coveredThroughIndex,
+      uncompressedMessageCount,
+      contextCharacters,
+      temporaryOverflowCharacters: Math.max(
+        0,
+        contextCharacters - input.characterLimit,
+      ),
+      compressionReason,
       compression,
     };
+  }
+
+  private async countMessages(
+    input: ConversationContextLoadInput,
+    afterIndex: string,
+  ): Promise<number> {
+    const result = await this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+       FROM messages m
+       INNER JOIN chats c ON c.id = m.chat_id
+       WHERE c.provider = $1 AND c.provider_chat_id = $2
+         AND c.enabled = TRUE
+         AND m.message_index > $3
+         AND ($4::boolean OR m.is_from_me = FALSE)
+         AND m.provider_message_id <> $5
+         AND ((m.body IS NOT NULL AND m.body <> '')
+              OR m.link_preview_status = 'available'
+              OR m.attachments <> '[]'::jsonb)`,
+      [
+        input.provider,
+        input.providerChatId,
+        afterIndex,
+        input.includeFromMe,
+        input.excludeProviderMessageId,
+      ],
+    );
+    return Number.parseInt(result.rows[0]?.count ?? "0", 10);
+  }
+
+  private messagesCharacters(messages: readonly ContextMessage[]): number {
+    return messages.reduce((total, message) => {
+      const previewCharacters = message.linkPreview.items.reduce(
+        (previewTotal, item) =>
+          previewTotal +
+          item.url.length +
+          (item.title?.length ?? 0) +
+          (item.summary?.length ?? 0) +
+          (item.siteName?.length ?? 0),
+        0,
+      );
+      return total + message.body.length + previewCharacters;
+    }, 0);
+  }
+
+  private boundedCompressionBatch(
+    messages: readonly IndexedContextMessage[],
+  ): readonly IndexedContextMessage[] {
+    const selected: IndexedContextMessage[] = [];
+    let characters = 0;
+    for (const message of messages) {
+      const nextCharacters = this.messagesCharacters([message]);
+      if (
+        selected.length > 0 &&
+        characters + nextCharacters > CONTEXT_HARD_CHARACTER_LIMIT
+      ) {
+        break;
+      }
+      selected.push(message);
+      characters += nextCharacters;
+    }
+    return selected;
   }
 
   private async ensureState(
@@ -411,7 +597,7 @@ export class ConversationContextService {
     return result.rows.map(contextMessage);
   }
 
-  private async loadRecentMessages(
+  private async loadFallbackMessages(
     input: ConversationContextLoadInput,
     afterIndex: string,
     maxCharacters: number,

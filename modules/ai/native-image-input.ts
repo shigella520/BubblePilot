@@ -18,7 +18,9 @@ import type {
 import type { ImageInputSettingsService } from "./image-input-settings-service.js";
 import type { ImageInputRuntimeSettings } from "./image-input-settings-types.js";
 
-type ImageCandidate =
+type ImageCandidate = {
+  providerMessageId: string;
+} & (
   | {
       source: "attachment";
       attachment: MessageAttachment;
@@ -28,10 +30,17 @@ type ImageCandidate =
       source: "link-preview";
       preview: LinkPreviewItem;
       label: string;
-    };
+    }
+);
+
+export interface PreparedImageInputItem {
+  providerMessageId: string;
+  part: AiImageContentPart;
+}
 
 export interface PreparedImageInput {
   parts: readonly AiImageContentPart[];
+  items: readonly PreparedImageInputItem[];
   selectedCount: number;
   failedCount: number;
   skippedCount: number;
@@ -126,9 +135,10 @@ function currentCandidates(
       .slice(0, settings.maxCurrentAttachments)
       .entries()) {
       candidates.push({
+        providerMessageId: envelope.message.providerMessageId,
         source: "attachment",
         attachment,
-        label: `当前消息的图片附件 ${index + 1}`,
+        label: `紧邻上一条消息的图片附件 ${index + 1}`,
       });
     }
   }
@@ -137,9 +147,10 @@ function currentCandidates(
   );
   if (settings.includeLinkPreviewImages && preview !== undefined)
     candidates.push({
+      providerMessageId: envelope.message.providerMessageId,
       source: "link-preview",
       preview,
-      label: "当前消息链接卡片的主图",
+      label: "紧邻上一条消息的链接卡片主图",
     });
   return candidates;
 }
@@ -157,18 +168,20 @@ function historyCandidates(
     );
     if (settings.includeLinkPreviewImages && preview !== undefined)
       result.push({
+        providerMessageId: message.providerMessageId,
         source: "link-preview",
         preview,
-        label: `历史消息 ${offset + 1} 的链接卡片主图`,
+        label: "紧邻上一条消息的链接卡片主图",
       });
     if (settings.includeAttachments) {
       for (const [index, attachment] of message.attachments
         .filter(isDeclaredImage)
         .entries()) {
         result.push({
+          providerMessageId: message.providerMessageId,
           source: "attachment",
           attachment,
-          label: `历史消息 ${offset + 1} 的图片附件 ${index + 1}`,
+          label: `紧邻上一条消息的图片附件 ${index + 1}`,
         });
       }
     }
@@ -196,6 +209,7 @@ export class NativeImageInputService {
     if (!settings.enabled)
       return {
         parts: [],
+        items: [],
         selectedCount: 0,
         failedCount: 0,
         skippedCount: 0,
@@ -212,6 +226,7 @@ export class NativeImageInputService {
     let failedCount = 0;
     let totalBytes = 0;
     const parts: AiImageContentPart[] = [];
+    const items: PreparedImageInputItem[] = [];
     const needsAttachmentDownload = selected.some(
       (candidate) => candidate.source === "attachment",
     );
@@ -284,11 +299,16 @@ export class NativeImageInputService {
           errorCode = "AI_IMAGE_TOTAL_BYTES_EXCEEDED";
         } else {
           totalBytes += body.length;
-          parts.push({
+          const part: AiImageContentPart = {
             type: "image",
             dataUrl: `data:${actualMimeType};base64,${body.toString("base64")}`,
             detail: settings.detail,
             label: candidate.label,
+          };
+          parts.push(part);
+          items.push({
+            providerMessageId: candidate.providerMessageId,
+            part,
           });
         }
       } catch (error) {
@@ -333,6 +353,7 @@ export class NativeImageInputService {
 
     return {
       parts,
+      items,
       selectedCount: parts.length,
       failedCount,
       skippedCount,

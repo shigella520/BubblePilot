@@ -8,6 +8,7 @@ import { createPostgresPool } from "../shared/postgres-pool.js";
 import {
   aiRouteDegradePolicySchema,
   aiRouteRetryPolicySchema,
+  type AiCallDiagnostics,
   type AiAttemptRecordInput,
   type AiCandidate,
   type AiCandidateSelection,
@@ -121,6 +122,7 @@ interface AttemptRow {
   cached_prompt_tokens: number | null;
   cache_write_prompt_tokens: number | null;
   cache_miss_prompt_tokens: number | null;
+  request_trace: AiCallDiagnostics["requestTrace"] | null;
   created_at: Date;
 }
 
@@ -261,6 +263,7 @@ function attemptView(row: AttemptRow): AiProviderAttemptView {
             cachedPromptTokens: row.cached_prompt_tokens,
             cacheWritePromptTokens: row.cache_write_prompt_tokens,
             cacheMissPromptTokens: row.cache_miss_prompt_tokens,
+            requestTrace: row.request_trace ?? null,
           },
     createdAt: row.created_at.toISOString(),
   };
@@ -1016,12 +1019,12 @@ export class PostgresAiRepository implements AiRepository {
          response_content_characters, response_reasoning_characters,
          prompt_tokens, completion_tokens, reasoning_tokens, total_tokens,
          cached_prompt_tokens, cache_write_prompt_tokens,
-         cache_miss_prompt_tokens
+         cache_miss_prompt_tokens, request_trace
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
          $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
          $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34,
-         $35, $36, $37, $38
+         $35, $36, $37, $38, $39
        )`,
       [
         randomUUID(),
@@ -1062,6 +1065,9 @@ export class PostgresAiRepository implements AiRepository {
         input.diagnostics?.cachedPromptTokens ?? null,
         input.diagnostics?.cacheWritePromptTokens ?? null,
         input.diagnostics?.cacheMissPromptTokens ?? null,
+        input.diagnostics?.requestTrace === undefined
+          ? null
+          : JSON.stringify(input.diagnostics.requestTrace),
       ],
     );
   }

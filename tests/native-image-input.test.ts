@@ -152,6 +152,14 @@ describe("NativeImageInputService", () => {
       totalBytes: png.length * 2,
     });
     expect(result.parts).toHaveLength(2);
+    expect(result.items.map((item) => item.providerMessageId)).toEqual([
+      "fictional-message",
+      "history-image",
+    ]);
+    expect(result.items.map((item) => item.part.label)).toEqual([
+      "紧邻上一条消息的图片附件 1",
+      "紧邻上一条消息的图片附件 1",
+    ]);
     expect(result.parts[0]?.dataUrl).toMatch(/^data:image\/png;base64,/u);
     expect(repository.imageInputs).toHaveLength(2);
     expect(repository.imageInputs[0]).toMatchObject({
@@ -268,6 +276,7 @@ describe("NativeImageInputService", () => {
       }),
     ).resolves.toEqual({
       parts: [],
+      items: [],
       selectedCount: 0,
       failedCount: 0,
       skippedCount: 0,

@@ -285,10 +285,36 @@ export interface AiChatRequest {
   maxOutputTokens: number;
   temperature: number | null;
   clientRequestId?: string;
+  promptTraceKey?: string;
   webSearch?: WebSearchPolicy | undefined;
   maxToolCalls?: number;
   tools?: readonly AiToolDefinition[];
   toolChoice?: "auto" | "required";
+}
+
+export interface AiRequestTraceItem {
+  index: number;
+  role: string;
+  contentKinds: readonly string[];
+  textCharacters: number;
+  imageCount: number;
+  imageBytes: number;
+  itemHash: string;
+  prefixHash: string;
+}
+
+export interface AiRequestTrace {
+  traceKeyHash: string;
+  apiKind: "chat-completions" | "responses";
+  requestHash: string;
+  configurationHash: string;
+  previousRequestHash: string | null;
+  previousItemCount: number | null;
+  sharedPrefixItemCount: number | null;
+  configurationMatchesPrevious: boolean | null;
+  previousRequestIsExactPrefix: boolean | null;
+  divergenceIndex: number | null;
+  items: readonly AiRequestTraceItem[];
 }
 
 export interface AiCallDiagnostics {
@@ -310,6 +336,7 @@ export interface AiCallDiagnostics {
   cachedPromptTokens: number | null;
   cacheWritePromptTokens: number | null;
   cacheMissPromptTokens: number | null;
+  requestTrace?: AiRequestTrace | null;
 }
 
 export type AiFailureCategory =
@@ -415,6 +442,7 @@ export interface AiRouteRequest {
   toolChoice?: "auto" | "required";
   preferredProviderId?: string;
   agentTurn?: number;
+  promptTraceKey?: string;
 }
 
 export interface AiToolExecutionRecordInput {

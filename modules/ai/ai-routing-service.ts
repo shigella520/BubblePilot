@@ -305,6 +305,11 @@ export class AiRoutingService {
           maxOutputTokens: request.maxOutputTokens,
           temperature: request.temperature,
           clientRequestId: `${request.executionId}:${request.nodeId}:${round}:${sequence}`,
+          ...(request.promptTraceKey === undefined
+            ? {}
+            : {
+                promptTraceKey: `${request.promptTraceKey}:${request.agentTurn ?? 1}`,
+              }),
           ...(useHostedSearch ? { webSearch: request.webSearch } : {}),
           ...(!useHostedSearch && request.tools !== undefined
             ? {

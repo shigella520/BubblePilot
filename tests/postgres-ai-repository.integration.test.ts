@@ -227,6 +227,30 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         cachedPromptTokens: 256,
         cacheWritePromptTokens: 0,
         cacheMissPromptTokens: 44,
+        requestTrace: {
+          traceKeyHash: "trace-key-hash-fictional",
+          apiKind: "responses",
+          requestHash: "request-hash-fictional",
+          configurationHash: "configuration-hash-fictional",
+          previousRequestHash: "previous-request-hash-fictional",
+          previousItemCount: 2,
+          sharedPrefixItemCount: 1,
+          configurationMatchesPrevious: true,
+          previousRequestIsExactPrefix: false,
+          divergenceIndex: 1,
+          items: [
+            {
+              index: 0,
+              role: "system",
+              contentKinds: [],
+              textCharacters: 20,
+              imageCount: 0,
+              imageBytes: 0,
+              itemHash: "item-hash-fictional",
+              prefixHash: "prefix-hash-fictional",
+            },
+          ],
+        },
       },
     });
     await expect(
@@ -241,6 +265,13 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
           promptTokens: 300,
           cachedPromptTokens: 256,
           cacheMissPromptTokens: 44,
+          requestTrace: {
+            previousItemCount: 2,
+            sharedPrefixItemCount: 1,
+            previousRequestIsExactPrefix: false,
+            divergenceIndex: 1,
+            items: [{ role: "system", textCharacters: 20 }],
+          },
         },
       },
     ]);
