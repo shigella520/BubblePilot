@@ -117,9 +117,10 @@ async function setup(answer?: string) {
 describe("AgentRunner", () => {
   it("executes a required local search and continues the same provider", async () => {
     const { repository, client, routing, search, request } = await setup();
-    const result = await new AgentRunner(routing, search, repository).run(
-      request,
-    );
+    const result = await new AgentRunner(routing, search, repository).run({
+      ...request,
+      promptTraceKey: "fictional-chat:workflow:ai-node",
+    });
     expect(result).toMatchObject({
       status: "succeeded",
       text: "Answer with source",
@@ -141,6 +142,10 @@ describe("AgentRunner", () => {
     expect(repository.toolExecutions[0]?.queryHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(repository.attempts.map((attempt) => attempt.agentTurn)).toEqual([
       1, 2,
+    ]);
+    expect(client.requests.map((item) => item.promptTraceKey)).toEqual([
+      "fictional-chat:workflow:ai-node:1",
+      "fictional-chat:workflow:ai-node:2",
     ]);
   });
 

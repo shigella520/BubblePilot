@@ -5,7 +5,10 @@ import { buildApplication } from "../app/application.js";
 import type { AppConfig } from "../app/config.js";
 import { AiManagementService } from "../modules/ai/ai-management-service.js";
 import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
-import type { AiClient } from "../modules/ai/openai-compatible-client.js";
+import {
+  OpenAiCompatibleClient,
+  type AiClient,
+} from "../modules/ai/openai-compatible-client.js";
 import type {
   AiCallResult,
   AiChatRequest,
@@ -63,16 +66,44 @@ const config: AppConfig = {
 class CapturingAiClient implements AiClient {
   readonly requests: AiChatRequest[] = [];
 
+  private readonly delegate: OpenAiCompatibleClient;
+
+  constructor(secrets: EnvironmentSecretResolver) {
+    this.delegate = new OpenAiCompatibleClient(
+      secrets,
+      () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  finish_reason: "stop",
+                  message: { content: "Fictional AI answer" },
+                },
+              ],
+              usage: {
+                prompt_tokens: 120,
+                completion_tokens: 8,
+                total_tokens: 128,
+                prompt_tokens_details: { cached_tokens: 64 },
+              },
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+        ),
+      true,
+    );
+  }
+
   call(
-    _provider: AiProviderRecord,
+    provider: AiProviderRecord,
     request: AiChatRequest,
   ): Promise<AiCallResult> {
     this.requests.push(structuredClone(request));
-    return Promise.resolve({
-      status: "succeeded",
-      text: "Fictional AI answer",
-      durationMs: 9,
-    });
+    return this.delegate.call(provider, request);
   }
 }
 
@@ -116,11 +147,11 @@ describe("AI workflow", () => {
     archive = new InMemoryArchiveRepository();
     workflows = new InMemoryWorkflowRepository();
     aiRepository = new InMemoryAiRepository();
-    aiClient = new CapturingAiClient();
     replyGateway = new CapturingReplyGateway();
     const secrets = new EnvironmentSecretResolver({
       FICTIONAL_AI_KEY: "fictional-server-secret",
     });
+    aiClient = new CapturingAiClient(secrets);
     const provider = await aiRepository.createProvider({
       name: "Fictional AI",
       apiKind: "chat-completions",
@@ -684,6 +715,30 @@ describe("AI workflow", () => {
     expect(second.length).toBeGreaterThan(first.length);
     expect(third.length).toBeGreaterThan(second.length);
     expect(JSON.stringify(aiClient.requests)).not.toContain("current_input");
+
+    const traces = aiRepository.attempts
+      .filter((attempt) => attempt.nodeId === "ask-ai")
+      .map((attempt) => attempt.diagnostics?.requestTrace);
+    expect(traces).toHaveLength(3);
+    expect(traces[0]).toMatchObject({
+      previousItemCount: null,
+      sharedPrefixItemCount: null,
+      previousRequestIsExactPrefix: null,
+    });
+    expect(traces[1]).toMatchObject({
+      previousItemCount: first.length,
+      sharedPrefixItemCount: first.length,
+      configurationMatchesPrevious: true,
+      previousRequestIsExactPrefix: true,
+      divergenceIndex: null,
+    });
+    expect(traces[2]).toMatchObject({
+      previousItemCount: second.length,
+      sharedPrefixItemCount: second.length,
+      configurationMatchesPrevious: true,
+      previousRequestIsExactPrefix: true,
+      divergenceIndex: null,
+    });
   });
 
   it("rejects publishing a workflow whose AI route is unavailable", async () => {

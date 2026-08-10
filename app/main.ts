@@ -219,6 +219,10 @@ process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 try {
   await application.listen({ host: config.host, port: config.port });
+  application.log.info(
+    { aiRequestTraceEnabled: config.aiRequestTraceEnabled ?? false },
+    "BubblePilot AI request tracing configured",
+  );
 } catch (error) {
   application.log.fatal({ err: error }, "BubblePilot failed to start");
   await application.close();
