@@ -26,6 +26,9 @@ import {
   type AiRouteSnapshot,
   type AiToolExecutionRecordInput,
   type AiToolExecutionView,
+  type AiUsageHours,
+  type AiUsageMetrics,
+  type AiUsageReport,
 } from "./ai-types.js";
 
 interface ProviderRow {
@@ -38,6 +41,7 @@ interface ProviderRow {
   encrypted_secret: string | null;
   parameters: Record<string, string | number | boolean>;
   request_timeout_ms: number;
+  session_affinity: "disabled" | "session-id-header";
   capabilities: {
     functionCalling: boolean;
     hostedWebSearch: boolean;
@@ -126,6 +130,26 @@ interface AttemptRow {
   created_at: Date;
 }
 
+interface UsageRow {
+  provider_id: string;
+  provider_name: string;
+  period: "today" | "week" | "month";
+  request_count: string;
+  succeeded_request_count: string;
+  failed_request_count: string;
+  prompt_tokens: string;
+  completion_tokens: string;
+  reasoning_tokens: string;
+  total_tokens: string;
+  cached_prompt_tokens: string;
+  cache_eligible_prompt_tokens: string;
+  all_prompt_tokens: string;
+}
+
+interface UsageSeriesRow extends Omit<UsageRow, "period"> {
+  bucket_start: Date;
+}
+
 interface ToolExecutionRow {
   id: string;
   execution_id: string;
@@ -145,7 +169,7 @@ interface ToolExecutionRow {
 
 const providerSelect = `SELECT
   id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-  request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
+  request_timeout_ms, session_affinity, enabled, sort_order, version, capabilities, capability_probe,
   created_at, updated_at
 FROM ai_providers`;
 
@@ -179,6 +203,7 @@ function providerRecord(
         : cipher.decrypt(row.encrypted_secret),
     parameters: row.parameters,
     requestTimeoutMs: row.request_timeout_ms,
+    sessionAffinity: row.session_affinity,
     enabled: row.enabled,
     capabilities: row.capabilities,
     capabilityProbe: row.capability_probe,
@@ -269,6 +294,53 @@ function attemptView(row: AttemptRow): AiProviderAttemptView {
   };
 }
 
+const emptyUsageMetrics = (): AiUsageMetrics => ({
+  requestCount: 0,
+  succeededRequestCount: 0,
+  failedRequestCount: 0,
+  promptTokens: 0,
+  completionTokens: 0,
+  reasoningTokens: 0,
+  totalTokens: 0,
+  cachedPromptTokens: null,
+  cacheEligiblePromptTokens: 0,
+  cacheHitRate: null,
+  cacheDataCoverage: null,
+});
+
+function usageNumber(value: string): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function usageMetrics(row: UsageRow | UsageSeriesRow): AiUsageMetrics {
+  const promptTokens = usageNumber(row.prompt_tokens);
+  const eligible = usageNumber(row.cache_eligible_prompt_tokens);
+  const cached = usageNumber(row.cached_prompt_tokens);
+  const allPromptTokens = usageNumber(row.all_prompt_tokens);
+  return {
+    requestCount: usageNumber(row.request_count),
+    succeededRequestCount: usageNumber(row.succeeded_request_count),
+    failedRequestCount: usageNumber(row.failed_request_count),
+    promptTokens,
+    completionTokens: usageNumber(row.completion_tokens),
+    reasoningTokens: usageNumber(row.reasoning_tokens),
+    totalTokens: usageNumber(row.total_tokens),
+    cachedPromptTokens: eligible === 0 ? null : cached,
+    cacheEligiblePromptTokens: eligible,
+    cacheHitRate: eligible === 0 ? null : cached / eligible,
+    cacheDataCoverage:
+      allPromptTokens === 0 ? null : Math.min(1, eligible / allPromptTokens),
+  };
+}
+
+function usageBucketMinutes(hours: AiUsageHours): 1 | 5 | 15 | 30 {
+  if (hours === 1) return 1;
+  if (hours === 6) return 5;
+  if (hours === 48) return 30;
+  return 15;
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return (
     error !== null &&
@@ -340,8 +412,8 @@ export class PostgresAiRepository implements AiRepository {
       await client.query(
         `INSERT INTO ai_providers (
            id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-           request_timeout_ms, enabled, sort_order, capabilities
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12::jsonb)`,
+           request_timeout_ms, session_affinity, enabled, sort_order, capabilities
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13::jsonb)`,
         [
           id,
           configuration.name,
@@ -354,6 +426,7 @@ export class PostgresAiRepository implements AiRepository {
             : this.cipher.encrypt(configuration.secret),
           JSON.stringify(configuration.parameters),
           configuration.requestTimeoutMs,
+          configuration.sessionAffinity ?? "disabled",
           configuration.enabled,
           order.rows[0]?.sort_order ?? 100,
           JSON.stringify(
@@ -398,10 +471,11 @@ export class PostgresAiRepository implements AiRepository {
            secret_ref = $7, encrypted_secret = COALESCE($11, encrypted_secret), parameters = $8::jsonb,
            request_timeout_ms = $9, enabled = $10,
            capabilities = $12::jsonb,
+           session_affinity = $13,
            version = version + 1, updated_at = NOW()
          WHERE id = $1 AND version = $2 AND deleted_at IS NULL
         RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                   request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
+                   request_timeout_ms, session_affinity, enabled, sort_order, version, capabilities, capability_probe,
                    created_at, updated_at`,
         [
           providerId,
@@ -424,6 +498,7 @@ export class PostgresAiRepository implements AiRepository {
               imageInput: false,
             },
           ),
+          configuration.sessionAffinity ?? "disabled",
         ],
       );
       const row = result.rows[0];
@@ -1083,6 +1158,181 @@ export class PostgresAiRepository implements AiRepository {
       [executionId, nodeId ?? null],
     );
     return result.rows.map(attemptView);
+  }
+
+  async getUsage(input: {
+    hours: AiUsageHours;
+    timeZone: string;
+    now: Date;
+  }): Promise<AiUsageReport> {
+    const bucketMinutes = usageBucketMinutes(input.hours);
+    const [periodResult, seriesResult] = await Promise.all([
+      this.pool.query<UsageRow>(
+        `WITH bounds AS (
+           SELECT
+             date_trunc('day', $1::timestamptz AT TIME ZONE $2)
+               AT TIME ZONE $2 AS today_start,
+             date_trunc('week', $1::timestamptz AT TIME ZONE $2)
+               AT TIME ZONE $2 AS week_start,
+             date_trunc('month', $1::timestamptz AT TIME ZONE $2)
+               AT TIME ZONE $2 AS month_start
+         ), periods(period, starts_at) AS (
+           SELECT 'today', today_start FROM bounds
+           UNION ALL SELECT 'week', week_start FROM bounds
+           UNION ALL SELECT 'month', month_start FROM bounds
+         )
+         SELECT
+           p.id AS provider_id,
+           p.name AS provider_name,
+           periods.period,
+           COUNT(a.id)::text AS request_count,
+           COUNT(a.id) FILTER (WHERE a.status = 'succeeded')::text
+             AS succeeded_request_count,
+           COUNT(a.id) FILTER (WHERE a.status = 'failed')::text
+             AS failed_request_count,
+           COALESCE(SUM(a.prompt_tokens), 0)::text AS prompt_tokens,
+           COALESCE(SUM(a.completion_tokens), 0)::text AS completion_tokens,
+           COALESCE(SUM(a.reasoning_tokens), 0)::text AS reasoning_tokens,
+           COALESCE(SUM(COALESCE(
+             a.total_tokens,
+             COALESCE(a.prompt_tokens, 0) + COALESCE(a.completion_tokens, 0)
+           )), 0)::text AS total_tokens,
+           COALESCE(SUM(a.cached_prompt_tokens)
+             FILTER (WHERE a.cached_prompt_tokens IS NOT NULL
+               AND a.prompt_tokens IS NOT NULL), 0)::text
+             AS cached_prompt_tokens,
+           COALESCE(SUM(a.prompt_tokens)
+             FILTER (WHERE a.cached_prompt_tokens IS NOT NULL
+               AND a.prompt_tokens IS NOT NULL), 0)::text
+             AS cache_eligible_prompt_tokens,
+           COALESCE(SUM(a.prompt_tokens), 0)::text AS all_prompt_tokens
+         FROM ai_providers p
+         CROSS JOIN periods
+         LEFT JOIN ai_provider_attempts a
+           ON a.provider_id = p.id
+          AND a.created_at >= periods.starts_at
+          AND a.created_at <= $1::timestamptz
+         GROUP BY p.id, p.name, p.sort_order, periods.period
+         ORDER BY p.sort_order, p.id,
+           CASE periods.period
+             WHEN 'today' THEN 1 WHEN 'week' THEN 2 ELSE 3
+           END`,
+        [input.now, input.timeZone],
+      ),
+      this.pool.query<UsageSeriesRow>(
+        `WITH settings AS (
+           SELECT
+             make_interval(mins => $3::integer) AS bucket_width,
+             date_bin(
+               make_interval(mins => $3::integer),
+               $1::timestamptz - make_interval(hours => $2::integer),
+               '1970-01-01 00:00:00+00'::timestamptz
+             ) AS first_bucket,
+             date_bin(
+               make_interval(mins => $3::integer),
+               $1::timestamptz,
+               '1970-01-01 00:00:00+00'::timestamptz
+             ) AS last_bucket
+         ), buckets AS (
+           SELECT generated AS bucket_start, settings.bucket_width
+           FROM settings,
+             generate_series(
+               settings.first_bucket,
+               settings.last_bucket,
+               settings.bucket_width
+             ) AS generated
+         )
+         SELECT
+           buckets.bucket_start,
+           p.id AS provider_id,
+           p.name AS provider_name,
+           COUNT(a.id)::text AS request_count,
+           COUNT(a.id) FILTER (WHERE a.status = 'succeeded')::text
+             AS succeeded_request_count,
+           COUNT(a.id) FILTER (WHERE a.status = 'failed')::text
+             AS failed_request_count,
+           COALESCE(SUM(a.prompt_tokens), 0)::text AS prompt_tokens,
+           COALESCE(SUM(a.completion_tokens), 0)::text AS completion_tokens,
+           COALESCE(SUM(a.reasoning_tokens), 0)::text AS reasoning_tokens,
+           COALESCE(SUM(COALESCE(
+             a.total_tokens,
+             COALESCE(a.prompt_tokens, 0) + COALESCE(a.completion_tokens, 0)
+           )), 0)::text AS total_tokens,
+           COALESCE(SUM(a.cached_prompt_tokens)
+             FILTER (WHERE a.cached_prompt_tokens IS NOT NULL
+               AND a.prompt_tokens IS NOT NULL), 0)::text
+             AS cached_prompt_tokens,
+           COALESCE(SUM(a.prompt_tokens)
+             FILTER (WHERE a.cached_prompt_tokens IS NOT NULL
+               AND a.prompt_tokens IS NOT NULL), 0)::text
+             AS cache_eligible_prompt_tokens,
+           COALESCE(SUM(a.prompt_tokens), 0)::text AS all_prompt_tokens
+         FROM buckets
+         CROSS JOIN ai_providers p
+         LEFT JOIN ai_provider_attempts a
+           ON a.provider_id = p.id
+          AND a.created_at >= buckets.bucket_start
+          AND a.created_at < buckets.bucket_start + buckets.bucket_width
+          AND a.created_at <= $1::timestamptz
+         GROUP BY buckets.bucket_start, p.id, p.name, p.sort_order
+         ORDER BY buckets.bucket_start, p.sort_order, p.id`,
+        [input.now, input.hours, bucketMinutes],
+      ),
+    ]);
+
+    const providers = new Map<string, string>();
+    const periods = new Map<
+      string,
+      {
+        providerId: string;
+        providerName: string;
+        today: AiUsageMetrics;
+        week: AiUsageMetrics;
+        month: AiUsageMetrics;
+      }
+    >();
+    for (const row of periodResult.rows) {
+      providers.set(row.provider_id, row.provider_name);
+      const current = periods.get(row.provider_id) ?? {
+        providerId: row.provider_id,
+        providerName: row.provider_name,
+        today: emptyUsageMetrics(),
+        week: emptyUsageMetrics(),
+        month: emptyUsageMetrics(),
+      };
+      current[row.period] = usageMetrics(row);
+      periods.set(row.provider_id, current);
+    }
+
+    const series = new Map<
+      string,
+      {
+        bucketStart: string;
+        providers: Array<{ providerId: string } & AiUsageMetrics>;
+      }
+    >();
+    for (const row of seriesResult.rows) {
+      const bucketStart = row.bucket_start.toISOString();
+      const current = series.get(bucketStart) ?? {
+        bucketStart,
+        providers: [],
+      };
+      current.providers.push({
+        providerId: row.provider_id,
+        ...usageMetrics(row),
+      });
+      series.set(bucketStart, current);
+    }
+
+    return {
+      generatedAt: input.now.toISOString(),
+      timeZone: input.timeZone,
+      hours: input.hours,
+      bucketMinutes,
+      providers: [...providers].map(([id, name]) => ({ id, name })),
+      periods: [...periods.values()],
+      series: [...series.values()],
+    };
   }
 
   async recordToolExecution(input: AiToolExecutionRecordInput): Promise<void> {

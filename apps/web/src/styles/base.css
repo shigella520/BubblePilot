@@ -357,6 +357,73 @@ a {
   font-size: 13px;
   line-height: 1.7;
 }
+.ai-usage-panel {
+  display: grid;
+  gap: 24px;
+}
+.ai-usage-panel .panel-head p:not(.card-kicker),
+.usage-section-head p,
+.usage-chart-card > p {
+  margin: 7px 0 0;
+  color: var(--bubblepilot-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.usage-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 4px;
+}
+.usage-section-head h2,
+.usage-chart-card h3 {
+  margin: 0;
+}
+.usage-table {
+  margin-top: -8px;
+}
+.usage-table table {
+  min-width: 820px;
+}
+.usage-table td strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.usage-total-row {
+  background: rgba(10, 132, 255, 0.055);
+}
+.usage-hours-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--bubblepilot-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.usage-hours-control select {
+  min-width: 96px;
+  padding: 8px 30px 8px 10px;
+}
+.usage-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.usage-chart-card {
+  min-width: 0;
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+}
+.usage-chart-card.wide {
+  grid-column: 1 / -1;
+}
+.usage-chart-card > p {
+  margin-bottom: 14px;
+}
 .hero-panel {
   display: flex;
   align-items: center;
@@ -2319,6 +2386,16 @@ legend {
   .panel-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .usage-section-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .usage-chart-grid {
+    grid-template-columns: 1fr;
+  }
+  .usage-chart-card.wide {
+    grid-column: auto;
   }
   .hero-panel h1 {
     font-size: 40px;

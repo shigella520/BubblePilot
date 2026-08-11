@@ -33,6 +33,9 @@ const aiProviderConfigurationBaseSchema = z.object({
     })
     .default({}),
   requestTimeoutMs: z.number().int().min(1_000).max(360_000).default(30_000),
+  sessionAffinity: z
+    .enum(["disabled", "session-id-header"])
+    .default("disabled"),
   enabled: z.boolean().default(true),
   capabilities: z
     .object({
@@ -108,6 +111,7 @@ export const aiRouteEnabledSchema = z.object({
 });
 
 export type AiApiKind = "chat-completions" | "responses";
+export type AiSessionAffinity = "disabled" | "session-id-header";
 export type AiCapabilityProbeState = "verified" | "failed" | "unknown";
 export type WebSearchPolicy = "disabled" | "auto" | "required";
 export type WebSearchSourceDisplay = "full" | "compact" | "hidden";
@@ -143,6 +147,7 @@ export interface AiProviderConfiguration {
   secret?: string | null | undefined;
   parameters: AiProviderParameters;
   requestTimeoutMs: number;
+  sessionAffinity?: AiSessionAffinity;
   enabled: boolean;
   capabilities?: AiProviderCapabilities | undefined;
 }
@@ -285,6 +290,7 @@ export interface AiChatRequest {
   maxOutputTokens: number;
   temperature: number | null;
   clientRequestId?: string;
+  sessionId?: string;
   promptTraceKey?: string;
   webSearch?: WebSearchPolicy | undefined;
   maxToolCalls?: number;
@@ -401,6 +407,57 @@ export interface AiProviderAttemptView extends AiAttemptRecordInput {
   createdAt: string;
 }
 
+export const aiUsageHoursSchema = z.union([
+  z.literal(1),
+  z.literal(6),
+  z.literal(12),
+  z.literal(24),
+  z.literal(48),
+]);
+
+export type AiUsageHours = z.infer<typeof aiUsageHoursSchema>;
+
+export interface AiUsageMetrics {
+  requestCount: number;
+  succeededRequestCount: number;
+  failedRequestCount: number;
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  cachedPromptTokens: number | null;
+  cacheEligiblePromptTokens: number;
+  cacheHitRate: number | null;
+  cacheDataCoverage: number | null;
+}
+
+export interface AiProviderUsagePeriods {
+  providerId: string;
+  providerName: string;
+  today: AiUsageMetrics;
+  week: AiUsageMetrics;
+  month: AiUsageMetrics;
+}
+
+export interface AiUsageSeriesProviderPoint extends AiUsageMetrics {
+  providerId: string;
+}
+
+export interface AiUsageSeriesPoint {
+  bucketStart: string;
+  providers: readonly AiUsageSeriesProviderPoint[];
+}
+
+export interface AiUsageReport {
+  generatedAt: string;
+  timeZone: string;
+  hours: AiUsageHours;
+  bucketMinutes: 1 | 5 | 15 | 30;
+  providers: readonly { id: string; name: string }[];
+  periods: readonly AiProviderUsagePeriods[];
+  series: readonly AiUsageSeriesPoint[];
+}
+
 export interface AiRouteSuccess {
   status: "succeeded";
   text: string;
@@ -443,6 +500,7 @@ export interface AiRouteRequest {
   preferredProviderId?: string;
   agentTurn?: number;
   promptTraceKey?: string;
+  sessionAffinityKey?: string;
 }
 
 export interface AiToolExecutionRecordInput {

@@ -667,6 +667,12 @@ export class OpenAiCompatibleClient implements AiClient {
     } else {
       payload.input = responseInput(request.messages);
       payload.max_output_tokens = request.maxOutputTokens;
+      if (request.sessionId !== undefined) {
+        // Responses prompt caches are commonly partitioned by this key. Keep
+        // it identical to the affinity header so a multi-account gateway and
+        // its upstream cache observe the same stable logical conversation.
+        payload.prompt_cache_key = request.sessionId;
+      }
       if (request.webSearch !== undefined && request.webSearch !== "disabled") {
         payload.tools = [{ type: "web_search" }];
         if (request.webSearch === "required") {
@@ -726,6 +732,9 @@ export class OpenAiCompatibleClient implements AiClient {
           ...(request.clientRequestId === undefined
             ? {}
             : { "x-client-request-id": request.clientRequestId }),
+          ...(request.sessionId === undefined
+            ? {}
+            : { "x-session-id": request.sessionId }),
           accept: "application/json",
           "content-type": "application/json",
         },

@@ -263,6 +263,69 @@ describe("AI management API", () => {
     }>().data;
   }
 
+  it("returns long-period and realtime AI usage with strict query validation", async () => {
+    const providerId = "11111111-1111-4111-8111-111111111111";
+    const metrics = {
+      requestCount: 2,
+      succeededRequestCount: 1,
+      failedRequestCount: 1,
+      promptTokens: 1_000,
+      completionTokens: 100,
+      reasoningTokens: 20,
+      totalTokens: 1_100,
+      cachedPromptTokens: 800,
+      cacheEligiblePromptTokens: 1_000,
+      cacheHitRate: 0.8,
+      cacheDataCoverage: 1,
+    };
+    repository.usageReport = {
+      generatedAt: "2026-08-11T01:00:00.000Z",
+      timeZone: "Asia/Shanghai",
+      hours: 6,
+      bucketMinutes: 5,
+      providers: [{ id: providerId, name: "Fictional Provider" }],
+      periods: [
+        {
+          providerId,
+          providerName: "Fictional Provider",
+          today: metrics,
+          week: metrics,
+          month: metrics,
+        },
+      ],
+      series: [
+        {
+          bucketStart: "2026-08-11T00:55:00.000Z",
+          providers: [{ providerId, ...metrics }],
+        },
+      ],
+    };
+
+    const response = await request({
+      method: "GET",
+      url: "/api/v1/ai/usage?hours=6&timeZone=Asia%2FShanghai",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      data: {
+        hours: 6,
+        bucketMinutes: 5,
+        periods: [{ providerId, today: { totalTokens: 1_100 } }],
+        series: [{ providers: [{ cacheHitRate: 0.8 }] }],
+      },
+    });
+
+    await expect(
+      request({ method: "GET", url: "/api/v1/ai/usage?hours=5" }),
+    ).resolves.toMatchObject({ statusCode: 400 });
+    await expect(
+      request({
+        method: "GET",
+        url: "/api/v1/ai/usage?timeZone=Fictional%2FInvalid",
+      }),
+    ).resolves.toMatchObject({ statusCode: 400 });
+  });
+
   it("independently probes and persists configured provider capabilities", async () => {
     const created = await request({
       method: "POST",

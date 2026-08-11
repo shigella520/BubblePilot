@@ -315,6 +315,7 @@ describe("OpenAiCompatibleClient", () => {
     const result = await client.call(provider, {
       ...request,
       clientRequestId: "execution:node:1:1",
+      sessionId: "bp_fictional-stable-session",
     });
 
     expect(result).toMatchObject({
@@ -336,6 +337,41 @@ describe("OpenAiCompatibleClient", () => {
     expect(JSON.stringify(result.diagnostics)).not.toContain("Answer");
     expect(fetchImplementation.mock.calls[0]?.[1]?.headers).toMatchObject({
       "x-client-request-id": "execution:node:1:1",
+      "x-session-id": "bp_fictional-stable-session",
+    });
+    const requestBody = fetchImplementation.mock.calls[0]?.[1]?.body;
+    expect(
+      JSON.parse(typeof requestBody === "string" ? requestBody : "null"),
+    ).not.toHaveProperty("prompt_cache_key");
+  });
+
+  it("uses the affinity session as the Responses prompt cache key", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ output_text: "Answer" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+
+    await client.call(
+      {
+        ...provider,
+        apiKind: "responses",
+        parameters: { prompt_cache_key: "provider-default" },
+      },
+      { ...request, sessionId: "bp_fictional-stable-session" },
+    );
+
+    expect(fetchImplementation.mock.calls[0]?.[1]?.headers).toMatchObject({
+      "x-session-id": "bp_fictional-stable-session",
+    });
+    const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+    expect(JSON.parse(typeof body === "string" ? body : "null")).toMatchObject({
+      prompt_cache_key: "bp_fictional-stable-session",
     });
   });
 

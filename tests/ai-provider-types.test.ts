@@ -27,4 +27,19 @@ describe("AI provider configuration", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("accepts only supported session affinity modes", () => {
+    expect(
+      aiProviderConfigurationSchema.parse({
+        ...provider,
+        sessionAffinity: "session-id-header",
+      }).sessionAffinity,
+    ).toBe("session-id-header");
+    expect(
+      aiProviderConfigurationSchema.safeParse({
+        ...provider,
+        sessionAffinity: "x-client-request-id",
+      }).success,
+    ).toBe(false);
+  });
 });

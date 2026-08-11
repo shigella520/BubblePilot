@@ -497,6 +497,7 @@ export class AiManagementService {
     return {
       ...configuration,
       baseUrl: normalizeAiBaseUrl(configuration.baseUrl),
+      sessionAffinity: configuration.sessionAffinity ?? "disabled",
       capabilities: configuration.capabilities ?? {
         functionCalling: false,
         hostedWebSearch: false,

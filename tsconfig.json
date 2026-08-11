@@ -19,6 +19,7 @@
   "include": [
     "app/**/*.ts",
     "modules/**/*.ts",
+    "apps/web/src/components/ai-usage-chart-data.ts",
     "tests/**/*.ts",
     "eslint.config.js",
     "vitest.config.ts"

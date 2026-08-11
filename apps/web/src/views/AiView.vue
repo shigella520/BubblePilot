@@ -33,6 +33,7 @@ interface Provider {
   secretConfigured: boolean;
   parameters: Record<string, string | number | boolean>;
   requestTimeoutMs: number;
+  sessionAffinity?: "disabled" | "session-id-header";
   enabled: boolean;
   sortOrder: number;
   version: number;
@@ -115,6 +116,7 @@ interface ProviderForm {
   secret: string;
   parameters: string;
   requestTimeoutMs: number;
+  sessionAffinity: "disabled" | "session-id-header";
   enabled: boolean;
   functionCalling: boolean;
   hostedWebSearch: boolean;
@@ -181,6 +183,7 @@ const providerForm = reactive<ProviderForm>({
   secret: "",
   parameters: "{}",
   requestTimeoutMs: 30000,
+  sessionAffinity: "disabled",
   enabled: true,
   functionCalling: false,
   hostedWebSearch: false,
@@ -363,6 +366,7 @@ function resetProvider() {
     secret: "",
     parameters: "{}",
     requestTimeoutMs: 30000,
+    sessionAffinity: "disabled",
     enabled: true,
     functionCalling: false,
     hostedWebSearch: false,
@@ -380,6 +384,7 @@ function editProvider(item: Provider) {
     secret: "",
     parameters: JSON.stringify(item.parameters, null, 2),
     requestTimeoutMs: item.requestTimeoutMs,
+    sessionAffinity: item.sessionAffinity ?? "disabled",
     enabled: item.enabled,
     functionCalling: item.capabilities?.functionCalling ?? false,
     hostedWebSearch: item.capabilities?.hostedWebSearch ?? false,
@@ -404,6 +409,7 @@ async function saveProvider() {
       ...(providerForm.secret ? { secret: providerForm.secret } : {}),
       parameters: parseJsonObject(providerForm.parameters),
       requestTimeoutMs: providerForm.requestTimeoutMs,
+      sessionAffinity: providerForm.sessionAffinity,
       enabled: providerForm.enabled,
       capabilities: {
         functionCalling: providerForm.functionCalling,
@@ -1076,6 +1082,9 @@ onMounted(load);
               <footer>
                 <span>{{ item.model }}</span
                 ><span>{{ item.requestTimeoutMs / 1000 }}s</span
+                ><span v-if="item.sessionAffinity === 'session-id-header'"
+                  >固定会话与缓存键</span
+                >
                 ><span>{{
                   item.secretConfigured ? "API Key 已配置" : "API Key 未配置"
                 }}</span
@@ -1214,6 +1223,13 @@ onMounted(load);
               ><span>默认参数（JSON）</span
               ><textarea v-model="providerForm.parameters" rows="4"></textarea>
             </label>
+            <label
+              ><span>会话亲和</span
+              ><select v-model="providerForm.sessionAffinity">
+                <option value="disabled">关闭（默认）</option>
+                <option value="session-id-header">固定会话与缓存键</option>
+              </select></label
+            >
             <label class="checkbox-field"
               ><input v-model="providerForm.functionCalling" type="checkbox" />
               <span>支持 Function Calling</span></label

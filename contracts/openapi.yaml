@@ -955,6 +955,44 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/ai/usage:
+    get:
+      operationId: getAiUsage
+      description: 返回按 Provider 聚合的今日、本周、本月用量，以及最近指定小时数的实时 Token、请求和缓存命中序列；不包含消息或 Prompt 正文。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: query
+          name: hours
+          schema:
+            type: integer
+            enum: [1, 6, 12, 24, 48]
+            default: 24
+        - in: query
+          name: timeZone
+          description: 用于自然日、ISO 周和月份边界的 IANA 时区。
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+            default: UTC
+      responses:
+        "200":
+          description: AI Provider 长周期汇总和补齐空桶的实时序列。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AiUsageReport"
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
   /api/v1/ai/image-input/settings:
     get:
       operationId: getAiImageInputSettings
@@ -1678,6 +1716,10 @@ components:
           minimum: 1000
           maximum: 360000
           default: 30000
+        sessionAffinity:
+          enum: [disabled, session-id-header]
+          default: disabled
+          description: Sends a stable, hashed X-Session-ID and, for Responses, the same prompt_cache_key per provider, chat, workflow, and AI node when enabled.
         enabled:
           type: boolean
           default: true
@@ -1689,6 +1731,87 @@ components:
             hostedWebSearch: { type: boolean, default: false }
             imageInput: { type: boolean, default: false }
           additionalProperties: false
+    AiUsageMetrics:
+      type: object
+      required:
+        - requestCount
+        - succeededRequestCount
+        - failedRequestCount
+        - promptTokens
+        - completionTokens
+        - reasoningTokens
+        - totalTokens
+        - cachedPromptTokens
+        - cacheEligiblePromptTokens
+        - cacheHitRate
+        - cacheDataCoverage
+      properties:
+        requestCount: { type: integer, minimum: 0 }
+        succeededRequestCount: { type: integer, minimum: 0 }
+        failedRequestCount: { type: integer, minimum: 0 }
+        promptTokens: { type: integer, minimum: 0 }
+        completionTokens: { type: integer, minimum: 0 }
+        reasoningTokens: { type: integer, minimum: 0 }
+        totalTokens: { type: integer, minimum: 0 }
+        cachedPromptTokens: { type: [integer, "null"], minimum: 0 }
+        cacheEligiblePromptTokens: { type: integer, minimum: 0 }
+        cacheHitRate: { type: [number, "null"], minimum: 0, maximum: 1 }
+        cacheDataCoverage: { type: [number, "null"], minimum: 0, maximum: 1 }
+    AiUsageReport:
+      type: object
+      required:
+        - generatedAt
+        - timeZone
+        - hours
+        - bucketMinutes
+        - providers
+        - periods
+        - series
+      properties:
+        generatedAt: { type: string, format: date-time }
+        timeZone: { type: string }
+        hours: { type: integer, enum: [1, 6, 12, 24, 48] }
+        bucketMinutes: { type: integer, enum: [1, 5, 15, 30] }
+        providers:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+            additionalProperties: false
+        periods:
+          type: array
+          items:
+            type: object
+            required: [providerId, providerName, today, week, month]
+            properties:
+              providerId: { type: string, format: uuid }
+              providerName: { type: string }
+              today: { $ref: "#/components/schemas/AiUsageMetrics" }
+              week: { $ref: "#/components/schemas/AiUsageMetrics" }
+              month: { $ref: "#/components/schemas/AiUsageMetrics" }
+            additionalProperties: false
+        series:
+          type: array
+          items:
+            type: object
+            required: [bucketStart, providers]
+            properties:
+              bucketStart: { type: string, format: date-time }
+              providers:
+                type: array
+                items:
+                  allOf:
+                    - $ref: "#/components/schemas/AiUsageMetrics"
+                    - type: object
+                      required: [providerId]
+                      properties:
+                        providerId: { type: string, format: uuid }
+                  unevaluatedProperties: false
+            additionalProperties: false
+      additionalProperties: false
     AiRouteConfiguration:
       type: object
       required: [name]

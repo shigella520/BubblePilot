@@ -2,6 +2,8 @@ import type {
   AiAttemptRecordInput,
   AiCandidateSelection,
   AiProviderAttemptView,
+  AiUsageHours,
+  AiUsageReport,
   AiImageInputRecordInput,
   AiImageInputView,
   AiProviderConfiguration,
@@ -88,6 +90,11 @@ export interface AiRepository {
     executionId: string,
     nodeId?: string,
   ): Promise<readonly AiProviderAttemptView[]>;
+  getUsage(input: {
+    hours: AiUsageHours;
+    timeZone: string;
+    now: Date;
+  }): Promise<AiUsageReport>;
   recordToolExecution(input: AiToolExecutionRecordInput): Promise<void>;
   listToolExecutions(
     executionId: string,

@@ -20,6 +20,8 @@ import type {
   AiRouteSnapshot,
   AiToolExecutionRecordInput,
   AiToolExecutionView,
+  AiUsageHours,
+  AiUsageReport,
 } from "../../modules/ai/ai-types.js";
 
 function cloned<T>(value: T): T {
@@ -34,6 +36,7 @@ export class InMemoryAiRepository implements AiRepository {
   readonly attempts: AiProviderAttemptView[] = [];
   readonly toolExecutions: AiToolExecutionView[] = [];
   readonly imageInputs: AiImageInputView[] = [];
+  usageReport: AiUsageReport | null = null;
   readonly healthEvents: Array<{
     providerId: string;
     from: AiProviderHealth["state"];
@@ -496,6 +499,50 @@ export class InMemoryAiRepository implements AiRepository {
         )
         .map(cloned),
     );
+  }
+
+  async getUsage(input: {
+    hours: AiUsageHours;
+    timeZone: string;
+    now: Date;
+  }): Promise<AiUsageReport> {
+    if (this.usageReport !== null) return cloned(this.usageReport);
+    const providers = await this.listProviders();
+    const emptyMetrics = {
+      requestCount: 0,
+      succeededRequestCount: 0,
+      failedRequestCount: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 0,
+      cachedPromptTokens: null,
+      cacheEligiblePromptTokens: 0,
+      cacheHitRate: null,
+      cacheDataCoverage: null,
+    } as const;
+    return {
+      generatedAt: input.now.toISOString(),
+      timeZone: input.timeZone,
+      hours: input.hours,
+      bucketMinutes:
+        input.hours === 1
+          ? 1
+          : input.hours === 6
+            ? 5
+            : input.hours === 48
+              ? 30
+              : 15,
+      providers: providers.map(({ id, name }) => ({ id, name })),
+      periods: providers.map(({ id, name }) => ({
+        providerId: id,
+        providerName: name,
+        today: emptyMetrics,
+        week: emptyMetrics,
+        month: emptyMetrics,
+      })),
+      series: [],
+    };
   }
 
   recordToolExecution(input: AiToolExecutionRecordInput): Promise<void> {
