@@ -29,6 +29,7 @@ services:
       NODE_ENV: production
       APP_HOST: 0.0.0.0
       APP_PORT: 8080
+      TZ: ${TZ:-UTC}
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
       DATABASE_QUERY_TIMEOUT_MS: ${DATABASE_QUERY_TIMEOUT_MS:-30000}
       API_ACCESS_TOKEN: ${API_ACCESS_TOKEN:?set API_ACCESS_TOKEN in .env}

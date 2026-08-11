@@ -42,7 +42,9 @@ const allowedExampleOnlyVariables = new Set([
   "POSTGRES_PASSWORD",
   "POSTGRES_USER",
   "SEARXNG_SECRET",
+  "TZ",
 ]);
+const containerRuntimeVariables = new Set(["TZ"]);
 
 const errors = [];
 for (const variable of runtimeVariables) {
@@ -57,7 +59,10 @@ for (const variable of runtimeVariables) {
   }
 }
 for (const variable of composeVariables) {
-  if (!runtimeVariables.has(variable)) {
+  if (
+    !runtimeVariables.has(variable) &&
+    !containerRuntimeVariables.has(variable)
+  ) {
     errors.push(`Compose app variable missing from runtime: ${variable}`);
   }
 }
