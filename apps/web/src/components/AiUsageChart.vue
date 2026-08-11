@@ -9,28 +9,18 @@ import {
 } from "vue";
 import uPlot, { type AlignedData } from "uplot";
 import "uplot/dist/uPlot.min.css";
-
-interface UsageMetrics {
-  requestCount: number;
-  succeededRequestCount: number;
-  failedRequestCount: number;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  cachedPromptTokens: number | null;
-  cacheEligiblePromptTokens: number;
-  cacheHitRate: number | null;
-  cacheDataCoverage: number | null;
-}
-
-interface UsagePoint {
-  bucketStart: string;
-  providers: Array<{ providerId: string } & UsageMetrics>;
-}
+import {
+  activeUsageProviders,
+  hasMetricData,
+  usageChartData,
+  type UsageMetric,
+  type UsagePoint,
+  type UsageProvider,
+} from "./ai-usage-chart-data";
 
 const props = defineProps<{
-  metric: "totalTokens" | "requestCount" | "cacheHitRate";
-  providers: Array<{ id: string; name: string; color: string }>;
+  metric: UsageMetric;
+  providers: UsageProvider[];
   points: UsagePoint[];
 }>();
 
@@ -46,9 +36,9 @@ function compact(value: number): string {
   }).format(value);
 }
 
-function metricValue(metrics: UsageMetrics): number | null {
-  return metrics[props.metric];
-}
+const visibleProviders = computed(() =>
+  activeUsageProviders(props.providers, props.points, props.metric),
+);
 
 const hoverPoint = computed(() => {
   const index = hoverIndex.value;
@@ -56,11 +46,13 @@ const hoverPoint = computed(() => {
 });
 
 const hoverProviders = computed(() =>
-  props.providers.flatMap((provider) => {
+  visibleProviders.value.flatMap((provider) => {
     const metrics = hoverPoint.value?.providers.find(
       (item) => item.providerId === provider.id,
     );
-    return metrics === undefined ? [] : [{ ...provider, metrics }];
+    return metrics === undefined || !hasMetricData(metrics, props.metric)
+      ? []
+      : [{ ...provider, metrics }];
   }),
 );
 
@@ -69,18 +61,11 @@ function percentage(value: number | null): string {
 }
 
 function chartData(): AlignedData {
-  const timestamps = props.points.map(
-    (point) => Date.parse(point.bucketStart) / 1_000,
-  );
-  const values = props.providers.map((provider) =>
-    props.points.map((point) => {
-      const metrics = point.providers.find(
-        (item) => item.providerId === provider.id,
-      );
-      return metrics === undefined ? null : metricValue(metrics);
-    }),
-  );
-  return [timestamps, ...values] as AlignedData;
+  return usageChartData(
+    visibleProviders.value,
+    props.points,
+    props.metric,
+  ) as AlignedData;
 }
 
 function destroyPlot() {
@@ -98,10 +83,10 @@ function renderPlot() {
   const percentage = props.metric === "cacheHitRate";
   plot = new uPlot(
     {
-      width: Math.max(320, element.clientWidth),
+      width: Math.max(1, Math.floor(element.clientWidth)),
       height: 230,
       cursor: { sync: { key: "bubblepilot-ai-usage" } },
-      legend: { show: true, live: true },
+      legend: { show: false },
       hooks: {
         setCursor: [
           (current) => {
@@ -129,12 +114,14 @@ function renderPlot() {
       ],
       series: [
         {},
-        ...props.providers.map((provider) => ({
+        ...visibleProviders.value.map((provider) => ({
           label: provider.name,
           stroke: provider.color,
           width: 2,
           spanGaps: false,
-          points: { show: false },
+          points: percentage
+            ? { show: true, size: 6, width: 2, stroke: provider.color }
+            : { show: false },
           value: (_u: uPlot, value: number | null) =>
             value === null
               ? "暂无数据"
@@ -154,7 +141,10 @@ onMounted(() => {
   observer = new ResizeObserver(() => {
     const element = host.value;
     if (plot !== null && element !== null) {
-      plot.setSize({ width: Math.max(320, element.clientWidth), height: 230 });
+      plot.setSize({
+        width: Math.max(1, Math.floor(element.clientWidth)),
+        height: 230,
+      });
     }
   });
   if (host.value !== null) observer.observe(host.value);
@@ -179,6 +169,15 @@ onBeforeUnmount(() => {
       class="ai-usage-chart"
       aria-label="AI Provider 用量趋势"
     ></div>
+    <div class="usage-series-legend" aria-label="图例">
+      <span
+        v-for="provider in visibleProviders"
+        :key="provider.id"
+        :style="{ '--provider-color': provider.color }"
+      >
+        <i aria-hidden="true"></i>{{ provider.name }}
+      </span>
+    </div>
     <div v-if="hoverPoint" class="ai-usage-hover-details">
       <time>{{ new Date(hoverPoint.bucketStart).toLocaleString() }}</time>
       <span
@@ -218,10 +217,40 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.ai-usage-chart-shell {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
 .ai-usage-chart {
   min-height: 230px;
   min-width: 0;
   overflow: hidden;
+}
+.usage-series-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  min-width: 0;
+  margin-top: 8px;
+  color: var(--bubblepilot-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.usage-series-legend span {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.usage-series-legend i {
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border: 2px solid var(--provider-color);
+  border-radius: 3px;
 }
 .ai-usage-hover-details {
   display: grid;
@@ -240,20 +269,11 @@ onBeforeUnmount(() => {
 .ai-usage-hover-details span {
   padding-left: 9px;
   border-left: 3px solid var(--provider-color);
+  overflow-wrap: anywhere;
 }
 
 .ai-usage-hover-details strong {
   margin-right: 5px;
   color: var(--bubblepilot-text);
-}
-
-.ai-usage-chart :deep(.u-legend) {
-  color: var(--bubblepilot-text);
-  font-family: inherit;
-  font-size: 0.78rem;
-}
-
-.ai-usage-chart :deep(.u-value) {
-  font-variant-numeric: tabular-nums;
 }
 </style>

@@ -762,7 +762,9 @@ function resetAuditPage(): Promise<boolean> {
           <article class="usage-chart-card wide">
             <h3>缓存命中率</h3>
             <p>
-              缓存命中输入 Token ÷ 可统计的输入 Token；缺失数据不按 0% 处理。
+              缓存命中输入 Token ÷ 可统计的输入
+              Token；圆点表示有缓存统计的时间桶，空档表示无请求或 Provider
+              未返回缓存数据。
             </p>
             <AiUsageChart
               metric="cacheHitRate"
