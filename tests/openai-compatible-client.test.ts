@@ -337,7 +337,7 @@ describe("OpenAiCompatibleClient", () => {
     expect(JSON.stringify(result.diagnostics)).not.toContain("Answer");
     expect(fetchImplementation.mock.calls[0]?.[1]?.headers).toMatchObject({
       "x-client-request-id": "execution:node:1:1",
-      "session-id": "bp_fictional-stable-session",
+      "x-session-id": "bp_fictional-stable-session",
     });
     const requestBody = fetchImplementation.mock.calls[0]?.[1]?.body;
     expect(
@@ -367,7 +367,7 @@ describe("OpenAiCompatibleClient", () => {
     );
 
     expect(fetchImplementation.mock.calls[0]?.[1]?.headers).toMatchObject({
-      "session-id": "bp_fictional-stable-session",
+      "x-session-id": "bp_fictional-stable-session",
     });
     const body = fetchImplementation.mock.calls[0]?.[1]?.body;
     expect(JSON.parse(typeof body === "string" ? body : "null")).toMatchObject({

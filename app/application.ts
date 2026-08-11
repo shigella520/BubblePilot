@@ -28,6 +28,7 @@ import {
   aiRouteConfigurationSchema,
   aiRouteEnabledSchema,
   aiRouteUpdateSchema,
+  aiUsageHoursSchema,
 } from "../modules/ai/ai-types.js";
 import type {
   ArchiveRepository,
@@ -96,6 +97,29 @@ const workflowExecutionStatusSchema = z.enum([
 
 const executionListQuerySchema = pageQuerySchema.extend({
   status: z.string().min(1).max(200).optional(),
+});
+
+function validTimeZone(value: string): boolean {
+  try {
+    void new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const aiUsageQuerySchema = z.object({
+  hours: z.preprocess(
+    (value) => (value === undefined ? 24 : value),
+    z.coerce.number().pipe(aiUsageHoursSchema),
+  ),
+  timeZone: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .default("UTC")
+    .refine(validTimeZone, "Invalid IANA time zone."),
 });
 
 const chatParametersSchema = z.object({
@@ -1703,6 +1727,21 @@ export function buildApplication(
             "AI_ROUTE_NOT_FOUND",
             "The AI provider route does not exist.",
           ),
+        };
+      },
+    );
+
+    application.get(
+      "/api/v1/ai/usage",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const query = aiUsageQuerySchema.parse(request.query);
+        return {
+          data: await options.ai!.repository.getUsage({
+            hours: query.hours,
+            timeZone: query.timeZone,
+            now: new Date(),
+          }),
         };
       },
     );

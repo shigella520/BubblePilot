@@ -407,6 +407,57 @@ export interface AiProviderAttemptView extends AiAttemptRecordInput {
   createdAt: string;
 }
 
+export const aiUsageHoursSchema = z.union([
+  z.literal(1),
+  z.literal(6),
+  z.literal(12),
+  z.literal(24),
+  z.literal(48),
+]);
+
+export type AiUsageHours = z.infer<typeof aiUsageHoursSchema>;
+
+export interface AiUsageMetrics {
+  requestCount: number;
+  succeededRequestCount: number;
+  failedRequestCount: number;
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  cachedPromptTokens: number | null;
+  cacheEligiblePromptTokens: number;
+  cacheHitRate: number | null;
+  cacheDataCoverage: number | null;
+}
+
+export interface AiProviderUsagePeriods {
+  providerId: string;
+  providerName: string;
+  today: AiUsageMetrics;
+  week: AiUsageMetrics;
+  month: AiUsageMetrics;
+}
+
+export interface AiUsageSeriesProviderPoint extends AiUsageMetrics {
+  providerId: string;
+}
+
+export interface AiUsageSeriesPoint {
+  bucketStart: string;
+  providers: readonly AiUsageSeriesProviderPoint[];
+}
+
+export interface AiUsageReport {
+  generatedAt: string;
+  timeZone: string;
+  hours: AiUsageHours;
+  bucketMinutes: 1 | 5 | 15 | 30;
+  providers: readonly { id: string; name: string }[];
+  periods: readonly AiProviderUsagePeriods[];
+  series: readonly AiUsageSeriesPoint[];
+}
+
 export interface AiRouteSuccess {
   status: "succeeded";
   text: string;

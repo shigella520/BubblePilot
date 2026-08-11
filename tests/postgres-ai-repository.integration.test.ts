@@ -277,6 +277,98 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         },
       },
     ]);
+    await repository.recordAttempt({
+      executionId: diagnosticExecutionId,
+      nodeId: "ai-node",
+      routeId: route.value.id,
+      routeVersion: route.value.version,
+      providerId: primary.value.id,
+      providerName: primary.value.name,
+      providerVersion: primary.value.version,
+      model: primary.value.model,
+      agentTurn: 1,
+      round: 1,
+      sequence: 2,
+      status: "succeeded",
+      selectionHealthState: "healthy",
+      healthState: "healthy",
+      durationMs: 50,
+      errorCategory: null,
+      errorCode: null,
+      retryable: null,
+      fallbackAllowed: null,
+      diagnostics: {
+        clientRequestId: null,
+        providerRequestId: null,
+        httpStatus: 200,
+        requestHash: "request-without-cache-usage",
+        requestMessageCount: 1,
+        requestCharacters: 100,
+        responseBytes: 20,
+        responseBodyHash: null,
+        responseFinishReason: "stop",
+        responseContentCharacters: 2,
+        responseReasoningCharacters: 0,
+        promptTokens: 100,
+        completionTokens: 10,
+        reasoningTokens: 0,
+        totalTokens: 110,
+        cachedPromptTokens: null,
+        cacheWritePromptTokens: null,
+        cacheMissPromptTokens: null,
+      },
+    });
+    await inspectionPool.query(
+      `UPDATE ai_provider_attempts
+       SET created_at = CASE request_hash
+         WHEN 'request-hash-fictional'
+           THEN '2026-08-10T00:30:00.000Z'::timestamptz
+         ELSE '2026-08-09T15:30:00.000Z'::timestamptz
+       END
+       WHERE execution_id = $1`,
+      [diagnosticExecutionId],
+    );
+    const usage = await repository.getUsage({
+      hours: 1,
+      timeZone: "Asia/Shanghai",
+      now: new Date("2026-08-10T01:00:00.000Z"),
+    });
+    expect(usage).toMatchObject({
+      timeZone: "Asia/Shanghai",
+      hours: 1,
+      bucketMinutes: 1,
+    });
+    expect(
+      usage.periods.find((item) => item.providerId === primary.value.id),
+    ).toMatchObject({
+      today: {
+        requestCount: 1,
+        totalTokens: 364,
+        cachedPromptTokens: 256,
+        cacheEligiblePromptTokens: 300,
+        cacheHitRate: 256 / 300,
+        cacheDataCoverage: 1,
+      },
+      week: { requestCount: 1, totalTokens: 364 },
+      month: {
+        requestCount: 2,
+        totalTokens: 474,
+        cachedPromptTokens: 256,
+        cacheEligiblePromptTokens: 300,
+        cacheHitRate: 256 / 300,
+        cacheDataCoverage: 0.75,
+      },
+    });
+    expect(
+      usage.series.some((point) =>
+        point.providers.some(
+          (item) =>
+            item.providerId === primary.value.id &&
+            item.totalTokens === 364 &&
+            item.cacheHitRate === 256 / 300,
+        ),
+      ),
+    ).toBe(true);
     await repository.recordToolExecution({
       executionId: diagnosticExecutionId,
       nodeId: "ai-node",
