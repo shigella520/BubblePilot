@@ -1,5 +1,6 @@
 import type { AiClient } from "./openai-compatible-client.js";
 import type { WebSearchTool } from "./web-search-tool.js";
+import type { ImageInputSettingsService } from "./image-input-settings-service.js";
 import type { AiMutationResult, AiRepository } from "./ai-repository.js";
 import {
   normalizeAiBaseUrl,
@@ -120,6 +121,7 @@ export class AiManagementService {
     private readonly localWebSearchEnabled = false,
     private readonly searchTool?: WebSearchTool,
     private readonly imageProbeDataUrl = imageCapabilityProbeDataUrl,
+    private readonly imageInputSettings?: ImageInputSettingsService,
   ) {}
 
   async listProviders(): Promise<readonly AiProviderView[]> {
@@ -323,6 +325,14 @@ export class AiManagementService {
           ),
         );
       } else {
+        let imageDetail: "low" | "high" | "auto" = "high";
+        try {
+          imageDetail =
+            (await this.imageInputSettings?.resolve())?.detail ?? "high";
+        } catch {
+          // Capability testing must remain available when the optional global
+          // settings read fails. High is the conservative quality fallback.
+        }
         const imageProbe = await probeWithRetry(
           this.client,
           provider,
@@ -338,7 +348,7 @@ export class AiManagementService {
                   {
                     type: "image",
                     dataUrl: this.imageProbeDataUrl,
-                    detail: "low",
+                    detail: imageDetail,
                     label: "capability probe",
                   },
                 ],
@@ -498,6 +508,7 @@ export class AiManagementService {
       ...configuration,
       baseUrl: normalizeAiBaseUrl(configuration.baseUrl),
       sessionAffinity: configuration.sessionAffinity ?? "disabled",
+      reasoningEffort: configuration.reasoningEffort ?? "default",
       capabilities: configuration.capabilities ?? {
         functionCalling: false,
         hostedWebSearch: false,

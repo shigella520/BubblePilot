@@ -42,4 +42,22 @@ describe("AI provider configuration", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("accepts supported reasoning efforts and defaults to provider behavior", () => {
+    expect(aiProviderConfigurationSchema.parse(provider).reasoningEffort).toBe(
+      "default",
+    );
+    expect(
+      aiProviderConfigurationSchema.parse({
+        ...provider,
+        reasoningEffort: "xhigh",
+      }).reasoningEffort,
+    ).toBe("xhigh");
+    expect(
+      aiProviderConfigurationSchema.safeParse({
+        ...provider,
+        reasoningEffort: "ultra",
+      }).success,
+    ).toBe(false);
+  });
 });

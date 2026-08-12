@@ -49,6 +49,7 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       return;
     }
     expect(primary.value.sessionAffinity).toBe("session-id-header");
+    expect(primary.value.reasoningEffort).toBe("default");
 
     const reordered = await repository.reorderProviders([
       { id: backup.value.id, expectedVersion: backup.value.version },

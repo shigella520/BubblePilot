@@ -133,6 +133,8 @@ const aiManagement = new AiManagementService(
   secretResolver,
   config.enableWebSearch ?? false,
   webSearchTool,
+  undefined,
+  imageInputSettings,
 );
 const aiAgent = new AgentRunner(
   aiRouting,

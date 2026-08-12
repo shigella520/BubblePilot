@@ -436,6 +436,63 @@ describe("AI management API", () => {
     expect(retryClient.imageAttempts).toBe(2);
   });
 
+  it("uses the global image detail for the provider capability probe", async () => {
+    const detailRepository = new InMemoryAiRepository(() => now);
+    const detailClient = new SuccessfulAiClient();
+    const created = await detailRepository.createProvider({
+      name: "Configured detail provider",
+      apiKind: "responses",
+      baseUrl: "https://ai.example.test/v1",
+      model: "fictional-vision-model",
+      secretRef: "PRIMARY_AI_KEY",
+      parameters: {},
+      requestTimeoutMs: 30_000,
+      enabled: true,
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: true,
+      },
+    });
+    expect(created.status).toBe("ok");
+    if (created.status !== "ok") return;
+    const imageSettings = new ImageInputSettingsService(
+      new InMemoryImageInputSettingsRepository(),
+      {
+        enabled: true,
+        includeAttachments: true,
+        includeLinkPreviewImages: true,
+        trustedLinkPreviewHosts: [],
+        maxCurrentAttachments: 4,
+        maxHistoryImages: 2,
+        maxTotalImages: 6,
+        maxImageBytes: 10_485_760,
+        maxTotalBytes: 20_971_520,
+        fetchTimeoutMs: 15_000,
+        detail: "high",
+      },
+    );
+    const service = new AiManagementService(
+      detailRepository,
+      detailClient,
+      new EnvironmentSecretResolver({
+        PRIMARY_AI_KEY: "primary-server-secret",
+      }),
+      false,
+      undefined,
+      undefined,
+      imageSettings,
+    );
+
+    await service.testProvider(created.value.id);
+    const content = detailClient.requests[1]?.messages[0]?.content;
+    const image =
+      typeof content === "string"
+        ? undefined
+        : content?.find((part) => part.type === "image");
+    expect(image).toMatchObject({ type: "image", detail: "high" });
+  });
+
   it("rejects an invalid built-in image before calling the provider", async () => {
     const probeRepository = new InMemoryAiRepository(() => now);
     const probeClient = new SuccessfulAiClient();

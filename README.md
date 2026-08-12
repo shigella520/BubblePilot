@@ -250,7 +250,7 @@ https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_W
 
 ### 6. 配置 AI Provider（可选）
 
-1. 进入“AI Provider”，创建 Provider，填写接口类型、Base URL、模型、API Key 和单次请求超时。
+1. 进入“AI Provider”，创建 Provider，填写接口类型、Base URL、模型、API Key、单次请求超时和默认推理强度；不确定模型支持范围时保留“模型默认”。
 2. 按 Provider 实际能力勾选 Function Calling、托管搜索或原生图片输入，再运行连接与能力测试。
 3. 创建一条 Provider 路由，选择候选顺序以及 Fallback、Retry、降级阈值和冷却时间。
 4. 若要联网搜索，确认 `.env` 中 `ENABLE_WEB_SEARCH=true`，且页面显示搜索后端可用。

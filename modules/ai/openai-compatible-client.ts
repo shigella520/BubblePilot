@@ -686,6 +686,14 @@ export class OpenAiCompatibleClient implements AiClient {
       model: provider.model,
       stream: false,
     };
+    const reasoningEffort = provider.reasoningEffort ?? "default";
+    if (reasoningEffort !== "default") {
+      if (provider.apiKind === "responses") {
+        payload.reasoning = { effort: reasoningEffort };
+      } else {
+        payload.reasoning_effort = reasoningEffort;
+      }
+    }
     if (
       request.webSearch !== undefined &&
       request.webSearch !== "disabled" &&

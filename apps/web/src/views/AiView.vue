@@ -33,6 +33,7 @@ interface Provider {
   secretConfigured: boolean;
   parameters: Record<string, string | number | boolean>;
   requestTimeoutMs: number;
+  reasoningEffort?: ReasoningEffort;
   sessionAffinity?: "disabled" | "session-id-header";
   enabled: boolean;
   sortOrder: number;
@@ -116,12 +117,15 @@ interface ProviderForm {
   secret: string;
   parameters: string;
   requestTimeoutMs: number;
+  reasoningEffort: ReasoningEffort;
   sessionAffinity: "disabled" | "session-id-header";
   enabled: boolean;
   functionCalling: boolean;
   hostedWebSearch: boolean;
   imageInput: boolean;
 }
+type ReasoningEffort =
+  "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
@@ -183,6 +187,7 @@ const providerForm = reactive<ProviderForm>({
   secret: "",
   parameters: "{}",
   requestTimeoutMs: 30000,
+  reasoningEffort: "default",
   sessionAffinity: "disabled",
   enabled: true,
   functionCalling: false,
@@ -366,6 +371,7 @@ function resetProvider() {
     secret: "",
     parameters: "{}",
     requestTimeoutMs: 30000,
+    reasoningEffort: "default",
     sessionAffinity: "disabled",
     enabled: true,
     functionCalling: false,
@@ -384,6 +390,7 @@ function editProvider(item: Provider) {
     secret: "",
     parameters: JSON.stringify(item.parameters, null, 2),
     requestTimeoutMs: item.requestTimeoutMs,
+    reasoningEffort: item.reasoningEffort ?? "default",
     sessionAffinity: item.sessionAffinity ?? "disabled",
     enabled: item.enabled,
     functionCalling: item.capabilities?.functionCalling ?? false,
@@ -409,6 +416,7 @@ async function saveProvider() {
       ...(providerForm.secret ? { secret: providerForm.secret } : {}),
       parameters: parseJsonObject(providerForm.parameters),
       requestTimeoutMs: providerForm.requestTimeoutMs,
+      reasoningEffort: providerForm.reasoningEffort,
       sessionAffinity: providerForm.sessionAffinity,
       enabled: providerForm.enabled,
       capabilities: {
@@ -1082,6 +1090,11 @@ onMounted(load);
               <footer>
                 <span>{{ item.model }}</span
                 ><span>{{ item.requestTimeoutMs / 1000 }}s</span
+                ><span
+                  v-if="
+                    item.reasoningEffort && item.reasoningEffort !== 'default'
+                  "
+                  >推理强度：{{ item.reasoningEffort }}</span
                 ><span v-if="item.sessionAffinity === 'session-id-header'"
                   >固定会话与缓存键</span
                 >
@@ -1219,6 +1232,21 @@ onMounted(load);
                 min="1000"
                 max="360000"
                 required /></label
+            ><label
+              ><span>默认推理强度</span
+              ><select v-model="providerForm.reasoningEffort">
+                <option value="default">模型默认（推荐）</option>
+                <option value="none">none</option>
+                <option value="minimal">minimal</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="xhigh">xhigh</option>
+                <option value="max">max</option>
+              </select>
+              <small
+                >仅推理模型有效；可用等级由模型与兼容网关决定。</small
+              ></label
             ><label class="wide-field"
               ><span>默认参数（JSON）</span
               ><textarea v-model="providerForm.parameters" rows="4"></textarea>
