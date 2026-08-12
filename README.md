@@ -89,10 +89,10 @@ BlueBubbles 只负责收发 iMessage；BubblePilot 保存自己的监听配置�
 启用原生图片输入后，AI Bot 可以直接理解 iMessage 图片附件和链接卡片主图。图片只在当前 AI 节点执行期间安全读取并发送给已验证的多模态 Provider；图片获取或视觉调用失败时会明确降级为文本，不阻断整个工作流。
 
 <p align="center">
-  <a href="assets/preview/bubblepilot-multimodal-chat.jpg"><img src="assets/preview/bubblepilot-multimodal-chat.jpg" width="294" alt="BubblePilot 在 iMessage 中识别聊天图片" /></a>
+  <a href="assets/preview/bubblepilot-multimodal-chat.jpg"><img src="assets/preview/bubblepilot-multimodal-chat.jpg" width="960" alt="BubblePilot 在多组 iMessage 对话中完成图片理解、联网检索和上下文问答" /></a>
 </p>
 
-<p align="center">BubblePilot 在真实 iMessage 对话中识别图片并自然回复。</p>
+<p align="center">BubblePilot 在多组真实 iMessage 对话中完成图片理解、联网检索和上下文问答。</p>
 
 ## 10 分钟完成首次配置
 
