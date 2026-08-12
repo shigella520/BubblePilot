@@ -113,6 +113,8 @@ interface ExecutionDetail extends Execution {
         cacheKeyHash: string | null;
         cacheKeyMatchesPrevious: boolean | null;
         divergenceIndex: number | null;
+        divergenceRegion: string | null;
+        divergenceReason: string | null;
         items: Array<{
           index: number;
           role: string;
@@ -122,6 +124,7 @@ interface ExecutionDetail extends Execution {
           imageBytes: number;
           itemHash: string;
           prefixHash: string;
+          region: string;
         }>;
       } | null;
     } | null;
@@ -1193,6 +1196,12 @@ function resetAuditPage(): Promise<boolean> {
                         item.diagnostics.requestTrace.divergenceIndex === null
                           ? "—"
                           : item.diagnostics.requestTrace.divergenceIndex + 1
+                      }}
+                      · 区域：{{
+                        item.diagnostics.requestTrace.divergenceRegion ?? "—"
+                      }}
+                      · 原因：{{
+                        item.diagnostics.requestTrace.divergenceReason ?? "—"
                       }}
                     </p>
                     <details class="cache-diagnostic-details">

@@ -141,6 +141,74 @@ describe.runIf(testDatabaseUrl !== undefined)(
       ).resolves.toMatchObject({ status: "invalid-sender" });
     });
 
+    it("allows only one concurrent pending link preview result to win", async () => {
+      const suffix = randomUUID();
+      const adapter = new BlueBubblesWebhookAdapter();
+      const normalized = adapter.normalize(
+        newMessageWebhook({
+          messageGuid: `preview-race-${suffix}`,
+          chatGuid: `iMessage;-;preview-race-chat-${suffix}`,
+          text: "https://preview.example.test/race",
+        }),
+        randomUUID(),
+      );
+      expect(normalized.kind).toBe("message");
+      if (normalized.kind !== "message") return;
+      await repository.ingestMessage(normalized.envelope, true);
+      const firstPreview = {
+        status: "available" as const,
+        errorCode: null,
+        items: [
+          {
+            source: "open-graph" as const,
+            url: "https://preview.example.test/race",
+            originalUrl: null,
+            title: "First stable result",
+            summary: null,
+            siteName: "Example Test",
+            imageAvailable: false,
+            imageUrl: null,
+            imageSource: null,
+            iconAvailable: false,
+          },
+        ],
+      };
+      const losingPreview = {
+        status: "available" as const,
+        errorCode: null,
+        items: [
+          {
+            source: "open-graph" as const,
+            url: "https://preview.example.test/race",
+            originalUrl: null,
+            title: "Losing overwrite",
+            summary: null,
+            siteName: "Example Test",
+            imageAvailable: false,
+            imageUrl: null,
+            imageSource: null,
+            iconAvailable: false,
+          },
+        ],
+      };
+      const [firstResult, secondResult] = await Promise.all([
+        repository.saveMessageLinkPreview({
+          providerMessageId: normalized.envelope.message.providerMessageId,
+          linkPreview: firstPreview,
+          diagnostics: [],
+          fetchedAt: new Date(),
+        }),
+        repository.saveMessageLinkPreview({
+          providerMessageId: normalized.envelope.message.providerMessageId,
+          linkPreview: losingPreview,
+          diagnostics: [],
+          fetchedAt: new Date(),
+        }),
+      ]);
+      expect(firstResult).toEqual(secondResult);
+      expect([firstPreview, losingPreview]).toContainEqual(firstResult);
+    });
+
     it("redacts expired content only after automation is final and audits it", async () => {
       const suffix = randomUUID();
       const adapter = new BlueBubblesWebhookAdapter();
