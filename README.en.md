@@ -36,6 +36,12 @@
   <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
 </p>
 
+<p align="center">
+  <a href="https://linux.do" target="_blank">
+    <img src="https://img.shields.io/badge/LINUX-DO-FFB003?style=for-the-badge&logo=linux&logoColor=white" alt="LINUX DO" />
+  </a>
+</p>
+
 BubblePilot receives new-message events from BlueBubbles, archives only the chats you choose, matches triggers, and runs visual workflows. A workflow can load recent conversation context and images, call one or more OpenAI-compatible providers, search the web when needed, and safely reply to the original chat.
 
 - **Selective archiving:** unmonitored chats keep only the minimum metadata needed for discovery; message bodies are not archived.
@@ -48,17 +54,17 @@ BubblePilot receives new-message events from BlueBubbles, archives only the chat
 
 ## What you can build
 
-| Use case                            | BubblePilot capability                                                                                               |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Archive important conversations     | Enable monitoring per chat, search archived messages, and export an authorized JSON Lines snapshot                   |
-| Create a group-chat bot             | Trigger on chat, sender, content type, keyword, prefix, regex, or time window                                        |
-| Identify chat participants          | Maintain real names and nicknames per chat so AI can distinguish each historical speaker                             |
-| Understand link cards               | Archive titles, summaries, and site names so AI can use card context without claiming it read the full page          |
-| Understand chat images              | Send current image attachments, link-card images, and bounded recent images to a verified native multimodal provider |
-| Design message workflows            | Connect context, condition, variable, AI, reply, and end nodes on a visual canvas                                    |
-| Use multiple AI services            | Manage OpenAI-compatible providers and routes with Retry, Fallback, degradation, and recovery                        |
-| Answer with current web information | Use provider-hosted search or Function Calling with the bundled private SearXNG service                              |
-| Diagnose failures                   | Inspect executions, node traces, provider attempts, tool calls, and outgoing delivery state                          |
+| Use case                            | BubblePilot capability                                                                                                        |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Archive important conversations     | Enable monitoring per chat, search archived messages, and export an authorized JSON Lines snapshot                            |
+| Create a group-chat bot             | Trigger on chat, sender, content type, keyword, prefix, regex, or time window                                                 |
+| Identify chat participants          | Maintain real names and nicknames per chat so AI can distinguish each historical speaker                                      |
+| Understand link cards               | Archive titles, summaries, and site names so AI can use card context without claiming it read the full page                   |
+| Understand chat images              | Send current image attachments, link-card images, and bounded recent images to a verified native multimodal provider          |
+| Design message workflows            | Connect context, condition, variable, AI, reply, and end nodes on a visual canvas                                             |
+| Use multiple AI services            | Manage OpenAI-compatible providers, models, and routes with Retry, Fallback, degradation, and recovery                        |
+| Answer with current web information | Use provider-hosted search or Function Calling with the bundled private SearXNG service                                       |
+| Diagnose failures                   | Inspect executions, node traces, provider attempts, tool calls, and outgoing delivery state, then safely recover dead letters |
 
 Web search is optional. With it disabled, archiving, regular workflows, and non-search AI replies continue to work.
 
@@ -66,9 +72,13 @@ Web search is optional. With it disabled, archiving, regular workflows, and non-
 
 ![BubblePilot architecture](doc/architecture-overview.svg)
 
-BlueBubbles remains the iMessage gateway. BubblePilot owns its monitoring rules, archive, workflows, execution history, and audit facts. Every message is normalized and deduplicated before matching, so a webhook redelivery cannot create a duplicate reply.
+BlueBubbles remains the iMessage gateway. BubblePilot owns its monitoring rules, archive, workflows, execution history, and audit facts. Every message is normalized and deduplicated before BubblePilot checks the monitoring scope, matches triggers, and locks the workflow version, so a webhook redelivery cannot create a duplicate reply.
 
 ![BubblePilot message workflow](doc/message-workflow-flow.svg)
+
+Conversation summaries rotate periodically: the raw window remains append-only until it reaches a compression boundary, then the oldest batch is replaced by a new summary. AI requests keep a stable text prefix while participant mappings, link previews, images, and other volatile material are moved to the tail, improving Prompt Cache hit rates for compatible providers.
+
+[![BubblePilot message rotation, workflow orchestration, and Prompt Cache optimization](doc/message-context-orchestration-cache.svg)](doc/message-context-orchestration-cache.svg)
 
 ## Product preview
 
@@ -81,6 +91,8 @@ With native image input enabled, an AI bot can understand iMessage image attachm
 <p align="center">
   <a href="assets/preview/bubblepilot-multimodal-chat.jpg"><img src="assets/preview/bubblepilot-multimodal-chat.jpg" width="294" alt="BubblePilot understanding an image in iMessage" /></a>
 </p>
+
+<p align="center">BubblePilot understands an image and replies naturally in a real iMessage conversation.</p>
 
 ## First working automation in 10 minutes
 
@@ -116,6 +128,7 @@ Server:
 BlueBubbles:
 - Server URL: http://192.0.2.10:1234
 - Ask me to enter the REST API Password in a controlled terminal when needed
+- The BlueBubbles Server can reach the BubblePilot webhook
 - Discover the initial Chat GUID from the first webhook
 
 Preferences:
@@ -235,7 +248,7 @@ https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_W
 4. Send a test message from another account. If `MONITORED_CHAT_IDS` is empty, this first event discovers the chat without archiving its body.
 5. Open **Messages** in BubblePilot, unlock sensitive actions, enable the chat, and send a second test message.
 
-Disable query-string access logging for this webhook path. The secret is carried in the URL because BlueBubbles does not add a custom signing header.
+Disable query-string access logging for this webhook path. The secret is carried in the URL because BlueBubbles does not add a custom signing header. See [Deployment and operations](doc/部署与运维.md#连接-bluebubbles) for the complete network and BlueBubbles setup.
 
 ### 6. Configure an AI provider (optional)
 
@@ -256,12 +269,13 @@ Message Trigger → Load Context → AI Chat → Reply → End
 ```
 
 1. Select a monitored chat in **Message Trigger**, set a keyword or prefix, and enable the trigger node.
-2. Add **Render Text** when fixed instructions, the current event, and upstream outputs must be combined; insert allowed Context values in its template editor.
-3. Select the provider route in **AI Chat** and set its prompt, output limits, and web-search policy.
-4. Connect `AI Chat.text` to `Reply.text`, then connect the control edges.
-5. Save and enable the workflow, send a matching message, and inspect **Executions** for the complete result.
+2. To identify group-chat participants, open **Messages** and configure real names and nicknames for sender IDs already seen in the target chat. **Load Context** and **AI Chat** automatically use only mappings involved in the current window.
+3. Add **Render Text** when fixed instructions, the current event, and upstream outputs must be combined; insert allowed Context values in its template editor and connect its `text` output downstream.
+4. Select the provider route in **AI Chat** and set its prompt, output limits, and web-search policy.
+5. Connect `AI Chat.text` to `Reply.text`, then connect each node's success edge.
+6. Save the workflow, select **Enable** at the top, send a matching message, and inspect **Executions** for every node and the final reply state.
 
-**Render Text** supports controlled references such as `{{context.event.message.text}}`, `{{context.event.message.senderId}}`, and `{{context.outputs.<node-id>.<output-port>}}`.
+**Render Text** supports controlled references such as `{{context.event.message.text}}`, `{{context.event.message.senderId}}`, `{{context.history.participants}}`, and `{{context.outputs.<node-id>.<output-port>}}`. This is useful for combining fixed context with dynamic messages; participant identification normally requires no manual rendering.
 
 For a fixed reply, use `Message Trigger → Reply → End` and skip AI configuration.
 
@@ -273,7 +287,19 @@ For a fixed reply, use `Message Trigger → Reply → End` and skip AI configura
 - Review chat monitoring, message retention, and AI context limits.
 - Back up PostgreSQL and deploy an exact image version before upgrading.
 
-The detailed Chinese guides cover [deployment and operations](doc/部署与运维.md), [technical design](doc/技术设计.md), [workflow semantics](doc/事件与工作流设计.md), and [API/configuration contracts](doc/接口与配置契约.md).
+See [Deployment and operations](doc/部署与运维.md) for backup, restore, upgrade, rollback, and troubleshooting commands.
+
+## Documentation
+
+| Document                                                 | When to read it                                                                     |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [Documentation center](doc/README.md)                    | Browse all documentation and its authoritative scope                                |
+| [Product and scope](doc/产品与范围.md)                   | Understand target users, delivered scope, acceptance criteria, and future direction |
+| [Deployment and operations](doc/部署与运维.md)           | First-time setup, production deployment, backup, upgrade, and troubleshooting       |
+| [Technical design](doc/技术设计.md)                      | Understand architecture, data boundaries, security, and module responsibilities     |
+| [Events and workflow design](doc/事件与工作流设计.md)    | Understand triggers, nodes, AI routing, idempotency, and recovery semantics         |
+| [API and configuration contracts](doc/接口与配置契约.md) | Look up APIs, permissions, environment variables, and machine-readable contracts    |
+| [Development and release](doc/开发与发布.md)             | Local development, verification, migrations, branches, and release workflow         |
 
 ## License
 
