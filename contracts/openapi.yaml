@@ -600,6 +600,107 @@ paths:
           description: 当前服务端支持的动作块、输入输出端口和配置描述。
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/workflows/schema:
+    get:
+      operationId: getWorkflowManifestSchema
+      description: 返回 AI 可使用的 BubblePilotWorkflow JSON Schema Draft 2020-12。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 可移植工作流清单 Schema。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/workflows/schema/guide:
+    get:
+      operationId: getWorkflowManifestGuide
+      description: 返回 Context 路径、编写规则、弃用节点和标准 AI 提示词。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: AI 工作流编写指南。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/workflows/binding-catalog:
+    get:
+      operationId: getWorkflowBindingCatalog
+      description: 返回可绑定聊天、AI 路由及已验证能力，不包含凭据或 Provider 地址。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 当前实例的安全绑定目录。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/workflows/import/preview:
+    post:
+      operationId: previewWorkflowManifestImport
+      description: 无副作用校验 Manifest、工作流语义和资源绑定，返回五分钟签名预览令牌。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manifest]
+              properties:
+                manifest:
+                  type: object
+                bindings:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        "200":
+          description: 规范化清单、绑定候选及 JSON Pointer 错误。
+        "400":
+          $ref: "#/components/responses/Error"
+  /api/v1/workflows/import:
+    post:
+      operationId: importWorkflowManifest
+      description: 二次验证后创建新工作流或不可变候选版本；不会自动发布或启用。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manifest, previewToken]
+              properties:
+                manifest:
+                  type: object
+                previewToken:
+                  type: string
+                bindings:
+                  type: object
+                  additionalProperties:
+                    type: string
+                mode:
+                  enum: [create, new-version]
+                targetWorkflowId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: 已创建尚未发布的 validated 候选版本。
+        "400":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "410":
+          $ref: "#/components/responses/Error"
   /api/v1/workflows/validate:
     post:
       operationId: validateWorkflowDefinition
@@ -703,6 +804,33 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
         "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/workflows/{workflowId}/versions/{version}/export:
+    get:
+      operationId: exportWorkflowManifest
+      description: 导出指定不可变版本；portable 默认移除实例 ID，instance-bound 需要二次验证。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkflowId"
+        - in: path
+          name: version
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - in: query
+          name: mode
+          schema:
+            enum: [portable, instance-bound]
+            default: portable
+      responses:
+        "200":
+          description: BubblePilotWorkflow JSON 清单。
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
           $ref: "#/components/responses/Error"
   /api/v1/workflows/{workflowId}/enabled:
     patch:

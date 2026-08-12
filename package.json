@@ -15,6 +15,7 @@
     "build:server": "tsc -p tsconfig.build.json",
     "build:web": "pnpm --dir apps/web build",
     "contracts:check": "node scripts/check-openapi-routes.mjs && node scripts/check-config-contract.mjs",
+    "contracts:workflow-schema": "pnpm build:server && node scripts/generate-workflow-schema.mjs",
     "db:migrate": "tsx app/migrate.ts",
     "db:migrate:local": "tsx --env-file=.env.local app/migrate.ts",
     "dev": "tsx watch app/main.ts",

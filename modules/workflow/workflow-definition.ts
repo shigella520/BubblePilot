@@ -197,7 +197,7 @@ export const workflowNodeSchema = z.discriminatedUnion("type", [
   endNodeSchema,
 ]);
 
-const rawWorkflowDefinitionSchema = z.object({
+export const workflowDefinitionSchema = z.object({
   schemaVersion: z.literal("1"),
   name: z.string().min(1).max(120),
   startNodeId: nodeIdSchema,
@@ -206,7 +206,7 @@ const rawWorkflowDefinitionSchema = z.object({
 });
 
 export type WorkflowNode = z.infer<typeof workflowNodeSchema>;
-export type WorkflowDefinition = z.infer<typeof rawWorkflowDefinitionSchema>;
+export type WorkflowDefinition = z.infer<typeof workflowDefinitionSchema>;
 
 function targets(node: WorkflowNode): readonly string[] {
   switch (node.type) {
@@ -452,7 +452,7 @@ function validateSemantics(definition: WorkflowDefinition): void {
 }
 
 export function parseWorkflowDefinition(value: unknown): WorkflowDefinition {
-  const definition = rawWorkflowDefinitionSchema.parse(value);
+  const definition = workflowDefinitionSchema.parse(value);
   validateSemantics(definition);
   return definition;
 }

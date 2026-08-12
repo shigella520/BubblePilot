@@ -66,6 +66,14 @@ import {
 } from "../modules/workflow/trigger-matcher.js";
 import { parseWorkflowDefinition } from "../modules/workflow/workflow-definition.js";
 import { validateWorkflowGraph } from "../modules/workflow/workflow-graph.js";
+import {
+  exportWorkflowManifest,
+  importWorkflowManifest,
+  WorkflowManifestPreviewSigner,
+  workflowManifestSchema,
+  type WorkflowBindingCatalog,
+  type WorkflowCapability,
+} from "../modules/workflow/workflow-manifest.js";
 import type { MessageAutomation } from "../modules/workflow/workflow-engine.js";
 import type {
   ExecutionRecoveryClaim,
@@ -218,6 +226,31 @@ const workflowVersionBodySchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   definition: z.unknown(),
 });
+
+const workflowManifestExportQuerySchema = z.object({
+  mode: z.enum(["portable", "instance-bound"]).default("portable"),
+});
+
+const workflowManifestPreviewBodySchema = z.object({
+  manifest: z.unknown(),
+  bindings: z.record(z.string(), z.string().min(1)).default({}),
+});
+
+const workflowManifestImportBodySchema = workflowManifestPreviewBodySchema
+  .extend({
+    previewToken: z.string().min(1).max(4_096),
+    mode: z.enum(["create", "new-version"]).default("create"),
+    targetWorkflowId: z.string().uuid().optional(),
+  })
+  .superRefine((body, context) => {
+    if (body.mode === "new-version" && body.targetWorkflowId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["targetWorkflowId"],
+        message: "targetWorkflowId is required for new-version imports.",
+      });
+    }
+  });
 
 const triggerBodySchema = z.object({
   name: z.string().min(1).max(120),
@@ -1749,6 +1782,318 @@ export function buildApplication(
 
   if (options.workflow !== undefined) {
     const workflowRepository = options.workflow.repository;
+    const manifestSigner = new WorkflowManifestPreviewSigner(
+      `${config.settingsEncryptionKey}:workflow-manifest-preview:v1`,
+    );
+    const workflowBindingCatalog =
+      async (): Promise<WorkflowBindingCatalog> => {
+        const chats = [];
+        let chatCursor: { timestamp: Date; id: string } | null = null;
+        do {
+          const page = await repository.listChats({
+            limit: 100,
+            cursor: chatCursor,
+          });
+          chats.push(...page);
+          const last = page.at(-1);
+          chatCursor =
+            page.length === 100 && last !== undefined
+              ? { timestamp: new Date(last.updatedAt), id: last.id }
+              : null;
+        } while (chatCursor !== null);
+        const routes = await (options.ai?.management.listRoutes() ??
+          Promise.resolve([]));
+        const providers = await options.ai?.management.listProviders();
+        const providersById = new Map(
+          (providers ?? []).map((provider) => [provider.id, provider]),
+        );
+        return {
+          aiRoutes: routes.map((route) => {
+            const capabilities = new Set<WorkflowCapability>(["text"]);
+            for (const providerId of route.effectiveProviderIds) {
+              const provider = providersById.get(providerId);
+              if (provider?.capabilities?.functionCalling)
+                capabilities.add("function-calling");
+              if (provider?.capabilities?.hostedWebSearch)
+                capabilities.add("hosted-search");
+              if (provider?.capabilities?.imageInput)
+                capabilities.add("image-input");
+            }
+            return {
+              id: route.id,
+              name: route.name,
+              capabilities: [...capabilities],
+            };
+          }),
+          chats: chats.map((chat) => ({
+            id: chat.providerChatId,
+            name: chat.displayName ?? chat.providerChatId,
+            capabilities: [],
+          })),
+        };
+      };
+
+    application.get(
+      "/api/v1/workflows/schema",
+      { preHandler: requireAdmin },
+      () => ({
+        data: z.toJSONSchema(workflowManifestSchema, {
+          target: "draft-2020-12",
+          unrepresentable: "any",
+        }),
+      }),
+    );
+
+    application.get(
+      "/api/v1/workflows/schema/guide",
+      { preHandler: requireAdmin },
+      () => ({
+        data: {
+          format: "BubblePilotWorkflow bubblepilot.io/v1 JSON",
+          rules: [
+            "Use spec for workflow logic and bindings for external AI routes and chats.",
+            "Use providerRouteRef, summaryProviderRouteRef and chatRefs in node config; never invent instance IDs.",
+            "Keep node IDs stable, connect every node, and keep the graph acyclic.",
+            "set-variable is deprecated; use render-text with Context paths for new workflows.",
+            "Import always creates an unpublished candidate version.",
+          ],
+          contextPaths: [
+            "context.event.message.text",
+            "context.event.message.senderId",
+            "context.event.message.attachments",
+            "context.event.message.linkPreview",
+            "context.event.chat.providerChatId",
+            "context.history.messages",
+            "context.history.participants",
+            "context.outputs.<node-id>.<output>",
+          ],
+          standardPrompt:
+            "Create one BubblePilotWorkflow JSON document matching the supplied JSON Schema and Binding Catalog. Use only listed action blocks and logical binding refs. Do not include secrets, database IDs, Markdown fences, comments, or YAML. Return JSON only.",
+          deprecatedNodes: ["set-variable"],
+          actionBlocks: listActionBlockDefinitions(),
+          example: {
+            $schema: "/api/v1/workflows/schema",
+            kind: "BubblePilotWorkflow",
+            apiVersion: "bubblepilot.io/v1",
+            metadata: {
+              name: "示例工作流",
+              description: "收到消息后结束，用于展示清单结构。",
+            },
+            spec: {
+              maxSteps: 8,
+              startNodeId: "message-trigger",
+              nodes: [
+                {
+                  id: "message-trigger",
+                  type: "message-trigger",
+                  version: 1,
+                  config: {
+                    provider: "bluebubbles",
+                    chatRefs: [],
+                    senderIds: [],
+                    contentTypes: ["text"],
+                    includeFromMe: false,
+                    enabled: false,
+                    text: null,
+                  },
+                  onSuccess: "done",
+                },
+                {
+                  id: "done",
+                  type: "end",
+                  version: 1,
+                  config: { result: "succeeded" },
+                },
+              ],
+            },
+            bindings: { aiRoutes: {}, chats: {} },
+          },
+        },
+      }),
+    );
+
+    application.get(
+      "/api/v1/workflows/binding-catalog",
+      { preHandler: requireAdmin },
+      async () => ({ data: await workflowBindingCatalog() }),
+    );
+
+    application.get(
+      "/api/v1/workflows/:workflowId/versions/:version/export",
+      { preHandler: requireAdmin },
+      async (request, reply) => {
+        const parameters = workflowVersionParametersSchema.parse(
+          request.params,
+        );
+        const query = workflowManifestExportQuerySchema.parse(request.query);
+        const principal = principals.get(request);
+        if (
+          query.mode === "instance-bound" &&
+          principal?.kind === "session" &&
+          options.auth !== undefined &&
+          !(await options.auth.hasSensitiveGrant(principal.sessionId))
+        ) {
+          await audit(
+            request,
+            "workflow.export",
+            "workflow",
+            parameters.workflowId,
+            "denied",
+            principal,
+            { reason: "sensitive-auth-required" },
+          );
+          throw new ApplicationError(
+            "SENSITIVE_AUTH_REQUIRED",
+            "Sensitive operation verification is required.",
+            403,
+          );
+        }
+        const version = await workflowRepository.getWorkflowVersion(
+          parameters.workflowId,
+          parameters.version,
+        );
+        if (version === null) {
+          throw new ApplicationError(
+            "WORKFLOW_NOT_FOUND",
+            "The workflow version does not exist.",
+            404,
+          );
+        }
+        const manifest = exportWorkflowManifest({
+          definition: version.definition,
+          mode: query.mode,
+          catalog: await workflowBindingCatalog(),
+          schemaUrl: "/api/v1/workflows/schema",
+        });
+        sensitiveAudits.set(request, {
+          action: "workflow.export",
+          targetType: "workflow",
+        });
+        const safeName =
+          version.workflowName
+            .replace(/[^a-zA-Z0-9._-]+/gu, "-")
+            .replace(/^-+|-+$/gu, "") || "workflow";
+        return reply
+          .header(
+            "content-disposition",
+            `attachment; filename="${safeName}.bubblepilot-workflow.json"`,
+          )
+          .send({ data: manifest });
+      },
+    );
+
+    application.post(
+      "/api/v1/workflows/import/preview",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const body = workflowManifestPreviewBodySchema.parse(request.body);
+        const catalog = await workflowBindingCatalog();
+        const result = importWorkflowManifest({
+          manifest: body.manifest,
+          catalog,
+          selections: body.bindings,
+        });
+        const preview =
+          result.manifest === null
+            ? null
+            : manifestSigner.issue(result.manifest, catalog);
+        return {
+          data: {
+            valid: result.issues.every((issue) => issue.severity !== "error"),
+            normalizedManifest: result.manifest,
+            previewToken: preview?.token ?? null,
+            expiresAt: preview?.expiresAt ?? null,
+            bindings: result.resolutions,
+            errors: result.issues.filter((issue) => issue.severity === "error"),
+            warnings: result.issues.filter(
+              (issue) => issue.severity === "warning",
+            ),
+            summary:
+              result.manifest === null
+                ? null
+                : {
+                    name: result.manifest.metadata.name,
+                    description: result.manifest.metadata.description,
+                    nodeCount: result.manifest.spec.nodes.length,
+                  },
+          },
+        };
+      },
+    );
+
+    application.post(
+      "/api/v1/workflows/import",
+      { preHandler: requireSensitive("workflow.import", "workflow") },
+      async (request, reply) => {
+        const body = workflowManifestImportBodySchema.parse(request.body);
+        const catalog = await workflowBindingCatalog();
+        const parsedManifest = workflowManifestSchema.safeParse(body.manifest);
+        if (!parsedManifest.success) {
+          throw new ApplicationError(
+            "WORKFLOW_MANIFEST_INVALID",
+            "The workflow manifest is invalid.",
+            400,
+          );
+        }
+        const tokenState = manifestSigner.verify(
+          body.previewToken,
+          parsedManifest.data,
+          catalog,
+        );
+        if (tokenState !== "valid") {
+          throw new ApplicationError(
+            tokenState === "expired"
+              ? "WORKFLOW_IMPORT_PREVIEW_EXPIRED"
+              : "WORKFLOW_IMPORT_PREVIEW_INVALID",
+            tokenState === "expired"
+              ? "The workflow import preview has expired."
+              : "The workflow import preview no longer matches the manifest or binding catalog.",
+            tokenState === "expired" ? 410 : 409,
+          );
+        }
+        const result = importWorkflowManifest({
+          manifest: parsedManifest.data,
+          catalog,
+          selections: body.bindings,
+        });
+        if (result.definition === null || result.issues.length > 0) {
+          throw new ApplicationError(
+            "WORKFLOW_MANIFEST_INVALID",
+            result.issues[0]?.message ?? "The workflow manifest is invalid.",
+            400,
+          );
+        }
+        const version =
+          body.mode === "create"
+            ? await workflowRepository.createWorkflow(
+                parsedManifest.data.metadata.name,
+                result.definition as never,
+              )
+            : await workflowRepository.createWorkflowVersion(
+                body.targetWorkflowId!,
+                result.definition as never,
+                parsedManifest.data.metadata.name,
+              );
+        if (version === null) {
+          throw new ApplicationError(
+            "WORKFLOW_NOT_FOUND",
+            "The target workflow does not exist.",
+            404,
+          );
+        }
+        return reply.status(201).send({
+          data: {
+            workflowId: version.workflowId,
+            workflowVersion: version.version,
+            status: version.status,
+            definition: version.definition,
+            warnings: result.issues.filter(
+              (issue) => issue.severity === "warning",
+            ),
+          },
+        });
+      },
+    );
     application.get(
       "/api/v1/workflows/action-blocks",
       { preHandler: requireAdmin },

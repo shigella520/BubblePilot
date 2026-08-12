@@ -2,12 +2,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 import {
   Boxes,
+  ClipboardCopy,
+  Download,
+  FileJson,
   Play,
   Plus,
   RefreshCw,
   Save,
   ShieldAlert,
   ToggleLeft,
+  Upload,
+  X,
 } from "@lucide/vue";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -109,6 +114,7 @@ const triggerEditId = ref<string | null>(null);
 const triggerDeleteBusyIds = reactive(new Set<string>());
 const workflowToggleBusyIds = reactive(new Set<string>());
 const workflowDeleteBusyIds = reactive(new Set<string>());
+const workflowExportBusyIds = reactive(new Set<string>());
 const triggerToggleBusyIds = reactive(new Set<string>());
 let versionsRequestId = 0;
 const createForm = reactive({ name: "", definition: "" });
@@ -186,6 +192,171 @@ const aiFlowForm = reactive({
   promptTemplate: "请根据前面的聊天记录执行以下任务：\n{{message.text}}",
   replyTemplate: "{{variables.aiReply}}",
 });
+
+interface ImportIssue {
+  path: string;
+  code: string;
+  message: string;
+  suggestion: string;
+}
+interface ImportBinding {
+  ref: string;
+  kind: "aiRoute" | "chat";
+  name: string;
+  selectedId: string | null;
+  status: string;
+  candidates: Array<{ id: string; name: string; capabilities: string[] }>;
+}
+interface ImportPreview {
+  valid: boolean;
+  normalizedManifest: Record<string, unknown> | null;
+  previewToken: string | null;
+  expiresAt: string | null;
+  bindings: ImportBinding[];
+  errors: ImportIssue[];
+  warnings: ImportIssue[];
+  summary: { name: string; description: string; nodeCount: number } | null;
+}
+
+const importOpen = ref(false);
+const importJson = ref("");
+const importPreview = ref<ImportPreview | null>(null);
+const importBusy = ref(false);
+const importMode = ref<"create" | "new-version">("create");
+const importTargetWorkflowId = ref("");
+const importSelections = reactive<Record<string, string>>({});
+
+function openImport() {
+  importOpen.value = true;
+  importPreview.value = null;
+  importJson.value = "";
+  importMode.value = "create";
+  importTargetWorkflowId.value = "";
+  for (const key of Object.keys(importSelections)) delete importSelections[key];
+}
+
+async function loadImportFile(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  importJson.value = await file.text();
+  importPreview.value = null;
+}
+
+async function previewImport() {
+  importBusy.value = true;
+  try {
+    const manifest = parseJsonObject(importJson.value);
+    importPreview.value = await apiRequest<ImportPreview>(
+      "/api/v1/workflows/import/preview",
+      {
+        method: "POST",
+        body: jsonBody({ manifest, bindings: importSelections }),
+      },
+    );
+    for (const binding of importPreview.value.bindings) {
+      if (binding.selectedId && !importSelections[binding.ref]) {
+        importSelections[binding.ref] = binding.selectedId;
+      }
+    }
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    importBusy.value = false;
+  }
+}
+
+async function commitImport() {
+  if (!importPreview.value?.valid || !importPreview.value.previewToken) return;
+  importBusy.value = true;
+  try {
+    const result = await apiRequest<{
+      workflowId: string;
+      workflowVersion: number;
+    }>("/api/v1/workflows/import", {
+      method: "POST",
+      body: jsonBody({
+        manifest: parseJsonObject(importJson.value),
+        previewToken: importPreview.value.previewToken,
+        bindings: importSelections,
+        mode: importMode.value,
+        ...(importMode.value === "new-version"
+          ? { targetWorkflowId: importTargetWorkflowId.value }
+          : {}),
+      }),
+    });
+    importOpen.value = false;
+    await router.push(
+      `/automation/${result.workflowId}?version=${result.workflowVersion}`,
+    );
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    importBusy.value = false;
+  }
+}
+
+async function exportWorkflow(
+  workflow: Workflow,
+  mode: "portable" | "instance-bound" = "portable",
+) {
+  if (workflowExportBusyIds.has(workflow.id)) return;
+  workflowExportBusyIds.add(workflow.id);
+  try {
+    const workflowVersions = await apiRequest<WorkflowVersion[]>(
+      `/api/v1/workflows/${workflow.id}/versions`,
+    );
+    const version =
+      workflowVersions.find((item) => item.status === "validated") ??
+      workflowVersions.find(
+        (item) => item.version === workflow.publishedVersion,
+      ) ??
+      workflowVersions[0];
+    if (!version) throw new Error("该工作流没有可导出的版本。");
+    const manifest = await apiRequest<Record<string, unknown>>(
+      `/api/v1/workflows/${workflow.id}/versions/${version.version}/export?mode=${mode}`,
+    );
+    const blobUrl = URL.createObjectURL(
+      new Blob([JSON.stringify(manifest, null, 2)], {
+        type: "application/json",
+      }),
+    );
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = `${workflow.name.replace(/[^a-zA-Z0-9._-]+/gu, "-") || "workflow"}.bubblepilot-workflow.json`;
+    anchor.click();
+    URL.revokeObjectURL(blobUrl);
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    workflowExportBusyIds.delete(workflow.id);
+  }
+}
+
+async function copyWorkflowResource(
+  kind: "schema" | "guide" | "catalog" | "prompt",
+) {
+  try {
+    const path =
+      kind === "schema"
+        ? "/api/v1/workflows/schema"
+        : kind === "catalog"
+          ? "/api/v1/workflows/binding-catalog"
+          : "/api/v1/workflows/schema/guide";
+    const value = await apiRequest<any>(path);
+    const copied = kind === "prompt" ? value.standardPrompt : value;
+    await navigator.clipboard.writeText(
+      typeof copied === "string" ? copied : JSON.stringify(copied, null, 2),
+    );
+    message.value = "已复制到剪贴板。";
+    messageIsError.value = false;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  }
+}
 
 const defaultDefinition = (name: string) =>
   JSON.stringify(
@@ -718,12 +889,46 @@ onMounted(load);
           <button class="button secondary" @click="load">
             <RefreshCw :size="16" />刷新
           </button>
+          <button class="button secondary" type="button" @click="openImport">
+            <Upload :size="16" />导入工作流
+          </button>
           <button
             class="button primary"
             type="button"
             @click="startNewWorkflow"
           >
             <Plus :size="16" />新建工作流
+          </button>
+        </div>
+        <div class="workflow-ai-tools">
+          <span><FileJson :size="16" />AI 编写资源</span>
+          <button
+            class="button tiny secondary"
+            type="button"
+            @click="copyWorkflowResource('schema')"
+          >
+            <ClipboardCopy :size="14" />Schema
+          </button>
+          <button
+            class="button tiny secondary"
+            type="button"
+            @click="copyWorkflowResource('guide')"
+          >
+            <ClipboardCopy :size="14" />编写指南
+          </button>
+          <button
+            class="button tiny secondary"
+            type="button"
+            @click="copyWorkflowResource('catalog')"
+          >
+            <ClipboardCopy :size="14" />Binding Catalog
+          </button>
+          <button
+            class="button tiny secondary"
+            type="button"
+            @click="copyWorkflowResource('prompt')"
+          >
+            <ClipboardCopy :size="14" />标准提示词
           </button>
         </div>
         <WorkflowEditor
@@ -939,6 +1144,14 @@ onMounted(load);
                     编辑
                   </button>
                   <button
+                    class="button tiny secondary"
+                    type="button"
+                    :disabled="workflowExportBusyIds.has(workflow.id)"
+                    @click="exportWorkflow(workflow)"
+                  >
+                    <Download :size="14" />导出
+                  </button>
+                  <button
                     class="button tiny danger"
                     type="button"
                     :disabled="workflowDeleteBusyIds.has(workflow.id)"
@@ -972,6 +1185,148 @@ onMounted(load);
           </table>
         </div>
       </section>
+      <div
+        v-if="importOpen"
+        class="workflow-import-backdrop"
+        @click.self="importOpen = false"
+      >
+        <section
+          class="workflow-import-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label="导入工作流"
+        >
+          <div class="panel-head">
+            <div>
+              <p class="card-kicker">AI FRIENDLY IMPORT</p>
+              <h2>导入工作流</h2>
+            </div>
+            <button
+              class="icon-button"
+              type="button"
+              title="关闭"
+              @click="importOpen = false"
+            >
+              <X :size="18" />
+            </button>
+          </div>
+          <label class="workflow-import-file">
+            <span>上传 .bubblepilot-workflow.json</span>
+            <input
+              type="file"
+              accept="application/json,.json"
+              @change="loadImportFile"
+            />
+          </label>
+          <label>
+            <span>或粘贴 Manifest JSON</span>
+            <textarea
+              v-model="importJson"
+              rows="13"
+              spellcheck="false"
+              @input="importPreview = null"
+            ></textarea>
+          </label>
+          <div class="form-actions">
+            <button
+              class="button secondary"
+              type="button"
+              :disabled="!importJson || importBusy"
+              @click="previewImport"
+            >
+              <FileJson :size="16" />{{ importBusy ? "校验中…" : "预览并校验" }}
+            </button>
+          </div>
+          <template v-if="importPreview">
+            <div v-if="importPreview.summary" class="workflow-import-summary">
+              <strong>{{ importPreview.summary.name }}</strong>
+              <span>{{ importPreview.summary.nodeCount }} 个节点</span>
+              <p v-if="importPreview.summary.description">
+                {{ importPreview.summary.description }}
+              </p>
+            </div>
+            <div
+              v-if="importPreview.errors.length"
+              class="workflow-import-issues"
+            >
+              <article
+                v-for="issue in importPreview.errors"
+                :key="`${issue.path}:${issue.code}`"
+              >
+                <code>{{ issue.path || "/" }}</code>
+                <strong>{{ issue.message }}</strong>
+                <span>{{ issue.suggestion }}</span>
+              </article>
+            </div>
+            <div
+              v-if="importPreview.bindings.length"
+              class="workflow-import-bindings"
+            >
+              <label
+                v-for="binding in importPreview.bindings"
+                :key="binding.ref"
+              >
+                <span
+                  >{{ binding.kind === "aiRoute" ? "AI 路由" : "聊天" }} ·
+                  {{ binding.name }}</span
+                >
+                <select
+                  v-model="importSelections[binding.ref]"
+                  @change="previewImport"
+                >
+                  <option value="">请选择绑定</option>
+                  <option
+                    v-for="candidate in binding.candidates"
+                    :key="candidate.id"
+                    :value="candidate.id"
+                  >
+                    {{ candidate.name
+                    }}{{
+                      candidate.capabilities.length
+                        ? ` · ${candidate.capabilities.join(", ")}`
+                        : ""
+                    }}
+                  </option>
+                </select>
+              </label>
+            </div>
+            <div v-if="importPreview.valid" class="workflow-import-commit">
+              <label
+                ><span>导入方式</span
+                ><select v-model="importMode">
+                  <option value="create">创建新工作流</option>
+                  <option value="new-version">添加到已有工作流</option>
+                </select></label
+              >
+              <label v-if="importMode === 'new-version'"
+                ><span>目标工作流</span
+                ><select v-model="importTargetWorkflowId">
+                  <option value="">请选择</option>
+                  <option
+                    v-for="workflow in workflows"
+                    :key="workflow.id"
+                    :value="workflow.id"
+                  >
+                    {{ workflow.name }}
+                  </option>
+                </select></label
+              >
+              <p>导入只创建候选版本，不会自动发布或启用。</p>
+              <button
+                class="button primary"
+                type="button"
+                :disabled="
+                  importBusy ||
+                  (importMode === 'new-version' && !importTargetWorkflowId)
+                "
+                @click="commitImport"
+              >
+                <Upload :size="16" />{{ importBusy ? "导入中…" : "确认导入" }}
+              </button>
+            </div>
+          </template>
+        </section>
+      </div>
       <section v-show="false" id="triggers" class="admin-panel">
         <div class="panel-head">
           <div>

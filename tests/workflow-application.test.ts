@@ -232,6 +232,103 @@ describe("workflow application", () => {
     expect(types).not.toContain("json-get");
   });
 
+  it("exports, previews, and imports a portable workflow as an unpublished candidate", async () => {
+    const source = await application.inject({
+      method: "POST",
+      url: "/api/v1/workflows",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: {
+        name: "Portable fictional flow",
+        definition: workflowDefinition,
+      },
+    });
+    const sourceVersion = source.json<{
+      data: { workflowId: string; version: number };
+    }>().data;
+    const exported = await application.inject({
+      method: "GET",
+      url: `/api/v1/workflows/${sourceVersion.workflowId}/versions/${sourceVersion.version}/export`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(exported.statusCode).toBe(200);
+    const manifest = exported.json<{ data: Record<string, unknown> }>().data;
+    expect(manifest).toMatchObject({
+      kind: "BubblePilotWorkflow",
+      apiVersion: "bubblepilot.io/v1",
+      metadata: { name: "Portable fictional flow" },
+    });
+
+    const preview = await application.inject({
+      method: "POST",
+      url: "/api/v1/workflows/import/preview",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: { manifest },
+    });
+    expect(preview.statusCode).toBe(200);
+    const previewData = preview.json<{
+      data: { valid: boolean; previewToken: string };
+    }>().data;
+    expect(previewData.valid).toBe(true);
+
+    const imported = await application.inject({
+      method: "POST",
+      url: "/api/v1/workflows/import",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: {
+        manifest,
+        previewToken: previewData.previewToken,
+        mode: "create",
+      },
+    });
+    expect(imported.statusCode).toBe(201);
+    const importedData = imported.json<{
+      data: { workflowId: string; workflowVersion: number; status: string };
+    }>().data;
+    expect(importedData.status).toBe("validated");
+    expect(importedData.workflowId).not.toBe(sourceVersion.workflowId);
+    const stored = workflows.workflows.get(importedData.workflowId);
+    expect(stored).toMatchObject({ status: "draft", publishedVersion: null });
+  });
+
+  it("rejects a workflow import when its preview token is tampered", async () => {
+    const manifest = {
+      kind: "BubblePilotWorkflow",
+      apiVersion: "bubblepilot.io/v1",
+      metadata: { name: "Tamper test", description: "" },
+      spec: {
+        maxSteps: 1,
+        startNodeId: "done",
+        nodes: [
+          {
+            id: "done",
+            type: "end",
+            version: 1,
+            config: { result: "succeeded" },
+          },
+        ],
+      },
+      bindings: { aiRoutes: {}, chats: {} },
+    };
+    const preview = await application.inject({
+      method: "POST",
+      url: "/api/v1/workflows/import/preview",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: { manifest },
+    });
+    const token = preview.json<{ data: { previewToken: string } }>().data
+      .previewToken;
+    const imported = await application.inject({
+      method: "POST",
+      url: "/api/v1/workflows/import",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: { manifest, previewToken: `${token}x` },
+    });
+    expect(imported.statusCode).toBe(409);
+    expect(imported.json()).toMatchObject({
+      error: { code: "WORKFLOW_IMPORT_PREVIEW_INVALID" },
+    });
+  });
+
   it("renders Context and upstream outputs into text", async () => {
     const renderDefinition = parseWorkflowDefinition({
       schemaVersion: "1",
