@@ -1,0 +1,263 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1330" viewBox="0 0 1920 1330" role="img" aria-labelledby="title desc">
+  <title id="title">BubblePilot 消息轮换压缩、工作流编排与 Prompt Cache 优化</title>
+  <desc id="desc">图示 BlueBubbles 入站消息如何标准化、归档、匹配触发器并通过节点注册表执行工作流；上下文如何在基础窗口和冗余缓冲内只追加，并在批次边界以旧摘要加最早一批消息生成新版摘要；以及稳定请求前缀、后置增强材料和固定会话缓存键如何提高 Provider Prompt Cache 命中率。</desc>
+
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.55" stop-color="#0c1728"/>
+      <stop offset="1" stop-color="#111d31"/>
+    </linearGradient>
+    <linearGradient id="stablePrefix" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1d5f80"/>
+      <stop offset="1" stop-color="#4354a5"/>
+    </linearGradient>
+    <linearGradient id="dynamicTail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#634b31"/>
+      <stop offset="1" stop-color="#6b3f56"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#8fa6c6" stroke-opacity=".055"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="170%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity=".24"/>
+    </filter>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" viewBox="0 0 10 10">
+      <path d="M0 0L10 5L0 10Z" fill="#57bce9"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" viewBox="0 0 10 10">
+      <path d="M0 0L10 5L0 10Z" fill="#45d6ac"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" viewBox="0 0 10 10">
+      <path d="M0 0L10 5L0 10Z" fill="#f6ae5f"/>
+    </marker>
+    <style>
+      text { font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
+      .section { fill:#eef5ff; font-size:24px; font-weight:700; }
+      .eyebrow { fill:#7589a7; font-size:14px; font-weight:700; letter-spacing:2px; }
+      .card-title { fill:#f7f9fd; font-size:18px; font-weight:700; }
+      .body { fill:#b7c5d9; font-size:14px; }
+      .small { fill:#8fa0b8; font-size:12px; }
+      .tiny { fill:#8192aa; font-size:11px; }
+      .code { font-family:"SFMono-Regular", Consolas, monospace; }
+      .chip { fill:#dcecff; font-size:12px; font-weight:700; }
+      .number { fill:#07111f; font-size:13px; font-weight:800; }
+      .line { fill:none; stroke:#57bce9; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1330" fill="url(#background)"/>
+  <rect width="1920" height="1330" fill="url(#grid)"/>
+  <circle cx="1770" cy="20" r="350" fill="#5868d8" opacity=".10"/>
+  <circle cx="110" cy="1260" r="310" fill="#18a985" opacity=".08"/>
+
+  <text x="64" y="64" fill="#f8fbff" font-size="36" font-weight="800">BubblePilot 消息轮换压缩与编排</text>
+  <text x="64" y="100" fill="#9aacc4" font-size="17">让上下文“周期内只追加、边界处再换代”，把动态变化推到 Prompt 尾部</text>
+  <g transform="translate(1505 51)">
+    <rect width="351" height="44" rx="22" fill="#14243a" stroke="#2a415f"/>
+    <circle cx="24" cy="22" r="6" fill="#45d6ac" filter="url(#glow)"/>
+    <text x="40" y="27" fill="#c5d6e9" font-size="13" font-weight="700">PostgreSQL 权威 · Provider 指标验真</text>
+  </g>
+
+  <!-- 01 · message orchestration -->
+  <text x="64" y="154" class="eyebrow">01 · MESSAGE ORCHESTRATION</text>
+  <text x="64" y="185" class="section">消息编排主链</text>
+
+  <g transform="translate(64 211)">
+    <path d="M205 86H244M450 86H489M695 86H734M940 86H979M1185 86H1224M1430 86H1469" class="line" marker-end="url(#arrowBlue)"/>
+
+    <g filter="url(#shadow)">
+      <rect width="205" height="172" rx="19" fill="#101e32" stroke="#263b58"/>
+      <circle cx="27" cy="28" r="14" fill="#57bce9"/><text x="27" y="33" text-anchor="middle" class="number">1</text>
+      <text x="50" y="34" class="card-title">Webhook</text>
+      <text x="20" y="75" class="body">BlueBubbles 新消息</text>
+      <text x="20" y="101" class="body">校验供应商 Payload</text>
+      <text x="20" y="139" class="small code">eventId = type:guid</text>
+    </g>
+
+    <g transform="translate(245)" filter="url(#shadow)">
+      <rect width="205" height="172" rx="19" fill="#101e32" stroke="#263b58"/>
+      <circle cx="27" cy="28" r="14" fill="#57bce9"/><text x="27" y="33" text-anchor="middle" class="number">2</text>
+      <text x="50" y="34" class="card-title">统一消息信封 v1</text>
+      <text x="20" y="75" class="body">Chat / Message / 附件</text>
+      <text x="20" y="101" class="body">发送者、时间与内容哈希</text>
+      <text x="20" y="139" class="small">业务层不依赖供应商结构</text>
+    </g>
+
+    <g transform="translate(490)" filter="url(#shadow)">
+      <rect width="205" height="172" rx="19" fill="#101e32" stroke="#263b58"/>
+      <circle cx="27" cy="28" r="14" fill="#57bce9"/><text x="27" y="33" text-anchor="middle" class="number">3</text>
+      <text x="50" y="34" class="card-title">归档与认领</text>
+      <text x="20" y="75" class="body">监听范围内才保存正文</text>
+      <text x="20" y="101" class="body">事务写入待评估状态</text>
+      <text x="20" y="139" class="small">重复 Webhook 可安全重投</text>
+    </g>
+
+    <g transform="translate(735)" filter="url(#shadow)">
+      <rect width="205" height="172" rx="19" fill="#101e32" stroke="#263b58"/>
+      <circle cx="27" cy="28" r="14" fill="#57bce9"/><text x="27" y="33" text-anchor="middle" class="number">4</text>
+      <text x="50" y="34" class="card-title">触发器匹配</text>
+      <text x="20" y="75" class="body">聊天 · 发送者 · 消息类型</text>
+      <text x="20" y="101" class="body">文本规则 · 时间窗口</text>
+      <text x="20" y="139" class="small">只匹配已发布且启用版本</text>
+    </g>
+
+    <g transform="translate(980)" filter="url(#shadow)">
+      <rect width="205" height="172" rx="19" fill="#101e32" stroke="#263b58"/>
+      <circle cx="27" cy="28" r="14" fill="#57bce9"/><text x="27" y="33" text-anchor="middle" class="number">5</text>
+      <text x="50" y="34" class="card-title">有界调度</text>
+      <text x="20" y="75" class="body">进程内并发门</text>
+      <text x="20" y="101" class="body">有界队列与执行 Claim</text>
+      <text x="20" y="133" class="small code">event + version</text>
+      <text x="20" y="151" class="small code">+ trigger</text>
+    </g>
+
+    <g transform="translate(1225)" filter="url(#shadow)">
+      <rect width="205" height="172" rx="19" fill="#101e32" stroke="#263b58"/>
+      <circle cx="27" cy="28" r="14" fill="#7c8cff"/><text x="27" y="33" text-anchor="middle" class="number">6</text>
+      <text x="50" y="34" class="card-title">节点编排</text>
+      <text x="20" y="75" class="body">注册表解析节点合同</text>
+      <text x="20" y="101" class="body code">type@version</text>
+      <text x="20" y="133" class="small">输出端口驱动后继节点</text>
+      <text x="20" y="151" class="small">成功 / 失败分支与有限重试</text>
+    </g>
+
+    <g transform="translate(1470)" filter="url(#shadow)">
+      <rect width="322" height="172" rx="19" fill="#10243a" stroke="#27586a"/>
+      <circle cx="27" cy="28" r="14" fill="#45d6ac"/><text x="27" y="33" text-anchor="middle" class="number">7</text>
+      <text x="50" y="34" class="card-title">回复与执行轨迹</text>
+      <text x="20" y="75" class="body">Reply 幂等键阻止重复出站</text>
+      <text x="20" y="101" class="body">attempt、耗时和错误均可解释</text>
+      <text x="20" y="139" class="small code">executionId + replyNodeId</text>
+    </g>
+  </g>
+
+  <!-- 02 · context rotation -->
+  <text x="64" y="440" class="eyebrow">02 · CONTEXT ROTATION &amp; COMPRESSION</text>
+  <text x="64" y="471" class="section">上下文轮换：周期内严格追加，批次边界才替换摘要</text>
+  <text x="1856" y="469" text-anchor="end" class="small">L = messageLimit · B = compressionBatchSize</text>
+
+  <g transform="translate(64 496)">
+    <rect width="1792" height="336" rx="22" fill="#0d192a" stroke="#233954"/>
+
+    <g transform="translate(24 22)">
+      <rect width="530" height="292" rx="17" fill="#101f33" stroke="#29405d"/>
+      <text x="22" y="31" class="chip">A · 稳定期</text>
+      <text x="22" y="62" class="card-title">原始窗口只在尾部追加</text>
+      <g transform="translate(22 84)">
+        <rect width="486" height="48" rx="10" fill="#183852"/>
+        <text x="18" y="30" class="body">摘要 v3 · coveredThroughIndex = k</text>
+        <g transform="translate(0 66)">
+          <rect width="60" height="44" rx="8" fill="#244b66"/><text x="30" y="27" text-anchor="middle" class="chip">m1</text>
+          <rect x="67" width="60" height="44" rx="8" fill="#244b66"/><text x="97" y="27" text-anchor="middle" class="chip">m2</text>
+          <rect x="134" width="60" height="44" rx="8" fill="#244b66"/><text x="164" y="27" text-anchor="middle" class="chip">…</text>
+          <rect x="201" width="60" height="44" rx="8" fill="#244b66"/><text x="231" y="27" text-anchor="middle" class="chip">mL</text>
+          <rect x="276" width="60" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="306" y="27" text-anchor="middle" class="chip">+1</text>
+          <rect x="343" width="60" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="373" y="27" text-anchor="middle" class="chip">…</text>
+          <rect x="410" width="76" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="448" y="27" text-anchor="middle" class="chip">B−1</text>
+        </g>
+        <path d="M276 126H486" fill="none" stroke="#f6ae5f" stroke-width="2"/>
+        <text x="381" y="148" text-anchor="middle" fill="#e7b876" font-size="11">冗余缓冲：允许暂时超过目标字符数</text>
+      </g>
+      <text x="22" y="267" class="small">窗口范围始终是 L … L+B−1；共同前缀持续增长</text>
+    </g>
+
+    <path d="M566 153H602" fill="none" stroke="#f6ae5f" stroke-width="3" marker-end="url(#arrowOrange)"/>
+    <text x="584" y="132" text-anchor="middle" fill="#e7b876" font-size="11">第 L+B 条</text>
+
+    <g transform="translate(624 22)">
+      <rect width="520" height="292" rx="17" fill="#101f33" stroke="#6f512d"/>
+      <text x="22" y="31" fill="#ffd49a" font-size="12" font-weight="700">B · 压缩边界</text>
+      <text x="22" y="62" class="card-title">旧摘要 + 最早 B 条 → 新摘要</text>
+      <g transform="translate(22 86)">
+        <rect width="178" height="48" rx="10" fill="#183852"/>
+        <text x="89" y="30" text-anchor="middle" class="body">摘要 v3</text>
+        <text x="199" y="31" fill="#f6ae5f" font-size="19" font-weight="800">＋</text>
+        <rect x="224" width="154" height="48" rx="10" fill="#4d4028"/>
+        <text x="301" y="30" text-anchor="middle" class="body">最早 B 条</text>
+        <path d="M395 24H447" fill="none" stroke="#f6ae5f" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
+        <rect y="72" width="476" height="56" rx="11" fill="#2e4051" stroke="#45d6ac"/>
+        <text x="238" y="106" text-anchor="middle" fill="#c7f7e7" font-size="14" font-weight="700">摘要 v4 · 新覆盖游标 k+B</text>
+      </g>
+      <text x="22" y="242" class="small">租约防并发重复压缩；仅模型成功且状态版本未变时原子提交</text>
+      <text x="22" y="267" class="small">失败 / busy / superseded：保留旧摘要，降级为有界近期历史</text>
+    </g>
+
+    <path d="M1156 153H1192" fill="none" stroke="#45d6ac" stroke-width="3" marker-end="url(#arrowGreen)"/>
+
+    <g transform="translate(1214 22)">
+      <rect width="530" height="292" rx="17" fill="#10233a" stroke="#27634f"/>
+      <text x="22" y="31" fill="#9ef0d5" font-size="12" font-weight="700">C · 新一轮稳定期</text>
+      <text x="22" y="62" class="card-title">回到基础窗口，再次只追加</text>
+      <g transform="translate(22 84)">
+        <rect width="486" height="48" rx="10" fill="#225147"/>
+        <text x="18" y="30" fill="#c7f7e7" font-size="14">摘要 v4 · 已覆盖被移出的 B 条</text>
+        <g transform="translate(0 66)">
+          <rect width="70" height="44" rx="8" fill="#244b66"/><text x="35" y="27" text-anchor="middle" class="chip">mB+1</text>
+          <rect x="77" width="70" height="44" rx="8" fill="#244b66"/><text x="112" y="27" text-anchor="middle" class="chip">mB+2</text>
+          <rect x="154" width="60" height="44" rx="8" fill="#244b66"/><text x="184" y="27" text-anchor="middle" class="chip">…</text>
+          <rect x="221" width="78" height="44" rx="8" fill="#244b66"/><text x="260" y="27" text-anchor="middle" class="chip">mL+B</text>
+          <rect x="318" width="168" height="44" rx="8" fill="#1d3a50" stroke="#47769a" stroke-dasharray="5 4"/>
+          <text x="402" y="27" text-anchor="middle" class="chip">下一条继续追加</text>
+        </g>
+      </g>
+      <text x="22" y="242" class="small">安全阈值：渲染上下文绝不超过 32,000 字符</text>
+      <text x="22" y="267" class="small">首次积压只建立一个近期周期游标，不追赶全部旧消息</text>
+    </g>
+  </g>
+
+  <!-- 03 · prompt cache -->
+  <text x="64" y="892" class="eyebrow">03 · PROMPT CACHE OPTIMIZATION</text>
+  <text x="64" y="923" class="section">缓存命中优化：最大化稳定前缀，把不可避免的变化集中到尾部</text>
+
+  <g transform="translate(64 948)">
+    <rect width="1792" height="292" rx="22" fill="#0d192a" stroke="#233954"/>
+    <g transform="translate(24 22)">
+      <text x="0" y="15" fill="#9ddcf7" font-size="13" font-weight="700">PROVIDER INPUT · 从左到右匹配前缀</text>
+      <g transform="translate(0 34)">
+        <rect width="1060" height="70" rx="13" fill="url(#stablePrefix)"/>
+        <text x="20" y="26" fill="#f3f8ff" font-size="12" font-weight="700">稳定前缀</text>
+        <text x="20" y="51" fill="#dcecff" font-size="14">输入协议 → Workflow System → 静态任务 → 摘要 → 独立历史消息块 → 当前消息</text>
+        <path d="M1076 35H1116" fill="none" stroke="#f6ae5f" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
+        <rect x="1132" width="612" height="70" rx="13" fill="url(#dynamicTail)"/>
+        <text x="1152" y="26" fill="#ffe3bd" font-size="12" font-weight="700">易变增强区 / 尾部</text>
+        <text x="1152" y="51" fill="#f5d6c0" font-size="14">成员映射 → 链接预览 → 历史图片 → 当前图片 → 资源诊断</text>
+      </g>
+
+      <g transform="translate(0 132)">
+        <rect width="540" height="112" rx="14" fill="#101f33" stroke="#29405d"/>
+        <circle cx="24" cy="24" r="8" fill="#57bce9"/>
+        <text x="44" y="29" class="card-title">稳定身份与会话分区</text>
+        <text x="20" y="59" class="body">Provider + Chat + Workflow + AI Node → 稳定哈希</text>
+        <text x="20" y="84" class="small code">X-Session-ID = prompt_cache_key</text>
+        <text x="20" y="102" class="small">仅在显式启用会话亲和时发送</text>
+
+        <rect x="560" width="540" height="112" rx="14" fill="#101f33" stroke="#29405d"/>
+        <circle cx="584" cy="24" r="8" fill="#7c8cff"/>
+        <text x="604" y="29" class="card-title">保持消息块不可变</text>
+        <text x="580" y="59" class="body">稳定 ID / sender_id / 正文 / 引用；不按窗口重编号</text>
+        <text x="580" y="84" class="small">成员、图片或预览变化只进入后置增强区</text>
+        <text x="580" y="102" class="small">因此不会改写已有历史文本前缀</text>
+
+        <rect x="1120" width="624" height="112" rx="14" fill="#10243a" stroke="#27634f"/>
+        <circle cx="1144" cy="24" r="8" fill="#45d6ac"/>
+        <text x="1164" y="29" class="card-title">观测真实命中，不靠猜</text>
+        <text x="1140" y="58" class="small code">cachedPromptTokens / cacheWritePromptTokens</text>
+        <text x="1140" y="78" class="small code">cacheMissPromptTokens</text>
+        <text x="1140" y="102" class="small">记录共同前缀与首个差异原因，但不保存正文</text>
+      </g>
+    </g>
+  </g>
+
+  <g transform="translate(64 1271)">
+    <rect width="1792" height="36" rx="18" fill="#15243a"/>
+    <circle cx="19" cy="18" r="5" fill="#f6ae5f"/>
+    <text x="34" y="23" fill="#c6d3e4" font-size="12">
+      注意：summaryStateCacheHit 仅表示 60 秒 / 500 项的进程内摘要状态 LRU 命中；PostgreSQL 才是摘要权威，Provider Prompt Cache 必须看 cached token。
+    </text>
+  </g>
+</svg>

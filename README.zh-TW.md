@@ -36,6 +36,12 @@
   <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 16" /></a>
 </p>
 
+<p align="center">
+  <a href="https://linux.do" target="_blank">
+    <img src="https://img.shields.io/badge/LINUX-DO-FFB003?style=for-the-badge&logo=linux&logoColor=white" alt="LINUX DO" />
+  </a>
+</p>
+
 BubblePilot 接收 BlueBubbles 的新訊息，只在你指定的聊天中保存內容、比對觸發條件並執行視覺化工作流程。工作流程可以讀取最近對話和圖片、呼叫一個或多個 OpenAI 相容服務、按需搜尋網頁，再把結果安全地回覆到原聊天。
 
 - **只處理你選擇的聊天**：未啟用監聽的聊天只保留發現所需的最小中繼資料，不歸檔正文。
@@ -56,9 +62,9 @@ BubblePilot 接收 BlueBubbles 的新訊息，只在你指定的聊天中保存�
 | 理解連結卡片     | 歸檔標題、摘要和網站名稱，讓 AI 使用卡片上下文但不宣稱已閱讀完整網頁      |
 | 理解聊天圖片     | 將目前圖片附件、連結卡片主圖和有限歷史圖片送入已驗證的原生多模態 Provider |
 | 編排訊息流程     | 在畫布中連接上下文、條件、變數、AI、回覆和結束節點                        |
-| 接入不同 AI      | 管理 OpenAI 相容 Provider 和路由，自動 Retry、Fallback 與恢復             |
+| 接入不同 AI      | 管理 OpenAI 相容 Provider、模型和路由，自動 Retry、Fallback 與恢復        |
 | 取得最新網頁資訊 | 使用 Provider 託管搜尋，或透過 Function Calling 呼叫自託管 SearXNG        |
-| 排查失敗         | 查看執行、節點、Provider Attempt、工具軌跡和出站狀態                      |
+| 排查失敗         | 查看執行、節點、Provider Attempt、工具軌跡和出站狀態，安全恢復死信        |
 
 聯網搜尋是可選功能。關閉後仍可使用訊息歸檔、一般工作流程和不聯網的 AI 回覆。
 
@@ -66,9 +72,13 @@ BubblePilot 接收 BlueBubbles 的新訊息，只在你指定的聊天中保存�
 
 ![BubblePilot 整體架構](doc/architecture-overview.svg)
 
-BlueBubbles 只負責收發 iMessage；BubblePilot 保存自己的監聽設定、歸檔、工作流程、執行和稽核事實。訊息會先標準化和去重，再進行比對，因此 Webhook 重投不會產生重複回覆。
+BlueBubbles 只負責收發 iMessage；BubblePilot 保存自己的監聽設定、歸檔、工作流程、執行和稽核事實。訊息進入後會先標準化和去重，再判斷監聽範圍、比對觸發器並鎖定工作流程版本，因此 Webhook 重投不會產生重複回覆。
 
 ![BubblePilot 訊息工作流程](doc/message-workflow-flow.svg)
+
+上下文摘要採用週期性輪換：視窗在壓縮邊界前只追加，到達邊界後再批次替換摘要；AI 請求同時保持穩定文字前綴，並把成員映射、連結預覽和圖片等易變材料放在尾部，以提高相容 Provider 的 Prompt Cache 命中率。
+
+[![BubblePilot 訊息輪換壓縮、工作流程編排與 Prompt Cache 最佳化](doc/message-context-orchestration-cache.svg)](doc/message-context-orchestration-cache.svg)
 
 ## 實際使用效果
 
@@ -81,6 +91,8 @@ BlueBubbles 只負責收發 iMessage；BubblePilot 保存自己的監聽設定�
 <p align="center">
   <a href="assets/preview/bubblepilot-multimodal-chat.jpg"><img src="assets/preview/bubblepilot-multimodal-chat.jpg" width="294" alt="BubblePilot 在 iMessage 中識別聊天圖片" /></a>
 </p>
+
+<p align="center">BubblePilot 在真實 iMessage 對話中識別圖片並自然回覆。</p>
 
 ## 10 分鐘完成首次設定
 
@@ -115,6 +127,7 @@ doc/部署與運維.md 和 .env.example，列出計畫和缺少資訊，確認�
 BlueBubbles：
 - Server URL：http://192.0.2.10:1234
 - 需要 REST API Password 時暫停，讓我在受控終端輸入
+- BlueBubbles Server 可以連線到 BubblePilot Webhook
 - 初始 Chat GUID 未知，先由第一條 Webhook 發現
 
 偏好：
@@ -225,7 +238,7 @@ https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_W
 4. 從另一帳號傳送測試訊息。若 `MONITORED_CHAT_IDS` 留空，第一條訊息只用來發現聊天，不保存正文。
 5. 回到 BubblePilot 的「訊息」頁，完成二次驗證並開啟該聊天的監聽，再傳送第二條測試訊息。
 
-反向代理必須關閉這條 Webhook 路徑的查詢字串存取日誌，避免 Secret 進入日誌。
+反向代理必須關閉這條 Webhook 路徑的查詢字串存取日誌，避免 Secret 進入日誌。更完整的網路與 BlueBubbles 設定請參閱[部署與維運](doc/部署与运维.md#连接-bluebubbles)。
 
 ### 6. 設定 AI Provider（可選）
 
@@ -246,12 +259,13 @@ API Key 會使用 `SETTINGS_ENCRYPTION_KEY` 加密保存到 PostgreSQL，之後�
 ```
 
 1. 在「訊息觸發器」選擇已監聽聊天，設定關鍵字或前綴，並開啟節點的啟用開關。
-2. 需要組合固定說明、目前事件與上游輸出時，加入「渲染文字」，並從範本編輯器插入允許的 Context 內容。
-3. 在「AI 對話」選擇 Provider 路由，設定提示詞、輸出上限和聯網策略。
-4. 將 `AI 對話.text` 連接到 `回覆訊息.text`，再連接控制流程。
-5. 保存並啟用工作流程，在目標聊天傳送符合條件的訊息，再到「執行」頁檢查結果。
+2. 如需識別群聊成員，到「訊息」頁為目標聊天歷史中出現的 sender ID 設定本名和暱稱；「載入聊天上下文」和「AI 對話」會自動使用目前視窗涉及的映射。
+3. 需要組合固定說明、目前訊息或上游結果時，加入「渲染文字」，從範本編輯器插入允許的 Context 內容，並把 `text` 輸出連接到下游。
+4. 在「AI 對話」選擇 Provider 路由，設定提示詞、輸出上限和聯網策略。
+5. 將 `AI 對話.text` 連接到 `回覆訊息.text`，再連接各節點的成功出口。
+6. 保存工作流程並點擊頂部「啟用」，在目標聊天傳送符合條件的訊息，再到「執行」頁檢查每個節點和最終回覆狀態。
 
-「渲染文字」支援 `{{context.event.message.text}}`、`{{context.event.message.senderId}}` 與 `{{context.outputs.<節點ID>.<輸出端口>}}` 等受控引用。
+「渲染文字」支援 `{{context.event.message.text}}`、`{{context.event.message.senderId}}`、`{{context.history.participants}}` 與 `{{context.outputs.<節點ID>.<輸出端口>}}` 等受控引用，適合組合固定背景與動態訊息；成員識別通常不需要手動渲染。
 
 固定回覆只需使用「訊息觸發器 → 回覆訊息 → 結束」，不必設定 AI。
 
@@ -263,7 +277,19 @@ API Key 會使用 `SETTINGS_ENCRYPTION_KEY` 加密保存到 PostgreSQL，之後�
 - 已確認聊天監聽範圍、訊息保留期和 AI 上下文範圍。
 - 升級前備份 PostgreSQL，正式環境使用精確映像標籤。
 
-完整說明請參閱[部署與維運](doc/部署与运维.md)、[技術設計](doc/技术设计.md)、[事件與工作流程設計](doc/事件与工作流设计.md)和[介面與設定契約](doc/接口与配置契约.md)。
+備份、還原、升級、回滾和故障診斷命令請參閱[部署與維運](doc/部署与运维.md)。
+
+## 文件
+
+| 文件                                          | 適合何時閱讀                               |
+| --------------------------------------------- | ------------------------------------------ |
+| [文件中心](doc/README.md)                     | 查看全部文件及其權威範圍                   |
+| [產品與範圍](doc/产品与范围.md)               | 了解目標使用者、已完成範圍、驗收與後續方向 |
+| [部署與維運](doc/部署与运维.md)               | 首次設定、生產部署、備份、升級與排障       |
+| [技術設計](doc/技术设计.md)                   | 了解架構、資料邊界、安全與模組職責         |
+| [事件與工作流程設計](doc/事件与工作流设计.md) | 了解觸發、節點、AI 路由、冪等與恢復語義    |
+| [介面與設定契約](doc/接口与配置契约.md)       | 查詢 API、權限、環境變數與機器契約         |
+| [開發與發布](doc/开发与发布.md)               | 本機開發、驗證、遷移、分支與發布流程       |
 
 ## 授權條款
 

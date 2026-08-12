@@ -76,6 +76,10 @@ BlueBubbles 只负责收发 iMessage；BubblePilot 保存自己的监听配置�
 
 ![BubblePilot 消息到回复流程](doc/message-workflow-flow.svg)
 
+上下文摘要采用周期性轮换：窗口在压缩边界前只追加，达到边界后再批量替换摘要；AI 请求同时保持稳定文本前缀，并把成员映射、链接预览和图片等易变材料放在尾部，以提高兼容 Provider 的 Prompt Cache 命中率。
+
+[![BubblePilot 消息轮换压缩、工作流编排与 Prompt Cache 优化](doc/message-context-orchestration-cache.svg)](doc/message-context-orchestration-cache.svg)
+
 ## 实际使用效果
 
 左侧展示可视化工作流编排，右侧展示节点、AI Provider、联网搜索和出站回复的完整执行轨迹。点击图片可查看原始清晰度。
