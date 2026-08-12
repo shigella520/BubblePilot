@@ -12,7 +12,9 @@ import "uplot/dist/uPlot.min.css";
 import {
   activeUsageProviders,
   hasMetricData,
+  metricValue,
   usageChartData,
+  usageTooltipPosition,
   type UsageMetric,
   type UsagePoint,
   type UsageProvider,
@@ -25,7 +27,10 @@ const props = defineProps<{
 }>();
 
 const host = ref<HTMLElement | null>(null);
+const tooltip = ref<HTMLElement | null>(null);
 const hoverIndex = ref<number | null>(null);
+const tooltipAnchor = ref<{ x: number; y: number } | null>(null);
+const tooltipPosition = ref<{ left: number; top: number } | null>(null);
 let plot: uPlot | null = null;
 let observer: ResizeObserver | null = null;
 
@@ -68,9 +73,69 @@ function chartData(): AlignedData {
   ) as AlignedData;
 }
 
+function positionTooltip() {
+  const hostElement = host.value;
+  const tooltipElement = tooltip.value;
+  const anchor = tooltipAnchor.value;
+  if (hostElement === null || tooltipElement === null || anchor === null) {
+    tooltipPosition.value = null;
+    return;
+  }
+  tooltipPosition.value = usageTooltipPosition({
+    anchorX: anchor.x,
+    anchorY: anchor.y,
+    tooltipWidth: tooltipElement.offsetWidth,
+    tooltipHeight: tooltipElement.offsetHeight,
+    boundaryWidth: hostElement.clientWidth,
+    boundaryHeight: hostElement.clientHeight,
+  });
+}
+
+function updateHover(current: uPlot) {
+  const index = current.cursor.idx ?? null;
+  hoverIndex.value = index;
+  if (index === null) {
+    tooltipAnchor.value = null;
+    tooltipPosition.value = null;
+    return;
+  }
+  const point = props.points[index];
+  if (point === undefined) {
+    tooltipAnchor.value = null;
+    tooltipPosition.value = null;
+    return;
+  }
+  const values = visibleProviders.value.flatMap((provider) => {
+    const metrics = point.providers.find(
+      (item) => item.providerId === provider.id,
+    );
+    if (metrics === undefined || !hasMetricData(metrics, props.metric)) {
+      return [];
+    }
+    const value = metricValue(metrics, props.metric);
+    return value === null ? [] : [value];
+  });
+  if (values.length === 0) {
+    tooltipAnchor.value = null;
+    tooltipPosition.value = null;
+    return;
+  }
+  tooltipAnchor.value = {
+    x:
+      current.over.offsetLeft +
+      current.valToPos(Date.parse(point.bucketStart) / 1_000, "x"),
+    y: current.over.offsetTop + current.valToPos(Math.max(...values), "y"),
+  };
+  tooltipPosition.value = null;
+  void nextTick(positionTooltip);
+}
+
 function destroyPlot() {
   plot?.destroy();
   plot = null;
+  hoverIndex.value = null;
+  tooltipAnchor.value = null;
+  tooltipPosition.value = null;
 }
 
 function renderPlot() {
@@ -90,7 +155,7 @@ function renderPlot() {
       hooks: {
         setCursor: [
           (current) => {
-            hoverIndex.value = current.cursor.idx ?? null;
+            updateHover(current);
           },
         ],
       },
@@ -141,6 +206,8 @@ onMounted(() => {
   observer = new ResizeObserver(() => {
     const element = host.value;
     if (plot !== null && element !== null) {
+      tooltipAnchor.value = null;
+      tooltipPosition.value = null;
       plot.setSize({
         width: Math.max(1, Math.floor(element.clientWidth)),
         height: 230,
@@ -178,7 +245,16 @@ onBeforeUnmount(() => {
         <i aria-hidden="true"></i>{{ provider.name }}
       </span>
     </div>
-    <div v-if="hoverPoint" class="ai-usage-hover-details">
+    <div
+      v-if="hoverPoint && tooltipAnchor"
+      ref="tooltip"
+      class="ai-usage-hover-details"
+      :class="{ 'is-positioned': tooltipPosition !== null }"
+      :style="{
+        left: `${tooltipPosition?.left ?? tooltipAnchor.x}px`,
+        top: `${tooltipPosition?.top ?? tooltipAnchor.y}px`,
+      }"
+    >
       <time>{{ new Date(hoverPoint.bucketStart).toLocaleString() }}</time>
       <span
         v-for="provider in hoverProviders"
@@ -218,6 +294,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .ai-usage-chart-shell {
+  position: relative;
   width: 100%;
   min-width: 0;
   overflow: hidden;
@@ -253,13 +330,27 @@ onBeforeUnmount(() => {
   border-radius: 3px;
 }
 .ai-usage-hover-details {
+  position: absolute;
+  z-index: 4;
   display: grid;
   gap: 5px;
-  min-height: 24px;
-  margin-top: 8px;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  padding: 9px 11px;
+  visibility: hidden;
+  overflow: hidden;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: 10px;
+  background: var(--bubblepilot-surface);
+  box-shadow: 0 10px 28px rgba(31, 35, 41, 0.16);
   color: var(--bubblepilot-muted);
   font-size: 10px;
   line-height: 1.5;
+  pointer-events: none;
+}
+
+.ai-usage-hover-details.is-positioned {
+  visibility: visible;
 }
 
 .ai-usage-hover-details time {

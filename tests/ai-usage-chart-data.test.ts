@@ -3,6 +3,7 @@ import {
   activeUsageProviders,
   hasMetricData,
   usageChartData,
+  usageTooltipPosition,
   type UsageMetrics,
   type UsagePoint,
 } from "../apps/web/src/components/ai-usage-chart-data.js";
@@ -72,5 +73,28 @@ describe("AI usage chart data", () => {
       [1786406400, 1786407300],
       [null, 0.5],
     ]);
+  });
+
+  it("keeps a floating tooltip inside the chart and flips around its point", () => {
+    expect(
+      usageTooltipPosition({
+        anchorX: 40,
+        anchorY: 30,
+        tooltipWidth: 120,
+        tooltipHeight: 70,
+        boundaryWidth: 400,
+        boundaryHeight: 240,
+      }),
+    ).toEqual({ left: 50, top: 40 });
+    expect(
+      usageTooltipPosition({
+        anchorX: 380,
+        anchorY: 220,
+        tooltipWidth: 120,
+        tooltipHeight: 70,
+        boundaryWidth: 400,
+        boundaryHeight: 240,
+      }),
+    ).toEqual({ left: 250, top: 140 });
   });
 });

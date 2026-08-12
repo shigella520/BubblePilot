@@ -2,7 +2,6 @@
 import {
   Bot,
   Boxes,
-  Code2,
   LayoutDashboard,
   LogOut,
   MessagesSquare,
@@ -15,6 +14,7 @@ import { useRouter } from "vue-router";
 import { errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
 import DismissibleMessage from "./DismissibleMessage.vue";
+import GithubIcon from "./GithubIcon.vue";
 
 const session = useSessionStore();
 const router = useRouter();
@@ -58,12 +58,12 @@ async function logout() {
         {{ session.sensitiveActive ? "敏感授权有效" : "管理会话有效" }}
       </span>
       <a
-        class="icon-button"
+        class="icon-button github-icon"
         href="https://github.com/shigella520/BubblePilot"
         target="_blank"
         rel="noreferrer"
         aria-label="GitHub"
-        ><Code2 :size="18"
+        ><GithubIcon
       /></a>
       <button
         class="icon-button"

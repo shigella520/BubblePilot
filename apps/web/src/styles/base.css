@@ -220,6 +220,10 @@ a {
   transform: translateY(-1px);
   box-shadow: 0 10px 22px rgba(16, 19, 23, 0.09);
 }
+.github-icon svg {
+  width: 19px;
+  height: 19px;
+}
 .icon-button:disabled,
 .button:disabled,
 .switch-button:disabled {
