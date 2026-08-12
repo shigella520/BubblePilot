@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 
 import { sha256 } from "../../app/canonical-json.js";
+import { formatContextTimestamp } from "./context-time.js";
 import type { AiRoutingService } from "../ai/ai-routing-service.js";
 import type { AiCallDiagnostics } from "../ai/ai-types.js";
 import type { ContextMessage } from "../archive/archive-repository.js";
@@ -159,13 +160,18 @@ export interface ConversationContextLoadInput {
   characterLimit: number;
   compressionBatchSize: number;
   includeFromMe: boolean;
+  timeZone: string;
 }
 
-export function conversationContextProfileHash(includeFromMe: boolean): string {
+export function conversationContextProfileHash(
+  includeFromMe: boolean,
+  timeZone = "UTC",
+): string {
   return sha256(
     JSON.stringify({
       contract: "conversation-summary-v1",
       includeFromMe,
+      timeZone,
     }),
   );
 }
@@ -313,7 +319,10 @@ export class ConversationContextService {
   async load(
     input: ConversationContextLoadInput,
   ): Promise<ConversationContextResult> {
-    const profileHash = conversationContextProfileHash(input.includeFromMe);
+    const profileHash = conversationContextProfileHash(
+      input.includeFromMe,
+      input.timeZone,
+    );
     const cacheKey = conversationContextCacheKey({
       provider: input.provider,
       providerChatId: input.providerChatId,
@@ -387,7 +396,11 @@ export class ConversationContextService {
             executionId: input.executionId,
             nodeId: input.nodeId,
             routeId: input.routeId,
-            messages: this.compressionPrompt(claim.state.summary, batch),
+            messages: this.compressionPrompt(
+              claim.state.summary,
+              batch,
+              input.timeZone,
+            ),
             maxOutputTokens: Math.min(
               1_024,
               Math.max(64, Math.ceil(summaryCharacterLimit / 4)),
@@ -812,11 +825,12 @@ export class ConversationContextService {
   private compressionPrompt(
     previousSummary: string,
     messages: readonly IndexedContextMessage[],
+    timeZone: string,
   ) {
     const transcript = messages
       .map(
         (message) =>
-          `[${message.sentAt}] [sender=${message.isFromMe ? "Bot" : (message.senderId ?? "unknown")}] ${message.body}`,
+          `[${formatContextTimestamp(message.sentAt, timeZone)}] [sender=${message.isFromMe ? "Bot" : (message.senderId ?? "unknown")}] ${message.body}`,
       )
       .join("\n");
     return [

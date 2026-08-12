@@ -124,6 +124,23 @@ describe("conversation context summary contract", () => {
         }),
       ]).size,
     ).toBe(5);
+    expect(conversationContextProfileHash(true, "UTC")).not.toBe(
+      conversationContextProfileHash(true, "Asia/Shanghai"),
+    );
+  });
+
+  it("renders history timestamps in the execution time zone", () => {
+    const [message] = conversationHistoryMessages(
+      null,
+      [contextMessage("1")],
+      {},
+      [],
+      "Asia/Shanghai",
+    );
+    expect(message?.content).toContain(
+      "[2026-08-10 08:00:01 GMT+08:00 [Asia/Shanghai]]",
+    );
+    expect(message?.content).not.toContain("2026-08-10T00:00:01.000Z");
   });
 
   it("keeps the raw window append-only until the compression boundary", () => {

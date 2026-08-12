@@ -24,6 +24,52 @@ export interface UsageProvider {
 
 export type UsageMetric = "totalTokens" | "requestCount" | "cacheHitRate";
 
+export interface UsageTooltipPosition {
+  left: number;
+  top: number;
+}
+
+export function usageTooltipPosition(input: {
+  anchorX: number;
+  anchorY: number;
+  tooltipWidth: number;
+  tooltipHeight: number;
+  boundaryWidth: number;
+  boundaryHeight: number;
+  gap?: number;
+  padding?: number;
+}): UsageTooltipPosition {
+  const gap = input.gap ?? 10;
+  const padding = input.padding ?? 8;
+  const maximumLeft = Math.max(
+    padding,
+    input.boundaryWidth - input.tooltipWidth - padding,
+  );
+  const maximumTop = Math.max(
+    padding,
+    input.boundaryHeight - input.tooltipHeight - padding,
+  );
+  const right = input.anchorX + gap;
+  const left = input.anchorX - input.tooltipWidth - gap;
+  const above = input.anchorY - input.tooltipHeight - gap;
+  const below = input.anchorY + gap;
+  return {
+    left: Math.min(
+      maximumLeft,
+      Math.max(
+        padding,
+        right + input.tooltipWidth <= input.boundaryWidth - padding
+          ? right
+          : left,
+      ),
+    ),
+    top: Math.min(
+      maximumTop,
+      Math.max(padding, above >= padding ? above : below),
+    ),
+  };
+}
+
 export function metricValue(
   metrics: UsageMetrics,
   metric: UsageMetric,

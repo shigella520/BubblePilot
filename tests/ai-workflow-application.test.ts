@@ -69,32 +69,29 @@ class CapturingAiClient implements AiClient {
   private readonly delegate: OpenAiCompatibleClient;
 
   constructor(secrets: EnvironmentSecretResolver) {
-    this.delegate = new OpenAiCompatibleClient(
-      secrets,
-      () =>
-        Promise.resolve(
-          new Response(
-            JSON.stringify({
-              choices: [
-                {
-                  finish_reason: "stop",
-                  message: { content: "Fictional AI answer" },
-                },
-              ],
-              usage: {
-                prompt_tokens: 120,
-                completion_tokens: 8,
-                total_tokens: 128,
-                prompt_tokens_details: { cached_tokens: 64 },
+    this.delegate = new OpenAiCompatibleClient(secrets, () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: "Fictional AI answer" },
               },
-            }),
-            {
-              status: 200,
-              headers: { "content-type": "application/json" },
+            ],
+            usage: {
+              prompt_tokens: 120,
+              completion_tokens: 8,
+              total_tokens: 128,
+              prompt_tokens_details: { cached_tokens: 64 },
             },
-          ),
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
         ),
-      true,
+      ),
     );
   }
 
@@ -184,6 +181,7 @@ describe("AI workflow", () => {
         archive,
         aiRouting: routing,
       }),
+      { timeZone: "Asia/Shanghai" },
     );
     application = buildApplication(config, archive, {
       logger: false,
@@ -470,17 +468,17 @@ describe("AI workflow", () => {
       {
         role: "user",
         content:
-          '<chat_history trust="untrusted_chat_history">\n[2026-08-29T10:40:00.000Z] [发送者: 林一（昵称：队长；ID：fictional-user@example.test）] Earlier fictional context\n<link_previews trust="untrusted_external_metadata">\n[{"url":"https://public.example.test/article","title":"Fictional article","summary":"Fictional summary","siteName":"Example Test"}]\n</link_previews>\n</chat_history>',
+          '<chat_history trust="untrusted_chat_history">\n[2026-08-29 18:40:00 GMT+08:00 [Asia/Shanghai]] [发送者: 林一（昵称：队长；ID：fictional-user@example.test）] Earlier fictional context\n<link_previews trust="untrusted_external_metadata">\n[{"url":"https://public.example.test/article","title":"Fictional article","summary":"Fictional summary","siteName":"Example Test"}]\n</link_previews>\n</chat_history>',
       },
       {
         role: "assistant",
         content:
-          '<chat_history trust="untrusted_chat_history">\n[2026-08-29T10:40:00.000Z] [发送者: Bot] Earlier fictional Bot reply\n</chat_history>',
+          '<chat_history trust="untrusted_chat_history">\n[2026-08-29 18:40:00 GMT+08:00 [Asia/Shanghai]] [发送者: Bot] Earlier fictional Bot reply\n</chat_history>',
       },
       {
         role: "user",
         content:
-          '<chat_history trust="untrusted_chat_history">\n[2026-08-29T10:40:00.000Z] [发送者: 周二（昵称：二号；ID：another-user@example.test）] Another participant context\n</chat_history>',
+          '<chat_history trust="untrusted_chat_history">\n[2026-08-29 18:40:00 GMT+08:00 [Asia/Shanghai]] [发送者: 周二（昵称：二号；ID：another-user@example.test）] Another participant context\n</chat_history>',
       },
       {
         role: "user",
@@ -490,7 +488,7 @@ describe("AI workflow", () => {
       {
         role: "user",
         content:
-          '<chat_history trust="untrusted_chat_history">\n[2026-08-29T10:40:00.000Z] [发送者: 林一（昵称：队长；ID：fictional-user@example.test）] /ask what happened?\n</chat_history>',
+          '<chat_history trust="untrusted_chat_history">\n[2026-08-29 18:40:00 GMT+08:00 [Asia/Shanghai]] [发送者: 林一（昵称：队长；ID：fictional-user@example.test）] /ask what happened?\n</chat_history>',
       },
     ]);
     expect(aiClient.requests[1]?.messages).toEqual([

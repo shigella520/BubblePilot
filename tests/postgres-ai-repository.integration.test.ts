@@ -239,6 +239,8 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
           sharedPrefixItemCount: 1,
           configurationMatchesPrevious: true,
           previousRequestIsExactPrefix: false,
+          cacheKeyHash: "cache-key-hash-fictional",
+          cacheKeyMatchesPrevious: true,
           divergenceIndex: 1,
           items: [
             {
@@ -491,5 +493,26 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         current.get(backup.value.id)?.version ?? -1,
       ),
     ).resolves.toMatchObject({ status: "ok" });
+
+    const usageAfterProviderDeletion = await repository.getUsage({
+      hours: 1,
+      timeZone: "Asia/Shanghai",
+      now: new Date("2026-08-10T01:00:00.000Z"),
+    });
+    for (const deletedProviderId of [primary.value.id, backup.value.id]) {
+      expect(usageAfterProviderDeletion.providers).not.toContainEqual(
+        expect.objectContaining({ id: deletedProviderId }),
+      );
+      expect(usageAfterProviderDeletion.periods).not.toContainEqual(
+        expect.objectContaining({ providerId: deletedProviderId }),
+      );
+      expect(
+        usageAfterProviderDeletion.series.some((point) =>
+          point.providers.some(
+            (provider) => provider.providerId === deletedProviderId,
+          ),
+        ),
+      ).toBe(false);
+    }
   });
 });

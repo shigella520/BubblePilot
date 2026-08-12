@@ -19,11 +19,13 @@ import type { WorkflowNode } from "./workflow-definition.js";
 import { WorkflowExecutionError } from "./workflow-errors.js";
 import type { WorkflowRepository } from "./workflow-repository.js";
 import type { ConversationContextService } from "./conversation-context-service.js";
+import { formatContextTimestamp } from "./context-time.js";
 
 export interface NodeExecutionContext {
   executionId: string;
   workflowId: string;
   correlationId: string;
+  timeZone: string;
   envelope: MessageEnvelope;
   variables: Record<string, string>;
   history: ContextMessage[];
@@ -181,7 +183,10 @@ function resolveContextPath(
     case "context.event.message.providerMessageId":
       return context.envelope.message.providerMessageId;
     case "context.event.message.sentAt":
-      return context.envelope.message.sentAt;
+      return formatContextTimestamp(
+        context.envelope.message.sentAt,
+        context.timeZone,
+      );
     case "context.event.message.contentType":
       return context.envelope.message.contentType;
     case "context.event.message.isFromMe":
@@ -215,7 +220,10 @@ function resolveContextPath(
     case "context.event.chat.displayName":
       return context.envelope.chat.displayName;
     case "context.history.messages":
-      return context.history;
+      return context.history.map((message) => ({
+        ...message,
+        sentAt: formatContextTimestamp(message.sentAt, context.timeZone),
+      }));
     case "context.history.count":
       return context.history.length;
     case "context.history.participants":
@@ -429,6 +437,7 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             characterLimit: node.config.characterLimit,
             compressionBatchSize: node.config.compressionBatchSize ?? 10,
             includeFromMe: node.config.includeFromMe,
+            timeZone: context.timeZone,
           })
         : undefined;
       if (summaryEnabled && summarized === undefined) {
@@ -571,13 +580,14 @@ function promptIdentityValue(value: string): string {
 function conversationMessageContent(
   message: ContextMessage,
   identities: Readonly<Record<string, ChatParticipantIdentity>>,
+  timeZone: string,
 ): string {
   const sender = message.isFromMe
     ? "Bot"
     : participantLabel(message.senderId, identities);
   return [
     '<chat_history trust="untrusted_chat_history">',
-    `[${message.sentAt}] [发送者: ${sender}] ${message.body}`,
+    `[${formatContextTimestamp(message.sentAt, timeZone)}] [发送者: ${sender}] ${message.body}`,
     linkPreviewPrompt(message.linkPreview),
     "</chat_history>",
   ]
@@ -615,6 +625,7 @@ export function conversationHistoryMessages(
   history: readonly ContextMessage[],
   identities: Readonly<Record<string, ChatParticipantIdentity>>,
   imageItems: readonly PreparedImageInputItem[] = [],
+  timeZone = "UTC",
 ): readonly AiChatMessage[] {
   const imagePartsByMessageId = new Map<string, AiImageContentPart[]>();
   for (const item of imageItems) {
@@ -641,7 +652,7 @@ export function conversationHistoryMessages(
       return [
         {
           role: message.isFromMe ? ("assistant" as const) : ("user" as const),
-          content: conversationMessageContent(message, identities),
+          content: conversationMessageContent(message, identities, timeZone),
         },
         ...(parts.length === 0 ? [] : [imageMessage(parts)]),
       ];
@@ -850,6 +861,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
           history,
           context.participantIdentities,
           historyImageItems,
+          context.timeZone,
         ),
       );
     }
@@ -880,6 +892,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
           content: conversationMessageContent(
             current,
             context.participantIdentities,
+            context.timeZone,
           ),
         });
         if (currentImageParts.length > 0) {

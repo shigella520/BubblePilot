@@ -29,23 +29,6 @@ describe("loadConfig", () => {
     expect(config.adminRateLimitMax).toBe(600);
     expect(config.sessionCookieSecure).toBe("auto");
     expect(config.searxngLanguage).toBe("zh-CN");
-    expect(config.aiRequestTraceEnabled).toBe(false);
-  });
-
-  it("supports temporary AI request structure tracing", () => {
-    const config = loadConfig({
-      DATABASE_URL: "postgresql://example.test/bubblepilot",
-      API_ACCESS_TOKEN: "a".repeat(32),
-      APP_LOGIN_PASSWORD_HASH:
-        "scrypt$16384$8$1$fictional-salt$fictional-password-key",
-      SENSITIVE_OPERATION_PASSWORD_HASH:
-        "scrypt$16384$8$1$fictional-salt$fictional-sensitive-key",
-      BLUEBUBBLES_WEBHOOK_SECRET: "b".repeat(32),
-      BLUEBUBBLES_SERVER_URL: "https://bluebubbles.example.test",
-      BLUEBUBBLES_ACCESS_TOKEN: "fictional-bluebubbles-token",
-      AI_REQUEST_TRACE_ENABLED: "true",
-    });
-    expect(config.aiRequestTraceEnabled).toBe(true);
   });
 
   it("supports explicit session cookie security modes", () => {

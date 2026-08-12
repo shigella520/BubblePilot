@@ -1212,6 +1212,7 @@ export class PostgresAiRepository implements AiRepository {
            ON a.provider_id = p.id
           AND a.created_at >= periods.starts_at
           AND a.created_at <= $1::timestamptz
+         WHERE p.deleted_at IS NULL
          GROUP BY p.id, p.name, p.sort_order, periods.period
          ORDER BY p.sort_order, p.id,
            CASE periods.period
@@ -1274,6 +1275,7 @@ export class PostgresAiRepository implements AiRepository {
           AND a.created_at >= buckets.bucket_start
           AND a.created_at < buckets.bucket_start + buckets.bucket_width
           AND a.created_at <= $1::timestamptz
+         WHERE p.deleted_at IS NULL
          GROUP BY buckets.bucket_start, p.id, p.name, p.sort_order
          ORDER BY buckets.bucket_start, p.sort_order, p.id`,
         [input.now, input.hours, bucketMinutes],

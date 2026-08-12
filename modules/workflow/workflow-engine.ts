@@ -18,6 +18,7 @@ import type {
   WorkflowExecutionRecord,
   WorkflowRepository,
 } from "./workflow-repository.js";
+import { runtimeTimeZone } from "./context-time.js";
 
 export interface AutomationResult {
   executionIds: readonly string[];
@@ -54,6 +55,7 @@ function delay(milliseconds: number): Promise<void> {
 
 export class WorkflowEngine implements MessageAutomation {
   private readonly gate: BoundedExecutionGate;
+  private readonly timeZone: string;
 
   constructor(
     private readonly repository: WorkflowRepository,
@@ -62,6 +64,7 @@ export class WorkflowEngine implements MessageAutomation {
       maxConcurrency?: number;
       queueCapacity?: number;
       queueWaitMs?: number;
+      timeZone?: string;
     } = {},
   ) {
     this.gate = new BoundedExecutionGate(
@@ -69,6 +72,7 @@ export class WorkflowEngine implements MessageAutomation {
       options.queueCapacity ?? 64,
       options.queueWaitMs ?? 30_000,
     );
+    this.timeZone = options.timeZone ?? runtimeTimeZone();
   }
 
   async handleMessage(envelope: MessageEnvelope): Promise<AutomationResult> {
@@ -143,6 +147,7 @@ export class WorkflowEngine implements MessageAutomation {
     } | null = null;
     const participantIdentities = {};
     const outputs: Record<string, Record<string, unknown>> = {};
+    const timeZone = trigger.conditions.timeWindow?.timeZone ?? this.timeZone;
     let currentNodeId: string | null = definition.startNodeId;
     let steps = 0;
 
@@ -205,6 +210,7 @@ export class WorkflowEngine implements MessageAutomation {
             executionId: execution.id,
             workflowId: execution.workflowId,
             correlationId: execution.correlationId,
+            timeZone,
             envelope,
             variables,
             history,

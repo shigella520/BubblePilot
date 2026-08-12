@@ -150,6 +150,7 @@ interface ParsedResponse {
 interface PreviousPromptTrace {
   requestHash: string;
   configurationHash: string;
+  cacheKeyHash: string | null;
   itemHashes: readonly string[];
 }
 
@@ -613,7 +614,6 @@ export class OpenAiCompatibleClient implements AiClient {
   constructor(
     private readonly secrets: SecretResolver,
     fetchImplementation?: typeof fetch,
-    private readonly promptTraceEnabled = false,
   ) {
     this.fetchImplementation = fetchImplementation ?? fetch;
   }
@@ -825,7 +825,7 @@ export class OpenAiCompatibleClient implements AiClient {
     payload: Readonly<Record<string, unknown>>,
     requestHash: string,
   ): AiRequestTrace | null {
-    if (!this.promptTraceEnabled || request.promptTraceKey === undefined) {
+    if (request.promptTraceKey === undefined) {
       return null;
     }
     const itemsValue =
@@ -847,6 +847,10 @@ export class OpenAiCompatibleClient implements AiClient {
       previous === undefined
         ? null
         : previous.configurationHash === configurationHash;
+    const cacheKeyHash =
+      request.sessionId === undefined ? null : sha256(request.sessionId);
+    const cacheKeyMatchesPrevious =
+      previous === undefined ? null : previous.cacheKeyHash === cacheKeyHash;
     const previousRequestIsExactPrefix =
       previous === undefined || sharedPrefixItemCount === null
         ? null
@@ -862,6 +866,8 @@ export class OpenAiCompatibleClient implements AiClient {
       sharedPrefixItemCount,
       configurationMatchesPrevious,
       previousRequestIsExactPrefix,
+      cacheKeyHash,
+      cacheKeyMatchesPrevious,
       divergenceIndex:
         previous === undefined ||
         sharedPrefixItemCount === previous.itemHashes.length
@@ -872,6 +878,7 @@ export class OpenAiCompatibleClient implements AiClient {
     this.promptTraceHistory.set(historyKey, {
       requestHash,
       configurationHash,
+      cacheKeyHash,
       itemHashes,
     });
     if (this.promptTraceHistory.size > 1_024) {
