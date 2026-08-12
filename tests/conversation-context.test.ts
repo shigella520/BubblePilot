@@ -264,10 +264,11 @@ describe("conversation context summary contract", () => {
     ]);
   });
 
-  it("keeps historical images beside their owning message across appended turns", () => {
+  it("keeps historical text stable while images move to a trailing attachment section", () => {
     const imageItems: PreparedImageInputItem[] = [
       {
         providerMessageId: "1",
+        reference: "message-test:attachment:1",
         part: {
           type: "image",
           dataUrl: "data:image/png;base64,ZmFrZS1pbWFnZQ==",
@@ -302,22 +303,16 @@ describe("conversation context summary contract", () => {
         contextMessage("5"),
       ],
       {},
-      imageItems,
+      [],
     );
 
     expect(next.slice(0, previous.length)).toEqual(previous);
     expect(third.slice(0, next.length)).toEqual(next);
-    expect(previous).toHaveLength(3);
-    expect(previous[2]).toMatchObject({
-      role: "user",
-      content: [
-        { type: "text" },
-        { type: "image", label: "紧邻上一条消息的图片附件 1" },
-      ],
-    });
+    expect(previous).toHaveLength(2);
+    expect(previous[1]?.content).not.toContain("data:image");
   });
 
-  it("rebuilds the affected history prefix when a participant mapping changes", () => {
+  it("keeps the history prefix stable when a participant mapping changes", () => {
     const history: ContextMessage[] = [
       {
         providerMessageId: "member-message",
@@ -338,8 +333,8 @@ describe("conversation context summary contract", () => {
       },
     });
     expect(before[0]).toEqual(after[0]);
-    expect(before[1]).not.toEqual(after[1]);
-    expect(after[1]?.content).toContain("林一（昵称：队长");
+    expect(before).toEqual(after);
+    expect(after[1]?.content).toContain('sender_id="member@example.test"');
   });
 
   it("treats a summary update as an intentional cache-prefix boundary", () => {
@@ -359,9 +354,11 @@ describe("conversation context summary contract", () => {
     expect(before.slice(1)).toEqual(after.slice(1));
   });
 
-  it("keeps messages before a newly enriched link preview stable", () => {
+  it("keeps every historical text item stable when a link preview is enriched", () => {
     const stable = contextMessage("21");
-    const pending = contextMessage("22");
+    const pending = contextMessage("22", {
+      linkPreview: emptyLinkPreview("pending"),
+    });
     const enriched = contextMessage("22", {
       linkPreview: {
         status: "available",
@@ -393,8 +390,8 @@ describe("conversation context summary contract", () => {
       {},
     );
 
-    expect(sharedMessagePrefixLength(before, after)).toBe(2);
-    expect(before[2]).not.toEqual(after[2]);
-    expect(after[2]?.content).toContain("<link_previews");
+    expect(before).toEqual(after);
+    expect(sharedMessagePrefixLength(before, after)).toBe(before.length);
+    expect(after[2]?.content).toContain("link_preview_ref");
   });
 });

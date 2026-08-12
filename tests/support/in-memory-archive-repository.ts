@@ -147,6 +147,8 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
       .flatMap((chat) => chat.messages)
       .find((item) => item.providerMessageId === input.providerMessageId);
     if (message === undefined) return Promise.resolve(null);
+    if (message.linkPreview.status !== "pending")
+      return Promise.resolve(message.linkPreview);
     message.linkPreview = input.linkPreview;
     message.linkPreviewDiagnostics = input.diagnostics;
     message.linkPreviewFetchedAt = input.fetchedAt.toISOString();

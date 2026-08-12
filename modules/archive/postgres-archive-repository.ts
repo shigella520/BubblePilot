@@ -391,6 +391,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
            link_preview_diagnostics = $5::jsonb,
            link_preview_fetched_at = $6
        WHERE provider = 'bluebubbles' AND provider_message_id = $1
+         AND link_preview_status = 'pending'
        RETURNING link_preview_status, link_previews, link_preview_error_code`,
       [
         input.providerMessageId,
@@ -402,7 +403,19 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       ],
     );
     const row = result.rows[0];
-    return row === undefined ? null : linkPreviewBundle(row);
+    if (row !== undefined) return linkPreviewBundle(row);
+    const existing = await this.pool.query<{
+      link_preview_status: string;
+      link_previews: unknown;
+      link_preview_error_code: string | null;
+    }>(
+      `SELECT link_preview_status, link_previews, link_preview_error_code
+       FROM messages
+       WHERE provider = 'bluebubbles' AND provider_message_id = $1`,
+      [input.providerMessageId],
+    );
+    const existingRow = existing.rows[0];
+    return existingRow === undefined ? null : linkPreviewBundle(existingRow);
   }
 
   async recordIgnoredEvent(

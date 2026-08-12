@@ -242,6 +242,8 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
           cacheKeyHash: "cache-key-hash-fictional",
           cacheKeyMatchesPrevious: true,
           divergenceIndex: 1,
+          divergenceRegion: "history",
+          divergenceReason: "history-message-changed",
           items: [
             {
               index: 0,
@@ -252,6 +254,7 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
               imageBytes: 0,
               itemHash: "item-hash-fictional",
               prefixHash: "prefix-hash-fictional",
+              region: "system",
             },
           ],
         },

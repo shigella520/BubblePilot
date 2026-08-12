@@ -157,8 +157,8 @@ describe("NativeImageInputService", () => {
       "history-image",
     ]);
     expect(result.items.map((item) => item.part.label)).toEqual([
-      "紧邻上一条消息的图片附件 1",
-      "紧邻上一条消息的图片附件 1",
+      "消息附件 1",
+      "消息附件 1",
     ]);
     expect(result.parts[0]?.dataUrl).toMatch(/^data:image\/png;base64,/u);
     expect(repository.imageInputs).toHaveLength(2);

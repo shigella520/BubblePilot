@@ -113,6 +113,8 @@ interface ExecutionDetail extends Execution {
         cacheKeyHash: string | null;
         cacheKeyMatchesPrevious: boolean | null;
         divergenceIndex: number | null;
+        divergenceRegion: string | null;
+        divergenceReason: string | null;
         items: Array<{
           index: number;
           role: string;
@@ -122,6 +124,7 @@ interface ExecutionDetail extends Execution {
           imageBytes: number;
           itemHash: string;
           prefixHash: string;
+          region: string;
         }>;
       } | null;
     } | null;
@@ -749,18 +752,35 @@ function resetAuditPage(): Promise<boolean> {
             <h2>实时趋势</h2>
             <p>按 Provider 对比最近一段时间的 Token、请求和缓存命中。</p>
           </div>
-          <label class="usage-hours-control">
-            最近
-            <select v-model.number="usageHours" :disabled="usageBusy">
-              <option
-                v-for="hours in usageHourOptions"
-                :key="hours"
-                :value="hours"
-              >
-                {{ hours }} 小时
-              </option>
-            </select>
-          </label>
+          <div class="usage-realtime-actions">
+            <label class="usage-hours-control">
+              最近
+              <select v-model.number="usageHours" :disabled="usageBusy">
+                <option
+                  v-for="hours in usageHourOptions"
+                  :key="hours"
+                  :value="hours"
+                >
+                  {{ hours }} 小时
+                </option>
+              </select>
+            </label>
+            <button
+              type="button"
+              class="button tiny secondary usage-refresh-button"
+              :disabled="usageBusy"
+              :aria-label="usageBusy ? '正在刷新实时趋势' : '刷新实时趋势'"
+              :title="usageBusy ? '正在刷新' : '刷新实时趋势'"
+              @click="loadUsage"
+            >
+              <RefreshCw
+                :size="16"
+                :class="{ 'button-spinner': usageBusy }"
+                aria-hidden="true"
+              />
+              {{ usageBusy ? "刷新中" : "刷新" }}
+            </button>
+          </div>
         </div>
         <div v-if="hasRealtimeUsage && usage" class="usage-chart-grid">
           <article class="usage-chart-card">
@@ -1193,6 +1213,12 @@ function resetAuditPage(): Promise<boolean> {
                         item.diagnostics.requestTrace.divergenceIndex === null
                           ? "—"
                           : item.diagnostics.requestTrace.divergenceIndex + 1
+                      }}
+                      · 区域：{{
+                        item.diagnostics.requestTrace.divergenceRegion ?? "—"
+                      }}
+                      · 原因：{{
+                        item.diagnostics.requestTrace.divergenceReason ?? "—"
                       }}
                     </p>
                     <details class="cache-diagnostic-details">

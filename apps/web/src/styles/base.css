@@ -409,6 +409,16 @@ a {
   min-width: 96px;
   padding: 8px 30px 8px 10px;
 }
+.usage-realtime-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.usage-refresh-button {
+  white-space: nowrap;
+}
 .usage-chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

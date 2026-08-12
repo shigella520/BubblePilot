@@ -307,6 +307,15 @@ export interface AiRequestTraceItem {
   imageBytes: number;
   itemHash: string;
   prefixHash: string;
+  region:
+    | "system"
+    | "summary"
+    | "history"
+    | "participants"
+    | "link-previews"
+    | "attachments"
+    | "diagnostics"
+    | "dynamic";
 }
 
 export interface AiRequestTrace {
@@ -322,6 +331,18 @@ export interface AiRequestTrace {
   cacheKeyHash: string | null;
   cacheKeyMatchesPrevious: boolean | null;
   divergenceIndex: number | null;
+  divergenceRegion: AiRequestTraceItem["region"] | null;
+  divergenceReason:
+    | "summary-changed"
+    | "system-prompt-changed"
+    | "history-message-changed"
+    | "participant-mapping-changed"
+    | "link-preview-changed"
+    | "history-image-selection-changed"
+    | "image-download-state-changed"
+    | "dynamic-input-changed"
+    | "unknown"
+    | null;
   items: readonly AiRequestTraceItem[];
 }
 

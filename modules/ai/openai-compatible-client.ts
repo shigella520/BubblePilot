@@ -152,6 +152,7 @@ interface PreviousPromptTrace {
   configurationHash: string;
   cacheKeyHash: string | null;
   itemHashes: readonly string[];
+  items: readonly AiRequestTraceItem[];
 }
 
 function dataUrlBytes(value: string): number {
@@ -215,6 +216,7 @@ function traceItems(items: readonly unknown[]): readonly AiRequestTraceItem[] {
         ? (item as Record<string, unknown>)
         : {};
     const metrics = promptItemMetrics(item);
+    const region = promptItemRegion(item, record);
     return {
       index,
       role:
@@ -226,8 +228,58 @@ function traceItems(items: readonly unknown[]): readonly AiRequestTraceItem[] {
       ...metrics,
       itemHash,
       prefixHash: hashJson(hashes),
+      region,
     };
   });
+}
+
+function promptItemRegion(
+  item: unknown,
+  record: Readonly<Record<string, unknown>>,
+): AiRequestTraceItem["region"] {
+  const text = JSON.stringify(item);
+  if (text.includes("<history_summary")) return "summary";
+  if (text.includes("<chat_history")) return "history";
+  if (text.includes("<participant_identities")) return "participants";
+  if (text.includes("<link_previews")) return "link-previews";
+  if (
+    text.includes("<history_attachments") ||
+    text.includes("<current_attachments") ||
+    text.includes("input_image") ||
+    text.includes("image_url")
+  )
+    return "attachments";
+  if (text.includes("<resource_diagnostics")) return "diagnostics";
+  return record.role === "system" ? "system" : "dynamic";
+}
+
+function divergenceReason(
+  previous: AiRequestTraceItem | undefined,
+  current: AiRequestTraceItem | undefined,
+): AiRequestTrace["divergenceReason"] {
+  const region = current?.region ?? previous?.region;
+  switch (region) {
+    case "summary":
+      return "summary-changed";
+    case "system":
+      return "system-prompt-changed";
+    case "history":
+      return "history-message-changed";
+    case "participants":
+      return "participant-mapping-changed";
+    case "link-previews":
+      return "link-preview-changed";
+    case "attachments":
+      return previous === undefined || current === undefined
+        ? "history-image-selection-changed"
+        : "image-download-state-changed";
+    case "diagnostics":
+      return "image-download-state-changed";
+    case "dynamic":
+      return "dynamic-input-changed";
+    default:
+      return "unknown";
+  }
 }
 
 function sharedPrefixLength(
@@ -856,6 +908,11 @@ export class OpenAiCompatibleClient implements AiClient {
         ? null
         : configurationMatchesPrevious === true &&
           sharedPrefixItemCount === previous.itemHashes.length;
+    const divergenceOffset = sharedPrefixItemCount;
+    const hasDivergence =
+      previous !== undefined &&
+      divergenceOffset !== null &&
+      divergenceOffset !== previous.itemHashes.length;
     const trace: AiRequestTrace = {
       traceKeyHash,
       apiKind: provider.apiKind,
@@ -873,6 +930,19 @@ export class OpenAiCompatibleClient implements AiClient {
         sharedPrefixItemCount === previous.itemHashes.length
           ? null
           : sharedPrefixItemCount,
+      divergenceRegion:
+        !hasDivergence || divergenceOffset === null
+          ? null
+          : (items[divergenceOffset]?.region ??
+            previous.items[divergenceOffset]?.region ??
+            null),
+      divergenceReason:
+        !hasDivergence || divergenceOffset === null
+          ? null
+          : divergenceReason(
+              previous.items[divergenceOffset],
+              items[divergenceOffset],
+            ),
       items,
     };
     this.promptTraceHistory.set(historyKey, {
@@ -880,6 +950,7 @@ export class OpenAiCompatibleClient implements AiClient {
       configurationHash,
       cacheKeyHash,
       itemHashes,
+      items,
     });
     if (this.promptTraceHistory.size > 1_024) {
       const oldest = this.promptTraceHistory.keys().next().value;

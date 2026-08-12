@@ -20,6 +20,7 @@ import type { ImageInputRuntimeSettings } from "./image-input-settings-types.js"
 
 type ImageCandidate = {
   providerMessageId: string;
+  reference: string;
 } & (
   | {
       source: "attachment";
@@ -35,6 +36,7 @@ type ImageCandidate = {
 
 export interface PreparedImageInputItem {
   providerMessageId: string;
+  reference: string;
   part: AiImageContentPart;
 }
 
@@ -87,6 +89,10 @@ function isDeclaredImage(attachment: MessageAttachment): boolean {
   );
 }
 
+function messageReference(providerMessageId: string): string {
+  return `message-${sha256(providerMessageId).slice(0, 16)}`;
+}
+
 function hostName(value: string | null): string | null {
   if (value === null) return null;
   try {
@@ -130,15 +136,17 @@ function currentCandidates(
 ): ImageCandidate[] {
   const candidates: ImageCandidate[] = [];
   if (settings.includeAttachments) {
-    for (const [index, attachment] of envelope.message.attachments
-      .filter(isDeclaredImage)
-      .slice(0, settings.maxCurrentAttachments)
-      .entries()) {
+    let selected = 0;
+    for (const [index, attachment] of envelope.message.attachments.entries()) {
+      if (!isDeclaredImage(attachment)) continue;
+      if (selected >= settings.maxCurrentAttachments) break;
+      selected += 1;
       candidates.push({
         providerMessageId: envelope.message.providerMessageId,
+        reference: `${messageReference(envelope.message.providerMessageId)}:attachment:${index + 1}`,
         source: "attachment",
         attachment,
-        label: `紧邻上一条消息的图片附件 ${index + 1}`,
+        label: `消息附件 ${index + 1}`,
       });
     }
   }
@@ -148,9 +156,10 @@ function currentCandidates(
   if (settings.includeLinkPreviewImages && preview !== undefined)
     candidates.push({
       providerMessageId: envelope.message.providerMessageId,
+      reference: `${messageReference(envelope.message.providerMessageId)}:link:1:image`,
       source: "link-preview",
       preview,
-      label: "紧邻上一条消息的链接卡片主图",
+      label: "链接卡片主图",
     });
   return candidates;
 }
@@ -169,19 +178,20 @@ function historyCandidates(
     if (settings.includeLinkPreviewImages && preview !== undefined)
       result.push({
         providerMessageId: message.providerMessageId,
+        reference: `${messageReference(message.providerMessageId)}:link:1:image`,
         source: "link-preview",
         preview,
-        label: "紧邻上一条消息的链接卡片主图",
+        label: "链接卡片主图",
       });
     if (settings.includeAttachments) {
-      for (const [index, attachment] of message.attachments
-        .filter(isDeclaredImage)
-        .entries()) {
+      for (const [index, attachment] of message.attachments.entries()) {
+        if (!isDeclaredImage(attachment)) continue;
         result.push({
           providerMessageId: message.providerMessageId,
+          reference: `${messageReference(message.providerMessageId)}:attachment:${index + 1}`,
           source: "attachment",
           attachment,
-          label: `紧邻上一条消息的图片附件 ${index + 1}`,
+          label: `消息附件 ${index + 1}`,
         });
       }
     }
@@ -308,6 +318,7 @@ export class NativeImageInputService {
           parts.push(part);
           items.push({
             providerMessageId: candidate.providerMessageId,
+            reference: candidate.reference,
             part,
           });
         }
