@@ -239,6 +239,8 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
           sharedPrefixItemCount: 1,
           configurationMatchesPrevious: true,
           previousRequestIsExactPrefix: false,
+          cacheKeyHash: "cache-key-hash-fictional",
+          cacheKeyMatchesPrevious: true,
           divergenceIndex: 1,
           items: [
             {

@@ -319,6 +319,8 @@ export interface AiRequestTrace {
   sharedPrefixItemCount: number | null;
   configurationMatchesPrevious: boolean | null;
   previousRequestIsExactPrefix: boolean | null;
+  cacheKeyHash: string | null;
+  cacheKeyMatchesPrevious: boolean | null;
   divergenceIndex: number | null;
   items: readonly AiRequestTraceItem[];
 }

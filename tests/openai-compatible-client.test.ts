@@ -49,7 +49,6 @@ describe("OpenAiCompatibleClient", () => {
     const client = new OpenAiCompatibleClient(
       new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
       fetchImplementation,
-      true,
     );
     const imageTail = {
       role: "user" as const,
@@ -65,11 +64,13 @@ describe("OpenAiCompatibleClient", () => {
     };
     const first = await client.call(responsesProvider, {
       ...request,
+      sessionId: "bp_fictional-stable-session",
       promptTraceKey: "fictional-chat:workflow:node:turn-1",
       messages: [...request.messages, imageTail],
     });
     const second = await client.call(responsesProvider, {
       ...request,
+      sessionId: "bp_fictional-stable-session",
       promptTraceKey: "fictional-chat:workflow:node:turn-1",
       messages: [
         ...request.messages,
@@ -88,8 +89,12 @@ describe("OpenAiCompatibleClient", () => {
       sharedPrefixItemCount: 2,
       configurationMatchesPrevious: true,
       previousRequestIsExactPrefix: false,
+      cacheKeyMatchesPrevious: true,
       divergenceIndex: 2,
     });
+    expect(second.diagnostics?.requestTrace?.cacheKeyHash).toMatch(
+      /^sha256:[a-f0-9]{64}$/u,
+    );
     expect(second.diagnostics?.requestTrace?.items[4]).toMatchObject({
       role: "user",
       contentKinds: ["input_image", "input_text"],

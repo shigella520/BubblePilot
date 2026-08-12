@@ -110,6 +110,8 @@ interface ExecutionDetail extends Execution {
         sharedPrefixItemCount: number | null;
         configurationMatchesPrevious: boolean | null;
         previousRequestIsExactPrefix: boolean | null;
+        cacheKeyHash: string | null;
+        cacheKeyMatchesPrevious: boolean | null;
         divergenceIndex: number | null;
         items: Array<{
           index: number;
@@ -223,7 +225,7 @@ let applicationRootWasInert = false;
 const route = useRoute();
 const session = useSessionStore();
 const executionPager = useCursorPager<Execution>((cursor) => {
-  const query = new URLSearchParams({ limit: "50" });
+  const query = new URLSearchParams({ limit: "10" });
   if (recoveryOnly.value) {
     query.set("status", "retrying,failed,dead-lettered,closed");
   }
@@ -380,6 +382,26 @@ const retryTitle = computed(() => {
 
 function providerHealthLabel(state: string) {
   return providerHealthLabels[state] ?? state;
+}
+
+function percent(numerator: number | null, denominator: number | null) {
+  if (numerator === null || denominator === null || denominator <= 0)
+    return "—";
+  return `${((numerator / denominator) * 100).toFixed(1)}%`;
+}
+
+function cacheStructureLabel(
+  trace: NonNullable<
+    NonNullable<
+      ExecutionDetail["aiProviderAttempts"][number]["diagnostics"]
+    >["requestTrace"]
+  >,
+) {
+  if (trace.previousItemCount === null) return "等待下一请求建立对比";
+  if (trace.cacheKeyMatchesPrevious === false) return "缓存键已变化";
+  if (trace.configurationMatchesPrevious === false) return "请求配置已变化";
+  if (trace.previousRequestIsExactPrefix === true) return "结构满足前缀缓存";
+  return `前缀在第 ${(trace.divergenceIndex ?? 0) + 1} 项发生变化`;
 }
 
 async function load(reset = false): Promise<boolean> {
@@ -1091,73 +1113,127 @@ function resetAuditPage(): Promise<boolean> {
                   </details>
                   <details
                     v-if="item.diagnostics?.requestTrace"
-                    class="keyline"
+                    class="cache-diagnostic"
                   >
-                    <summary>AI 请求结构追踪</summary>
-                    <p>
-                      接口 {{ item.diagnostics.requestTrace.apiKind }} · 当前
-                      {{ item.diagnostics.requestTrace.items.length }} 项 ·
-                      上一请求
-                      {{
-                        item.diagnostics.requestTrace.previousItemCount ?? "—"
-                      }}
-                      项 · 共同前缀
-                      {{
-                        item.diagnostics.requestTrace.sharedPrefixItemCount ??
-                        "—"
-                      }}
-                      项
-                    </p>
-                    <p>
-                      上一请求是完整前缀：{{
-                        item.diagnostics.requestTrace
-                          .previousRequestIsExactPrefix === null
-                          ? "无基线"
-                          : item.diagnostics.requestTrace
-                                .previousRequestIsExactPrefix
-                            ? "是"
-                            : "否"
-                      }}
-                      · 配置一致：{{
+                    <summary>
+                      <span>缓存诊断</span>
+                      <span class="cache-diagnostic-verdict">{{
+                        cacheStructureLabel(item.diagnostics.requestTrace)
+                      }}</span>
+                    </summary>
+                    <div class="cache-diagnostic-grid">
+                      <div>
+                        <span>请求结构</span>
+                        <strong
+                          >{{
+                            item.diagnostics.requestTrace.previousItemCount ??
+                            "—"
+                          }}
+                          →
+                          {{ item.diagnostics.requestTrace.items.length }}
+                          项</strong
+                        >
+                      </div>
+                      <div>
+                        <span>共同前缀</span>
+                        <strong
+                          >{{
+                            item.diagnostics.requestTrace
+                              .sharedPrefixItemCount ?? "—"
+                          }}
+                          项 ·
+                          {{
+                            percent(
+                              item.diagnostics.requestTrace
+                                .sharedPrefixItemCount,
+                              item.diagnostics.requestTrace.previousItemCount,
+                            )
+                          }}</strong
+                        >
+                      </div>
+                      <div>
+                        <span>固定缓存键</span>
+                        <strong>{{
+                          item.diagnostics.requestTrace.cacheKeyHash === null
+                            ? "未启用"
+                            : item.diagnostics.requestTrace
+                                  .cacheKeyMatchesPrevious === null
+                              ? "已启用 · 待对比"
+                              : item.diagnostics.requestTrace
+                                    .cacheKeyMatchesPrevious
+                                ? "稳定"
+                                : "已变化"
+                        }}</strong>
+                      </div>
+                      <div>
+                        <span>Provider 实际命中</span>
+                        <strong
+                          >{{ item.diagnostics.cachedPromptTokens ?? "—" }} /
+                          {{ item.diagnostics.promptTokens ?? "—" }} Token ·
+                          {{
+                            percent(
+                              item.diagnostics.cachedPromptTokens,
+                              item.diagnostics.promptTokens,
+                            )
+                          }}</strong
+                        >
+                      </div>
+                    </div>
+                    <p class="cache-diagnostic-meta">
+                      接口 {{ item.diagnostics.requestTrace.apiKind }} · 配置{{
                         item.diagnostics.requestTrace
                           .configurationMatchesPrevious === null
-                          ? "无基线"
+                          ? "待对比"
                           : item.diagnostics.requestTrace
                                 .configurationMatchesPrevious
-                            ? "是"
-                            : "否"
+                            ? "一致"
+                            : "变化"
                       }}
                       · 首个差异项：{{
-                        item.diagnostics.requestTrace.divergenceIndex ?? "—"
+                        item.diagnostics.requestTrace.divergenceIndex === null
+                          ? "—"
+                          : item.diagnostics.requestTrace.divergenceIndex + 1
                       }}
                     </p>
-                    <code
-                      >trace={{
-                        item.diagnostics.requestTrace.traceKeyHash
-                      }}</code
-                    >
-                    <code
-                      >config={{
-                        item.diagnostics.requestTrace.configurationHash
-                      }}</code
-                    >
-                    <div
-                      v-for="traceItem in item.diagnostics.requestTrace.items"
-                      :key="item.id + '-trace-' + traceItem.index"
-                      class="trace-item"
-                    >
-                      <strong
-                        >#{{ traceItem.index }} · {{ traceItem.role }}</strong
+                    <details class="cache-diagnostic-details">
+                      <summary>逐项哈希与高级诊断</summary>
+                      <code
+                        >trace={{
+                          item.diagnostics.requestTrace.traceKeyHash
+                        }}</code
                       >
-                      <span>
-                        {{ traceItem.contentKinds.join(", ") || "text" }} · 文本
-                        {{ traceItem.textCharacters }} 字符 · 图片
-                        {{ traceItem.imageCount }} 张 /
-                        {{ traceItem.imageBytes }} B
-                      </span>
-                      <code>item={{ traceItem.itemHash }}</code>
-                      <code>prefix={{ traceItem.prefixHash }}</code>
-                    </div>
+                      <code
+                        >config={{
+                          item.diagnostics.requestTrace.configurationHash
+                        }}</code
+                      >
+                      <code v-if="item.diagnostics.requestTrace.cacheKeyHash"
+                        >cache={{
+                          item.diagnostics.requestTrace.cacheKeyHash
+                        }}</code
+                      >
+                      <div class="request-trace-items">
+                        <div
+                          v-for="traceItem in item.diagnostics.requestTrace
+                            .items"
+                          :key="item.id + '-trace-' + traceItem.index"
+                          class="request-trace-item"
+                        >
+                          <strong
+                            >#{{ traceItem.index + 1 }} ·
+                            {{ traceItem.role }}</strong
+                          >
+                          <span
+                            >{{ traceItem.contentKinds.join(", ") || "text" }} ·
+                            文本 {{ traceItem.textCharacters }} 字符 · 图片
+                            {{ traceItem.imageCount }} 张 /
+                            {{ traceItem.imageBytes }} B</span
+                          >
+                          <code>item={{ traceItem.itemHash }}</code>
+                          <code>prefix={{ traceItem.prefixHash }}</code>
+                        </div>
+                      </div>
+                    </details>
                   </details>
                 </div>
               </article>

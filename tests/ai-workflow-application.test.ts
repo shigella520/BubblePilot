@@ -69,32 +69,29 @@ class CapturingAiClient implements AiClient {
   private readonly delegate: OpenAiCompatibleClient;
 
   constructor(secrets: EnvironmentSecretResolver) {
-    this.delegate = new OpenAiCompatibleClient(
-      secrets,
-      () =>
-        Promise.resolve(
-          new Response(
-            JSON.stringify({
-              choices: [
-                {
-                  finish_reason: "stop",
-                  message: { content: "Fictional AI answer" },
-                },
-              ],
-              usage: {
-                prompt_tokens: 120,
-                completion_tokens: 8,
-                total_tokens: 128,
-                prompt_tokens_details: { cached_tokens: 64 },
+    this.delegate = new OpenAiCompatibleClient(secrets, () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: "Fictional AI answer" },
               },
-            }),
-            {
-              status: 200,
-              headers: { "content-type": "application/json" },
+            ],
+            usage: {
+              prompt_tokens: 120,
+              completion_tokens: 8,
+              total_tokens: 128,
+              prompt_tokens_details: { cached_tokens: 64 },
             },
-          ),
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
         ),
-      true,
+      ),
     );
   }
 
