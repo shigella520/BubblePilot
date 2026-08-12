@@ -214,7 +214,7 @@ SENSITIVE_OPERATION_PASSWORD_HASH='scrypt$...'
 - `MONITORED_CHAT_IDS`：已知 Chat GUID 时可提前写入，多个值以逗号分隔；留空时先通过 Webhook 发现聊天，再在管理端开启监听。
 - `MESSAGE_RETENTION_DAYS`：消息正文和附件元数据默认保留 90 天；设为 `0` 表示明确接受无限期保留风险。
 - `ENABLE_WEB_SEARCH`：默认 `false`，作为部署级安全总开关。开启后，尝试次数、单次请求超时、退避、结果数和失败兜底统一在 AI 页面的“联网搜索全局配置”中管理，保存后立即生效。
-- `BUBBLEPILOT_IMAGE`：源码部署会由 Compose 本地构建；正式部署可固定为 `ghcr.io/shigella520/bubblepilot:1.1.0`，不要长期使用 `dev` 或 `latest`。
+- `BUBBLEPILOT_IMAGE`：源码部署会由 Compose 本地构建；正式部署可固定为 `ghcr.io/shigella520/bubblepilot:1.2.0`，不要长期使用 `dev` 或 `latest`。
 
 ### 4. 启动并检查服务
 
