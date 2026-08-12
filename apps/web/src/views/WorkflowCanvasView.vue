@@ -1,6 +1,13 @@
 <script setup lang="ts">
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call */
-import { ArrowLeft, Check, LoaderCircle, Power, TestTube2 } from "@lucide/vue";
+import {
+  ArrowLeft,
+  Check,
+  Download,
+  LoaderCircle,
+  Power,
+  TestTube2,
+} from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -78,7 +85,11 @@ const versionDefinition = async () => {
   const versions = await apiRequest<any[]>(
     `/api/v1/workflows/${workflowId.value}/versions`,
   );
+  const requestedVersion = Number(route.query.version);
   const candidate =
+    (Number.isInteger(requestedVersion) && requestedVersion > 0
+      ? versions.find((item) => item.version === requestedVersion)
+      : undefined) ??
     versions.find((item) => item.version === publishedVersion.value) ??
     versions.find((item) => item.status === "validated") ??
     versions[0];
@@ -218,6 +229,28 @@ function markDirty() {
   if (saveState.value !== "saving") saveState.value = "dirty";
 }
 
+async function exportCurrentVersion() {
+  if (isNew.value || candidateVersion.value === null) return;
+  try {
+    const manifest = await apiRequest<Record<string, unknown>>(
+      `/api/v1/workflows/${workflowId.value}/versions/${candidateVersion.value}/export`,
+    );
+    const blobUrl = URL.createObjectURL(
+      new Blob([JSON.stringify(manifest, null, 2)], {
+        type: "application/json",
+      }),
+    );
+    const anchor = document.createElement("a");
+    anchor.href = blobUrl;
+    anchor.download = `${workflowName.value.replace(/[^a-zA-Z0-9._-]+/gu, "-") || "workflow"}.bubblepilot-workflow.json`;
+    anchor.click();
+    URL.revokeObjectURL(blobUrl);
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  }
+}
+
 onMounted(load);
 </script>
 
@@ -255,6 +288,14 @@ onMounted(load);
         }}
       </span>
       <div class="workflow-canvas-actions">
+        <button
+          class="button secondary"
+          type="button"
+          :disabled="isNew || candidateVersion === null"
+          @click="exportCurrentVersion"
+        >
+          <Download :size="16" />导出当前版本
+        </button>
         <button class="button secondary" type="button" @click="testWorkflow">
           <TestTube2 :size="16" />测试执行
         </button>

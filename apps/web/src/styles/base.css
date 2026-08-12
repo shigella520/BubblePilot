@@ -2077,6 +2077,97 @@ legend {
   box-shadow: 0 28px 80px rgba(15, 23, 42, 0.28);
   animation: execution-detail-dialog-in 0.18s ease-out;
 }
+
+.workflow-ai-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+}
+
+.workflow-ai-tools > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-right: auto;
+  font-weight: 700;
+}
+
+.workflow-import-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgb(4 12 22 / 58%);
+  backdrop-filter: blur(5px);
+}
+
+.workflow-import-dialog {
+  width: min(780px, 100%);
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  padding: 1.25rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: var(--surface-raised);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 32%);
+}
+
+.workflow-import-dialog label,
+.workflow-import-commit {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.workflow-import-dialog textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-mono);
+}
+
+.workflow-import-file {
+  padding: 0.75rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+}
+
+.workflow-import-summary,
+.workflow-import-issues article {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.9rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.workflow-import-issues article {
+  border-left: 3px solid var(--danger);
+}
+
+.workflow-import-issues code {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.workflow-import-bindings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0 1rem;
+}
+
+.workflow-import-commit {
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line-soft);
+}
 .execution-detail-header {
   position: relative;
   display: grid;

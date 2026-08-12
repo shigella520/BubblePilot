@@ -1,326 +1,1482 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://bubblepilot.local/contracts/workflow.schema.json",
-  "title": "BubblePilot Workflow Definition",
-  "type": "object",
-  "required": ["schemaVersion", "name", "startNodeId", "nodes"],
-  "properties": {
-    "schemaVersion": { "const": "1" },
-    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
-    "startNodeId": { "$ref": "#/$defs/nodeId" },
-    "maxSteps": { "type": "integer", "minimum": 1, "maximum": 128 },
-    "nodes": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 64,
-      "items": {
-        "oneOf": [
-          { "$ref": "#/$defs/conditionNode" },
-          { "$ref": "#/$defs/logNode" },
-          { "$ref": "#/$defs/setVariableNode" },
-          { "$ref": "#/$defs/renderTextNode" },
-          { "$ref": "#/$defs/loadContextNode" },
-          { "$ref": "#/$defs/aiChatNode" },
-          { "$ref": "#/$defs/replyNode" },
-          { "$ref": "#/$defs/endNode" }
-        ]
-      }
-    }
-  },
-  "additionalProperties": false,
-  "$defs": {
-    "nodeId": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9-]{0,63}$"
-    },
-    "baseNode": {
+  "anyOf": [
+    {
       "type": "object",
-      "required": ["id", "type", "version", "config"],
       "properties": {
-        "id": { "$ref": "#/$defs/nodeId" },
-        "type": {},
-        "config": {},
-        "version": { "const": 1 }
-      }
-    },
-    "conditionNode": {
-      "type": "object",
-      "allOf": [
-        { "$ref": "#/$defs/baseNode" },
-        {
-          "type": "object",
-          "required": ["onTrue", "onFalse"],
-          "properties": {
-            "type": { "const": "condition" },
-            "config": {
-              "type": "object",
-              "required": ["field", "operator"],
-              "properties": {
-                "field": {
-                  "enum": [
-                    "message.text",
-                    "message.senderId",
-                    "message.contentType",
-                    "chat.providerChatId"
-                  ]
-                },
-                "operator": {
-                  "enum": [
-                    "equals",
-                    "contains",
-                    "starts-with",
-                    "matches",
-                    "exists"
-                  ]
-                },
-                "value": { "type": "string", "maxLength": 2000 },
-                "caseSensitive": { "type": "boolean" }
-              },
-              "additionalProperties": false
-            },
-            "onTrue": { "$ref": "#/$defs/nodeId" },
-            "onFalse": { "$ref": "#/$defs/nodeId" }
-          }
-        }
-      ],
-      "unevaluatedProperties": false
-    },
-    "logNode": {
-      "type": "object",
-      "allOf": [
-        { "$ref": "#/$defs/baseNode" },
-        {
-          "type": "object",
-          "required": ["onSuccess"],
-          "properties": {
-            "type": { "const": "log" },
-            "config": {
-              "type": "object",
-              "required": ["message"],
-              "properties": {
-                "message": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 500
-                }
-              },
-              "additionalProperties": false
-            },
-            "onSuccess": { "$ref": "#/$defs/nodeId" }
-          }
-        }
-      ],
-      "unevaluatedProperties": false
-    },
-    "setVariableNode": {
-      "type": "object",
-      "allOf": [
-        { "$ref": "#/$defs/baseNode" },
-        {
-          "type": "object",
-          "required": ["onSuccess"],
-          "properties": {
-            "type": { "const": "set-variable" },
-            "config": {
-              "type": "object",
-              "required": ["name", "valueTemplate"],
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-zA-Z0-9_]{0,63}$"
-                },
-                "valueTemplate": { "type": "string", "maxLength": 4000 }
-              },
-              "additionalProperties": false
-            },
-            "onSuccess": { "$ref": "#/$defs/nodeId" }
-          }
-        }
-      ],
-      "unevaluatedProperties": false
-    },
-    "renderTextNode": {
-      "type": "object",
-      "allOf": [
-        { "$ref": "#/$defs/baseNode" },
-        {
-          "type": "object",
-          "required": ["onSuccess"],
-          "properties": {
-            "type": { "const": "render-text" },
-            "config": {
-              "type": "object",
-              "required": ["template"],
-              "properties": {
-                "template": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 12000
-                }
-              },
-              "additionalProperties": false
-            },
-            "onSuccess": { "$ref": "#/$defs/nodeId" }
-          }
-        }
-      ],
-      "unevaluatedProperties": false
-    },
-    "loadContextNode": {
-      "type": "object",
-      "allOf": [
-        { "$ref": "#/$defs/baseNode" },
-        {
-          "type": "object",
-          "required": ["onSuccess"],
-          "properties": {
-            "type": { "const": "load-context" },
-            "config": {
-              "type": "object",
-              "properties": {
-                "messageLimit": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 50
-                },
-                "characterLimit": {
-                  "type": "integer",
-                  "minimum": 100,
-                  "maximum": 20000
-                },
-                "includeFromMe": { "type": "boolean" }
-              },
-              "additionalProperties": false
-            },
-            "onSuccess": { "$ref": "#/$defs/nodeId" },
-            "onFailure": { "$ref": "#/$defs/nodeId" }
-          }
-        }
-      ],
-      "unevaluatedProperties": false
-    },
-    "aiChatNode": {
-      "type": "object",
-      "allOf": [
-        { "$ref": "#/$defs/baseNode" },
-        {
-          "type": "object",
-          "required": ["onSuccess"],
-          "properties": {
-            "type": { "const": "ai-chat" },
-            "config": {
-              "type": "object",
-              "required": ["providerRouteId", "promptTemplate"],
-              "properties": {
-                "providerRouteId": { "type": "string", "format": "uuid" },
-                "systemPrompt": { "type": "string", "maxLength": 12000 },
-                "promptTemplate": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 12000
-                },
-                "includeLoadedContext": { "type": "boolean" },
-                "maxOutputTokens": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 8192
-                },
-                "maxOutputCharacters": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 12000
-                },
-                "temperature": {
-                  "type": ["number", "null"],
-                  "minimum": 0,
-                  "maximum": 2
-                },
-                "webSearch": {
-                  "enum": ["disabled", "auto", "required"]
-                },
-                "webSearchSources": {
-                  "enum": ["full", "compact", "hidden"]
-                },
-                "outputFormat": { "enum": ["text", "json"] },
-                "outputVariable": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-zA-Z0-9_]{0,63}$"
-                }
-              },
-              "additionalProperties": false
-            },
-            "onSuccess": { "$ref": "#/$defs/nodeId" },
-            "onFailure": { "$ref": "#/$defs/nodeId" }
-          }
-        }
-      ],
-      "unevaluatedProperties": false
-    },
-    "replyNode": {
-      "type": "object",
-      "allOf": [
-        { "$ref": "#/$defs/baseNode" },
-        {
-          "type": "object",
-          "required": ["onSuccess"],
-          "properties": {
-            "type": { "const": "reply" },
-            "config": {
-              "type": "object",
-              "required": ["text"],
-              "properties": {
-                "text": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 4000
-                },
-                "replyToSourceMessage": { "type": "boolean" },
-                "retry": {
-                  "type": "object",
-                  "required": ["maxAttempts", "initialDelayMs"],
-                  "properties": {
-                    "maxAttempts": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 5
+        "schemaVersion": {
+          "type": "string",
+          "const": "1"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "startNodeId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "maxSteps": {
+          "default": 64,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "nodes": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
                     },
-                    "initialDelayMs": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 5000
+                    "required": ["x", "y"],
+                    "additionalProperties": false
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "literal"
+                            },
+                            "value": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          },
+                          "required": ["kind", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "path"
+                            },
+                            "path": {
+                              "type": "string",
+                              "pattern": "^context\\.[a-zA-Z0-9_.]+$"
+                            }
+                          },
+                          "required": ["kind", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "output"
+                            },
+                            "blockId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "port": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": ["kind", "blockId", "port"],
+                          "additionalProperties": false
+                        }
+                      ]
                     }
                   },
-                  "additionalProperties": false
+                  "id": {
+                    "type": "string",
+                    "const": "message-trigger"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "message-trigger"
+                  },
+                  "version": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "default": "",
+                        "type": "string",
+                        "maxLength": 64
+                      },
+                      "chatIds": {
+                        "default": [],
+                        "maxItems": 50,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      },
+                      "senderIds": {
+                        "default": [],
+                        "maxItems": 50,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      },
+                      "contentTypes": {
+                        "default": [],
+                        "maxItems": 4,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": ["text", "attachment", "mixed", "unknown"]
+                        }
+                      },
+                      "includeFromMe": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "enabled": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "text": {
+                        "default": null,
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["keyword", "prefix", "regex"]
+                              },
+                              "value": {
+                                "type": "string",
+                                "maxLength": 2000
+                              },
+                              "caseSensitive": {
+                                "default": false,
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["kind", "value", "caseSensitive"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "provider",
+                      "chatIds",
+                      "senderIds",
+                      "contentTypes",
+                      "includeFromMe",
+                      "enabled",
+                      "text"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "onSuccess": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  }
+                },
+                "required": ["id", "type", "version", "config"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": false
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "literal"
+                            },
+                            "value": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          },
+                          "required": ["kind", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "path"
+                            },
+                            "path": {
+                              "type": "string",
+                              "pattern": "^context\\.[a-zA-Z0-9_.]+$"
+                            }
+                          },
+                          "required": ["kind", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "output"
+                            },
+                            "blockId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "port": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": ["kind", "blockId", "port"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "condition"
+                  },
+                  "version": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "field": {
+                        "type": "string",
+                        "enum": [
+                          "message.text",
+                          "message.senderId",
+                          "message.contentType",
+                          "message.linkPreviewStatus",
+                          "chat.providerChatId"
+                        ]
+                      },
+                      "operator": {
+                        "type": "string",
+                        "enum": [
+                          "equals",
+                          "contains",
+                          "starts-with",
+                          "matches",
+                          "exists"
+                        ]
+                      },
+                      "value": {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      "caseSensitive": {
+                        "default": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["field", "operator", "caseSensitive"],
+                    "additionalProperties": false
+                  },
+                  "onTrue": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "onFalse": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "type",
+                  "version",
+                  "config",
+                  "onTrue",
+                  "onFalse"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": false
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "literal"
+                            },
+                            "value": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          },
+                          "required": ["kind", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "path"
+                            },
+                            "path": {
+                              "type": "string",
+                              "pattern": "^context\\.[a-zA-Z0-9_.]+$"
+                            }
+                          },
+                          "required": ["kind", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "output"
+                            },
+                            "blockId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "port": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": ["kind", "blockId", "port"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "log"
+                  },
+                  "version": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "message": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    },
+                    "required": ["message"],
+                    "additionalProperties": false
+                  },
+                  "onSuccess": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  }
+                },
+                "required": ["id", "type", "version", "config", "onSuccess"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": false
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "literal"
+                            },
+                            "value": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          },
+                          "required": ["kind", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "path"
+                            },
+                            "path": {
+                              "type": "string",
+                              "pattern": "^context\\.[a-zA-Z0-9_.]+$"
+                            }
+                          },
+                          "required": ["kind", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "output"
+                            },
+                            "blockId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "port": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": ["kind", "blockId", "port"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "set-variable"
+                  },
+                  "version": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-zA-Z0-9_]{0,63}$"
+                      },
+                      "valueTemplate": {
+                        "type": "string",
+                        "maxLength": 4000
+                      }
+                    },
+                    "required": ["name", "valueTemplate"],
+                    "additionalProperties": false
+                  },
+                  "onSuccess": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  }
+                },
+                "required": ["id", "type", "version", "config", "onSuccess"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": false
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "literal"
+                            },
+                            "value": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          },
+                          "required": ["kind", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "path"
+                            },
+                            "path": {
+                              "type": "string",
+                              "pattern": "^context\\.[a-zA-Z0-9_.]+$"
+                            }
+                          },
+                          "required": ["kind", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "output"
+                            },
+                            "blockId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "port": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": ["kind", "blockId", "port"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "render-text"
+                  },
+                  "version": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "template": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 12000
+                      }
+                    },
+                    "required": ["template"],
+                    "additionalProperties": false
+                  },
+                  "onSuccess": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  }
+                },
+                "required": ["id", "type", "version", "config", "onSuccess"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": false
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "literal"
+                            },
+                            "value": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          },
+                          "required": ["kind", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "path"
+                            },
+                            "path": {
+                              "type": "string",
+                              "pattern": "^context\\.[a-zA-Z0-9_.]+$"
+                            }
+                          },
+                          "required": ["kind", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "output"
+                            },
+                            "blockId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "port": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": ["kind", "blockId", "port"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "load-context"
+                  },
+                  "version": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "messageLimit": {
+                        "default": 10,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50
+                      },
+                      "characterLimit": {
+                        "default": 6000,
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 20000
+                      },
+                      "includeFromMe": {
+                        "default": true,
+                        "type": "boolean"
+                      },
+                      "summaryEnabled": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "summaryProviderRouteId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          {
+                            "type": "string",
+                            "const": ""
+                          }
+                        ]
+                      },
+                      "compressionBatchSize": {
+                        "default": 10,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50
+                      }
+                    },
+                    "required": [
+                      "messageLimit",
+                      "characterLimit",
+                      "includeFromMe",
+                      "summaryEnabled",
+                      "compressionBatchSize"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "onSuccess": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "onFailure": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  }
+                },
+                "required": ["id", "type", "version", "config", "onSuccess"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": false
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "literal"
+                            },
+                            "value": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          },
+                          "required": ["kind", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "path"
+                            },
+                            "path": {
+                              "type": "string",
+                              "pattern": "^context\\.[a-zA-Z0-9_.]+$"
+                            }
+                          },
+                          "required": ["kind", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "output"
+                            },
+                            "blockId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "port": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": ["kind", "blockId", "port"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "ai-chat"
+                  },
+                  "version": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "providerRouteId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "systemPrompt": {
+                        "default": "",
+                        "type": "string",
+                        "maxLength": 12000
+                      },
+                      "promptTemplate": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 12000
+                      },
+                      "includeLoadedContext": {
+                        "default": true,
+                        "type": "boolean"
+                      },
+                      "maxOutputTokens": {
+                        "default": 1024,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 8192
+                      },
+                      "maxOutputCharacters": {
+                        "default": 4000,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 12000
+                      },
+                      "temperature": {
+                        "default": null,
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 2
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "webSearch": {
+                        "type": "string",
+                        "enum": ["disabled", "auto", "required"]
+                      },
+                      "webSearchSources": {
+                        "default": "full",
+                        "type": "string",
+                        "enum": ["full", "compact", "hidden"]
+                      },
+                      "outputFormat": {
+                        "default": "text",
+                        "type": "string",
+                        "enum": ["text", "json"]
+                      },
+                      "outputVariable": {
+                        "default": "aiReply",
+                        "type": "string",
+                        "pattern": "^[a-z][a-zA-Z0-9_]{0,63}$"
+                      }
+                    },
+                    "required": [
+                      "providerRouteId",
+                      "systemPrompt",
+                      "promptTemplate",
+                      "includeLoadedContext",
+                      "maxOutputTokens",
+                      "maxOutputCharacters",
+                      "temperature",
+                      "webSearchSources",
+                      "outputFormat",
+                      "outputVariable"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "onSuccess": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "onFailure": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  }
+                },
+                "required": ["id", "type", "version", "config", "onSuccess"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": false
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "literal"
+                            },
+                            "value": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          },
+                          "required": ["kind", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "path"
+                            },
+                            "path": {
+                              "type": "string",
+                              "pattern": "^context\\.[a-zA-Z0-9_.]+$"
+                            }
+                          },
+                          "required": ["kind", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "output"
+                            },
+                            "blockId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "port": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": ["kind", "blockId", "port"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "reply"
+                  },
+                  "version": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4000
+                      },
+                      "replyToSourceMessage": {
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "retry": {
+                        "default": {
+                          "maxAttempts": 2,
+                          "initialDelayMs": 250
+                        },
+                        "type": "object",
+                        "properties": {
+                          "maxAttempts": {
+                            "default": 2,
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 5
+                          },
+                          "initialDelayMs": {
+                            "default": 250,
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 5000
+                          }
+                        },
+                        "required": ["maxAttempts", "initialDelayMs"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["text", "replyToSourceMessage", "retry"],
+                    "additionalProperties": false
+                  },
+                  "onSuccess": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "onFailure": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  }
+                },
+                "required": ["id", "type", "version", "config", "onSuccess"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": false
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "literal"
+                            },
+                            "value": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          },
+                          "required": ["kind", "value"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "path"
+                            },
+                            "path": {
+                              "type": "string",
+                              "pattern": "^context\\.[a-zA-Z0-9_.]+$"
+                            }
+                          },
+                          "required": ["kind", "path"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "output"
+                            },
+                            "blockId": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                            },
+                            "port": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": ["kind", "blockId", "port"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "end"
+                  },
+                  "version": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "config": {
+                    "type": "object",
+                    "properties": {
+                      "result": {
+                        "default": "succeeded",
+                        "type": "string",
+                        "enum": ["succeeded", "skipped"]
+                      }
+                    },
+                    "required": ["result"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "version", "config"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "required": ["schemaVersion", "name", "startNodeId", "maxSteps", "nodes"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "const": "1"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "startNodeId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "maxSteps": {
+          "default": 64,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "nodes": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "position": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": ["x", "y"],
+                "additionalProperties": false
+              },
+              "config": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
                 }
               },
-              "additionalProperties": false
+              "inputs": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "literal"
+                        },
+                        "value": {
+                          "$ref": "#/$defs/__schema0"
+                        }
+                      },
+                      "required": ["kind", "value"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "path"
+                        },
+                        "path": {
+                          "type": "string",
+                          "pattern": "^context\\.[a-zA-Z0-9_.]+$"
+                        }
+                      },
+                      "required": ["kind", "path"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "output"
+                        },
+                        "blockId": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+                        },
+                        "port": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "required": ["kind", "blockId", "port"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
             },
-            "onSuccess": { "$ref": "#/$defs/nodeId" },
-            "onFailure": { "$ref": "#/$defs/nodeId" }
+            "required": [
+              "id",
+              "type",
+              "version",
+              "position",
+              "config",
+              "inputs"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "edges": {
+          "maxItems": 256,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              },
+              "source": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              },
+              "sourcePort": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "target": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              },
+              "targetPort": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["data", "success", "failure", "branch"]
+              }
+            },
+            "required": [
+              "id",
+              "source",
+              "sourcePort",
+              "target",
+              "targetPort",
+              "kind"
+            ],
+            "additionalProperties": false
           }
         }
+      },
+      "required": [
+        "schemaVersion",
+        "name",
+        "startNodeId",
+        "maxSteps",
+        "nodes",
+        "edges"
       ],
-      "unevaluatedProperties": false
-    },
-    "endNode": {
-      "type": "object",
-      "allOf": [
-        { "$ref": "#/$defs/baseNode" },
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
         {
           "type": "object",
-          "properties": {
-            "type": { "const": "end" },
-            "config": {
-              "type": "object",
-              "properties": {
-                "result": { "enum": ["succeeded", "skipped"] }
-              },
-              "additionalProperties": false
-            }
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
           }
         }
-      ],
-      "unevaluatedProperties": false
+      ]
     }
-  }
+  },
+  "$id": "https://bubblepilot.local/contracts/workflow.schema.json",
+  "title": "BubblePilot Workflow Definition"
 }
