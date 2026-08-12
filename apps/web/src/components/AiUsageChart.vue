@@ -285,7 +285,7 @@ onBeforeUnmount(() => {
           {{
             provider.metrics.cacheEligiblePromptTokens.toLocaleString("zh-CN")
           }}
-          Token · 覆盖 {{ percentage(provider.metrics.cacheDataCoverage) }}
+          Token
         </template>
       </span>
     </div>
