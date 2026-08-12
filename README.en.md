@@ -89,10 +89,10 @@ The workflow canvas is shown on the left; the complete node, AI provider, web-se
 With native image input enabled, an AI bot can understand iMessage image attachments and link-card images. Images are fetched only for the current AI node and sent to a verified multimodal provider; download or vision failures explicitly fall back to text without failing the whole workflow.
 
 <p align="center">
-  <a href="assets/preview/bubblepilot-multimodal-chat.jpg"><img src="assets/preview/bubblepilot-multimodal-chat.jpg" width="294" alt="BubblePilot understanding an image in iMessage" /></a>
+  <a href="assets/preview/bubblepilot-multimodal-chat.jpg"><img src="assets/preview/bubblepilot-multimodal-chat.jpg" width="960" alt="BubblePilot handling image understanding, web research, and contextual questions across several iMessage conversations" /></a>
 </p>
 
-<p align="center">BubblePilot understands an image and replies naturally in a real iMessage conversation.</p>
+<p align="center">BubblePilot handles image understanding, web research, and contextual questions across several real iMessage conversations.</p>
 
 ## First working automation in 10 minutes
 
