@@ -207,7 +207,7 @@ Optional settings:
 - `MONITORED_CHAT_IDS`: comma-separated Chat GUIDs to monitor from the first event. If empty, discover chats through the webhook and enable them in the Web UI.
 - `MESSAGE_RETENTION_DAYS`: archived bodies and attachment metadata are kept for 90 days by default. `0` explicitly accepts indefinite retention.
 - `ENABLE_WEB_SEARCH`: defaults to `false` and acts as the deployment-level safety switch. Once enabled, manage retries, timeouts, result limits, and failure fallback from the AI page's global Web Search settings; saved changes apply immediately.
-- `BUBBLEPILOT_IMAGE`: source deployments build locally. For a release deployment, pin `ghcr.io/shigella520/bubblepilot:1.1.0` instead of relying on `dev` or `latest`.
+- `BUBBLEPILOT_IMAGE`: source deployments build locally. For a release deployment, pin `ghcr.io/shigella520/bubblepilot:1.2.0` instead of relying on `dev` or `latest`.
 
 ### 4. Start and check the stack
 
