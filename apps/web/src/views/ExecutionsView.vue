@@ -2,6 +2,9 @@
 import {
   FileClock,
   Image,
+  CircleAlert,
+  LoaderCircle,
+  Minimize2,
   RefreshCw,
   RotateCcw,
   Route,
@@ -30,6 +33,8 @@ import { useSessionStore } from "../stores/session";
 
 interface Execution {
   id: string;
+  providerChatId: string | null;
+  chatDisplayName: string | null;
   workflowName: string;
   workflowVersion: number;
   triggerName: string;
@@ -41,6 +46,11 @@ interface Execution {
   nextRetryAt: string | null;
   createdAt: string;
   completedAt: string | null;
+  cachedPromptTokens: number | null;
+  cacheEligiblePromptTokens: number;
+  cacheHitRate: number | null;
+  summaryCompressionStatus:
+    "none" | "succeeded" | "failed" | "busy" | "superseded";
 }
 interface ExecutionDetail extends Execution {
   correlationId: string;
@@ -64,6 +74,7 @@ interface ExecutionDetail extends Execution {
   }>;
   aiProviderAttempts: Array<{
     id: string;
+    nodeId: string;
     routeId: string;
     routeVersion: number;
     providerId: string;
@@ -329,6 +340,16 @@ function formatCacheRate(value: number | null): string {
   return value === null ? "暂无数据" : `${(value * 100).toFixed(1)}%`;
 }
 
+function compressionLabel(
+  status: Execution["summaryCompressionStatus"],
+): string {
+  if (status === "succeeded") return "历史摘要压缩成功";
+  if (status === "failed") return "历史摘要压缩失败";
+  if (status === "busy") return "历史摘要压缩处理中";
+  if (status === "superseded") return "历史摘要压缩结果被并发状态替代";
+  return "";
+}
+
 function usageTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
@@ -391,6 +412,22 @@ function percent(numerator: number | null, denominator: number | null) {
   if (numerator === null || denominator === null || denominator <= 0)
     return "—";
   return `${((numerator / denominator) * 100).toFixed(1)}%`;
+}
+
+function providerAttemptPurpose(
+  item: ExecutionDetail["aiProviderAttempts"][number],
+) {
+  const nodeType = detail.value?.nodes.find(
+    (node) => node.nodeId === item.nodeId,
+  )?.nodeType;
+  switch (nodeType) {
+    case "ai-chat":
+      return "对话回复";
+    case "load-context":
+      return "历史摘要压缩";
+    default:
+      return nodeType === undefined ? "AI 请求" : `AI 请求 · ${nodeType}`;
+  }
 }
 
 function cacheStructureLabel(
@@ -827,6 +864,10 @@ function resetAuditPage(): Promise<boolean> {
           <div>
             <p class="card-kicker">EXECUTION TRACE</p>
             <h1>工作流执行</h1>
+            <p class="keyline">
+              回复缓存命中仅统计 ai-chat
+              对话请求；历史摘要压缩等辅助请求不计入。
+            </p>
           </div>
           <div class="row-actions">
             <button
@@ -849,9 +890,9 @@ function resetAuditPage(): Promise<boolean> {
             <thead>
               <tr>
                 <th>工作流</th>
-                <th>触发器</th>
+                <th>聊天</th>
                 <th>状态</th>
-                <th>当前节点</th>
+                <th>回复缓存命中</th>
                 <th>时间</th>
                 <th></th>
               </tr>
@@ -869,13 +910,50 @@ function resetAuditPage(): Promise<boolean> {
                     >恢复 #{{ item.recoveryAttempt }}</span
                   >
                 </td>
-                <td>{{ item.triggerName }}</td>
+                <td>
+                  <strong>{{
+                    item.chatDisplayName || item.providerChatId || "—"
+                  }}</strong>
+                  <span
+                    v-if="item.chatDisplayName && item.providerChatId"
+                    class="keyline"
+                    >{{ item.providerChatId }}</span
+                  >
+                </td>
                 <td>
                   <span class="table-status" :class="item.status">{{
                     item.status
                   }}</span>
                 </td>
-                <td>{{ item.currentNodeId || "—" }}</td>
+                <td>
+                  <span class="cache-rate-line">
+                    <strong>{{ formatCacheRate(item.cacheHitRate) }}</strong>
+                    <span
+                      v-if="item.summaryCompressionStatus !== 'none'"
+                      class="compression-indicator"
+                      :class="`compression-${item.summaryCompressionStatus}`"
+                      :title="compressionLabel(item.summaryCompressionStatus)"
+                      :aria-label="
+                        compressionLabel(item.summaryCompressionStatus)
+                      "
+                      role="img"
+                    >
+                      <Minimize2
+                        v-if="item.summaryCompressionStatus === 'succeeded'"
+                        :size="14"
+                      />
+                      <CircleAlert
+                        v-else-if="item.summaryCompressionStatus === 'failed'"
+                        :size="14"
+                      />
+                      <LoaderCircle v-else :size="14" />
+                    </span>
+                  </span>
+                  <span v-if="item.cachedPromptTokens !== null" class="keyline"
+                    >{{ formatTokenCount(item.cachedPromptTokens) }} /
+                    {{ formatTokenCount(item.cacheEligiblePromptTokens) }}</span
+                  >
+                </td>
                 <td>{{ new Date(item.createdAt).toLocaleString() }}</td>
                 <td>
                   <button
@@ -1063,7 +1141,12 @@ function resetAuditPage(): Promise<boolean> {
               >
                 <Route :size="17" />
                 <div>
-                  <strong>{{ item.providerName }} · {{ item.model }}</strong>
+                  <div class="provider-attempt-heading">
+                    <strong>{{ item.providerName }} · {{ item.model }}</strong>
+                    <span class="provider-attempt-purpose">{{
+                      providerAttemptPurpose(item)
+                    }}</span>
+                  </div>
                   <span class="keyline"
                     >路由 v{{ item.routeVersion }} · Provider v{{
                       item.providerVersion

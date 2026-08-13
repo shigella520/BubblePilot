@@ -264,7 +264,7 @@ describe("conversation context summary contract", () => {
     ]);
   });
 
-  it("keeps historical text stable while images move to a trailing attachment section", () => {
+  it("binds historical images to their owning chat message", () => {
     const imageItems: PreparedImageInputItem[] = [
       {
         providerMessageId: "1",
@@ -307,9 +307,10 @@ describe("conversation context summary contract", () => {
     );
 
     expect(next.slice(0, previous.length)).toEqual(previous);
-    expect(third.slice(0, next.length)).toEqual(next);
+    expect(third.slice(0, next.length)).not.toEqual(next);
+    expect(third[1]?.content).toContain("message-1");
     expect(previous).toHaveLength(2);
-    expect(previous[1]?.content).not.toContain("data:image");
+    expect(JSON.stringify(previous[1]?.content)).toContain("data:image");
   });
 
   it("keeps the history prefix stable when a participant mapping changes", () => {
@@ -390,8 +391,9 @@ describe("conversation context summary contract", () => {
       {},
     );
 
-    expect(before).toEqual(after);
-    expect(sharedMessagePrefixLength(before, after)).toBe(before.length);
-    expect(after[2]?.content).toContain("link_preview_ref");
+    expect(before).not.toEqual(after);
+    expect(sharedMessagePrefixLength(before, after)).toBe(2);
+    expect(after[2]?.content).toContain("link_preview");
+    expect(after[2]?.content).toContain("article.example.test");
   });
 });

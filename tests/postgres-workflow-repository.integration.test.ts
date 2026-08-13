@@ -101,6 +101,7 @@ describe.runIf(testDatabaseUrl !== undefined)(
         newMessageWebhook({
           messageGuid: `fake-workflow-message-${suffix}`,
           chatGuid: `iMessage;-;fake-chat-${suffix}`,
+          chatDisplayName: `Fictional chat ${suffix}`,
           text: "/db run",
         }),
         randomUUID(),
@@ -139,6 +140,20 @@ describe.runIf(testDatabaseUrl !== undefined)(
         normalized.envelope.message.providerMessageId,
       );
       expect(messageExecutions[0]?.execution.id).toBe(first.executionIds[0]);
+      await expect(
+        repository.listExecutions({ limit: 100, cursor: null }),
+      ).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: first.executionIds[0],
+            providerChatId: `iMessage;-;fake-chat-${suffix}`,
+            chatDisplayName: `Fictional chat ${suffix}`,
+            cachedPromptTokens: null,
+            cacheEligiblePromptTokens: 0,
+            cacheHitRate: null,
+          }),
+        ]),
+      );
 
       await expect(
         repository.setWorkflowEnabled(version.workflowId, false),

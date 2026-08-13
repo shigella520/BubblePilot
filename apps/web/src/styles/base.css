@@ -711,6 +711,30 @@ td .keyline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.cache-rate-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.cache-rate-line strong {
+  display: inline;
+}
+.compression-indicator {
+  display: inline-flex;
+  align-items: center;
+}
+
+.compression-succeeded {
+  color: var(--success, #20b486);
+}
+.compression-failed {
+  color: var(--danger, #e05252);
+}
+.compression-busy,
+.compression-superseded {
+  color: var(--warning, #f59e0b);
+}
 .mono {
   font-family: "SFMono-Regular", Consolas, monospace;
 }
@@ -2246,6 +2270,25 @@ legend {
 .trace-item strong,
 .trace-item p {
   overflow-wrap: anywhere;
+}
+.provider-attempt-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.provider-attempt-purpose {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid rgba(39, 104, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(39, 104, 255, 0.08);
+  color: var(--bubblepilot-accent, #2768ff);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 .trace-item p {
   margin: 4px 0;

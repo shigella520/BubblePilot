@@ -5,6 +5,7 @@ export function newMessageWebhook(
     text?: string | null;
     isFromMe?: boolean;
     senderAddress?: string;
+    chatDisplayName?: string | null;
   } = {},
 ) {
   return {
@@ -25,7 +26,7 @@ export function newMessageWebhook(
         {
           guid: overrides.chatGuid ?? "iMessage;-;fictional-chat",
           style: 45,
-          displayName: null,
+          displayName: overrides.chatDisplayName ?? null,
           chatIdentifier: "fictional-chat",
         },
       ],

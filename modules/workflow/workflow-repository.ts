@@ -59,6 +59,8 @@ export interface WorkflowExecutionRecord {
   id: string;
   provider: string;
   externalEventId: string;
+  providerChatId: string | null;
+  chatDisplayName: string | null;
   triggerId: string;
   triggerName: string;
   workflowId: string;
@@ -76,6 +78,11 @@ export interface WorkflowExecutionRecord {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  cachedPromptTokens: number | null;
+  cacheEligiblePromptTokens: number;
+  cacheHitRate: number | null;
+  summaryCompressionStatus:
+    "none" | "succeeded" | "failed" | "busy" | "superseded";
 }
 
 export interface MessageExecutionLink {
