@@ -14,8 +14,8 @@ describe("image capability probe", () => {
       imageCapabilityProbeDataUrl.slice("data:image/png;base64,".length),
       "base64",
     );
-    expect(png.readUInt32BE(16)).toBe(96);
-    expect(png.readUInt32BE(20)).toBe(64);
+    expect(png.readUInt32BE(16)).toBe(768);
+    expect(png.readUInt32BE(20)).toBe(512);
   });
 
   it.each([

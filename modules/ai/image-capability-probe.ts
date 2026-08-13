@@ -3,9 +3,57 @@ import { deflateSync, inflateSync } from "node:zlib";
 const pngSignature = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
-const probeWidth = 96;
-const probeHeight = 64;
+const probeWidth = 768;
+const probeHeight = 512;
 const bytesPerPixel = 3;
+
+const glyphs: Readonly<Record<string, readonly string[]>> = {
+  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+  D: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+  G: ["01110", "10001", "10000", "10111", "10001", "10001", "01110"],
+  N: ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+  B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+  L: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+  U: ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+};
+
+function drawLabel(
+  scanlines: Buffer,
+  label: string,
+  panelStartX: number,
+  panelWidth: number,
+): void {
+  const scale = 8;
+  const glyphWidth = 5 * scale;
+  const gap = scale;
+  const labelWidth = label.length * glyphWidth + (label.length - 1) * gap;
+  const startX = panelStartX + Math.floor((panelWidth - labelWidth) / 2);
+  const startY = Math.floor((probeHeight - 7 * scale) / 2);
+  for (const [characterIndex, character] of [...label].entries()) {
+    const glyph = glyphs[character];
+    if (glyph === undefined) continue;
+    for (const [rowIndex, row] of glyph.entries()) {
+      for (const [columnIndex, pixel] of [...row].entries()) {
+        if (pixel !== "1") continue;
+        for (let dy = 0; dy < scale; dy += 1) {
+          for (let dx = 0; dx < scale; dx += 1) {
+            const x =
+              startX +
+              characterIndex * (glyphWidth + gap) +
+              columnIndex * scale +
+              dx;
+            const y = startY + rowIndex * scale + dy;
+            const offset = y * (1 + probeWidth * bytesPerPixel) + 1 + x * 3;
+            scanlines[offset] = 255;
+            scanlines[offset + 1] = 255;
+            scanlines[offset + 2] = 255;
+          }
+        }
+      }
+    }
+  }
+}
 
 function crc32(data: Buffer): number {
   let crc = 0xffffffff;
@@ -51,6 +99,10 @@ function createProbePng(): Buffer {
       scanlines[pixelOffset + 2] = section === 2 ? 255 : 0;
     }
   }
+  const panelWidth = probeWidth / 3;
+  drawLabel(scanlines, "RED", 0, panelWidth);
+  drawLabel(scanlines, "GREEN", panelWidth, panelWidth);
+  drawLabel(scanlines, "BLUE", panelWidth * 2, panelWidth);
   return Buffer.concat([
     pngSignature,
     pngChunk("IHDR", header),

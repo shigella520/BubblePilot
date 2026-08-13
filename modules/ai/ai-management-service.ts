@@ -99,6 +99,7 @@ async function probeWithRetry(
   provider: AiProviderRecord,
   request: AiChatRequest,
   maxAttempts: number,
+  verify?: (result: AiCallResult) => boolean,
 ): Promise<{ result: AiCallResult; attempts: number; durationMs: number }> {
   let attempts = 0;
   let durationMs = 0;
@@ -107,7 +108,13 @@ async function probeWithRetry(
     attempts += 1;
     result = await client.call(provider, request);
     durationMs += result.durationMs;
-    if (result.status === "succeeded" || !result.retryable) break;
+    if (
+      result.status === "succeeded" &&
+      (verify === undefined || verify(result))
+    ) {
+      break;
+    }
+    if (result.status === "failed" && !result.retryable) break;
     if (attempts < maxAttempts) await delay(250);
   } while (attempts < maxAttempts);
   return { result, attempts, durationMs };
@@ -343,12 +350,13 @@ export class AiManagementService {
                 content: [
                   {
                     type: "text",
-                    text: "Image capability test v3. List the three dominant colors visible in the attached image. Reply with only three color names.",
+                    text: "Image capability test v4. The image contains three large labeled vertical color panels. Read all three labels and identify each panel color. Reply with only the three color names from left to right.",
                   },
                   {
                     type: "image",
                     dataUrl: this.imageProbeDataUrl,
-                    detail: imageDetail,
+                    detail:
+                      provider.apiKind === "responses" ? "auto" : imageDetail,
                     label: "capability probe",
                   },
                 ],
@@ -358,6 +366,7 @@ export class AiManagementService {
             temperature: 0,
           },
           2,
+          imageProbeAnswerVerified,
         );
         totalDurationMs += imageProbe.durationMs;
         const imageVerified = imageProbeAnswerVerified(imageProbe.result);
