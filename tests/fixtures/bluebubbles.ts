@@ -6,6 +6,7 @@ export function newMessageWebhook(
     isFromMe?: boolean;
     senderAddress?: string;
     chatDisplayName?: string | null;
+    dateCreated?: number;
   } = {},
 ) {
   return {
@@ -16,7 +17,7 @@ export function newMessageWebhook(
         overrides.text === undefined
           ? "Hello from a fictional chat"
           : overrides.text,
-      dateCreated: 1_788_000_000_000,
+      dateCreated: overrides.dateCreated ?? 1_788_000_000_000,
       isFromMe: overrides.isFromMe ?? false,
       handle: {
         address: overrides.senderAddress ?? "fictional-user@example.test",

@@ -114,7 +114,7 @@ export interface ContextWindowOptions {
   limit: number;
   maxCharacters: number;
   includeFromMe: boolean;
-  excludeProviderMessageId: string | null;
+  beforeProviderMessageId: string;
 }
 
 export interface ChatParticipantIdentity {

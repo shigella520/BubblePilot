@@ -209,6 +209,58 @@ describe.runIf(testDatabaseUrl !== undefined)(
       expect([firstPreview, losingPreview]).toContainEqual(firstResult);
     });
 
+    it("freezes loaded context before the triggering message", async () => {
+      const suffix = randomUUID();
+      const adapter = new BlueBubblesWebhookAdapter();
+      const chatGuid = `iMessage;-;context-boundary-${suffix}`;
+      const messages = [
+        {
+          guid: `context-one-${suffix}`,
+          text: "Fictional message one",
+          at: 1_788_000_001_000,
+        },
+        {
+          guid: `context-two-${suffix}`,
+          text: "Fictional message two",
+          at: 1_788_000_002_000,
+        },
+        {
+          guid: `context-three-${suffix}`,
+          text: "Fictional message three",
+          at: 1_788_000_003_000,
+        },
+      ];
+      for (const message of messages) {
+        const normalized = adapter.normalize(
+          newMessageWebhook({
+            messageGuid: message.guid,
+            chatGuid,
+            text: message.text,
+            dateCreated: message.at,
+          }),
+          randomUUID(),
+        );
+        expect(normalized.kind).toBe("message");
+        if (normalized.kind === "message") {
+          await repository.ingestMessage(normalized.envelope, true);
+        }
+      }
+
+      await expect(
+        repository.loadRecentMessages(chatGuid, {
+          limit: 10,
+          maxCharacters: 10_000,
+          includeFromMe: true,
+          beforeProviderMessageId: `context-two-${suffix}`,
+        }),
+      ).resolves.toMatchObject([
+        {
+          providerMessageId: `context-one-${suffix}`,
+          body: "Fictional message one",
+        },
+      ]);
+    });
+
     it("redacts expired content only after automation is final and audits it", async () => {
       const suffix = randomUUID();
       const adapter = new BlueBubblesWebhookAdapter();

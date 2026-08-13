@@ -20,6 +20,7 @@ import type {
   ReplyGateway,
   SendReplyCommand,
 } from "../modules/integrations/bluebubbles/reply-gateway.js";
+import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/webhook-adapter.js";
 import { createDefaultNodeRegistry } from "../modules/workflow/node-registry.js";
 import type { WorkflowDefinition } from "../modules/workflow/workflow-definition.js";
 import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
@@ -706,6 +707,134 @@ describe("AI workflow", () => {
       previousRequestIsExactPrefix: true,
       divergenceIndex: null,
     });
+  });
+
+  it("does not leak messages archived after a queued trigger into its history", async () => {
+    const definition = {
+      schemaVersion: "1",
+      name: "frozen-context-boundary",
+      startNodeId: "load-history",
+      maxSteps: 4,
+      nodes: [
+        {
+          id: "load-history",
+          type: "load-context",
+          version: 1,
+          config: {
+            messageLimit: 20,
+            characterLimit: 20_000,
+            includeFromMe: true,
+            summaryEnabled: false,
+            compressionBatchSize: 10,
+          },
+          onSuccess: "ask-ai",
+          onFailure: "done",
+        },
+        {
+          id: "ask-ai",
+          type: "ai-chat",
+          version: 1,
+          config: {
+            providerRouteId: routeId,
+            systemPrompt: "Stable fictional system prompt.",
+            promptTemplate: "Inspect the frozen history.",
+            includeLoadedContext: true,
+            maxOutputTokens: 128,
+            maxOutputCharacters: 1_000,
+            temperature: 0,
+            webSearchSources: "full",
+            outputFormat: "text",
+            outputVariable: "answer",
+          },
+          inputs: {
+            messages: {
+              kind: "output",
+              blockId: "load-history",
+              port: "messages",
+            },
+            prompt: { kind: "path", path: "context.event.message.text" },
+          },
+          onSuccess: "done",
+          onFailure: "done",
+        },
+        {
+          id: "done",
+          type: "end",
+          version: 1,
+          config: { result: "succeeded" },
+        },
+      ],
+    } satisfies WorkflowDefinition;
+    const created = await workflows.createWorkflow(
+      "Frozen context",
+      definition,
+    );
+    await workflows.publishWorkflowVersion(created.workflowId, created.version);
+    await workflows.createTrigger({
+      name: "Frozen context trigger",
+      workflowId: created.workflowId,
+      workflowVersion: created.version,
+      conditions: {
+        chatIds: [monitoredChatId],
+        senderIds: [],
+        contentTypes: ["text"],
+        text: { kind: "prefix", value: "/frozen", caseSensitive: false },
+        timeWindow: null,
+      },
+      includeFromMe: false,
+      enabled: true,
+    });
+    const adapter = new BlueBubblesWebhookAdapter();
+    const envelopes = [
+      {
+        guid: "frozen-one",
+        text: "Fictional message one",
+        at: 1_788_000_001_000,
+      },
+      { guid: "frozen-two", text: "/frozen two", at: 1_788_000_002_000 },
+      {
+        guid: "frozen-three",
+        text: "Fictional message three",
+        at: 1_788_000_003_000,
+      },
+    ].map((message) =>
+      adapter.normalize(
+        newMessageWebhook({
+          messageGuid: message.guid,
+          text: message.text,
+          dateCreated: message.at,
+        }),
+        crypto.randomUUID(),
+      ),
+    );
+    for (const normalized of envelopes) {
+      expect(normalized.kind).toBe("message");
+      if (normalized.kind === "message") {
+        await archive.ingestMessage(normalized.envelope, true);
+      }
+    }
+    const triggerEnvelope = envelopes[1];
+    if (triggerEnvelope?.kind !== "message") return;
+    const engine = new WorkflowEngine(
+      workflows,
+      createDefaultNodeRegistry(workflows, replyGateway, {
+        archive,
+        aiRouting: new AiRoutingService(
+          aiRepository,
+          aiClient,
+          new EnvironmentSecretResolver({
+            FICTIONAL_AI_KEY: "fictional-server-secret",
+          }),
+        ),
+      }),
+      { timeZone: "Asia/Shanghai" },
+    );
+    await engine.handleMessage(triggerEnvelope.envelope);
+
+    const serialized = JSON.stringify(aiClient.requests.at(-1)?.messages ?? []);
+    expect(serialized).toContain("Fictional message one");
+    expect(serialized).toContain("/frozen two");
+    expect(serialized).not.toContain("Fictional message three");
   });
 
   it("rejects publishing a workflow whose AI route is unavailable", async () => {
