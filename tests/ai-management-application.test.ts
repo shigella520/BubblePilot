@@ -153,6 +153,8 @@ class RetryingImageAiClient implements AiClient {
 }
 
 class MismatchingImageAiClient implements AiClient {
+  imageAttempts = 0;
+
   call(
     _provider: AiProviderRecord,
     request: AiChatRequest,
@@ -162,11 +164,41 @@ class MismatchingImageAiClient implements AiClient {
         typeof message.content !== "string" &&
         message.content.some((part) => part.type === "image"),
     );
+    if (hasImage) this.imageAttempts += 1;
     return Promise.resolve({
       status: "succeeded",
       text: hasImage
         ? `I cannot inspect this image.\n${"x".repeat(200)}`
         : "OK",
+      durationMs: 7,
+    });
+  }
+}
+
+class RecoveringImageAiClient implements AiClient {
+  imageAttempts = 0;
+
+  call(
+    _provider: AiProviderRecord,
+    request: AiChatRequest,
+  ): Promise<AiCallResult> {
+    const hasImage = request.messages.some(
+      (message) =>
+        typeof message.content !== "string" &&
+        message.content.some((part) => part.type === "image"),
+    );
+    if (!hasImage) {
+      return Promise.resolve({
+        status: "succeeded",
+        text: "OK",
+        durationMs: 3,
+      });
+    }
+    this.imageAttempts += 1;
+    return Promise.resolve({
+      status: "succeeded",
+      text:
+        this.imageAttempts === 1 ? "green, blue, white" : "red, green, blue",
       durationMs: 7,
     });
   }
@@ -378,7 +410,7 @@ describe("AI management API", () => {
         ? undefined
         : imageContent?.find((part) => part.type === "text");
     expect(imagePart?.dataUrl).toMatch(/^data:image\/png;base64,/u);
-    expect(textPart?.text).toContain("Image capability test v3");
+    expect(textPart?.text).toContain("Image capability test v4");
     expect(client.requests[3]).toMatchObject({ maxOutputTokens: 128 });
     await expect(repository.getProvider(providerId)).resolves.toMatchObject({
       capabilityProbe: {
@@ -434,6 +466,160 @@ describe("AI management API", () => {
       },
     );
     expect(retryClient.imageAttempts).toBe(2);
+  });
+
+  it("retries a successful response that mismatches the image probe", async () => {
+    const retryRepository = new InMemoryAiRepository(() => now);
+    const retryClient = new RecoveringImageAiClient();
+    const created = await retryRepository.createProvider({
+      name: "Recovering image provider",
+      apiKind: "responses",
+      baseUrl: "https://ai.example.test/v1",
+      model: "fictional-vision-model",
+      secretRef: "PRIMARY_AI_KEY",
+      parameters: {},
+      requestTimeoutMs: 30_000,
+      enabled: true,
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: true,
+      },
+    });
+    expect(created.status).toBe("ok");
+    if (created.status !== "ok") return;
+    const service = new AiManagementService(
+      retryRepository,
+      retryClient,
+      new EnvironmentSecretResolver({
+        PRIMARY_AI_KEY: "primary-server-secret",
+      }),
+    );
+
+    await expect(service.testProvider(created.value.id)).resolves.toMatchObject(
+      {
+        success: true,
+        checks: [
+          { name: "connectivity", status: "verified" },
+          { name: "imageInput", status: "verified", attempts: 2 },
+        ],
+      },
+    );
+    expect(retryClient.imageAttempts).toBe(2);
+  });
+
+  it("uses auto detail for a Responses provider capability probe", async () => {
+    const detailRepository = new InMemoryAiRepository(() => now);
+    const detailClient = new SuccessfulAiClient();
+    const created = await detailRepository.createProvider({
+      name: "Configured detail provider",
+      apiKind: "responses",
+      baseUrl: "https://ai.example.test/v1",
+      model: "fictional-vision-model",
+      secretRef: "PRIMARY_AI_KEY",
+      parameters: {},
+      requestTimeoutMs: 30_000,
+      enabled: true,
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: true,
+      },
+    });
+    expect(created.status).toBe("ok");
+    if (created.status !== "ok") return;
+    const imageSettings = new ImageInputSettingsService(
+      new InMemoryImageInputSettingsRepository(),
+      {
+        enabled: true,
+        includeAttachments: true,
+        includeLinkPreviewImages: true,
+        trustedLinkPreviewHosts: [],
+        maxCurrentAttachments: 4,
+        maxHistoryImages: 2,
+        maxTotalImages: 6,
+        maxImageBytes: 10_485_760,
+        maxTotalBytes: 20_971_520,
+        fetchTimeoutMs: 15_000,
+        detail: "high",
+      },
+    );
+    const service = new AiManagementService(
+      detailRepository,
+      detailClient,
+      new EnvironmentSecretResolver({
+        PRIMARY_AI_KEY: "primary-server-secret",
+      }),
+      false,
+      undefined,
+      undefined,
+      imageSettings,
+    );
+
+    await service.testProvider(created.value.id);
+    const content = detailClient.requests[1]?.messages[0]?.content;
+    const image =
+      typeof content === "string"
+        ? undefined
+        : content?.find((part) => part.type === "image");
+    expect(image).toMatchObject({ type: "image", detail: "auto" });
+  });
+
+  it("uses the global image detail for a Chat Completions capability probe", async () => {
+    const detailRepository = new InMemoryAiRepository(() => now);
+    const detailClient = new SuccessfulAiClient();
+    const created = await detailRepository.createProvider({
+      name: "Chat Completions detail provider",
+      apiKind: "chat-completions",
+      baseUrl: "https://ai.example.test/v1",
+      model: "fictional-vision-model",
+      secretRef: "PRIMARY_AI_KEY",
+      parameters: {},
+      requestTimeoutMs: 30_000,
+      enabled: true,
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: true,
+      },
+    });
+    expect(created.status).toBe("ok");
+    if (created.status !== "ok") return;
+    const imageSettings = new ImageInputSettingsService(
+      new InMemoryImageInputSettingsRepository(),
+      {
+        enabled: true,
+        includeAttachments: true,
+        includeLinkPreviewImages: true,
+        trustedLinkPreviewHosts: [],
+        maxCurrentAttachments: 4,
+        maxHistoryImages: 2,
+        maxTotalImages: 6,
+        maxImageBytes: 10_485_760,
+        maxTotalBytes: 20_971_520,
+        fetchTimeoutMs: 15_000,
+        detail: "high",
+      },
+    );
+    const service = new AiManagementService(
+      detailRepository,
+      detailClient,
+      new EnvironmentSecretResolver({
+        PRIMARY_AI_KEY: "primary-server-secret",
+      }),
+      false,
+      undefined,
+      undefined,
+      imageSettings,
+    );
+
+    await service.testProvider(created.value.id);
+    const content = detailClient.requests[1]?.messages[0]?.content;
+    const image =
+      typeof content === "string"
+        ? undefined
+        : content?.find((part) => part.type === "image");
+    expect(image).toMatchObject({ type: "image", detail: "high" });
   });
 
   it("rejects an invalid built-in image before calling the provider", async () => {
@@ -504,9 +690,10 @@ describe("AI management API", () => {
     });
     expect(created.status).toBe("ok");
     if (created.status !== "ok") return;
+    const mismatchClient = new MismatchingImageAiClient();
     const service = new AiManagementService(
       mismatchRepository,
-      new MismatchingImageAiClient(),
+      mismatchClient,
       new EnvironmentSecretResolver({
         PRIMARY_AI_KEY: "primary-server-secret",
       }),
@@ -531,6 +718,7 @@ describe("AI management API", () => {
     expect(imageCheck?.responsePreview).toMatch(
       /^I cannot inspect this image\. x+/u,
     );
+    expect(mismatchClient.imageAttempts).toBe(2);
   });
 
   it("manages global native image settings with optimistic concurrency", async () => {

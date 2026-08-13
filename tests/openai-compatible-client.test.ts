@@ -229,6 +229,65 @@ describe("OpenAiCompatibleClient", () => {
   });
 
   it.each([
+    [
+      "chat-completions" as const,
+      "high" as const,
+      { reasoning_effort: "high" },
+    ],
+    ["responses" as const, "low" as const, { reasoning: { effort: "low" } }],
+  ])(
+    "maps provider reasoning effort for %s",
+    async (apiKind, effort, expected) => {
+      const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+        apiKind === "chat-completions"
+          ? new Response(
+              JSON.stringify({
+                choices: [{ message: { content: "Answer" } }],
+              }),
+              { status: 200 },
+            )
+          : new Response(JSON.stringify({ output_text: "Answer" }), {
+              status: 200,
+            }),
+      );
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+        fetchImplementation,
+      );
+      await client.call(
+        { ...provider, apiKind, reasoningEffort: effort },
+        request,
+      );
+      const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+      expect(
+        JSON.parse(typeof body === "string" ? body : "null"),
+      ).toMatchObject(expected);
+    },
+  );
+
+  it("omits reasoning fields when the provider uses the model default", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ output_text: "Answer" }), {
+        status: 200,
+      }),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    await client.call(
+      { ...provider, apiKind: "responses", reasoningEffort: "default" },
+      request,
+    );
+    const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+    const payload = JSON.parse(
+      typeof body === "string" ? body : "null",
+    ) as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("reasoning");
+    expect(payload).not.toHaveProperty("reasoning_effort");
+  });
+
+  it.each([
     ["chat-completions" as const, "text", "image_url"],
     ["responses" as const, "input_text", "input_image"],
   ])(

@@ -41,6 +41,15 @@ interface ProviderRow {
   encrypted_secret: string | null;
   parameters: Record<string, string | number | boolean>;
   request_timeout_ms: number;
+  reasoning_effort:
+    | "default"
+    | "none"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "max";
   session_affinity: "disabled" | "session-id-header";
   capabilities: {
     functionCalling: boolean;
@@ -169,7 +178,7 @@ interface ToolExecutionRow {
 
 const providerSelect = `SELECT
   id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-  request_timeout_ms, session_affinity, enabled, sort_order, version, capabilities, capability_probe,
+  request_timeout_ms, reasoning_effort, session_affinity, enabled, sort_order, version, capabilities, capability_probe,
   created_at, updated_at
 FROM ai_providers`;
 
@@ -203,6 +212,7 @@ function providerRecord(
         : cipher.decrypt(row.encrypted_secret),
     parameters: row.parameters,
     requestTimeoutMs: row.request_timeout_ms,
+    reasoningEffort: row.reasoning_effort,
     sessionAffinity: row.session_affinity,
     enabled: row.enabled,
     capabilities: row.capabilities,
@@ -412,8 +422,8 @@ export class PostgresAiRepository implements AiRepository {
       await client.query(
         `INSERT INTO ai_providers (
            id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-           request_timeout_ms, session_affinity, enabled, sort_order, capabilities
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13::jsonb)`,
+           request_timeout_ms, reasoning_effort, session_affinity, enabled, sort_order, capabilities
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14::jsonb)`,
         [
           id,
           configuration.name,
@@ -426,6 +436,7 @@ export class PostgresAiRepository implements AiRepository {
             : this.cipher.encrypt(configuration.secret),
           JSON.stringify(configuration.parameters),
           configuration.requestTimeoutMs,
+          configuration.reasoningEffort ?? "default",
           configuration.sessionAffinity ?? "disabled",
           configuration.enabled,
           order.rows[0]?.sort_order ?? 100,
@@ -472,10 +483,11 @@ export class PostgresAiRepository implements AiRepository {
            request_timeout_ms = $9, enabled = $10,
            capabilities = $12::jsonb,
            session_affinity = $13,
+           reasoning_effort = $14,
            version = version + 1, updated_at = NOW()
          WHERE id = $1 AND version = $2 AND deleted_at IS NULL
         RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                   request_timeout_ms, session_affinity, enabled, sort_order, version, capabilities, capability_probe,
+                   request_timeout_ms, reasoning_effort, session_affinity, enabled, sort_order, version, capabilities, capability_probe,
                    created_at, updated_at`,
         [
           providerId,
@@ -499,6 +511,7 @@ export class PostgresAiRepository implements AiRepository {
             },
           ),
           configuration.sessionAffinity ?? "disabled",
+          configuration.reasoningEffort ?? "default",
         ],
       );
       const row = result.rows[0];
@@ -524,7 +537,7 @@ export class PostgresAiRepository implements AiRepository {
        SET enabled = $3, version = version + 1, updated_at = NOW()
        WHERE id = $1 AND version = $2 AND deleted_at IS NULL
        RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                 request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
+                 request_timeout_ms, reasoning_effort, session_affinity, enabled, sort_order, version, capabilities, capability_probe,
                  created_at, updated_at`,
       [providerId, expectedVersion, enabled],
     );
@@ -615,7 +628,7 @@ export class PostgresAiRepository implements AiRepository {
              version = version + 1
          WHERE id = $1
          RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret, parameters,
-                   request_timeout_ms, enabled, sort_order, version, capabilities, capability_probe,
+                   request_timeout_ms, reasoning_effort, session_affinity, enabled, sort_order, version, capabilities, capability_probe,
                    created_at, updated_at`,
         [providerId],
       );
@@ -689,7 +702,7 @@ export class PostgresAiRepository implements AiRepository {
       `UPDATE ai_providers SET capability_probe = $2::jsonb, updated_at = NOW()
        WHERE id = $1 AND deleted_at IS NULL
        RETURNING id, name, api_kind, base_url, model, secret_ref, encrypted_secret,
-                 parameters, request_timeout_ms, enabled, sort_order, version,
+                 parameters, request_timeout_ms, reasoning_effort, session_affinity, enabled, sort_order, version,
                  capabilities, capability_probe, created_at, updated_at`,
       [providerId, JSON.stringify(probe)],
     );

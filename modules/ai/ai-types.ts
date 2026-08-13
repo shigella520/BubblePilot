@@ -33,6 +33,18 @@ const aiProviderConfigurationBaseSchema = z.object({
     })
     .default({}),
   requestTimeoutMs: z.number().int().min(1_000).max(360_000).default(30_000),
+  reasoningEffort: z
+    .enum([
+      "default",
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ])
+    .default("default"),
   sessionAffinity: z
     .enum(["disabled", "session-id-header"])
     .default("disabled"),
@@ -112,6 +124,8 @@ export const aiRouteEnabledSchema = z.object({
 
 export type AiApiKind = "chat-completions" | "responses";
 export type AiSessionAffinity = "disabled" | "session-id-header";
+export type AiReasoningEffort =
+  "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type AiCapabilityProbeState = "verified" | "failed" | "unknown";
 export type WebSearchPolicy = "disabled" | "auto" | "required";
 export type WebSearchSourceDisplay = "full" | "compact" | "hidden";
@@ -147,6 +161,7 @@ export interface AiProviderConfiguration {
   secret?: string | null | undefined;
   parameters: AiProviderParameters;
   requestTimeoutMs: number;
+  reasoningEffort?: AiReasoningEffort;
   sessionAffinity?: AiSessionAffinity;
   enabled: boolean;
   capabilities?: AiProviderCapabilities | undefined;

@@ -1844,6 +1844,10 @@ components:
           minimum: 1000
           maximum: 360000
           default: 30000
+        reasoningEffort:
+          enum: [default, none, minimal, low, medium, high, xhigh, max]
+          default: default
+          description: Provider default reasoning effort. Default omits the protocol field; Responses uses reasoning.effort and Chat Completions uses reasoning_effort. Model support varies.
         sessionAffinity:
           enum: [disabled, session-id-header]
           default: disabled
