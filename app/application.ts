@@ -20,6 +20,7 @@ import type {
   AiMutationResult,
   AiRepository,
 } from "../modules/ai/ai-repository.js";
+import type { AiRawRequestStore } from "../modules/ai/ai-raw-request-store.js";
 import {
   aiProviderConfigurationSchema,
   aiProviderEnabledSchema,
@@ -144,6 +145,9 @@ const workflowVersionParametersSchema = workflowParametersSchema.extend({
 
 const triggerParametersSchema = z.object({ triggerId: z.string().uuid() });
 const executionParametersSchema = z.object({ executionId: z.string().uuid() });
+const executionAttemptParametersSchema = executionParametersSchema.extend({
+  attemptId: z.string().uuid(),
+});
 const aiProviderParametersSchema = z.object({ providerId: z.string().uuid() });
 const aiRouteParametersSchema = z.object({ routeId: z.string().uuid() });
 const dataExportParametersSchema = z.object({ exportId: z.string().uuid() });
@@ -309,6 +313,7 @@ export interface ApplicationOptions {
     searchTool?: WebSearchTool;
     searchSettings?: WebSearchSettingsService;
     imageInputSettings?: ImageInputSettingsService;
+    rawRequestStore?: AiRawRequestStore;
   };
   workflow?: {
     repository: WorkflowRepository;
@@ -2127,8 +2132,15 @@ export function buildApplication(
         ? null
         : {
             ...execution,
-            aiProviderAttempts:
-              (await options.ai?.repository.listAttempts(executionId)) ?? [],
+            aiProviderAttempts: (
+              (await options.ai?.repository.listAttempts(executionId)) ?? []
+            ).map((attempt) => ({
+              ...attempt,
+              rawRequest: options.ai?.rawRequestStore?.reference(
+                executionId,
+                attempt.diagnostics?.requestHash ?? "",
+              ) ?? { status: "unavailable" as const },
+            })),
             aiToolExecutions:
               (await options.ai?.repository.listToolExecutions(executionId)) ??
               [],
@@ -2643,6 +2655,60 @@ export function buildApplication(
           );
         }
         return { data: execution };
+      },
+    );
+
+    application.get(
+      "/api/v1/executions/:executionId/ai-attempts/:attemptId/raw-request",
+      {
+        preHandler: requireSensitive(
+          "execution.ai-request.view",
+          "workflow-execution",
+        ),
+      },
+      async (request) => {
+        const parameters = executionAttemptParametersSchema.parse(
+          request.params,
+        );
+        const execution = await workflowRepository.getExecution(
+          parameters.executionId,
+        );
+        if (execution === null) {
+          throw new ApplicationError(
+            "EXECUTION_NOT_FOUND",
+            "The workflow execution does not exist.",
+            404,
+          );
+        }
+        const attempt = (
+          (await options.ai?.repository.listAttempts(parameters.executionId)) ??
+          []
+        ).find((candidate) => candidate.id === parameters.attemptId);
+        if (attempt === undefined) {
+          throw new ApplicationError(
+            "AI_PROVIDER_ATTEMPT_NOT_FOUND",
+            "The AI provider attempt does not exist in this execution.",
+            404,
+          );
+        }
+        const requestBody = options.ai?.rawRequestStore?.get(
+          parameters.executionId,
+          attempt.diagnostics?.requestHash ?? "",
+        );
+        if (requestBody === undefined || requestBody === null) {
+          throw new ApplicationError(
+            "AI_RAW_REQUEST_UNAVAILABLE",
+            "The raw AI request is no longer available in this process.",
+            404,
+          );
+        }
+        return {
+          data: {
+            attemptId: attempt.id,
+            requestHash: attempt.diagnostics?.requestHash ?? null,
+            body: requestBody,
+          },
+        };
       },
     );
 

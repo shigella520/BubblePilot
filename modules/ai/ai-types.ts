@@ -284,6 +284,8 @@ export type AiContentPart = AiTextContentPart | AiImageContentPart;
 export interface AiChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | readonly AiContentPart[];
+  /** Internal-only stable identity used for cache diagnostics; never serialized. */
+  traceMessageId?: string;
   toolCallId?: string;
   toolCalls?: readonly AiToolCall[];
 }
@@ -304,6 +306,8 @@ export interface AiChatRequest {
   messages: readonly AiChatMessage[];
   maxOutputTokens: number;
   temperature: number | null;
+  /** Internal execution identity for process-local request diagnostics. */
+  executionId?: string;
   clientRequestId?: string;
   sessionId?: string;
   promptTraceKey?: string;

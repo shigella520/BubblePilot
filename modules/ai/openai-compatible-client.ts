@@ -18,6 +18,7 @@ import {
   resolveProviderSecret,
   type SecretResolver,
 } from "./secret-resolver.js";
+import type { AiRawRequestStore } from "./ai-raw-request-store.js";
 
 const errorResponseSchema = z
   .object({
@@ -203,19 +204,25 @@ function promptItemMetrics(item: unknown) {
   };
   visit(item);
   const text = textParts.join("\n");
-  const historyMessageId = /<chat_history\s+message_id="([^"]+)"/u.exec(
-    text,
-  )?.[1];
+  const traceMessageId =
+    item !== null &&
+    typeof item === "object" &&
+    typeof (item as Record<string, unknown>).traceMessageId === "string"
+      ? ((item as Record<string, unknown>).traceMessageId as string)
+      : undefined;
   const linkPreviewLines = text
     .split("\n")
-    .filter((line) => line.includes("[link_preview"));
+    .filter(
+      (line) =>
+        line.includes("<link_previews") || line.includes("[link_preview"),
+    );
   return {
     contentKinds: [...contentKinds].sort(),
     textCharacters,
     imageCount,
     imageBytes,
     historyMessageIdHash:
-      historyMessageId === undefined ? null : sha256(historyMessageId),
+      traceMessageId === undefined ? null : sha256(traceMessageId),
     textHash: sha256(text),
     imageContentHash: imageParts.length === 0 ? null : hashJson(imageParts),
     linkPreviewHash:
@@ -285,12 +292,6 @@ function divergenceReason(
     case "history":
       if (previous === undefined || current === undefined)
         return "history-window-shifted";
-      if (
-        previous.historyMessageIdHash !== current.historyMessageIdHash ||
-        previous.historyMessageIdHash === null ||
-        current.historyMessageIdHash === null
-      )
-        return "history-window-shifted";
       if (previous.imageCount !== current.imageCount)
         return "history-image-selection-changed";
       if (previous.linkPreviewHash !== current.linkPreviewHash)
@@ -301,6 +302,12 @@ function divergenceReason(
         previous.imageContentHash !== current.imageContentHash
       )
         return "history-image-content-changed";
+      if (
+        previous.historyMessageIdHash !== current.historyMessageIdHash ||
+        previous.historyMessageIdHash === null ||
+        current.historyMessageIdHash === null
+      )
+        return "history-window-shifted";
       return "history-message-changed";
     case "participants":
       return "participant-mapping-changed";
@@ -365,6 +372,58 @@ function chatContent(content: string | readonly AiContentPart[]) {
   );
 }
 
+function mergeAdjacentRoleMessages(
+  messages: readonly AiChatMessage[],
+): readonly AiChatMessage[] {
+  const merged: AiChatMessage[] = [];
+  for (const message of messages) {
+    const previous = merged.at(-1);
+    const mergeable =
+      previous !== undefined &&
+      previous.role === message.role &&
+      previous.toolCallId === undefined &&
+      message.toolCallId === undefined &&
+      previous.toolCalls === undefined &&
+      message.toolCalls === undefined &&
+      message.role !== "tool";
+    if (!mergeable) {
+      merged.push(message);
+      continue;
+    }
+    const toParts = (content: string | readonly AiContentPart[]) =>
+      typeof content === "string"
+        ? [{ type: "text" as const, text: content }]
+        : [...content];
+    merged[merged.length - 1] = {
+      role: message.role,
+      content: [...toParts(previous.content), ...toParts(message.content)],
+    };
+  }
+  return merged;
+}
+
+function tracePayloadMessages(
+  provider: AiProviderRecord,
+  messages: readonly AiChatMessage[],
+): readonly unknown[] {
+  return messages.map((message) => ({
+    role: message.role,
+    content:
+      provider.apiKind === "responses"
+        ? responsesContent(message.content)
+        : chatContent(message.content),
+    ...(message.traceMessageId === undefined
+      ? {}
+      : { traceMessageId: message.traceMessageId }),
+    ...(message.toolCallId === undefined
+      ? {}
+      : { tool_call_id: message.toolCallId }),
+    ...(message.toolCalls === undefined
+      ? {}
+      : { tool_calls: message.toolCalls }),
+  }));
+}
+
 function responsesContent(content: string | readonly AiContentPart[]) {
   if (typeof content === "string") return content;
   return content.flatMap((part) =>
@@ -382,7 +441,7 @@ function responsesContent(content: string | readonly AiContentPart[]) {
 }
 
 function chatMessages(messages: readonly AiChatMessage[]) {
-  return messages.map((message) =>
+  return mergeAdjacentRoleMessages(messages).map((message) =>
     message.role === "tool"
       ? {
           role: "tool",
@@ -407,7 +466,7 @@ function chatMessages(messages: readonly AiChatMessage[]) {
 
 function responseInput(messages: readonly AiChatMessage[]) {
   const items: unknown[] = [];
-  for (const message of messages) {
+  for (const message of mergeAdjacentRoleMessages(messages)) {
     if (message.role === "tool") {
       items.push({
         type: "function_call_output",
@@ -707,6 +766,7 @@ export class OpenAiCompatibleClient implements AiClient {
   constructor(
     private readonly secrets: SecretResolver,
     fetchImplementation?: typeof fetch,
+    private readonly rawRequestStore?: AiRawRequestStore,
   ) {
     this.fetchImplementation = fetchImplementation ?? fetch;
   }
@@ -819,6 +879,13 @@ export class OpenAiCompatibleClient implements AiClient {
         diagnostics: initialDiagnostics,
       });
     }
+    if (request.executionId !== undefined) {
+      this.rawRequestStore?.record(
+        request.executionId,
+        requestHash,
+        requestBody,
+      );
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(
@@ -929,9 +996,7 @@ export class OpenAiCompatibleClient implements AiClient {
     if (request.promptTraceKey === undefined) {
       return null;
     }
-    const itemsValue =
-      provider.apiKind === "responses" ? payload.input : payload.messages;
-    const items = traceItems(Array.isArray(itemsValue) ? itemsValue : []);
+    const items = traceItems(tracePayloadMessages(provider, request.messages));
     const configuration = { ...payload };
     delete configuration.input;
     delete configuration.messages;

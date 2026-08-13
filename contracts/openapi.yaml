@@ -1465,6 +1465,28 @@ paths:
           description: 执行、节点尝试、含稳定错误类别和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；不返回完整 Prompt、聊天正文、AI 输出、Secret 或原始响应体。
         "404":
           $ref: "#/components/responses/Error"
+  /api/v1/executions/{executionId}/ai-attempts/{attemptId}/raw-request:
+    get:
+      operationId: getExecutionAiAttemptRawRequest
+      description: 读取当前应用进程内保留的 AI Provider Attempt 原始 JSON 请求报文。仅保留最近活跃的 20 个执行，不落库；应用重启、执行被淘汰或请求由其他实例处理后不可用。响应可能包含聊天正文和图片数据，需要敏感操作二次验证，审计不记录报文正文。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+        - in: path
+          name: attemptId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 返回与指定 Provider Attempt 请求哈希精确匹配的原始 JSON 请求体。
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/retry:
     post:
       operationId: retryExecution

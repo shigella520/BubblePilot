@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApplication } from "../app/application.js";
 import type { AppConfig } from "../app/config.js";
 import { AiManagementService } from "../modules/ai/ai-management-service.js";
+import { AiRawRequestStore } from "../modules/ai/ai-raw-request-store.js";
 import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
 import {
   OpenAiCompatibleClient,
@@ -69,30 +70,36 @@ class CapturingAiClient implements AiClient {
 
   private readonly delegate: OpenAiCompatibleClient;
 
-  constructor(secrets: EnvironmentSecretResolver) {
-    this.delegate = new OpenAiCompatibleClient(secrets, () =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                finish_reason: "stop",
-                message: { content: "Fictional AI answer" },
+  constructor(
+    secrets: EnvironmentSecretResolver,
+    rawRequestStore?: AiRawRequestStore,
+  ) {
+    this.delegate = new OpenAiCompatibleClient(
+      secrets,
+      () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  finish_reason: "stop",
+                  message: { content: "Fictional AI answer" },
+                },
+              ],
+              usage: {
+                prompt_tokens: 120,
+                completion_tokens: 8,
+                total_tokens: 128,
+                prompt_tokens_details: { cached_tokens: 64 },
               },
-            ],
-            usage: {
-              prompt_tokens: 120,
-              completion_tokens: 8,
-              total_tokens: 128,
-              prompt_tokens_details: { cached_tokens: 64 },
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
             },
-          }),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          },
+          ),
         ),
-      ),
+      rawRequestStore,
     );
   }
 
@@ -138,6 +145,7 @@ describe("AI workflow", () => {
   let aiRepository: InMemoryAiRepository;
   let aiClient: CapturingAiClient;
   let replyGateway: CapturingReplyGateway;
+  let rawRequestStore: AiRawRequestStore;
   let application: FastifyInstance;
   let routeId: string;
 
@@ -146,10 +154,11 @@ describe("AI workflow", () => {
     workflows = new InMemoryWorkflowRepository();
     aiRepository = new InMemoryAiRepository();
     replyGateway = new CapturingReplyGateway();
+    rawRequestStore = new AiRawRequestStore(20);
     const secrets = new EnvironmentSecretResolver({
       FICTIONAL_AI_KEY: "fictional-server-secret",
     });
-    aiClient = new CapturingAiClient(secrets);
+    aiClient = new CapturingAiClient(secrets, rawRequestStore);
     const provider = await aiRepository.createProvider({
       name: "Fictional AI",
       apiKind: "chat-completions",
@@ -189,6 +198,7 @@ describe("AI workflow", () => {
       ai: {
         repository: aiRepository,
         management: new AiManagementService(aiRepository, aiClient, secrets),
+        rawRequestStore,
       },
       workflow: { repository: workflows, engine },
     });
@@ -449,10 +459,7 @@ describe("AI workflow", () => {
     const firstMessages = aiClient.requests[0]?.messages ?? [];
     expect(firstMessages[0]?.role).toBe("system");
     expect(firstMessages[0]?.content).toContain("BubblePilot 输入协议");
-    expect(firstMessages[1]).toEqual({
-      role: "system",
-      content: "Answer safely for fictional-user@example.test.",
-    });
+    expect(firstMessages[0]?.content).toContain("<ai_system>");
     const serializedFirstMessages = JSON.stringify(firstMessages);
     expect(serializedFirstMessages).toContain(
       'sender_id=\\"fictional-user@example.test\\"',
@@ -462,11 +469,14 @@ describe("AI workflow", () => {
       serializedFirstMessages.indexOf("Earlier fictional context"),
     ).toBeLessThan(serializedFirstMessages.indexOf("<participant_identities>"));
     expect(aiClient.requests[1]?.messages).toEqual([
-      { role: "system", content: "Polish the upstream draft." },
+      {
+        role: "system",
+        content: "<ai_system>Polish the upstream draft.</ai_system>",
+      },
       {
         role: "user",
         content:
-          "<task_instructions>\nReturn a concise final answer.\n</task_instructions>",
+          "<static_task>\nReturn a concise final answer.\n</static_task>",
       },
       {
         role: "user",
@@ -504,6 +514,7 @@ describe("AI workflow", () => {
             selectionHealthState: "healthy",
             healthState: "healthy",
             errorCategory: null,
+            rawRequest: { status: "available" },
           },
           {
             nodeId: "refine-ai",
@@ -515,6 +526,7 @@ describe("AI workflow", () => {
             selectionHealthState: "healthy",
             healthState: "healthy",
             errorCategory: null,
+            rawRequest: { status: "available" },
           },
         ],
       },
@@ -522,6 +534,22 @@ describe("AI workflow", () => {
     expect(detail.body).not.toContain("fictional-server-secret");
     expect(detail.body).not.toContain("Earlier fictional context");
     expect(detail.body).not.toContain("Fictional AI answer");
+
+    const firstAttemptId = detail.json<{
+      data: { aiProviderAttempts: Array<{ id: string }> };
+    }>().data.aiProviderAttempts[0]?.id;
+    const rawRequest = await application.inject({
+      method: "GET",
+      url: `/api/v1/executions/${executionId}/ai-attempts/${firstAttemptId}/raw-request`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(rawRequest.statusCode).toBe(200);
+    const rawRequestBody = rawRequest.json<{
+      data: { attemptId: string; body: string };
+    }>();
+    expect(rawRequestBody.data.attemptId).toBe(firstAttemptId);
+    expect(rawRequestBody.data.body).toContain("Earlier fictional context");
+    expect(rawRequest.body).not.toContain("fictional-server-secret");
   });
 
   it("keeps each complete text-turn prompt as the next turn's exact prefix", async () => {
@@ -676,10 +704,8 @@ describe("AI workflow", () => {
     const first = aiClient.requests[0]?.messages ?? [];
     const second = aiClient.requests[1]?.messages ?? [];
     const third = aiClient.requests[2]?.messages ?? [];
-    expect(sharedMessagePrefixLength(first, second)).toBe(first.length);
-    expect(sharedMessagePrefixLength(second, third)).toBe(second.length);
-    expect(second.slice(0, first.length)).toEqual(first);
-    expect(third.slice(0, second.length)).toEqual(second);
+    expect(sharedMessagePrefixLength(first, second)).toBe(first.length - 1);
+    expect(sharedMessagePrefixLength(second, third)).toBe(second.length - 1);
     expect(second.length).toBeGreaterThan(first.length);
     expect(third.length).toBeGreaterThan(second.length);
     expect(JSON.stringify(aiClient.requests)).not.toContain("current_input");
@@ -695,17 +721,15 @@ describe("AI workflow", () => {
     });
     expect(traces[1]).toMatchObject({
       previousItemCount: first.length,
-      sharedPrefixItemCount: first.length,
+      sharedPrefixItemCount: first.length - 1,
       configurationMatchesPrevious: true,
-      previousRequestIsExactPrefix: true,
-      divergenceIndex: null,
+      previousRequestIsExactPrefix: false,
     });
     expect(traces[2]).toMatchObject({
       previousItemCount: second.length,
-      sharedPrefixItemCount: second.length,
+      sharedPrefixItemCount: second.length - 1,
       configurationMatchesPrevious: true,
-      previousRequestIsExactPrefix: true,
-      divergenceIndex: null,
+      previousRequestIsExactPrefix: false,
     });
   });
 

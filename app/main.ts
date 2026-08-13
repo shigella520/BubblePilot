@@ -3,6 +3,7 @@ import { loadConfig } from "./config.js";
 import { AiManagementService } from "../modules/ai/ai-management-service.js";
 import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
 import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
+import { AiRawRequestStore } from "../modules/ai/ai-raw-request-store.js";
 import { AgentRunner } from "../modules/ai/agent-runner.js";
 import { SearxngWebSearchTool } from "../modules/ai/web-search-tool.js";
 import { PostgresAiRepository } from "../modules/ai/postgres-ai-repository.js";
@@ -113,7 +114,12 @@ const authService = new AuthService(authRepository, {
   sensitiveOperationTtlSeconds: config.sensitiveOperationTtlSeconds,
 });
 const secretResolver = new EnvironmentSecretResolver();
-const aiClient = new OpenAiCompatibleClient(secretResolver);
+const aiRawRequestStore = new AiRawRequestStore(20);
+const aiClient = new OpenAiCompatibleClient(
+  secretResolver,
+  undefined,
+  aiRawRequestStore,
+);
 const aiRouting = new AiRoutingService(
   aiRepository,
   aiClient,
@@ -191,6 +197,7 @@ const application = buildApplication(config, repository, {
     searchTool: webSearchTool,
     searchSettings: webSearchSettings,
     imageInputSettings,
+    rawRequestStore: aiRawRequestStore,
   },
   workflow: {
     repository: workflowRepository,

@@ -304,6 +304,7 @@ export class AiRoutingService {
           messages: request.messages,
           maxOutputTokens: request.maxOutputTokens,
           temperature: request.temperature,
+          executionId: request.executionId,
           clientRequestId: `${request.executionId}:${request.nodeId}:${round}:${sequence}`,
           ...(candidate.provider.sessionAffinity === "session-id-header" &&
           request.sessionAffinityKey !== undefined

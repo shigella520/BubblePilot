@@ -429,6 +429,45 @@ describe("OpenAiCompatibleClient", () => {
     },
   );
 
+  it("merges adjacent roles without serializing internal trace identities", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ output_text: "ok" }), { status: 200 }),
+      );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    await client.call(
+      { ...provider, apiKind: "responses" },
+      {
+        ...request,
+        messages: [
+          { role: "system", content: "<input_protocol>p</input_protocol>" },
+          { role: "system", content: "<ai_system>s</ai_system>" },
+          {
+            role: "user",
+            content: "<chat_history>a</chat_history>",
+            traceMessageId: "provider-message-a",
+          },
+          {
+            role: "user",
+            content: "<chat_history>b</chat_history>",
+            traceMessageId: "provider-message-b",
+          },
+        ],
+      },
+    );
+    const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+    const rawBody = typeof body === "string" ? body : "";
+    const payload = JSON.parse(rawBody) as { input: unknown[] };
+    expect(payload.input).toHaveLength(2);
+    expect(rawBody).not.toContain("traceMessageId");
+    expect(rawBody).not.toContain("provider-message-a");
+    expect(rawBody).not.toContain("provider-message-b");
+  });
+
   it("records response shape, request IDs, token usage, and cache counters without content", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
