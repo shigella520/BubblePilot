@@ -559,10 +559,24 @@ describe("workflow application", () => {
       headers: { authorization: `Bearer ${apiAccessToken}` },
     });
     const firstPage = first.json<{
-      data: Array<{ id: string }>;
+      data: Array<{
+        id: string;
+        providerChatId: string | null;
+        chatDisplayName: string | null;
+        cachedPromptTokens: number | null;
+        cacheEligiblePromptTokens: number;
+        cacheHitRate: number | null;
+      }>;
       page: { nextCursor: string | null };
     }>();
     expect(firstPage.data).toHaveLength(2);
+    expect(firstPage.data[0]).toMatchObject({
+      providerChatId: "iMessage;-;fictional-chat",
+      chatDisplayName: null,
+      cachedPromptTokens: null,
+      cacheEligiblePromptTokens: 0,
+      cacheHitRate: null,
+    });
     expect(firstPage.page.nextCursor).toEqual(expect.any(String));
 
     const second = await application.inject({

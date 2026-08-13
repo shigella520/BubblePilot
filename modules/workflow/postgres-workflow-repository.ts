@@ -78,6 +78,8 @@ interface ExecutionRow {
   provider: string;
   external_event_id: string;
   source_provider_message_id: string | null;
+  provider_chat_id: string | null;
+  chat_display_name: string | null;
   trigger_id: string;
   trigger_name: string;
   workflow_id: string;
@@ -95,6 +97,8 @@ interface ExecutionRow {
   started_at: Date | null;
   completed_at: Date | null;
   created_at: Date;
+  cached_prompt_tokens: string | null;
+  cache_eligible_prompt_tokens: string | null;
 }
 
 interface RecoveryEnvelopeRow {
@@ -176,18 +180,31 @@ const triggerSelect = `SELECT
 
 const executionSelect = `SELECT
   e.id, e.provider, e.external_event_id,
-  (SELECT m.provider_message_id FROM messages m WHERE m.id = e.source_message_id)
-    AS source_provider_message_id,
+  source_message.provider_message_id AS source_provider_message_id,
+  source_chat.provider_chat_id, source_chat.display_name AS chat_display_name,
   e.trigger_id,
   t.name AS trigger_name, v.workflow_id, w.name AS workflow_name,
   e.workflow_version_id, v.version AS workflow_version,
   e.retry_of_execution_id, e.recovery_attempt, e.correlation_id,
   e.status, e.current_node_id, e.error_code, e.error_summary, e.next_retry_at,
-  e.started_at, e.completed_at, e.created_at
+  e.started_at, e.completed_at, e.created_at,
+  cache_usage.cached_prompt_tokens, cache_usage.cache_eligible_prompt_tokens
 FROM workflow_executions e
 INNER JOIN bot_triggers t ON t.id = e.trigger_id
 INNER JOIN workflow_versions v ON v.id = e.workflow_version_id
-INNER JOIN workflows w ON w.id = v.workflow_id`;
+INNER JOIN workflows w ON w.id = v.workflow_id
+LEFT JOIN messages source_message ON source_message.id = e.source_message_id
+LEFT JOIN chats source_chat ON source_chat.id = source_message.chat_id
+LEFT JOIN LATERAL (
+  SELECT
+    COALESCE(SUM(attempt.cached_prompt_tokens), 0)::text
+      AS cached_prompt_tokens,
+    SUM(attempt.prompt_tokens)::text AS cache_eligible_prompt_tokens
+  FROM ai_provider_attempts attempt
+  WHERE attempt.execution_id = e.id
+    AND attempt.cached_prompt_tokens IS NOT NULL
+    AND attempt.prompt_tokens IS NOT NULL
+) cache_usage ON TRUE`;
 
 function versionRecord(row: WorkflowVersionRow): WorkflowVersionRecord {
   return {
@@ -218,10 +235,19 @@ function triggerRecord(row: TriggerRow): TriggerRecord {
 }
 
 function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
+  const cacheEligiblePromptTokens = Number(
+    row.cache_eligible_prompt_tokens ?? 0,
+  );
+  const cachedPromptTokens =
+    row.cache_eligible_prompt_tokens === null
+      ? null
+      : Number(row.cached_prompt_tokens ?? 0);
   return {
     id: row.id,
     provider: row.provider,
     externalEventId: row.external_event_id,
+    providerChatId: row.provider_chat_id,
+    chatDisplayName: row.chat_display_name,
     triggerId: row.trigger_id,
     triggerName: row.trigger_name,
     workflowId: row.workflow_id,
@@ -239,6 +265,12 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
     startedAt: row.started_at?.toISOString() ?? null,
     completedAt: row.completed_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
+    cachedPromptTokens,
+    cacheEligiblePromptTokens,
+    cacheHitRate:
+      cachedPromptTokens === null || cacheEligiblePromptTokens === 0
+        ? null
+        : cachedPromptTokens / cacheEligiblePromptTokens,
   };
 }
 

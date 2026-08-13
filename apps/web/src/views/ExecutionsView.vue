@@ -30,6 +30,8 @@ import { useSessionStore } from "../stores/session";
 
 interface Execution {
   id: string;
+  providerChatId: string | null;
+  chatDisplayName: string | null;
   workflowName: string;
   workflowVersion: number;
   triggerName: string;
@@ -41,6 +43,9 @@ interface Execution {
   nextRetryAt: string | null;
   createdAt: string;
   completedAt: string | null;
+  cachedPromptTokens: number | null;
+  cacheEligiblePromptTokens: number;
+  cacheHitRate: number | null;
 }
 interface ExecutionDetail extends Execution {
   correlationId: string;
@@ -850,7 +855,9 @@ function resetAuditPage(): Promise<boolean> {
               <tr>
                 <th>工作流</th>
                 <th>触发器</th>
+                <th>聊天</th>
                 <th>状态</th>
+                <th>缓存命中</th>
                 <th>当前节点</th>
                 <th>时间</th>
                 <th></th>
@@ -858,7 +865,7 @@ function resetAuditPage(): Promise<boolean> {
             </thead>
             <tbody>
               <tr v-if="!executions.length">
-                <td colspan="6" class="empty-cell">暂无执行</td>
+                <td colspan="8" class="empty-cell">暂无执行</td>
               </tr>
               <tr v-for="item in executions" :key="item.id">
                 <td>
@@ -871,9 +878,26 @@ function resetAuditPage(): Promise<boolean> {
                 </td>
                 <td>{{ item.triggerName }}</td>
                 <td>
+                  <strong>{{
+                    item.chatDisplayName || item.providerChatId || "—"
+                  }}</strong>
+                  <span
+                    v-if="item.chatDisplayName && item.providerChatId"
+                    class="keyline"
+                    >{{ item.providerChatId }}</span
+                  >
+                </td>
+                <td>
                   <span class="table-status" :class="item.status">{{
                     item.status
                   }}</span>
+                </td>
+                <td>
+                  <strong>{{ formatCacheRate(item.cacheHitRate) }}</strong>
+                  <span v-if="item.cachedPromptTokens !== null" class="keyline"
+                    >{{ formatTokenCount(item.cachedPromptTokens) }} /
+                    {{ formatTokenCount(item.cacheEligiblePromptTokens) }}</span
+                  >
                 </td>
                 <td>{{ item.currentNodeId || "—" }}</td>
                 <td>{{ new Date(item.createdAt).toLocaleString() }}</td>
