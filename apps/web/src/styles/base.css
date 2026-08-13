@@ -711,6 +711,24 @@ td .keyline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.compression-indicator {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.35rem;
+  vertical-align: -0.12rem;
+}
+
+.compression-succeeded {
+  color: var(--success, #20b486);
+}
+.compression-failed {
+  color: var(--danger, #e05252);
+}
+.compression-busy,
+.compression-superseded {
+  color: var(--warning, #f59e0b);
+}
 .mono {
   font-family: "SFMono-Regular", Consolas, monospace;
 }

@@ -367,6 +367,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       cachedPromptTokens: null,
       cacheEligiblePromptTokens: 0,
       cacheHitRate: null,
+      summaryCompressionStatus: "none",
       sourceProviderMessageId: input.envelope.message.providerMessageId,
       sourceEnvelope: structuredClone(input.envelope),
       nodes: [],
@@ -482,6 +483,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       cachedPromptTokens: null,
       cacheEligiblePromptTokens: 0,
       cacheHitRate: null,
+      summaryCompressionStatus: "none",
       sourceProviderMessageId: source.sourceProviderMessageId,
       sourceEnvelope: {
         ...structuredClone(source.sourceEnvelope),
@@ -849,6 +851,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       cachedPromptTokens: execution.cachedPromptTokens,
       cacheEligiblePromptTokens: execution.cacheEligiblePromptTokens,
       cacheHitRate: execution.cacheHitRate,
+      summaryCompressionStatus: execution.summaryCompressionStatus,
     };
   }
 }

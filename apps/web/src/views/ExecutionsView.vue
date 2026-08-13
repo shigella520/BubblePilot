@@ -2,6 +2,9 @@
 import {
   FileClock,
   Image,
+  CircleAlert,
+  LoaderCircle,
+  Minimize2,
   RefreshCw,
   RotateCcw,
   Route,
@@ -46,6 +49,8 @@ interface Execution {
   cachedPromptTokens: number | null;
   cacheEligiblePromptTokens: number;
   cacheHitRate: number | null;
+  summaryCompressionStatus:
+    "none" | "succeeded" | "failed" | "busy" | "superseded";
 }
 interface ExecutionDetail extends Execution {
   correlationId: string;
@@ -333,6 +338,16 @@ function formatTokenCount(value: number): string {
 
 function formatCacheRate(value: number | null): string {
   return value === null ? "暂无数据" : `${(value * 100).toFixed(1)}%`;
+}
+
+function compressionLabel(
+  status: Execution["summaryCompressionStatus"],
+): string {
+  if (status === "succeeded") return "历史摘要压缩成功";
+  if (status === "failed") return "历史摘要压缩失败";
+  if (status === "busy") return "历史摘要压缩处理中";
+  if (status === "superseded") return "历史摘要压缩结果被并发状态替代";
+  return "";
 }
 
 function usageTimeZone(): string {
@@ -913,6 +928,26 @@ function resetAuditPage(): Promise<boolean> {
                   }}</span>
                 </td>
                 <td>
+                  <span
+                    v-if="item.summaryCompressionStatus !== 'none'"
+                    class="compression-indicator"
+                    :class="`compression-${item.summaryCompressionStatus}`"
+                    :title="compressionLabel(item.summaryCompressionStatus)"
+                    :aria-label="
+                      compressionLabel(item.summaryCompressionStatus)
+                    "
+                    role="img"
+                  >
+                    <Minimize2
+                      v-if="item.summaryCompressionStatus === 'succeeded'"
+                      :size="14"
+                    />
+                    <CircleAlert
+                      v-else-if="item.summaryCompressionStatus === 'failed'"
+                      :size="14"
+                    />
+                    <LoaderCircle v-else :size="14" />
+                  </span>
                   <strong>{{ formatCacheRate(item.cacheHitRate) }}</strong>
                   <span v-if="item.cachedPromptTokens !== null" class="keyline"
                     >{{ formatTokenCount(item.cachedPromptTokens) }} /

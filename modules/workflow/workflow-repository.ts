@@ -81,6 +81,8 @@ export interface WorkflowExecutionRecord {
   cachedPromptTokens: number | null;
   cacheEligiblePromptTokens: number;
   cacheHitRate: number | null;
+  summaryCompressionStatus:
+    "none" | "succeeded" | "failed" | "busy" | "superseded";
 }
 
 export interface MessageExecutionLink {

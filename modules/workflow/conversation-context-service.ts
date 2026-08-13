@@ -454,7 +454,9 @@ export class ConversationContextService {
       input.compressionBatchSize,
     );
     const messages =
-      compression.status === "failed" || compression.status === "busy"
+      compression.status === "failed" ||
+      compression.status === "busy" ||
+      compression.status === "superseded"
         ? await this.loadFallbackMessages(
             input,
             state.coveredThroughIndex,
@@ -463,7 +465,9 @@ export class ConversationContextService {
         : await this.loadOldestMessages(
             input,
             state.coveredThroughIndex,
-            appendOnlyLimit,
+            compression.status === "succeeded"
+              ? input.messageLimit
+              : appendOnlyLimit,
           );
     const contextCharacters =
       summary.length + this.messagesCharacters(messages);

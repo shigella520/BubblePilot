@@ -99,6 +99,8 @@ interface ExecutionRow {
   created_at: Date;
   cached_prompt_tokens: string | null;
   cache_eligible_prompt_tokens: string | null;
+  summary_compression_status:
+    "none" | "succeeded" | "failed" | "busy" | "superseded";
 }
 
 interface RecoveryEnvelopeRow {
@@ -188,7 +190,8 @@ const executionSelect = `SELECT
   e.retry_of_execution_id, e.recovery_attempt, e.correlation_id,
   e.status, e.current_node_id, e.error_code, e.error_summary, e.next_retry_at,
   e.started_at, e.completed_at, e.created_at,
-  cache_usage.cached_prompt_tokens, cache_usage.cache_eligible_prompt_tokens
+  cache_usage.cached_prompt_tokens, cache_usage.cache_eligible_prompt_tokens,
+  COALESCE(summary_usage.summary_compression_status, 'none') AS summary_compression_status
 FROM workflow_executions e
 INNER JOIN bot_triggers t ON t.id = e.trigger_id
 INNER JOIN workflow_versions v ON v.id = e.workflow_version_id
@@ -210,7 +213,18 @@ LEFT JOIN LATERAL (
       WHERE node ->> 'id' = attempt.node_id
         AND node ->> 'type' = 'ai-chat'
     )
-) cache_usage ON TRUE`;
+) cache_usage ON TRUE
+LEFT JOIN LATERAL (
+  SELECT CASE
+    WHEN BOOL_OR(n.output_summary ->> 'compressionStatus' = 'succeeded') THEN 'succeeded'
+    WHEN BOOL_OR(n.output_summary ->> 'compressionStatus' = 'failed') THEN 'failed'
+    WHEN BOOL_OR(n.output_summary ->> 'compressionStatus' = 'busy') THEN 'busy'
+    WHEN BOOL_OR(n.output_summary ->> 'compressionStatus' = 'superseded') THEN 'superseded'
+    ELSE 'none'
+  END AS summary_compression_status
+  FROM node_executions n
+  WHERE n.execution_id = e.id AND n.node_type = 'load-context'
+) summary_usage ON TRUE`;
 
 function versionRecord(row: WorkflowVersionRow): WorkflowVersionRecord {
   return {
@@ -277,6 +291,7 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
       cachedPromptTokens === null || cacheEligiblePromptTokens === 0
         ? null
         : cachedPromptTokens / cacheEligiblePromptTokens,
+    summaryCompressionStatus: row.summary_compression_status,
   };
 }
 
