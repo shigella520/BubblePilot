@@ -204,6 +204,12 @@ LEFT JOIN LATERAL (
   WHERE attempt.execution_id = e.id
     AND attempt.cached_prompt_tokens IS NOT NULL
     AND attempt.prompt_tokens IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(v.definition -> 'nodes') AS node
+      WHERE node ->> 'id' = attempt.node_id
+        AND node ->> 'type' = 'ai-chat'
+    )
 ) cache_usage ON TRUE`;
 
 function versionRecord(row: WorkflowVersionRow): WorkflowVersionRecord {

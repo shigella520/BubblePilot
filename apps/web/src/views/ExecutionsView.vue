@@ -69,6 +69,7 @@ interface ExecutionDetail extends Execution {
   }>;
   aiProviderAttempts: Array<{
     id: string;
+    nodeId: string;
     routeId: string;
     routeVersion: number;
     providerId: string;
@@ -396,6 +397,22 @@ function percent(numerator: number | null, denominator: number | null) {
   if (numerator === null || denominator === null || denominator <= 0)
     return "—";
   return `${((numerator / denominator) * 100).toFixed(1)}%`;
+}
+
+function providerAttemptPurpose(
+  item: ExecutionDetail["aiProviderAttempts"][number],
+) {
+  const nodeType = detail.value?.nodes.find(
+    (node) => node.nodeId === item.nodeId,
+  )?.nodeType;
+  switch (nodeType) {
+    case "ai-chat":
+      return "对话回复";
+    case "load-context":
+      return "历史摘要压缩";
+    default:
+      return nodeType === undefined ? "AI 请求" : `AI 请求 · ${nodeType}`;
+  }
 }
 
 function cacheStructureLabel(
@@ -832,6 +849,10 @@ function resetAuditPage(): Promise<boolean> {
           <div>
             <p class="card-kicker">EXECUTION TRACE</p>
             <h1>工作流执行</h1>
+            <p class="keyline">
+              回复缓存命中仅统计 ai-chat
+              对话请求；历史摘要压缩等辅助请求不计入。
+            </p>
           </div>
           <div class="row-actions">
             <button
@@ -857,15 +878,14 @@ function resetAuditPage(): Promise<boolean> {
                 <th>触发器</th>
                 <th>聊天</th>
                 <th>状态</th>
-                <th>缓存命中</th>
-                <th>当前节点</th>
+                <th>回复缓存命中</th>
                 <th>时间</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!executions.length">
-                <td colspan="8" class="empty-cell">暂无执行</td>
+                <td colspan="7" class="empty-cell">暂无执行</td>
               </tr>
               <tr v-for="item in executions" :key="item.id">
                 <td>
@@ -899,7 +919,6 @@ function resetAuditPage(): Promise<boolean> {
                     {{ formatTokenCount(item.cacheEligiblePromptTokens) }}</span
                   >
                 </td>
-                <td>{{ item.currentNodeId || "—" }}</td>
                 <td>{{ new Date(item.createdAt).toLocaleString() }}</td>
                 <td>
                   <button
@@ -1087,7 +1106,12 @@ function resetAuditPage(): Promise<boolean> {
               >
                 <Route :size="17" />
                 <div>
-                  <strong>{{ item.providerName }} · {{ item.model }}</strong>
+                  <div class="provider-attempt-heading">
+                    <strong>{{ item.providerName }} · {{ item.model }}</strong>
+                    <span class="provider-attempt-purpose">{{
+                      providerAttemptPurpose(item)
+                    }}</span>
+                  </div>
                   <span class="keyline"
                     >路由 v{{ item.routeVersion }} · Provider v{{
                       item.providerVersion
