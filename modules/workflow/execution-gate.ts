@@ -23,7 +23,7 @@ interface WaitingTask {
   key: string | null;
   start: () => void;
   reject: (error: WorkflowCapacityError) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout> | null;
 }
 
 export class BoundedExecutionGate {
@@ -52,15 +52,23 @@ export class BoundedExecutionGate {
       const waiting: WaitingTask = {
         key,
         start: () => {
-          clearTimeout(waiting.timer);
+          if (waiting.timer !== null) clearTimeout(waiting.timer);
           void this.start(task, key).then(resolve, reject);
         },
         reject,
-        timer: setTimeout(() => {
-          const index = this.waiting.indexOf(waiting);
-          if (index >= 0) this.waiting.splice(index, 1);
-          reject(new WorkflowCapacityError("WORKFLOW_QUEUE_WAIT_TIMEOUT"));
-        }, this.queueWaitMs),
+        // A keyed task waiting behind the same active key is ordered work, not
+        // a capacity wait. Expiring it would drop a valid chat event merely
+        // because the preceding execution was slow.
+        timer:
+          key !== null && this.activeKeys.has(key)
+            ? null
+            : setTimeout(() => {
+                const index = this.waiting.indexOf(waiting);
+                if (index >= 0) this.waiting.splice(index, 1);
+                reject(
+                  new WorkflowCapacityError("WORKFLOW_QUEUE_WAIT_TIMEOUT"),
+                );
+              }, this.queueWaitMs),
       };
       this.waiting.push(waiting);
     });

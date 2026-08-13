@@ -110,6 +110,33 @@ describe("reliability guards", () => {
     expect(started).toEqual(["first", "other-key", "same-key"]);
   });
 
+  it("does not expire ordered work waiting behind the same isolation key", async () => {
+    vi.useFakeTimers();
+    try {
+      const gate = new BoundedExecutionGate(2, 4, 50);
+      let releaseFirst: (() => void) | undefined;
+      const first = gate.run(
+        () =>
+          new Promise<string>((resolve) => {
+            releaseFirst = () => resolve("first");
+          }),
+        "workflow-a:chat-a",
+      );
+      const ordered = gate.run(
+        () => Promise.resolve("ordered"),
+        "workflow-a:chat-a",
+      );
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(gate.status()).toMatchObject({ active: 1, queued: 1 });
+      releaseFirst?.();
+      await expect(first).resolves.toBe("first");
+      await expect(ordered).resolves.toBe("ordered");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not let a blocked key prevent another queued key from starting", async () => {
     const gate = new BoundedExecutionGate(2, 4, 1_000);
     let releaseA: (() => void) | undefined;
