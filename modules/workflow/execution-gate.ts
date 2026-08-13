@@ -20,6 +20,7 @@ export interface WorkflowGateStatus {
 }
 
 interface WaitingTask {
+  key: string | null;
   start: () => void;
   reject: (error: WorkflowCapacityError) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -27,6 +28,7 @@ interface WaitingTask {
 
 export class BoundedExecutionGate {
   private active = 0;
+  private readonly activeKeys = new Set<string>();
   private readonly waiting: WaitingTask[] = [];
 
   constructor(
@@ -39,18 +41,19 @@ export class BoundedExecutionGate {
     }
   }
 
-  run<T>(task: () => Promise<T>): Promise<T> {
-    if (this.active < this.maxConcurrency) {
-      return this.start(task);
+  run<T>(task: () => Promise<T>, key: string | null = null): Promise<T> {
+    if (this.canStart(key)) {
+      return this.start(task, key);
     }
     if (this.waiting.length >= this.queueCapacity) {
       return Promise.reject(new WorkflowCapacityError("WORKFLOW_QUEUE_FULL"));
     }
     return new Promise<T>((resolve, reject) => {
       const waiting: WaitingTask = {
+        key,
         start: () => {
           clearTimeout(waiting.timer);
-          void this.start(task).then(resolve, reject);
+          void this.start(task, key).then(resolve, reject);
         },
         reject,
         timer: setTimeout(() => {
@@ -72,13 +75,35 @@ export class BoundedExecutionGate {
     };
   }
 
-  private async start<T>(task: () => Promise<T>): Promise<T> {
+  private canStart(key: string | null): boolean {
+    return (
+      this.active < this.maxConcurrency &&
+      (key === null || !this.activeKeys.has(key))
+    );
+  }
+
+  private async start<T>(
+    task: () => Promise<T>,
+    key: string | null,
+  ): Promise<T> {
     this.active += 1;
+    if (key !== null) this.activeKeys.add(key);
     try {
       return await task();
     } finally {
       this.active -= 1;
-      this.waiting.shift()?.start();
+      if (key !== null) this.activeKeys.delete(key);
+      this.drain();
+    }
+  }
+
+  private drain(): void {
+    while (this.active < this.maxConcurrency) {
+      const index = this.waiting.findIndex((waiting) =>
+        this.canStart(waiting.key),
+      );
+      if (index < 0) return;
+      this.waiting.splice(index, 1)[0]?.start();
     }
   }
 }

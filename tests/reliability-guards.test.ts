@@ -78,4 +78,66 @@ describe("reliability guards", () => {
       vi.useRealTimers();
     }
   });
+
+  it("serializes equal isolation keys while allowing other keys to run", async () => {
+    const gate = new BoundedExecutionGate(2, 4, 1_000);
+    const started: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const first = gate.run(
+      () =>
+        new Promise<string>((resolve) => {
+          started.push("first");
+          releaseFirst = () => resolve("first");
+        }),
+      "workflow-a:chat-a",
+    );
+    const sameKey = gate.run(() => {
+      started.push("same-key");
+      return Promise.resolve("same-key");
+    }, "workflow-a:chat-a");
+    const otherKey = gate.run(() => {
+      started.push("other-key");
+      return Promise.resolve("other-key");
+    }, "workflow-a:chat-b");
+
+    await expect(otherKey).resolves.toBe("other-key");
+    expect(started).toEqual(["first", "other-key"]);
+    expect(gate.status()).toMatchObject({ active: 1, queued: 1 });
+
+    releaseFirst?.();
+    await expect(first).resolves.toBe("first");
+    await expect(sameKey).resolves.toBe("same-key");
+    expect(started).toEqual(["first", "other-key", "same-key"]);
+  });
+
+  it("does not let a blocked key prevent another queued key from starting", async () => {
+    const gate = new BoundedExecutionGate(2, 4, 1_000);
+    let releaseA: (() => void) | undefined;
+    let releaseB: (() => void) | undefined;
+    const activeA = gate.run(
+      () => new Promise<void>((resolve) => (releaseA = resolve)),
+      "workflow-a:chat-a",
+    );
+    const activeB = gate.run(
+      () => new Promise<void>((resolve) => (releaseB = resolve)),
+      "workflow-a:chat-b",
+    );
+    const blockedA = gate.run(
+      () => Promise.resolve("blocked-a"),
+      "workflow-a:chat-a",
+    );
+    const queuedC = gate.run(
+      () => Promise.resolve("chat-c"),
+      "workflow-a:chat-c",
+    );
+
+    releaseB?.();
+    await activeB;
+    await expect(queuedC).resolves.toBe("chat-c");
+    expect(gate.status()).toMatchObject({ active: 1, queued: 1 });
+
+    releaseA?.();
+    await activeA;
+    await expect(blockedA).resolves.toBe("blocked-a");
+  });
 });

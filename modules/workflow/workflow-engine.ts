@@ -53,6 +53,14 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function executionIsolationKey(
+  workflowId: string,
+  provider: string,
+  providerChatId: string,
+): string {
+  return `${workflowId}\u0000${provider}\u0000${providerChatId}`;
+}
+
 export class WorkflowEngine implements MessageAutomation {
   private readonly gate: BoundedExecutionGate;
   private readonly timeZone: string;
@@ -85,16 +93,23 @@ export class WorkflowEngine implements MessageAutomation {
     const executionIds: string[] = [];
 
     for (const trigger of matched) {
-      const executionId = await this.gate.run(async () => {
-        const claimed = await this.repository.createExecution({
-          envelope,
-          trigger,
-        });
-        if (claimed.created) {
-          await this.run(claimed.execution, trigger, envelope);
-        }
-        return claimed.execution.id;
-      });
+      const executionId = await this.gate.run(
+        async () => {
+          const claimed = await this.repository.createExecution({
+            envelope,
+            trigger,
+          });
+          if (claimed.created) {
+            await this.run(claimed.execution, trigger, envelope);
+          }
+          return claimed.execution.id;
+        },
+        executionIsolationKey(
+          trigger.workflowId,
+          envelope.provider,
+          envelope.chat.providerChatId,
+        ),
+      );
       executionIds.push(executionId);
     }
 
@@ -110,6 +125,25 @@ export class WorkflowEngine implements MessageAutomation {
     correlationId: string,
     staleRetryBefore: Date,
   ): Promise<ExecutionRecoveryClaim> {
+    const source = await this.repository.getExecution(executionId);
+    if (
+      source?.status === "retrying" &&
+      source.nextRetryAt !== null &&
+      Date.parse(source.nextRetryAt) > staleRetryBefore.getTime()
+    ) {
+      return {
+        status: "conflict",
+        reason: "execution-retry-still-active",
+      };
+    }
+    const isolationKey =
+      source === null || source.providerChatId === null
+        ? null
+        : executionIsolationKey(
+            source.workflowId,
+            source.provider,
+            source.providerChatId,
+          );
     return this.gate.run(async () => {
       const claim = await this.repository.createManualRetry(
         executionId,
@@ -121,7 +155,7 @@ export class WorkflowEngine implements MessageAutomation {
       }
       await this.run(claim.execution, claim.trigger, claim.envelope);
       return claim;
-    });
+    }, isolationKey);
   }
 
   closeExecution(executionId: string): Promise<ExecutionCloseResult> {

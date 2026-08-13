@@ -1523,6 +1523,20 @@ select {
   min-height: 43px;
   padding: 0 13px;
 }
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  border-radius: 5px;
+  accent-color: var(--bubblepilot-blue);
+  justify-self: start;
+  cursor: pointer;
+}
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
 textarea {
   padding: 12px 13px;
   resize: vertical;
@@ -1547,7 +1561,43 @@ textarea:focus {
 }
 .checkbox-field input {
   width: 17px;
+  height: 17px;
   min-height: 17px;
+}
+.workflow-actions-heading {
+  text-align: right;
+}
+.workflow-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 286px;
+}
+.workflow-match-list {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.workflow-match-method {
+  width: fit-content;
+  padding: 4px 7px;
+  border-radius: 8px;
+  color: #196d58;
+  background: rgba(19, 164, 116, 0.08);
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.workflow-match-content {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--bubblepilot-text);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .form-actions {
   display: flex;
