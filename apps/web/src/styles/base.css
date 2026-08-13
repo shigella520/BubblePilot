@@ -712,11 +712,17 @@ td .keyline {
   white-space: nowrap;
 }
 
+.cache-rate-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.cache-rate-line strong {
+  display: inline;
+}
 .compression-indicator {
   display: inline-flex;
   align-items: center;
-  margin-right: 0.35rem;
-  vertical-align: -0.12rem;
 }
 
 .compression-succeeded {

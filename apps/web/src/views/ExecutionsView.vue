@@ -928,27 +928,29 @@ function resetAuditPage(): Promise<boolean> {
                   }}</span>
                 </td>
                 <td>
-                  <span
-                    v-if="item.summaryCompressionStatus !== 'none'"
-                    class="compression-indicator"
-                    :class="`compression-${item.summaryCompressionStatus}`"
-                    :title="compressionLabel(item.summaryCompressionStatus)"
-                    :aria-label="
-                      compressionLabel(item.summaryCompressionStatus)
-                    "
-                    role="img"
-                  >
-                    <Minimize2
-                      v-if="item.summaryCompressionStatus === 'succeeded'"
-                      :size="14"
-                    />
-                    <CircleAlert
-                      v-else-if="item.summaryCompressionStatus === 'failed'"
-                      :size="14"
-                    />
-                    <LoaderCircle v-else :size="14" />
+                  <span class="cache-rate-line">
+                    <strong>{{ formatCacheRate(item.cacheHitRate) }}</strong>
+                    <span
+                      v-if="item.summaryCompressionStatus !== 'none'"
+                      class="compression-indicator"
+                      :class="`compression-${item.summaryCompressionStatus}`"
+                      :title="compressionLabel(item.summaryCompressionStatus)"
+                      :aria-label="
+                        compressionLabel(item.summaryCompressionStatus)
+                      "
+                      role="img"
+                    >
+                      <Minimize2
+                        v-if="item.summaryCompressionStatus === 'succeeded'"
+                        :size="14"
+                      />
+                      <CircleAlert
+                        v-else-if="item.summaryCompressionStatus === 'failed'"
+                        :size="14"
+                      />
+                      <LoaderCircle v-else :size="14" />
+                    </span>
                   </span>
-                  <strong>{{ formatCacheRate(item.cacheHitRate) }}</strong>
                   <span v-if="item.cachedPromptTokens !== null" class="keyline"
                     >{{ formatTokenCount(item.cachedPromptTokens) }} /
                     {{ formatTokenCount(item.cacheEligiblePromptTokens) }}</span
