@@ -243,7 +243,6 @@ function promptItemRegion(
   if (text.includes("<participant_identities")) return "participants";
   if (text.includes("<link_previews")) return "link-previews";
   if (
-    text.includes("<history_attachments") ||
     text.includes("<current_attachments") ||
     text.includes("input_image") ||
     text.includes("image_url")

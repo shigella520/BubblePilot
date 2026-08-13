@@ -225,7 +225,7 @@
         <path d="M1076 35H1116" fill="none" stroke="#f6ae5f" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
         <rect x="1132" width="612" height="70" rx="13" fill="url(#dynamicTail)"/>
         <text x="1152" y="26" fill="#ffe3bd" font-size="12" font-weight="700">易变增强区 / 尾部</text>
-        <text x="1152" y="51" fill="#f5d6c0" font-size="14">成员映射 → 链接预览 → 历史图片 → 当前图片 → 资源诊断</text>
+        <text x="1152" y="51" fill="#f5d6c0" font-size="14">消息内联链接/图片 → 成员映射 → 当前图片 → 资源诊断</text>
       </g>
 
       <g transform="translate(0 132)">
