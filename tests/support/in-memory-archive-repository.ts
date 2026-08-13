@@ -465,9 +465,14 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
     options: ContextWindowOptions,
   ): Promise<readonly ContextMessage[]> {
     const messages = this.chats.get(providerChatId)?.messages ?? [];
+    const boundaryIndex = messages.findIndex(
+      (message) =>
+        message.providerMessageId === options.beforeProviderMessageId,
+    );
+    if (boundaryIndex < 0) return Promise.resolve([]);
     const selected: ContextMessage[] = [];
     let characters = 0;
-    for (const message of [...messages].reverse()) {
+    for (const message of messages.slice(0, boundaryIndex).reverse()) {
       const previewCharacters = message.linkPreview.items.reduce(
         (total, item) =>
           total +
@@ -481,7 +486,6 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
         ((message.body === null || message.body.length === 0) &&
           message.linkPreview.status !== "available") ||
         (!options.includeFromMe && message.isFromMe) ||
-        message.providerMessageId === options.excludeProviderMessageId ||
         selected.length >= options.limit ||
         characters + (message.body?.length ?? 0) + previewCharacters >
           options.maxCharacters

@@ -154,7 +154,7 @@ export interface ConversationContextLoadInput {
   nodeId: string;
   provider: string;
   providerChatId: string;
-  excludeProviderMessageId: string;
+  beforeProviderMessageId: string;
   routeId: string;
   messageLimit: number;
   characterLimit: number;
@@ -499,8 +499,12 @@ export class ConversationContextService {
        WHERE c.provider = $1 AND c.provider_chat_id = $2
          AND c.enabled = TRUE
          AND m.message_index > $3
+         AND m.message_index < (
+           SELECT boundary.message_index FROM messages boundary
+           WHERE boundary.provider = $1
+             AND boundary.provider_message_id = $5
+         )
          AND ($4::boolean OR m.is_from_me = FALSE)
-         AND m.provider_message_id <> $5
          AND ((m.body IS NOT NULL AND m.body <> '')
               OR m.link_preview_status = 'available'
               OR m.attachments <> '[]'::jsonb)`,
@@ -509,7 +513,7 @@ export class ConversationContextService {
         input.providerChatId,
         afterIndex,
         input.includeFromMe,
-        input.excludeProviderMessageId,
+        input.beforeProviderMessageId,
       ],
     );
     return Number.parseInt(result.rows[0]?.count ?? "0", 10);
@@ -598,8 +602,12 @@ export class ConversationContextService {
     const result = await this.pool.query<MessageRow>(
       `${this.messageSelect()}
        AND m.message_index > $3
+       AND m.message_index < (
+         SELECT boundary.message_index FROM messages boundary
+         WHERE boundary.provider = $1
+           AND boundary.provider_message_id = $5
+       )
        AND ($4::boolean OR m.is_from_me = FALSE)
-       AND m.provider_message_id <> $5
        ORDER BY m.message_index
        LIMIT $6`,
       [
@@ -607,7 +615,7 @@ export class ConversationContextService {
         input.providerChatId,
         afterIndex,
         input.includeFromMe,
-        input.excludeProviderMessageId,
+        input.beforeProviderMessageId,
         limit,
       ],
     );
@@ -624,8 +632,12 @@ export class ConversationContextService {
       `SELECT * FROM (
          ${this.messageSelect()}
          AND m.message_index > $3
+         AND m.message_index < (
+           SELECT boundary.message_index FROM messages boundary
+           WHERE boundary.provider = $1
+             AND boundary.provider_message_id = $5
+         )
          AND ($4::boolean OR m.is_from_me = FALSE)
-         AND m.provider_message_id <> $5
          ORDER BY m.message_index DESC
          LIMIT $6
        ) recent
@@ -635,7 +647,7 @@ export class ConversationContextService {
         input.providerChatId,
         afterIndex,
         input.includeFromMe,
-        input.excludeProviderMessageId,
+        input.beforeProviderMessageId,
         input.messageLimit,
       ],
     );

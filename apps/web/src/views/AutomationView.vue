@@ -5,12 +5,14 @@ import {
   ClipboardCopy,
   Download,
   FileJson,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
   Save,
   ShieldAlert,
   ToggleLeft,
+  Trash2,
   Upload,
   X,
 } from "@lucide/vue";
@@ -403,6 +405,44 @@ function conditionSummary(conditions: any): string {
     ? conditions.contentTypes.join("、")
     : "全部消息类型";
   return `${chat} · ${text} · ${types}`;
+}
+
+interface WorkflowTextMatchRule {
+  triggerId: string;
+  triggerName: string;
+  method: string;
+  content: string;
+}
+
+function textMatchMethod(kind: unknown): string {
+  switch (kind) {
+    case "keyword":
+      return "包含关键词";
+    case "prefix":
+      return "前缀匹配";
+    case "regex":
+      return "正则表达式";
+    default:
+      return "任意消息";
+  }
+}
+
+function workflowTextMatchRules(workflowId: string): WorkflowTextMatchRule[] {
+  return triggers.value
+    .filter((trigger) => trigger.workflowId === workflowId && trigger.enabled)
+    .map((trigger) => {
+      const conditions = (trigger.conditions ?? {}) as {
+        text?: { kind?: unknown; value?: unknown } | null;
+      };
+      const value = conditions.text?.value;
+      return {
+        triggerId: trigger.id,
+        triggerName: trigger.name,
+        method: textMatchMethod(conditions.text?.kind),
+        content:
+          typeof value === "string" && value.length > 0 ? value : "全部内容",
+      };
+    });
 }
 
 async function load() {
@@ -1109,13 +1149,15 @@ onMounted(load);
                 <th>工作流</th>
                 <th>状态</th>
                 <th>已发布</th>
+                <th>匹配方式</th>
+                <th>匹配内容</th>
                 <th>更新时间</th>
-                <th>新执行</th>
+                <th class="workflow-actions-heading">操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!workflows.length">
-                <td colspan="5" class="empty-cell">暂无工作流</td>
+                <td colspan="7" class="empty-cell">暂无工作流</td>
               </tr>
               <tr v-for="workflow in workflows" :key="workflow.id">
                 <td>
@@ -1134,51 +1176,83 @@ onMounted(load);
                       : "—"
                   }}
                 </td>
+                <td>
+                  <div
+                    v-if="workflowTextMatchRules(workflow.id).length"
+                    class="workflow-match-list"
+                  >
+                    <span
+                      v-for="rule in workflowTextMatchRules(workflow.id)"
+                      :key="rule.triggerId"
+                      class="workflow-match-method"
+                      :title="rule.triggerName"
+                      >{{ rule.method }}</span
+                    >
+                  </div>
+                  <span v-else class="keyline">未启用触发器</span>
+                </td>
+                <td>
+                  <div
+                    v-if="workflowTextMatchRules(workflow.id).length"
+                    class="workflow-match-list"
+                  >
+                    <code
+                      v-for="rule in workflowTextMatchRules(workflow.id)"
+                      :key="rule.triggerId"
+                      class="workflow-match-content"
+                      :title="`${rule.triggerName}：${rule.content}`"
+                      >{{ rule.content }}</code
+                    >
+                  </div>
+                  <span v-else>—</span>
+                </td>
                 <td>{{ new Date(workflow.updatedAt).toLocaleString() }}</td>
                 <td>
-                  <button
-                    class="button tiny secondary"
-                    type="button"
-                    @click="editWorkflow(workflow)"
-                  >
-                    编辑
-                  </button>
-                  <button
-                    class="button tiny secondary"
-                    type="button"
-                    :disabled="workflowExportBusyIds.has(workflow.id)"
-                    @click="exportWorkflow(workflow)"
-                  >
-                    <Download :size="14" />导出
-                  </button>
-                  <button
-                    class="button tiny danger"
-                    type="button"
-                    :disabled="workflowDeleteBusyIds.has(workflow.id)"
-                    @click="deleteWorkflow(workflow)"
-                  >
-                    删除
-                  </button>
-                  <button
-                    class="switch-button"
-                    :class="{ active: workflow.status === 'active' }"
-                    type="button"
-                    :disabled="
-                      workflow.publishedVersion === null ||
-                      workflowToggleBusyIds.has(workflow.id)
-                    "
-                    :aria-busy="workflowToggleBusyIds.has(workflow.id)"
-                    @click="toggleWorkflow(workflow)"
-                  >
-                    <span></span
-                    >{{
-                      workflowToggleBusyIds.has(workflow.id)
-                        ? "处理中…"
-                        : workflow.status === "active"
-                          ? "接收中"
-                          : "已停止"
-                    }}
-                  </button>
+                  <div class="workflow-row-actions">
+                    <button
+                      class="button tiny secondary"
+                      type="button"
+                      @click="editWorkflow(workflow)"
+                    >
+                      <Pencil :size="14" />编辑
+                    </button>
+                    <button
+                      class="button tiny secondary"
+                      type="button"
+                      :disabled="workflowExportBusyIds.has(workflow.id)"
+                      @click="exportWorkflow(workflow)"
+                    >
+                      <Download :size="14" />导出
+                    </button>
+                    <button
+                      class="button tiny danger-ghost"
+                      type="button"
+                      :disabled="workflowDeleteBusyIds.has(workflow.id)"
+                      @click="deleteWorkflow(workflow)"
+                    >
+                      <Trash2 :size="14" />删除
+                    </button>
+                    <button
+                      class="switch-button"
+                      :class="{ active: workflow.status === 'active' }"
+                      type="button"
+                      :disabled="
+                        workflow.publishedVersion === null ||
+                        workflowToggleBusyIds.has(workflow.id)
+                      "
+                      :aria-busy="workflowToggleBusyIds.has(workflow.id)"
+                      @click="toggleWorkflow(workflow)"
+                    >
+                      <span></span
+                      >{{
+                        workflowToggleBusyIds.has(workflow.id)
+                          ? "处理中…"
+                          : workflow.status === "active"
+                            ? "接收中"
+                            : "已停止"
+                      }}
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>

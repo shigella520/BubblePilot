@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { PostgresArchiveRepository } from "../modules/archive/postgres-archive-repository.js";
@@ -140,6 +141,29 @@ describe.runIf(testDatabaseUrl !== undefined)(
         normalized.envelope.message.providerMessageId,
       );
       expect(messageExecutions[0]?.execution.id).toBe(first.executionIds[0]);
+      const database = new Client({
+        connectionString: testDatabaseUrl,
+      });
+      await database.connect();
+      try {
+        await database.query(
+          "UPDATE workflow_executions SET source_message_id = NULL WHERE id = $1",
+          [first.executionIds[0]],
+        );
+        const recoveredLinks = await repository.listExecutionsForMessages([
+          normalized.envelope.message.providerMessageId,
+        ]);
+        expect(recoveredLinks).toHaveLength(1);
+        expect(recoveredLinks[0]).toMatchObject({
+          providerMessageId: normalized.envelope.message.providerMessageId,
+          execution: {
+            id: first.executionIds[0],
+            providerChatId: `iMessage;-;fake-chat-${suffix}`,
+          },
+        });
+      } finally {
+        await database.end();
+      }
       await expect(
         repository.listExecutions({ limit: 100, cursor: null }),
       ).resolves.toEqual(

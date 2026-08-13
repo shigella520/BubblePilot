@@ -196,7 +196,14 @@ FROM workflow_executions e
 INNER JOIN bot_triggers t ON t.id = e.trigger_id
 INNER JOIN workflow_versions v ON v.id = e.workflow_version_id
 INNER JOIN workflows w ON w.id = v.workflow_id
-LEFT JOIN messages source_message ON source_message.id = e.source_message_id
+LEFT JOIN messages source_message ON source_message.id = COALESCE(
+  e.source_message_id,
+  (SELECT event_message.id
+   FROM inbound_events source_event
+   INNER JOIN messages event_message ON event_message.source_event_id = source_event.id
+   WHERE source_event.provider = e.provider
+     AND source_event.external_event_id = e.external_event_id)
+)
 LEFT JOIN chats source_chat ON source_chat.id = source_message.chat_id
 LEFT JOIN LATERAL (
   SELECT
@@ -729,7 +736,13 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
          workflow_version_id, correlation_id, status
        ) VALUES (
          $1, $2, $3,
-         (SELECT id FROM messages WHERE provider = $2 AND provider_message_id = $4),
+         COALESCE(
+           (SELECT id FROM messages WHERE provider = $2 AND provider_message_id = $4),
+           (SELECT m.id
+            FROM inbound_events i
+            INNER JOIN messages m ON m.source_event_id = i.id
+            WHERE i.provider = $2 AND i.external_event_id = $3)
+         ),
          $5, $6, $7, 'created'
        )
        ON CONFLICT (provider, external_event_id, trigger_id, workflow_version_id)
@@ -1202,7 +1215,14 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     if (providerMessageIds.length === 0) return [];
     const result = await this.pool.query<ExecutionRow>(
       `${executionSelect}
-       WHERE e.source_message_id IN (
+       WHERE COALESCE(
+         e.source_message_id,
+         (SELECT m.id
+          FROM inbound_events i
+          INNER JOIN messages m ON m.source_event_id = i.id
+          WHERE i.provider = e.provider
+            AND i.external_event_id = e.external_event_id)
+       ) IN (
          SELECT m.id FROM messages m
          WHERE m.provider = 'bluebubbles'
            AND m.provider_message_id = ANY($1::text[])

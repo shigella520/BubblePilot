@@ -812,15 +812,19 @@ export class PostgresArchiveRepository implements ArchiveRepository {
                 OR m.link_preview_status = 'available'
                 OR m.attachments <> '[]'::jsonb)
            AND ($2::boolean OR m.is_from_me = FALSE)
-           AND ($3::text IS NULL OR m.provider_message_id <> $3)
-         ORDER BY m.sent_at DESC, m.id DESC
+           AND m.message_index < (
+             SELECT boundary.message_index FROM messages boundary
+             WHERE boundary.provider = 'bluebubbles'
+               AND boundary.provider_message_id = $3
+           )
+         ORDER BY m.message_index DESC
          LIMIT $4
        ) recent
-       ORDER BY sent_at, id`,
+       ORDER BY message_index`,
       [
         providerChatId,
         options.includeFromMe,
-        options.excludeProviderMessageId,
+        options.beforeProviderMessageId,
         options.limit,
         options.maxCharacters,
       ],

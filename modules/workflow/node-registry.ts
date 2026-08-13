@@ -429,8 +429,7 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             nodeId: node.id,
             provider: context.envelope.provider,
             providerChatId: context.envelope.chat.providerChatId,
-            excludeProviderMessageId:
-              context.envelope.message.providerMessageId,
+            beforeProviderMessageId: context.envelope.message.providerMessageId,
             routeId: node.config.summaryProviderRouteId ?? "",
             messageLimit: node.config.messageLimit,
             characterLimit: node.config.characterLimit,
@@ -450,8 +449,7 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             limit: node.config.messageLimit,
             maxCharacters: node.config.characterLimit,
             includeFromMe: node.config.includeFromMe,
-            excludeProviderMessageId:
-              context.envelope.message.providerMessageId,
+            beforeProviderMessageId: context.envelope.message.providerMessageId,
           },
         ));
       context.history.splice(0, context.history.length, ...messages);

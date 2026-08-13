@@ -20,13 +20,15 @@ export interface WorkflowGateStatus {
 }
 
 interface WaitingTask {
+  key: string | null;
   start: () => void;
   reject: (error: WorkflowCapacityError) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout> | null;
 }
 
 export class BoundedExecutionGate {
   private active = 0;
+  private readonly activeKeys = new Set<string>();
   private readonly waiting: WaitingTask[] = [];
 
   constructor(
@@ -39,25 +41,34 @@ export class BoundedExecutionGate {
     }
   }
 
-  run<T>(task: () => Promise<T>): Promise<T> {
-    if (this.active < this.maxConcurrency) {
-      return this.start(task);
+  run<T>(task: () => Promise<T>, key: string | null = null): Promise<T> {
+    if (this.canStart(key)) {
+      return this.start(task, key);
     }
     if (this.waiting.length >= this.queueCapacity) {
       return Promise.reject(new WorkflowCapacityError("WORKFLOW_QUEUE_FULL"));
     }
     return new Promise<T>((resolve, reject) => {
       const waiting: WaitingTask = {
+        key,
         start: () => {
-          clearTimeout(waiting.timer);
-          void this.start(task).then(resolve, reject);
+          if (waiting.timer !== null) clearTimeout(waiting.timer);
+          void this.start(task, key).then(resolve, reject);
         },
         reject,
-        timer: setTimeout(() => {
-          const index = this.waiting.indexOf(waiting);
-          if (index >= 0) this.waiting.splice(index, 1);
-          reject(new WorkflowCapacityError("WORKFLOW_QUEUE_WAIT_TIMEOUT"));
-        }, this.queueWaitMs),
+        // A keyed task waiting behind the same active key is ordered work, not
+        // a capacity wait. Expiring it would drop a valid chat event merely
+        // because the preceding execution was slow.
+        timer:
+          key !== null && this.activeKeys.has(key)
+            ? null
+            : setTimeout(() => {
+                const index = this.waiting.indexOf(waiting);
+                if (index >= 0) this.waiting.splice(index, 1);
+                reject(
+                  new WorkflowCapacityError("WORKFLOW_QUEUE_WAIT_TIMEOUT"),
+                );
+              }, this.queueWaitMs),
       };
       this.waiting.push(waiting);
     });
@@ -72,13 +83,35 @@ export class BoundedExecutionGate {
     };
   }
 
-  private async start<T>(task: () => Promise<T>): Promise<T> {
+  private canStart(key: string | null): boolean {
+    return (
+      this.active < this.maxConcurrency &&
+      (key === null || !this.activeKeys.has(key))
+    );
+  }
+
+  private async start<T>(
+    task: () => Promise<T>,
+    key: string | null,
+  ): Promise<T> {
     this.active += 1;
+    if (key !== null) this.activeKeys.add(key);
     try {
       return await task();
     } finally {
       this.active -= 1;
-      this.waiting.shift()?.start();
+      if (key !== null) this.activeKeys.delete(key);
+      this.drain();
+    }
+  }
+
+  private drain(): void {
+    while (this.active < this.maxConcurrency) {
+      const index = this.waiting.findIndex((waiting) =>
+        this.canStart(waiting.key),
+      );
+      if (index < 0) return;
+      this.waiting.splice(index, 1)[0]?.start();
     }
   }
 }
