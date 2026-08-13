@@ -91,6 +91,7 @@ describe("OpenAiCompatibleClient", () => {
       previousRequestIsExactPrefix: false,
       cacheKeyMatchesPrevious: true,
       divergenceIndex: 2,
+      divergenceReason: "dynamic-input-changed",
     });
     expect(second.diagnostics?.requestTrace?.cacheKeyHash).toMatch(
       /^sha256:[a-f0-9]{64}$/u,
@@ -131,6 +132,90 @@ describe("OpenAiCompatibleClient", () => {
       configurationMatchesPrevious: true,
       previousRequestIsExactPrefix: true,
       divergenceIndex: null,
+    });
+  });
+
+  it("distinguishes history image rotation, link preview changes, and append-only growth", async () => {
+    const responsesProvider: AiProviderRecord = {
+      ...provider,
+      apiKind: "responses",
+    };
+    const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ status: "completed", output_text: "ok" }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+    );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    const history = (preview: string, withImage: boolean) => ({
+      role: "user" as const,
+      content: [
+        {
+          type: "text" as const,
+          text: `<chat_history message_id="message-stable" trust="untrusted_chat_history">\nhello\n${preview}\n</chat_history>`,
+        },
+        ...(withImage
+          ? [
+              {
+                type: "image" as const,
+                dataUrl: "data:image/png;base64,ZmFrZQ==",
+                detail: "high" as const,
+                label: "fictional-history-image",
+              },
+            ]
+          : []),
+      ],
+    });
+    const base = {
+      ...request,
+      sessionId: "stable-session",
+      promptTraceKey: "diagnostic-reasons",
+    };
+    await client.call(responsesProvider, {
+      ...base,
+      messages: [request.messages[0]!, history("[link_preview] old", true)],
+    });
+    const rotated = await client.call(responsesProvider, {
+      ...base,
+      messages: [request.messages[0]!, history("[link_preview] old", false)],
+    });
+    expect(rotated.status).toBe("succeeded");
+    if (rotated.status !== "succeeded") return;
+    expect(rotated.diagnostics?.requestTrace?.divergenceReason).toBe(
+      "history-image-selection-changed",
+    );
+
+    const previewChanged = await client.call(responsesProvider, {
+      ...base,
+      messages: [request.messages[0]!, history("[link_preview] new", false)],
+    });
+    expect(previewChanged.status).toBe("succeeded");
+    if (previewChanged.status !== "succeeded") return;
+    expect(previewChanged.diagnostics?.requestTrace?.divergenceReason).toBe(
+      "link-preview-changed",
+    );
+
+    const appended = await client.call(responsesProvider, {
+      ...base,
+      messages: [
+        request.messages[0]!,
+        history("[link_preview] new", false),
+        { role: "user", content: "new tail" },
+      ],
+    });
+    expect(appended.status).toBe("succeeded");
+    if (appended.status !== "succeeded") return;
+    expect(appended.diagnostics?.requestTrace).toMatchObject({
+      previousRequestIsExactPrefix: true,
+      divergenceReason: "append-only-growth",
     });
   });
 

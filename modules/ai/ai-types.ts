@@ -320,6 +320,10 @@ export interface AiRequestTraceItem {
   textCharacters: number;
   imageCount: number;
   imageBytes: number;
+  historyMessageIdHash: string | null;
+  textHash: string;
+  imageContentHash: string | null;
+  linkPreviewHash: string | null;
   itemHash: string;
   prefixHash: string;
   region:
@@ -348,12 +352,20 @@ export interface AiRequestTrace {
   divergenceIndex: number | null;
   divergenceRegion: AiRequestTraceItem["region"] | null;
   divergenceReason:
+    | "request-unchanged"
+    | "append-only-growth"
+    | "request-configuration-changed"
+    | "cache-key-changed"
     | "summary-changed"
     | "system-prompt-changed"
+    | "history-window-shifted"
     | "history-message-changed"
     | "participant-mapping-changed"
     | "link-preview-changed"
     | "history-image-selection-changed"
+    | "history-image-content-changed"
+    | "current-image-selection-changed"
+    | "current-image-content-changed"
     | "image-download-state-changed"
     | "dynamic-input-changed"
     | "unknown"

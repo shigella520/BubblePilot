@@ -168,6 +168,8 @@ function promptItemMetrics(item: unknown) {
   let textCharacters = 0;
   let imageCount = 0;
   let imageBytes = 0;
+  const textParts: string[] = [];
+  const imageParts: string[] = [];
 
   const visit = (value: unknown, key: string | null = null): void => {
     if (typeof value === "string") {
@@ -175,11 +177,13 @@ function promptItemMetrics(item: unknown) {
         const bytes = dataUrlBytes(value);
         if (bytes > 0) {
           imageBytes += bytes;
+          imageParts.push(sha256(value));
           return;
         }
       }
       if (["content", "text", "output", "arguments"].includes(key ?? "")) {
         textCharacters += value.length;
+        textParts.push(value);
       }
       return;
     }
@@ -198,11 +202,26 @@ function promptItemMetrics(item: unknown) {
     );
   };
   visit(item);
+  const text = textParts.join("\n");
+  const historyMessageId = /<chat_history\s+message_id="([^"]+)"/u.exec(
+    text,
+  )?.[1];
+  const linkPreviewLines = text
+    .split("\n")
+    .filter((line) => line.includes("[link_preview"));
   return {
     contentKinds: [...contentKinds].sort(),
     textCharacters,
     imageCount,
     imageBytes,
+    historyMessageIdHash:
+      historyMessageId === undefined ? null : sha256(historyMessageId),
+    textHash: sha256(text),
+    imageContentHash: imageParts.length === 0 ? null : hashJson(imageParts),
+    linkPreviewHash:
+      linkPreviewLines.length === 0
+        ? null
+        : sha256(linkPreviewLines.join("\n")),
   };
 }
 
@@ -238,6 +257,7 @@ function promptItemRegion(
   record: Readonly<Record<string, unknown>>,
 ): AiRequestTraceItem["region"] {
   const text = JSON.stringify(item);
+  if (record.role === "system") return "system";
   if (text.includes("<history_summary")) return "summary";
   if (text.includes("<chat_history")) return "history";
   if (text.includes("<participant_identities")) return "participants";
@@ -249,7 +269,7 @@ function promptItemRegion(
   )
     return "attachments";
   if (text.includes("<resource_diagnostics")) return "diagnostics";
-  return record.role === "system" ? "system" : "dynamic";
+  return "dynamic";
 }
 
 function divergenceReason(
@@ -263,15 +283,37 @@ function divergenceReason(
     case "system":
       return "system-prompt-changed";
     case "history":
+      if (previous === undefined || current === undefined)
+        return "history-window-shifted";
+      if (
+        previous.historyMessageIdHash !== current.historyMessageIdHash ||
+        previous.historyMessageIdHash === null ||
+        current.historyMessageIdHash === null
+      )
+        return "history-window-shifted";
+      if (previous.imageCount !== current.imageCount)
+        return "history-image-selection-changed";
+      if (previous.linkPreviewHash !== current.linkPreviewHash)
+        return "link-preview-changed";
+      if (
+        previous.imageCount > 0 &&
+        current.imageCount > 0 &&
+        previous.imageContentHash !== current.imageContentHash
+      )
+        return "history-image-content-changed";
       return "history-message-changed";
     case "participants":
       return "participant-mapping-changed";
     case "link-previews":
       return "link-preview-changed";
     case "attachments":
-      return previous === undefined || current === undefined
-        ? "history-image-selection-changed"
-        : "image-download-state-changed";
+      return previous === undefined ||
+        current === undefined ||
+        previous.imageCount !== current.imageCount
+        ? "current-image-selection-changed"
+        : previous.imageContentHash !== current.imageContentHash
+          ? "current-image-content-changed"
+          : "dynamic-input-changed";
     case "diagnostics":
       return "image-download-state-changed";
     case "dynamic":
@@ -944,12 +986,21 @@ export class OpenAiCompatibleClient implements AiClient {
             previous.items[divergenceOffset]?.region ??
             null),
       divergenceReason:
-        !hasDivergence || divergenceOffset === null
+        previous === undefined
           ? null
-          : divergenceReason(
-              previous.items[divergenceOffset],
-              items[divergenceOffset],
-            ),
+          : configurationMatchesPrevious === false
+            ? "request-configuration-changed"
+            : cacheKeyMatchesPrevious === false
+              ? "cache-key-changed"
+              : previousRequestIsExactPrefix === true &&
+                  items.length > previous.itemHashes.length
+                ? "append-only-growth"
+                : !hasDivergence || divergenceOffset === null
+                  ? "request-unchanged"
+                  : divergenceReason(
+                      previous.items[divergenceOffset],
+                      items[divergenceOffset],
+                    ),
       items,
     };
     this.promptTraceHistory.set(historyKey, {

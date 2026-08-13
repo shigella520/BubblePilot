@@ -133,6 +133,10 @@ interface ExecutionDetail extends Execution {
           textCharacters: number;
           imageCount: number;
           imageBytes: number;
+          historyMessageIdHash?: string | null;
+          textHash?: string;
+          imageContentHash?: string | null;
+          linkPreviewHash?: string | null;
           itemHash: string;
           prefixHash: string;
           region: string;
@@ -412,6 +416,31 @@ function percent(numerator: number | null, denominator: number | null) {
   if (numerator === null || denominator === null || denominator <= 0)
     return "—";
   return `${((numerator / denominator) * 100).toFixed(1)}%`;
+}
+
+const cacheDivergenceReasonLabels: Readonly<Record<string, string>> = {
+  "request-unchanged": "请求未变化",
+  "append-only-growth": "历史仅追加",
+  "request-configuration-changed": "请求配置变化",
+  "cache-key-changed": "缓存键变化",
+  "summary-changed": "历史摘要变化",
+  "system-prompt-changed": "系统提示词变化",
+  "history-window-shifted": "历史窗口移位",
+  "history-message-changed": "历史消息内容变化",
+  "participant-mapping-changed": "成员映射变化",
+  "link-preview-changed": "链接预览变化",
+  "history-image-selection-changed": "历史图片轮换",
+  "history-image-content-changed": "历史图片内容变化",
+  "current-image-selection-changed": "当前图片选择变化",
+  "current-image-content-changed": "当前图片内容变化",
+  "image-download-state-changed": "图片加载状态变化",
+  "dynamic-input-changed": "本轮动态输入变化",
+  unknown: "未知变化",
+};
+
+function cacheDivergenceReasonLabel(reason: string | null): string {
+  if (reason === null) return "—";
+  return cacheDivergenceReasonLabels[reason] ?? reason;
 }
 
 function providerAttemptPurpose(
@@ -1301,7 +1330,9 @@ function resetAuditPage(): Promise<boolean> {
                         item.diagnostics.requestTrace.divergenceRegion ?? "—"
                       }}
                       · 原因：{{
-                        item.diagnostics.requestTrace.divergenceReason ?? "—"
+                        cacheDivergenceReasonLabel(
+                          item.diagnostics.requestTrace.divergenceReason,
+                        )
                       }}
                     </p>
                     <details class="cache-diagnostic-details">
