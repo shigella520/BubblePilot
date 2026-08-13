@@ -890,7 +890,6 @@ function resetAuditPage(): Promise<boolean> {
             <thead>
               <tr>
                 <th>工作流</th>
-                <th>触发器</th>
                 <th>聊天</th>
                 <th>状态</th>
                 <th>回复缓存命中</th>
@@ -900,7 +899,7 @@ function resetAuditPage(): Promise<boolean> {
             </thead>
             <tbody>
               <tr v-if="!executions.length">
-                <td colspan="7" class="empty-cell">暂无执行</td>
+                <td colspan="6" class="empty-cell">暂无执行</td>
               </tr>
               <tr v-for="item in executions" :key="item.id">
                 <td>
@@ -911,7 +910,6 @@ function resetAuditPage(): Promise<boolean> {
                     >恢复 #{{ item.recoveryAttempt }}</span
                   >
                 </td>
-                <td>{{ item.triggerName }}</td>
                 <td>
                   <strong>{{
                     item.chatDisplayName || item.providerChatId || "—"
