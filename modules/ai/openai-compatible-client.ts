@@ -390,6 +390,19 @@ function mergeAdjacentRoleMessages(
       merged.push(message);
       continue;
     }
+    const previousTextOnly =
+      typeof previous.content === "string" ||
+      previous.content.every((part) => part.type === "text");
+    const messageTextOnly =
+      typeof message.content === "string" ||
+      message.content.every((part) => part.type === "text");
+    if (previousTextOnly && messageTextOnly) {
+      merged[merged.length - 1] = {
+        role: message.role,
+        content: `${textContent(previous.content)}\n${textContent(message.content)}`,
+      };
+      continue;
+    }
     const toParts = (content: string | readonly AiContentPart[]) =>
       typeof content === "string"
         ? [{ type: "text" as const, text: content }]
