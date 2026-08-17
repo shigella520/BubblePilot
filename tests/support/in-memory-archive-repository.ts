@@ -460,6 +460,14 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
     return Promise.resolve(results);
   }
 
+  findMessage(messageId: string): Promise<ArchivedMessage | null> {
+    const message = [...this.chats.values()]
+      .filter((chat) => chat.enabled)
+      .flatMap((chat) => chat.messages)
+      .find((item) => item.id === messageId);
+    return Promise.resolve(message ?? null);
+  }
+
   loadRecentMessages(
     providerChatId: string,
     options: ContextWindowOptions,
@@ -499,7 +507,7 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
         sentAt: message.sentAt,
         body: message.body ?? "",
         isFromMe: message.isFromMe,
-        attachments: message.attachments as ContextMessage["attachments"],
+        attachments: message.attachments,
         linkPreview: message.linkPreview,
       });
     }

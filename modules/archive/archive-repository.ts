@@ -58,7 +58,7 @@ export interface ArchivedMessage {
   body: string | null;
   contentType: "text" | "attachment" | "mixed" | "unknown";
   isFromMe: boolean;
-  attachments: readonly unknown[];
+  attachments: readonly MessageAttachment[];
   linkPreview: LinkPreviewBundle;
   linkPreviewDiagnostics: readonly LinkPreviewDiagnostic[];
   linkPreviewFetchedAt: string | null;
@@ -186,6 +186,7 @@ export interface ArchiveRepository {
     chatId: string,
     options: PageOptions,
   ): Promise<readonly ArchivedMessage[]>;
+  findMessage(messageId: string): Promise<ArchivedMessage | null>;
   searchMessages(
     options: MessageSearchOptions,
   ): Promise<readonly MessageSearchResult[]>;

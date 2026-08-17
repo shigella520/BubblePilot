@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApplication } from "../app/application.js";
 import type { AppConfig } from "../app/config.js";
 import { MessageRetentionService } from "../modules/archive/message-retention-service.js";
-import { newMessageWebhook } from "./fixtures/bluebubbles.js";
+import {
+  groupAttachmentWebhook,
+  newMessageWebhook,
+} from "./fixtures/bluebubbles.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
 
 const webhookSecret = "fictional-webhook-secret-32-chars-long";
@@ -185,6 +188,56 @@ describe("BubblePilot application", () => {
         },
       ],
     });
+  });
+
+  it("exposes image media details only through the protected message endpoint", async () => {
+    await application.close();
+    repository = new InMemoryArchiveRepository();
+    application = buildApplication(
+      {
+        ...config,
+        monitoredChatIds: new Set(["iMessage;+;fictional-group"]),
+      },
+      repository,
+      { logger: false },
+    );
+    const ingested = await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: groupAttachmentWebhook(),
+    });
+    const messageId = ingested.json<{ data: { messageId: string } }>().data
+      .messageId;
+
+    const unauthorized = await application.inject({
+      method: "GET",
+      url: `/api/v1/messages/${messageId}/media`,
+    });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const response = await application.inject({
+      method: "GET",
+      url: `/api/v1/messages/${messageId}/media`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      data: {
+        messageId,
+        items: [
+          {
+            sourceType: "attachment",
+            fileName: "fictional-image.png",
+            summaryStatus: "not-created",
+            summary: null,
+          },
+        ],
+      },
+    });
+    const serialized = response.body;
+    expect(serialized).not.toContain("fake-attachment-guid");
+    expect(serialized).not.toContain("bluebubbles.example.test");
   });
 
   it("exposes an explicit marker after archived content is redacted", async () => {

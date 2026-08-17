@@ -2,6 +2,7 @@
 import {
   Download,
   FileJson2,
+  Images,
   MessageCircle,
   RefreshCw,
   Save,
@@ -10,7 +11,7 @@ import {
   Users,
   X,
 } from "@lucide/vue";
-import { onMounted, reactive, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import CursorPagination from "../components/CursorPagination.vue";
 import SensitiveUnlock from "../components/SensitiveUnlock.vue";
@@ -48,6 +49,12 @@ interface MessageResult {
   contentRedactedAt: string | null;
   contentType: string;
   isFromMe: boolean;
+  attachments: Array<{
+    providerAttachmentId: string;
+    mimeType: string | null;
+    fileName: string | null;
+    sizeBytes: number | null;
+  }>;
   linkPreview: {
     status: string;
     errorCode: string | null;
@@ -59,6 +66,7 @@ interface MessageResult {
       summary: string | null;
       siteName: string | null;
       imageAvailable: boolean;
+      imageUrl: string | null;
       iconAvailable: boolean;
     }>;
   };
@@ -79,6 +87,39 @@ interface MessageResult {
     correlationId: string;
     status: string;
     errorCode: string | null;
+  }>;
+}
+
+type ImageSummaryStatus =
+  | "not-created"
+  | "pending"
+  | "processing"
+  | "succeeded"
+  | "failed"
+  | "unavailable"
+  | "redacted";
+
+interface MessageMediaDetail {
+  messageId: string;
+  contentRedactedAt: string | null;
+  items: Array<{
+    attachmentRef: string;
+    sourceType: "attachment" | "link-preview";
+    label: string;
+    fileName: string | null;
+    declaredMimeType: string | null;
+    sizeBytes: number | null;
+    summaryStatus: ImageSummaryStatus;
+    summary: string | null;
+    providerName: string | null;
+    model: string | null;
+    contractVersion: string | null;
+    attemptCount: number;
+    errorCode: string | null;
+    durationMs: number | null;
+    generatedAt: string | null;
+    imageContentHash: string | null;
+    previewUrl: string;
   }>;
 }
 
@@ -137,6 +178,11 @@ const participantVersion = ref(0);
 const participantDrafts = ref<ChatParticipantDraft[]>([]);
 const participantBusy = ref(false);
 const participantSaveBusy = ref(false);
+const mediaMessage = ref<MessageResult | null>(null);
+const mediaDetail = ref<MessageMediaDetail | null>(null);
+const mediaBusy = ref(false);
+const mediaError = ref("");
+const failedMediaPreviews = reactive(new Set<string>());
 const exportCancelBusyIds = reactive(new Set<string>());
 const exportDownloadBusyIds = reactive(new Set<string>());
 const form = reactive({
@@ -191,6 +237,85 @@ function isLongMessage(body: string | null): boolean {
 }
 function messagePreview(body: string): string {
   return `${body.slice(0, 600)}…`;
+}
+
+function isImageAttachment(item: MessageResult["attachments"][number]) {
+  if (item.mimeType?.toLowerCase().startsWith("image/")) return true;
+  return /\.(?:jpe?g|png|webp|gif|heic|heif)$/iu.test(item.fileName ?? "");
+}
+
+function hasImageMedia(item: MessageResult): boolean {
+  return (
+    item.attachments.some(isImageAttachment) ||
+    item.linkPreview.items.some((preview) => preview.imageUrl !== null)
+  );
+}
+
+function imageSummaryStatusLabel(status: ImageSummaryStatus): string {
+  return {
+    "not-created": "未创建摘要任务",
+    pending: "等待生成",
+    processing: "生成中",
+    succeeded: "摘要成功",
+    failed: "摘要失败",
+    unavailable: "原图不可用",
+    redacted: "已按保留策略清理",
+  }[status];
+}
+
+function imageSummaryStatusDescription(status: ImageSummaryStatus): string {
+  return {
+    "not-created": "这通常是功能上线前入库的历史图片，不会自动回填摘要。",
+    pending: "任务已保存，正在等待后台 Worker 处理。",
+    processing: "视觉 Provider 正在生成摘要。",
+    succeeded: "摘要已保存，图片退出历史图片范围后会使用这段内容。",
+    failed: "Provider 请求或摘要输出校验失败。",
+    unavailable: "原始图片无法读取，因此不能生成可信摘要。",
+    redacted: "图片和摘要已按消息保留策略清理。",
+  }[status];
+}
+
+function formatMediaBytes(value: number | null): string {
+  if (value === null) return "大小未知";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KiB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function closeMessageMedia() {
+  mediaMessage.value = null;
+  mediaDetail.value = null;
+  mediaError.value = "";
+  failedMediaPreviews.clear();
+}
+
+async function loadMessageMedia() {
+  if (mediaMessage.value === null) return;
+  mediaBusy.value = true;
+  mediaError.value = "";
+  failedMediaPreviews.clear();
+  try {
+    mediaDetail.value = await apiRequest<MessageMediaDetail>(
+      `/api/v1/messages/${encodeURIComponent(mediaMessage.value.id)}/media`,
+    );
+  } catch (cause) {
+    mediaError.value = errorMessage(cause);
+  } finally {
+    mediaBusy.value = false;
+  }
+}
+
+function openMessageMedia(item: MessageResult) {
+  mediaMessage.value = item;
+  mediaDetail.value = null;
+  failedMediaPreviews.clear();
+  void loadMessageMedia();
+}
+
+function handleMediaKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape" && mediaMessage.value !== null) {
+    closeMessageMedia();
+  }
 }
 
 function scrollToSection(id: string) {
@@ -508,10 +633,17 @@ watch(
     exportPreview.value = null;
     exportConfirmed.value = false;
     closeParticipantEditor();
+    closeMessageMedia();
   },
 );
 
-onMounted(() => Promise.all([loadChats(true), loadExports(true)]));
+onMounted(() => {
+  document.addEventListener("keydown", handleMediaKeydown);
+  void Promise.all([loadChats(true), loadExports(true)]);
+});
+onBeforeUnmount(() =>
+  document.removeEventListener("keydown", handleMediaKeydown),
+);
 </script>
 
 <template>
@@ -873,23 +1005,33 @@ onMounted(() => Promise.all([loadChats(true), loadExports(true)]));
               <span>{{
                 item.isFromMe ? "我发送" : item.senderId || "未知发送者"
               }}</span>
-              <div v-if="item.executions.length" class="message-executions">
-                <RouterLink
-                  v-for="execution in item.executions"
-                  :key="execution.id"
-                  class="execution-link"
-                  :to="{
-                    path: '/executions',
-                    query: { executionId: execution.id },
-                  }"
+              <div class="message-footer-actions">
+                <button
+                  v-if="hasImageMedia(item)"
+                  class="button tiny secondary"
+                  type="button"
+                  @click="openMessageMedia(item)"
                 >
-                  {{ execution.workflowName }} · v{{
-                    execution.workflowVersion
-                  }}
-                  · {{ execution.status }}
-                </RouterLink>
+                  <Images :size="14" />图片与 AI 摘要
+                </button>
+                <div v-if="item.executions.length" class="message-executions">
+                  <RouterLink
+                    v-for="execution in item.executions"
+                    :key="execution.id"
+                    class="execution-link"
+                    :to="{
+                      path: '/executions',
+                      query: { executionId: execution.id },
+                    }"
+                  >
+                    {{ execution.workflowName }} · v{{
+                      execution.workflowVersion
+                    }}
+                    · {{ execution.status }}
+                  </RouterLink>
+                </div>
+                <span v-else>未触发工作流</span>
               </div>
-              <span v-else>未触发工作流</span>
             </footer>
           </article>
           <div v-if="!messages.length" class="empty-panel">
@@ -1128,4 +1270,135 @@ onMounted(() => Promise.all([loadChats(true), loadExports(true)]));
       </section>
     </div>
   </main>
+  <Teleport to="body">
+    <div
+      v-if="mediaMessage"
+      class="message-media-backdrop"
+      @click.self="closeMessageMedia"
+      @keyup.esc="closeMessageMedia"
+    >
+      <section
+        class="message-media-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="message-media-title"
+      >
+        <header class="message-media-dialog-head">
+          <div>
+            <p class="card-kicker">IMAGE ARCHIVE</p>
+            <h2 id="message-media-title">图片与 AI 摘要</h2>
+            <span>
+              {{ mediaMessage.chatDisplayName || mediaMessage.providerChatId }}
+              · {{ new Date(mediaMessage.sentAt).toLocaleString() }}
+            </span>
+          </div>
+          <div class="message-media-dialog-actions">
+            <button
+              class="icon-button"
+              type="button"
+              :disabled="mediaBusy"
+              title="刷新摘要状态"
+              aria-label="刷新摘要状态"
+              @click="loadMessageMedia"
+            >
+              <RefreshCw :size="17" :class="{ 'button-spinner': mediaBusy }" />
+            </button>
+            <button
+              class="icon-button"
+              type="button"
+              title="关闭"
+              aria-label="关闭图片详情"
+              @click="closeMessageMedia"
+            >
+              <X :size="18" />
+            </button>
+          </div>
+        </header>
+        <div class="message-media-dialog-body">
+          <div v-if="mediaError" class="message-media-alert">
+            {{ mediaError }}
+          </div>
+          <div v-if="mediaBusy && !mediaDetail" class="empty-panel compact">
+            <RefreshCw :size="22" class="button-spinner" />
+            <strong>正在读取图片状态</strong>
+          </div>
+          <div
+            v-else-if="mediaDetail && !mediaDetail.items.length"
+            class="empty-panel compact"
+          >
+            <Images :size="24" />
+            <strong>没有可查看的图片</strong>
+            <span>图片可能已经按消息保留策略清理。</span>
+          </div>
+          <div v-else-if="mediaDetail" class="message-media-grid">
+            <article
+              v-for="item in mediaDetail.items"
+              :key="item.attachmentRef"
+              class="message-media-item"
+            >
+              <div class="message-media-preview">
+                <img
+                  v-if="!failedMediaPreviews.has(item.attachmentRef)"
+                  :src="item.previewUrl"
+                  :alt="item.label"
+                  @error="failedMediaPreviews.add(item.attachmentRef)"
+                />
+                <div v-else>
+                  <Images :size="28" />
+                  <span>原图预览不可用</span>
+                </div>
+              </div>
+              <div class="message-media-copy">
+                <header>
+                  <div>
+                    <span>{{ item.sourceType }}</span>
+                    <h3>{{ item.fileName || item.label }}</h3>
+                  </div>
+                  <span class="summary-state" :class="item.summaryStatus">{{
+                    imageSummaryStatusLabel(item.summaryStatus)
+                  }}</span>
+                </header>
+                <p class="message-media-meta">
+                  {{ item.declaredMimeType || "图片类型未知" }} ·
+                  {{ formatMediaBytes(item.sizeBytes) }}
+                </p>
+                <div v-if="item.summary" class="message-media-summary">
+                  <span>AI 摘要</span>
+                  <p>{{ item.summary }}</p>
+                </div>
+                <p v-else class="message-media-status-copy">
+                  {{ imageSummaryStatusDescription(item.summaryStatus) }}
+                </p>
+                <dl class="message-media-diagnostics">
+                  <div>
+                    <dt>Provider</dt>
+                    <dd>{{ item.providerName || "—" }}</dd>
+                  </div>
+                  <div>
+                    <dt>模型</dt>
+                    <dd>{{ item.model || "—" }}</dd>
+                  </div>
+                  <div>
+                    <dt>耗时</dt>
+                    <dd>
+                      {{
+                        item.durationMs === null ? "—" : `${item.durationMs} ms`
+                      }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>尝试</dt>
+                    <dd>{{ item.attemptCount || "—" }}</dd>
+                  </div>
+                </dl>
+                <code v-if="item.errorCode" class="message-media-error">{{
+                  item.errorCode
+                }}</code>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+    </div>
+  </Teleport>
 </template>

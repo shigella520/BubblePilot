@@ -71,10 +71,6 @@ class MemorySummaryRepository implements ImageSummaryRepository {
     return Promise.resolve(new Map());
   }
 
-  listDiagnosticsForExecution(): Promise<[]> {
-    return Promise.resolve([]);
-  }
-
   isReady(): Promise<boolean> {
     return Promise.resolve(true);
   }

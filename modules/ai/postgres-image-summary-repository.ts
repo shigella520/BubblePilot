@@ -12,7 +12,6 @@ import { createPostgresPool } from "../shared/postgres-pool.js";
 import type { ImageSummaryRepository } from "./image-summary-repository.js";
 import type {
   ImageSummaryCompletion,
-  ImageSummaryDiagnostic,
   ImageSummaryJob,
   ImageSummarySource,
   ImageSummaryStatus,
@@ -327,36 +326,6 @@ export class PostgresImageSummaryRepository implements ImageSummaryRepository {
       grouped.set(row.provider_message_id, current);
     }
     return grouped;
-  }
-
-  async listDiagnosticsForExecution(
-    executionId: string,
-  ): Promise<readonly ImageSummaryDiagnostic[]> {
-    const result = await this.pool.query<SummaryRow>(
-      `${summarySelect}
-       INNER JOIN workflow_executions execution
-         ON execution.source_message_id = summary.message_id
-       WHERE execution.id = $1
-       ORDER BY summary.created_at, summary.id`,
-      [executionId],
-    );
-    return result.rows.map((row) => {
-      const view = summaryView(row);
-      return {
-        attachmentRef: view.attachmentRef,
-        sourceType: view.sourceType,
-        sourceKeyHash: view.sourceKeyHash,
-        imageContentHash: view.imageContentHash,
-        status: view.status,
-        providerName: view.providerName,
-        model: view.model,
-        contractVersion: view.contractVersion,
-        attemptCount: view.attemptCount,
-        errorCode: view.errorCode,
-        durationMs: view.durationMs,
-        generatedAt: view.generatedAt,
-      };
-    });
   }
 
   async isReady(): Promise<boolean> {

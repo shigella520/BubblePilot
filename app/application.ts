@@ -16,11 +16,16 @@ import type { WebSearchSettingsService } from "../modules/ai/web-search-settings
 import { webSearchSettingsUpdateSchema } from "../modules/ai/web-search-settings-types.js";
 import type { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
 import { imageInputSettingsUpdateSchema } from "../modules/ai/image-input-settings-types.js";
+import type { NativeImageInputService } from "../modules/ai/native-image-input.js";
 import type {
   ImageSummaryScheduler,
   ImageSummaryWorker,
 } from "../modules/ai/image-summary-service.js";
 import type { ImageSummaryRepository } from "../modules/ai/image-summary-repository.js";
+import {
+  messageImageMediaSources,
+  messageImageMediaViews,
+} from "../modules/ai/message-image-media.js";
 import type {
   AiMutationResult,
   AiRepository,
@@ -150,6 +155,10 @@ const workflowVersionParametersSchema = workflowParametersSchema.extend({
 
 const triggerParametersSchema = z.object({ triggerId: z.string().uuid() });
 const executionParametersSchema = z.object({ executionId: z.string().uuid() });
+const messageParametersSchema = z.object({ messageId: z.string().uuid() });
+const messageImageQuerySchema = z.object({
+  attachmentRef: z.string().min(1).max(255),
+});
 const executionAttemptParametersSchema = executionParametersSchema.extend({
   attemptId: z.string().uuid(),
 });
@@ -339,6 +348,7 @@ export interface ApplicationOptions {
     scheduler: ImageSummaryScheduler;
     worker: ImageSummaryWorker;
     repository: ImageSummaryRepository;
+    imageInput: NativeImageInputService;
   };
 }
 
@@ -1319,6 +1329,90 @@ export function buildApplication(
     },
   );
 
+  application.get(
+    "/api/v1/messages/:messageId/media",
+    { preHandler: requireSensitive("message.content.view", "message") },
+    async (request) => {
+      const parameters = messageParametersSchema.parse(request.params);
+      const archived = await repository.findMessage(parameters.messageId);
+      if (archived === null) {
+        throw new ApplicationError(
+          "MESSAGE_NOT_FOUND",
+          "The message does not exist or is unavailable.",
+          404,
+        );
+      }
+      const sources = messageImageMediaSources(archived);
+      const summariesByMessage =
+        await options.imageSummary?.repository.listForMessageIds([
+          parameters.messageId,
+        ]);
+      const summaries = summariesByMessage?.get(parameters.messageId) ?? [];
+      return {
+        data: {
+          messageId: parameters.messageId,
+          contentRedactedAt: archived.contentRedactedAt,
+          items: messageImageMediaViews(sources, summaries).map((item) => ({
+            ...item,
+            previewUrl: `/api/v1/messages/${encodeURIComponent(parameters.messageId)}/image?${new URLSearchParams({ attachmentRef: item.attachmentRef }).toString()}`,
+          })),
+        },
+      };
+    },
+  );
+
+  application.get(
+    "/api/v1/messages/:messageId/image",
+    { preHandler: requireSensitive("message.content.view", "message") },
+    async (request, reply) => {
+      const parameters = messageParametersSchema.parse(request.params);
+      const query = messageImageQuerySchema.parse(request.query);
+      const archived = await repository.findMessage(parameters.messageId);
+      if (archived === null || archived.contentRedactedAt !== null) {
+        throw new ApplicationError(
+          "MESSAGE_IMAGE_NOT_FOUND",
+          "The message image does not exist or is unavailable.",
+          404,
+        );
+      }
+      const source = messageImageMediaSources(archived).find(
+        (item) => item.source.attachmentRef === query.attachmentRef,
+      );
+      if (source === undefined || options.imageSummary === undefined) {
+        throw new ApplicationError(
+          "MESSAGE_IMAGE_NOT_FOUND",
+          "The message image does not exist or is unavailable.",
+          404,
+        );
+      }
+      const loaded = await options.imageSummary.imageInput.loadForSummary(
+        source.source,
+      );
+      if (loaded.status === "failed") {
+        throw new ApplicationError(
+          "MESSAGE_IMAGE_PREVIEW_UNAVAILABLE",
+          "The message image preview is currently unavailable.",
+          404,
+        );
+      }
+      const data =
+        /^data:(image\/(?:gif|jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/u.exec(
+          loaded.part.dataUrl,
+        );
+      if (data?.[1] === undefined || data[2] === undefined) {
+        throw new ApplicationError(
+          "MESSAGE_IMAGE_PREVIEW_INVALID",
+          "The message image preview could not be decoded.",
+          500,
+        );
+      }
+      return reply
+        .type(data[1])
+        .header("Cache-Control", "private, max-age=300")
+        .send(Buffer.from(data[2], "base64"));
+    },
+  );
+
   if (options.dataExport !== undefined) {
     const dataExport = options.dataExport.service;
 
@@ -2158,10 +2252,6 @@ export function buildApplication(
               [],
             aiImageInputs:
               (await options.ai?.repository.listImageInputs(executionId)) ?? [],
-            imageSummaries:
-              (await options.imageSummary?.repository.listDiagnosticsForExecution(
-                executionId,
-              )) ?? [],
           };
     };
 

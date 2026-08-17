@@ -234,6 +234,7 @@ const application = buildApplication(config, repository, {
     scheduler: imageSummaryWorker,
     worker: imageSummaryWorker,
     repository: imageSummaryRepository,
+    imageInput: nativeImageInput,
   },
 });
 

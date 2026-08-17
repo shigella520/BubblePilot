@@ -3,7 +3,6 @@ import type {
   ImageSummaryJob,
   ImageSummarySource,
   ImageSummaryStatus,
-  ImageSummaryDiagnostic,
   MessageImageSummary,
 } from "./image-summary-types.js";
 
@@ -34,9 +33,6 @@ export interface ImageSummaryRepository {
   listForProviderMessageIds(
     providerMessageIds: readonly string[],
   ): Promise<ReadonlyMap<string, readonly MessageImageSummary[]>>;
-  listDiagnosticsForExecution(
-    executionId: string,
-  ): Promise<readonly ImageSummaryDiagnostic[]>;
   isReady(): Promise<boolean>;
   close(): Promise<void>;
 }

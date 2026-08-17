@@ -26,8 +26,6 @@ export interface MessageImageSummary {
   generatedAt: string | null;
 }
 
-export type ImageSummaryDiagnostic = Omit<MessageImageSummary, "summary">;
-
 export type ImageSummarySource =
   | {
       sourceType: "attachment";

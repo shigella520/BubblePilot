@@ -178,26 +178,6 @@ interface ExecutionDetail extends Execution {
     errorCode: string | null;
     createdAt: string;
   }>;
-  imageSummaries: Array<{
-    attachmentRef: string;
-    sourceType: "attachment" | "link-preview";
-    sourceKeyHash: string;
-    imageContentHash: string | null;
-    status:
-      | "pending"
-      | "processing"
-      | "succeeded"
-      | "failed"
-      | "unavailable"
-      | "redacted";
-    providerName: string | null;
-    model: string | null;
-    contractVersion: string;
-    attemptCount: number;
-    errorCode: string | null;
-    durationMs: number | null;
-    generatedAt: string | null;
-  }>;
 }
 interface AuditEvent {
   id: string;
@@ -1527,40 +1507,6 @@ function resetAuditPage(): Promise<boolean> {
                 class="empty-panel compact"
               >
                 本次执行没有图片输入。
-              </div>
-              <h3>图片历史摘要</h3>
-              <article
-                v-for="item in detail.imageSummaries"
-                :key="item.attachmentRef + item.sourceKeyHash"
-                class="trace-item"
-              >
-                <FileClock :size="17" />
-                <div>
-                  <strong>{{ item.sourceType }} · {{ item.status }}</strong>
-                  <p>
-                    {{ item.providerName || "未选择 Provider" }} ·
-                    {{ item.model || "—" }} · {{ item.durationMs ?? "—" }} ms ·
-                    尝试 {{ item.attemptCount }} 次
-                  </p>
-                  <span v-if="item.errorCode" class="table-status danger">{{
-                    item.errorCode
-                  }}</span>
-                  <details class="keyline">
-                    <summary>诊断标识</summary>
-                    <code>attachment={{ item.attachmentRef }}</code>
-                    <code>source={{ item.sourceKeyHash }}</code>
-                    <code v-if="item.imageContentHash"
-                      >content={{ item.imageContentHash }}</code
-                    >
-                    <code>contract={{ item.contractVersion }}</code>
-                  </details>
-                </div>
-              </article>
-              <div
-                v-if="!detail.imageSummaries.length"
-                class="empty-panel compact"
-              >
-                本次消息没有图片摘要任务。
               </div>
               <h3>AI 工具调用</h3>
               <article
