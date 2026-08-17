@@ -434,7 +434,9 @@ export type AiCallResult =
   | AiCallFailure;
 
 export interface AiAttemptRecordInput {
-  executionId: string;
+  executionId: string | null;
+  purpose: "workflow-reply" | "context-summary" | "image-summary";
+  backgroundOperationId: string | null;
   nodeId: string;
   routeId: string;
   routeVersion: number;
@@ -538,7 +540,7 @@ export interface AiRouteFailure {
 export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 
 export interface AiRouteRequest {
-  executionId: string;
+  executionId: string | null;
   nodeId: string;
   routeId: string;
   messages: readonly AiChatMessage[];
@@ -555,6 +557,9 @@ export interface AiRouteRequest {
   agentTurn?: number;
   promptTraceKey?: string;
   sessionAffinityKey?: string;
+  purpose?: "workflow-reply" | "context-summary" | "image-summary";
+  backgroundOperationId?: string;
+  allowImageDegrade?: boolean;
 }
 
 export interface AiToolExecutionRecordInput {

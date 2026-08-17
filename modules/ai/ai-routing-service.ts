@@ -177,7 +177,12 @@ export class AiRoutingService {
   async execute(request: AiRouteRequest): Promise<AiRouteResult> {
     const withImages = requestHasImages(request);
     const result = await this.executeOnce(request);
-    if (!withImages || !mayDegradeImages(result)) return result;
+    if (
+      !withImages ||
+      request.allowImageDegrade === false ||
+      !mayDegradeImages(result)
+    )
+      return result;
     const degraded = await this.executeOnce({
       ...request,
       messages: withoutImages(request.messages),
@@ -304,8 +309,10 @@ export class AiRoutingService {
           messages: request.messages,
           maxOutputTokens: request.maxOutputTokens,
           temperature: request.temperature,
-          executionId: request.executionId,
-          clientRequestId: `${request.executionId}:${request.nodeId}:${round}:${sequence}`,
+          ...(request.executionId === null
+            ? {}
+            : { executionId: request.executionId }),
+          clientRequestId: `${request.executionId ?? request.backgroundOperationId ?? "background"}:${request.nodeId}:${request.agentTurn ?? 1}:${round}:${sequence}`,
           ...(candidate.provider.sessionAffinity === "session-id-header" &&
           request.sessionAffinityKey !== undefined
             ? {
@@ -356,6 +363,8 @@ export class AiRoutingService {
           );
           await this.repository.recordAttempt({
             executionId: request.executionId,
+            purpose: request.purpose ?? "workflow-reply",
+            backgroundOperationId: request.backgroundOperationId ?? null,
             nodeId: request.nodeId,
             routeId: snapshot.route.id,
             routeVersion: snapshot.route.version,
@@ -401,6 +410,8 @@ export class AiRoutingService {
         });
         await this.repository.recordAttempt({
           executionId: request.executionId,
+          purpose: request.purpose ?? "workflow-reply",
+          backgroundOperationId: request.backgroundOperationId ?? null,
           nodeId: request.nodeId,
           routeId: snapshot.route.id,
           routeVersion: snapshot.route.version,

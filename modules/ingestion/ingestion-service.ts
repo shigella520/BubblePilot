@@ -4,6 +4,7 @@ import type {
 } from "../archive/archive-repository.js";
 import type { BlueBubblesWebhookAdapter } from "../integrations/bluebubbles/webhook-adapter.js";
 import type { LinkPreviewEnricher } from "../integrations/bluebubbles/link-preview-enricher.js";
+import type { ImageSummaryScheduler } from "../ai/image-summary-service.js";
 import { emptyLinkPreview } from "./link-preview.js";
 import type { MessageEnvelope } from "./message-envelope.js";
 
@@ -12,12 +13,22 @@ export interface IngestionOutcome {
   automationEnvelope: MessageEnvelope | null;
 }
 
+function scheduleImageSummary(operation: (() => Promise<void>) | undefined) {
+  if (operation === undefined) return;
+  void Promise.resolve()
+    .then(operation)
+    .catch(() => {
+      // Summary persistence is best-effort and must not delay message automation.
+    });
+}
+
 export class IngestionService {
   constructor(
     private readonly adapter: BlueBubblesWebhookAdapter,
     private readonly repository: ArchiveRepository,
     private readonly monitoredChatIds: ReadonlySet<string>,
     private readonly linkPreviewEnricher?: LinkPreviewEnricher,
+    private readonly imageSummary?: ImageSummaryScheduler,
   ) {}
 
   async ingest(
@@ -41,6 +52,13 @@ export class IngestionService {
       normalized.envelope,
       archiveEnabled,
     );
+    const imageSummary = this.imageSummary;
+    if (result.messageId !== null && imageSummary !== undefined) {
+      const messageId = result.messageId;
+      scheduleImageSummary(() =>
+        imageSummary.enqueueAttachments(messageId, normalized.envelope),
+      );
+    }
     let automationEnvelope = normalized.envelope;
     if (
       this.linkPreviewEnricher !== undefined &&
@@ -65,6 +83,20 @@ export class IngestionService {
             linkPreview: saved ?? enrichment.linkPreview,
           },
         };
+        if (
+          result.messageId !== null &&
+          saved !== null &&
+          imageSummary !== undefined
+        ) {
+          const messageId = result.messageId;
+          scheduleImageSummary(() =>
+            imageSummary.enqueueLinkPreviews({
+              messageId,
+              providerMessageId: normalized.envelope.message.providerMessageId,
+              linkPreview: saved,
+            }),
+          );
+        }
       } catch {
         const failed = emptyLinkPreview(
           "failed",

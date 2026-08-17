@@ -931,6 +931,17 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       );
       const redactedCount = redacted.rowCount ?? 0;
       if (redactedCount > 0) {
+        const messageIds = redacted.rows.map((message) => message.id);
+        await client.query(
+          `UPDATE message_image_summaries
+           SET status = 'redacted', source_key = 'redacted:' || id::text,
+               summary = NULL, image_content_hash = NULL,
+               provider_id = NULL, provider_name = NULL, model = NULL,
+               error_code = 'IMAGE_SUMMARY_REDACTED_BY_RETENTION',
+               lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
+           WHERE message_id = ANY($1::uuid[])`,
+          [messageIds],
+        );
         const chatIds = [
           ...new Set(redacted.rows.map((message) => message.chat_id)),
         ];

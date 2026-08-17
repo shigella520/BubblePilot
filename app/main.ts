@@ -13,6 +13,11 @@ import { WebSearchSettingsService } from "../modules/ai/web-search-settings-serv
 import { PostgresImageInputSettingsRepository } from "../modules/ai/postgres-image-input-settings-repository.js";
 import { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
 import { NativeImageInputService } from "../modules/ai/native-image-input.js";
+import {
+  ImageSummaryService,
+  ImageSummaryWorker,
+} from "../modules/ai/image-summary-service.js";
+import { PostgresImageSummaryRepository } from "../modules/ai/postgres-image-summary-repository.js";
 import { AuthService } from "../modules/auth/auth-service.js";
 import { PostgresAuthRepository } from "../modules/auth/postgres-auth-repository.js";
 import { DataExportService } from "../modules/export/export-service.js";
@@ -171,6 +176,19 @@ const nativeImageInput = new NativeImageInputService(
   blueBubblesSettings,
   aiRepository,
 );
+const imageSummaryRepository = new PostgresImageSummaryRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
+const imageSummaryWorker = new ImageSummaryWorker(
+  imageSummaryRepository,
+  new ImageSummaryService(
+    imageSummaryRepository,
+    aiRepository,
+    aiRouting,
+    nativeImageInput,
+  ),
+);
 const workflowEngine = new WorkflowEngine(
   workflowRepository,
   createDefaultNodeRegistry(workflowRepository, replyGateway, {
@@ -179,6 +197,7 @@ const workflowEngine = new WorkflowEngine(
     aiAgent,
     imageInput: nativeImageInput,
     conversationContext,
+    imageSummaries: imageSummaryRepository,
   }),
   {
     maxConcurrency: config.workflowMaxConcurrency,
@@ -211,6 +230,11 @@ const application = buildApplication(config, repository, {
   },
   blueBubbles: { settings: blueBubblesSettings, linkPreviewEnricher },
   ...(messageRetention === undefined ? {} : { messageRetention }),
+  imageSummary: {
+    scheduler: imageSummaryWorker,
+    worker: imageSummaryWorker,
+    repository: imageSummaryRepository,
+  },
 });
 
 const shutdown = async (signal: string) => {

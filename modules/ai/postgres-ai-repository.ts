@@ -98,7 +98,9 @@ interface RouteRow {
 
 interface AttemptRow {
   id: string;
-  execution_id: string;
+  execution_id: string | null;
+  purpose: AiAttemptRecordInput["purpose"];
+  background_operation_id: string | null;
   node_id: string;
   route_id: string;
   route_version: number;
@@ -258,6 +260,8 @@ function attemptView(row: AttemptRow): AiProviderAttemptView {
   return {
     id: row.id,
     executionId: row.execution_id,
+    purpose: row.purpose,
+    backgroundOperationId: row.background_operation_id,
     nodeId: row.node_id,
     routeId: row.route_id,
     routeVersion: row.route_version,
@@ -1107,12 +1111,13 @@ export class PostgresAiRepository implements AiRepository {
          response_content_characters, response_reasoning_characters,
          prompt_tokens, completion_tokens, reasoning_tokens, total_tokens,
          cached_prompt_tokens, cache_write_prompt_tokens,
-         cache_miss_prompt_tokens, request_trace
+         cache_miss_prompt_tokens, request_trace, purpose,
+         background_operation_id
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
          $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
          $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34,
-         $35, $36, $37, $38, $39
+         $35, $36, $37, $38, $39, $40, $41
        )`,
       [
         randomUUID(),
@@ -1156,6 +1161,8 @@ export class PostgresAiRepository implements AiRepository {
         input.diagnostics?.requestTrace === undefined
           ? null
           : JSON.stringify(input.diagnostics.requestTrace),
+        input.purpose,
+        input.backgroundOperationId,
       ],
     );
   }

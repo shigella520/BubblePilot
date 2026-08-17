@@ -1462,7 +1462,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: 执行、节点尝试、含稳定错误类别和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；不返回完整 Prompt、聊天正文、AI 输出、Secret 或原始响应体。
+          description: 执行、节点尝试、含用途和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt、当前源消息的图片摘要状态及出站发送完整轨迹；图片摘要不返回正文，接口也不返回完整 Prompt、聊天正文、AI 输出、Secret、原图或原始响应体。
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/ai-attempts/{attemptId}/raw-request:

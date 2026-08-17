@@ -222,6 +222,16 @@ export class AgentRunner {
     if (policy === "disabled") {
       return this.routing.execute(request);
     }
+    const executionId = request.executionId;
+    if (executionId === null) {
+      return {
+        status: "failed",
+        code: "AI_AGENT_EXECUTION_REQUIRED",
+        summary: "Tool-enabled agent requests require a workflow execution.",
+        retryable: false,
+        attemptCount: 0,
+      };
+    }
     const settings = await this.searchSettings?.resolve();
     const failurePolicy = settings?.failurePolicy ?? "mode-default";
     const continueOnSearchFailure = continuesAfterSearchFailure(
@@ -342,7 +352,7 @@ export class AgentRunner {
             "sha256:".length,
           );
           await this.repository?.recordToolExecution({
-            executionId: request.executionId,
+            executionId,
             nodeId: request.nodeId,
             providerId: result.providerId,
             toolCallId: call.id.slice(0, 512),
@@ -394,7 +404,7 @@ export class AgentRunner {
           cache.set(queryHash, searchResult);
           searched ||= searchResult.results.length > 0;
           await this.repository?.recordToolExecution({
-            executionId: request.executionId,
+            executionId,
             nodeId: request.nodeId,
             providerId: result.providerId,
             toolCallId: call.id.slice(0, 512),
@@ -432,7 +442,7 @@ export class AgentRunner {
               ? error.responseDetails.retainedResultCount
               : null;
           await this.repository?.recordToolExecution({
-            executionId: request.executionId,
+            executionId,
             nodeId: request.nodeId,
             providerId: result.providerId,
             toolCallId: call.id.slice(0, 512),

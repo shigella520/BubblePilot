@@ -7,6 +7,7 @@ import type {
   LinkPreviewBundle,
   LinkPreviewDiagnostic,
 } from "../ingestion/link-preview.js";
+import type { MessageImageSummary } from "../ai/image-summary-types.js";
 
 export type IngestionStatus = "archived" | "ignored" | "duplicate";
 
@@ -108,6 +109,7 @@ export interface ContextMessage {
   isFromMe: boolean;
   attachments: readonly MessageAttachment[];
   linkPreview: LinkPreviewBundle;
+  imageSummaries?: readonly MessageImageSummary[];
 }
 
 export interface ContextWindowOptions {

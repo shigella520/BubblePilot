@@ -17,6 +17,11 @@ import { webSearchSettingsUpdateSchema } from "../modules/ai/web-search-settings
 import type { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
 import { imageInputSettingsUpdateSchema } from "../modules/ai/image-input-settings-types.js";
 import type {
+  ImageSummaryScheduler,
+  ImageSummaryWorker,
+} from "../modules/ai/image-summary-service.js";
+import type { ImageSummaryRepository } from "../modules/ai/image-summary-repository.js";
+import type {
   AiMutationResult,
   AiRepository,
 } from "../modules/ai/ai-repository.js";
@@ -330,6 +335,11 @@ export interface ApplicationOptions {
     linkPreviewEnricher?: LinkPreviewEnricher;
   };
   messageRetention?: MessageRetentionWorker;
+  imageSummary?: {
+    scheduler: ImageSummaryScheduler;
+    worker: ImageSummaryWorker;
+    repository: ImageSummaryRepository;
+  };
 }
 
 function aiMutationValue<T>(
@@ -592,6 +602,7 @@ export function buildApplication(
     repository,
     config.monitoredChatIds,
     options.blueBubbles?.linkPreviewEnricher,
+    options.imageSummary?.scheduler,
   );
   const adminRateLimiter = new FixedWindowRateLimiter(
     config.adminRateLimitMax,
@@ -603,6 +614,7 @@ export function buildApplication(
   );
   application.addHook("onReady", () => {
     options.messageRetention?.start();
+    options.imageSummary?.worker.start();
   });
   const fingerprint = (request: FastifyRequest): string =>
     sha256(
@@ -2146,6 +2158,10 @@ export function buildApplication(
               [],
             aiImageInputs:
               (await options.ai?.repository.listImageInputs(executionId)) ?? [],
+            imageSummaries:
+              (await options.imageSummary?.repository.listDiagnosticsForExecution(
+                executionId,
+              )) ?? [],
           };
     };
 
@@ -2792,6 +2808,7 @@ export function buildApplication(
   );
 
   application.addHook("onClose", async () => {
+    await options.imageSummary?.worker.stop();
     await options.messageRetention?.stop();
     await Promise.all([
       repository.close(),
@@ -2803,6 +2820,7 @@ export function buildApplication(
       options.ai?.imageInputSettings?.repository.close() ?? Promise.resolve(),
       options.dataExport?.repository.close() ?? Promise.resolve(),
       options.blueBubbles?.settings.repository.close() ?? Promise.resolve(),
+      options.imageSummary?.repository.close() ?? Promise.resolve(),
     ]);
   });
 
