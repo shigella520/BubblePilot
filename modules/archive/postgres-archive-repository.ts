@@ -9,6 +9,7 @@ import type {
   ArchiveRepository,
   ArchivedMessage,
   AutomationOutcome,
+  ChatDeletionMutation,
   ChatMonitoringMutation,
   ChatParticipantIdentity,
   ChatParticipantIdentityMutation,
@@ -271,6 +272,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          ON CONFLICT (provider, provider_chat_id) DO UPDATE SET
            type = EXCLUDED.type,
            display_name = COALESCE(EXCLUDED.display_name, chats.display_name),
+           deleted_at = NULL,
            updated_at = NOW()
          RETURNING id`,
         [
@@ -509,6 +511,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
        FROM chats c
        LEFT JOIN messages m ON m.chat_id = c.id
        WHERE c.enabled = TRUE
+         AND c.deleted_at IS NULL
          AND (
            $1::timestamptz IS NULL
            OR (c.updated_at, c.id) < ($1::timestamptz, $2::uuid)
@@ -535,10 +538,11 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          c.updated_at, COUNT(m.id)::text AS message_count
        FROM chats c
        LEFT JOIN messages m ON m.chat_id = c.id
-       WHERE (
-         $1::timestamptz IS NULL
-         OR (c.updated_at, c.id) < ($1::timestamptz, $2::uuid)
-       )
+       WHERE c.deleted_at IS NULL
+         AND (
+           $1::timestamptz IS NULL
+           OR (c.updated_at, c.id) < ($1::timestamptz, $2::uuid)
+         )
        GROUP BY c.id
        ORDER BY c.updated_at DESC, c.id DESC
        LIMIT $3`,
@@ -572,13 +576,15 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          enabled = $3,
          version = version + 1,
          updated_at = NOW()
-       WHERE id = $1 AND version = $2
+       WHERE id = $1
+         AND version = $2
+         AND deleted_at IS NULL
        RETURNING id`,
       [input.chatId, input.expectedVersion, input.enabled],
     );
     if (updated.rowCount === 0) {
       const exists = await this.pool.query(
-        "SELECT 1 FROM chats WHERE id = $1",
+        "SELECT 1 FROM chats WHERE id = $1 AND deleted_at IS NULL",
         [input.chatId],
       );
       return { status: exists.rowCount === 0 ? "not-found" : "conflict" };
@@ -588,6 +594,40 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       return { status: "not-found" };
     }
     return { status: "ok", value: chat };
+  }
+
+  async deleteChat(input: {
+    chatId: string;
+    expectedVersion: number;
+  }): Promise<ChatDeletionMutation> {
+    const deleted = await this.pool.query<{ id: string }>(
+      `UPDATE chats
+       SET deleted_at = NOW(),
+           version = version + 1,
+           updated_at = NOW()
+       WHERE id = $1
+         AND version = $2
+         AND enabled = FALSE
+         AND deleted_at IS NULL
+       RETURNING id`,
+      [input.chatId, input.expectedVersion],
+    );
+    if ((deleted.rowCount ?? 0) > 0) {
+      return { status: "deleted" };
+    }
+
+    const existing = await this.pool.query<{
+      enabled: boolean;
+      deleted_at: Date | null;
+    }>("SELECT enabled, deleted_at FROM chats WHERE id = $1", [input.chatId]);
+    const row = existing.rows[0];
+    if (row === undefined || row.deleted_at !== null) {
+      return { status: "not-found" };
+    }
+    if (row.enabled) {
+      return { status: "still-enabled" };
+    }
+    return { status: "conflict" };
   }
 
   getChatParticipants(

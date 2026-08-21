@@ -473,6 +473,141 @@ describe("BubblePilot application", () => {
     expect(unavailable.json()).toMatchObject({ data: [] });
   });
 
+  it("soft-deletes a disabled chat and hides it from monitoring", async () => {
+    const chatGuid = "iMessage;-;delete-fictional-chat";
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({
+        messageGuid: "fake-delete-chat",
+        chatGuid,
+        text: "Delete me",
+      }),
+    });
+
+    const monitoring = await application.inject({
+      method: "GET",
+      url: "/api/v1/chat-monitoring",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    const chat = monitoring
+      .json<{
+        data: Array<{ id: string; version: number; enabled: boolean }>;
+      }>()
+      .data.find((item) => !item.enabled);
+    expect(chat).toBeDefined();
+
+    const deleted = await application.inject({
+      method: "DELETE",
+      url: `/api/v1/chats/${chat?.id}?expectedVersion=${chat?.version}`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json()).toMatchObject({ data: { deleted: true } });
+
+    const afterDelete = await application.inject({
+      method: "GET",
+      url: "/api/v1/chat-monitoring",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(afterDelete.json()).toMatchObject({ data: [] });
+
+    const missing = await application.inject({
+      method: "DELETE",
+      url: `/api/v1/chats/${chat?.id}?expectedVersion=1`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(missing.statusCode).toBe(404);
+
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({
+        messageGuid: "fake-restore-deleted-chat",
+        chatGuid,
+        text: "Restore the original chat",
+      }),
+    });
+
+    const restoredMonitoring = await application.inject({
+      method: "GET",
+      url: "/api/v1/chat-monitoring",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    const restored = restoredMonitoring
+      .json<{
+        data: Array<{ id: string; enabled: boolean }>;
+      }>()
+      .data.find((item) => item.id === chat?.id);
+    expect(restored).toBeDefined();
+    expect(restored?.enabled).toBe(false);
+  });
+
+  it("rejects deleting an enabled chat or using a stale version", async () => {
+    const chatGuid = "iMessage;-;enabled-delete-fictional-chat";
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({
+        messageGuid: "fake-enabled-delete-chat",
+        chatGuid,
+        text: "Enabled chat",
+      }),
+    });
+
+    const monitoring = await application.inject({
+      method: "GET",
+      url: "/api/v1/chat-monitoring",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    const chat = monitoring
+      .json<{
+        data: Array<{ id: string; version: number; enabled: boolean }>;
+      }>()
+      .data.find((item) => !item.enabled);
+    expect(chat).toBeDefined();
+
+    const enabled = await application.inject({
+      method: "PATCH",
+      url: `/api/v1/chat-monitoring/${chat?.id}`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: { enabled: true, expectedVersion: chat?.version },
+    });
+    expect(enabled.statusCode).toBe(200);
+    const enabledView = enabled.json<{ data: { version: number } }>();
+
+    const deleteWhileEnabled = await application.inject({
+      method: "DELETE",
+      url: `/api/v1/chats/${chat?.id}?expectedVersion=${enabledView.data.version}`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(deleteWhileEnabled.statusCode).toBe(409);
+    expect(deleteWhileEnabled.json()).toMatchObject({
+      error: { code: "CHAT_STILL_ENABLED" },
+    });
+
+    const disabled = await application.inject({
+      method: "PATCH",
+      url: `/api/v1/chat-monitoring/${chat?.id}`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: { enabled: false, expectedVersion: enabledView.data.version },
+    });
+    expect(disabled.statusCode).toBe(200);
+
+    const staleDelete = await application.inject({
+      method: "DELETE",
+      url: `/api/v1/chats/${chat?.id}?expectedVersion=1`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(staleDelete.statusCode).toBe(409);
+    expect(staleDelete.json()).toMatchObject({
+      error: { code: "CHAT_DELETE_CONFLICT" },
+    });
+  });
+
   it("records unsupported event types as ignored", async () => {
     const response = await application.inject({
       method: "POST",

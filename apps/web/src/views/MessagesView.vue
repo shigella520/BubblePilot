@@ -8,6 +8,7 @@ import {
   Save,
   Search,
   SlidersHorizontal,
+  Trash2,
   Users,
   X,
 } from "@lucide/vue";
@@ -173,6 +174,7 @@ const exportConfirmed = ref(false);
 const exportPreviewBusy = ref(false);
 const exportConfirmBusy = ref(false);
 const chatToggleBusyIds = reactive(new Set<string>());
+const chatDeleteBusyIds = reactive(new Set<string>());
 const participantChat = ref<Chat | null>(null);
 const participantVersion = ref(0);
 const participantDrafts = ref<ChatParticipantDraft[]>([]);
@@ -387,6 +389,44 @@ async function toggleChat(chat: Chat) {
     messageIsError.value = true;
   } finally {
     chatToggleBusyIds.delete(chat.id);
+  }
+}
+
+async function deleteChat(chat: Chat) {
+  if (
+    chat.enabled ||
+    !session.sensitiveActive ||
+    chatDeleteBusyIds.has(chat.id)
+  ) {
+    return;
+  }
+  const label = chat.displayName || chat.providerChatId;
+  if (
+    !window.confirm(`确认删除聊天「${label}」？历史消息和执行记录仍会保留。`)
+  ) {
+    return;
+  }
+  chatDeleteBusyIds.add(chat.id);
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    await apiRequest<void>(
+      `/api/v1/chats/${chat.id}?expectedVersion=${chat.version}`,
+      { method: "DELETE" },
+    );
+    chats.value = chats.value.filter((candidate) => candidate.id !== chat.id);
+    chatOptions.value = chatOptions.value.filter(
+      (candidate) => candidate.id !== chat.id,
+    );
+    if (participantChat.value?.id === chat.id) {
+      closeParticipantEditor();
+    }
+    message.value = `聊天「${label}」已删除，历史记录和引用仍会保留。`;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    chatDeleteBusyIds.delete(chat.id);
   }
 }
 
@@ -708,11 +748,12 @@ onBeforeUnmount(() =>
                 <th>最后发现</th>
                 <th>成员身份</th>
                 <th>监听</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!chats.length">
-                <td colspan="6" class="empty-cell">
+                <td colspan="7" class="empty-cell">
                   <strong>尚未发现聊天</strong>
                   <span class="empty-help"
                     >聊天列表由 BlueBubbles Webhook 首次投递消息后创建；REST
@@ -774,6 +815,27 @@ onBeforeUnmount(() =>
                           ? "已启用"
                           : "已停用"
                     }}
+                  </button>
+                </td>
+                <td>
+                  <button
+                    class="button tiny secondary"
+                    type="button"
+                    :disabled="
+                      chat.enabled ||
+                      !session.sensitiveActive ||
+                      chatDeleteBusyIds.has(chat.id)
+                    "
+                    :aria-busy="chatDeleteBusyIds.has(chat.id)"
+                    :title="
+                      chat.enabled
+                        ? '请先停用监听后再删除'
+                        : '删除该聊天（历史记录仍会保留）'
+                    "
+                    @click="deleteChat(chat)"
+                  >
+                    <Trash2 :size="14" />
+                    {{ chatDeleteBusyIds.has(chat.id) ? "删除中…" : "删除" }}
                   </button>
                 </td>
               </tr>

@@ -93,6 +93,12 @@ export type ChatMonitoringMutation =
   | { status: "not-found" }
   | { status: "conflict" };
 
+export type ChatDeletionMutation =
+  | { status: "deleted" }
+  | { status: "not-found" }
+  | { status: "conflict" }
+  | { status: "still-enabled" };
+
 export interface PageOptions {
   limit: number;
   cursor: {
@@ -170,6 +176,10 @@ export interface ArchiveRepository {
     enabled: boolean;
     expectedVersion: number;
   }): Promise<ChatMonitoringMutation>;
+  deleteChat(input: {
+    chatId: string;
+    expectedVersion: number;
+  }): Promise<ChatDeletionMutation>;
   getChatParticipants(
     chatId: string,
   ): Promise<ChatParticipantIdentitySet | null>;

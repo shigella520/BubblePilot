@@ -4,6 +4,7 @@ import type {
   ArchiveRepository,
   ArchivedMessage,
   AutomationOutcome,
+  ChatDeletionMutation,
   ChatMonitoringMutation,
   ChatParticipantIdentity,
   ChatParticipantIdentityMutation,
@@ -28,6 +29,7 @@ import type {
 } from "../../modules/ingestion/link-preview.js";
 
 interface StoredChat extends ChatSummary {
+  deletedAt: string | null;
   messages: ArchivedMessage[];
   participantIdentityVersion: number;
   participantIdentities: Map<string, ChatParticipantIdentity>;
@@ -76,10 +78,12 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
       messageCount: 0,
       version: 1,
       updatedAt: now,
+      deletedAt: null,
       messages: [],
       participantIdentityVersion: 1,
       participantIdentities: new Map(),
     };
+    chat.deletedAt = null;
     chat.updatedAt = now;
     this.chats.set(envelope.chat.providerChatId, chat);
 
@@ -216,7 +220,9 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
     return [...this.chats.values()]
       .filter(
         (chat) =>
-          chat.enabled && this.isBefore(chat.updatedAt, chat.id, options),
+          chat.enabled &&
+          chat.deletedAt === null &&
+          this.isBefore(chat.updatedAt, chat.id, options),
       )
       .sort(
         (left, right) =>
@@ -240,7 +246,11 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
     options: PageOptions,
   ): Promise<readonly ChatSummary[]> {
     return [...this.chats.values()]
-      .filter((chat) => this.isBefore(chat.updatedAt, chat.id, options))
+      .filter(
+        (chat) =>
+          chat.deletedAt === null &&
+          this.isBefore(chat.updatedAt, chat.id, options),
+      )
       .sort(
         (left, right) =>
           right.updatedAt.localeCompare(left.updatedAt) ||
@@ -274,6 +284,9 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
     if (chat === undefined) {
       return Promise.resolve({ status: "not-found" });
     }
+    if (chat.deletedAt !== null) {
+      return Promise.resolve({ status: "not-found" });
+    }
     if (chat.version !== input.expectedVersion) {
       return Promise.resolve({ status: "conflict" });
     }
@@ -293,6 +306,28 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
         updatedAt: chat.updatedAt,
       },
     });
+  }
+
+  deleteChat(input: {
+    chatId: string;
+    expectedVersion: number;
+  }): Promise<ChatDeletionMutation> {
+    const chat = [...this.chats.values()].find(
+      (candidate) => candidate.id === input.chatId,
+    );
+    if (chat === undefined || chat.deletedAt !== null) {
+      return Promise.resolve({ status: "not-found" });
+    }
+    if (chat.enabled) {
+      return Promise.resolve({ status: "still-enabled" });
+    }
+    if (chat.version !== input.expectedVersion) {
+      return Promise.resolve({ status: "conflict" });
+    }
+    chat.deletedAt = new Date().toISOString();
+    chat.version += 1;
+    chat.updatedAt = chat.deletedAt;
+    return Promise.resolve({ status: "deleted" });
   }
 
   getChatParticipants(

@@ -339,6 +339,32 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/chats/{chatId}:
+    delete:
+      operationId: deleteChat
+      description: 软删除一个已停止监听的聊天；历史消息、执行记录和审计中的引用仍会保留并继续显示聊天名称。已启用监听的聊天必须先停用。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: chatId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/ExpectedVersion"
+      responses:
+        "200":
+          description: 聊天已软删除。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/v1/chat-monitoring:
     get:
       operationId: listChatMonitoring

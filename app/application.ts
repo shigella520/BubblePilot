@@ -1205,6 +1205,41 @@ export function buildApplication(
     },
   );
 
+  application.delete(
+    "/api/v1/chats/:chatId",
+    { preHandler: requireSensitive("chat.delete", "chat") },
+    async (request) => {
+      const parameters = chatParametersSchema.parse(request.params);
+      const query = expectedVersionQuerySchema.parse(request.query);
+      const result = await repository.deleteChat({
+        chatId: parameters.chatId,
+        expectedVersion: query.expectedVersion,
+      });
+      if (result.status === "not-found") {
+        throw new ApplicationError(
+          "CHAT_NOT_FOUND",
+          "The chat does not exist or is unavailable.",
+          404,
+        );
+      }
+      if (result.status === "still-enabled") {
+        throw new ApplicationError(
+          "CHAT_STILL_ENABLED",
+          "Disable monitoring before deleting the chat.",
+          409,
+        );
+      }
+      if (result.status === "conflict") {
+        throw new ApplicationError(
+          "CHAT_DELETE_CONFLICT",
+          "The chat changed; refresh before retrying.",
+          409,
+        );
+      }
+      return { data: { deleted: true } };
+    },
+  );
+
   application.get(
     "/api/v1/chats/:chatId/participants",
     { preHandler: requireSensitive("chat.participants.view", "chat") },
