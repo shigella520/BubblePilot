@@ -66,6 +66,34 @@ function chatType(style: number | undefined): MessageEnvelope["chat"]["type"] {
   return "unknown";
 }
 
+function chatDisplayName(
+  chat: {
+    guid: string;
+    displayName?: string | null | undefined;
+    chatIdentifier?: string | null | undefined;
+  },
+  type: MessageEnvelope["chat"]["type"],
+): string | null {
+  const explicit = chat.displayName?.trim();
+  if (explicit !== undefined && explicit !== "") {
+    return explicit;
+  }
+  if (type !== "direct") {
+    return null;
+  }
+
+  // iMessage cannot name one-on-one chats, so BlueBubbles leaves displayName
+  // empty for direct conversations. The peer's phone number or email address
+  // is carried in chatIdentifier, and the chat guid's trailing segment is the
+  // same handle for `iMessage;-;<handle>`.
+  const identifier = chat.chatIdentifier?.trim();
+  if (identifier !== undefined && identifier !== "") {
+    return identifier;
+  }
+  const guidTail = chat.guid.split(";").at(-1)?.trim();
+  return guidTail === undefined || guidTail === "" ? null : guidTail;
+}
+
 function contentType(
   text: string | null,
   attachments: readonly MessageAttachment[],
@@ -146,6 +174,8 @@ export class BlueBubblesWebhookAdapter {
       );
     }
 
+    const chatTypeValue = chatType(chat.style);
+
     return {
       kind: "message",
       envelope: {
@@ -155,8 +185,8 @@ export class BlueBubblesWebhookAdapter {
         provider: "bluebubbles",
         chat: {
           providerChatId: chat.guid,
-          type: chatType(chat.style),
-          displayName: chat.displayName ?? null,
+          type: chatTypeValue,
+          displayName: chatDisplayName(chat, chatTypeValue),
         },
         message: {
           providerMessageId: data.guid,
