@@ -3,6 +3,7 @@ import { loadConfig } from "./config.js";
 import { AiManagementService } from "../modules/ai/ai-management-service.js";
 import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
 import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
+import { AiRawRequestStore } from "../modules/ai/ai-raw-request-store.js";
 import { AgentRunner } from "../modules/ai/agent-runner.js";
 import { SearxngWebSearchTool } from "../modules/ai/web-search-tool.js";
 import { PostgresAiRepository } from "../modules/ai/postgres-ai-repository.js";
@@ -12,6 +13,11 @@ import { WebSearchSettingsService } from "../modules/ai/web-search-settings-serv
 import { PostgresImageInputSettingsRepository } from "../modules/ai/postgres-image-input-settings-repository.js";
 import { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
 import { NativeImageInputService } from "../modules/ai/native-image-input.js";
+import {
+  ImageSummaryService,
+  ImageSummaryWorker,
+} from "../modules/ai/image-summary-service.js";
+import { PostgresImageSummaryRepository } from "../modules/ai/postgres-image-summary-repository.js";
 import { AuthService } from "../modules/auth/auth-service.js";
 import { PostgresAuthRepository } from "../modules/auth/postgres-auth-repository.js";
 import { DataExportService } from "../modules/export/export-service.js";
@@ -113,7 +119,12 @@ const authService = new AuthService(authRepository, {
   sensitiveOperationTtlSeconds: config.sensitiveOperationTtlSeconds,
 });
 const secretResolver = new EnvironmentSecretResolver();
-const aiClient = new OpenAiCompatibleClient(secretResolver);
+const aiRawRequestStore = new AiRawRequestStore(20);
+const aiClient = new OpenAiCompatibleClient(
+  secretResolver,
+  undefined,
+  aiRawRequestStore,
+);
 const aiRouting = new AiRoutingService(
   aiRepository,
   aiClient,
@@ -165,6 +176,19 @@ const nativeImageInput = new NativeImageInputService(
   blueBubblesSettings,
   aiRepository,
 );
+const imageSummaryRepository = new PostgresImageSummaryRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
+const imageSummaryWorker = new ImageSummaryWorker(
+  imageSummaryRepository,
+  new ImageSummaryService(
+    imageSummaryRepository,
+    aiRepository,
+    aiRouting,
+    nativeImageInput,
+  ),
+);
 const workflowEngine = new WorkflowEngine(
   workflowRepository,
   createDefaultNodeRegistry(workflowRepository, replyGateway, {
@@ -173,6 +197,7 @@ const workflowEngine = new WorkflowEngine(
     aiAgent,
     imageInput: nativeImageInput,
     conversationContext,
+    imageSummaries: imageSummaryRepository,
   }),
   {
     maxConcurrency: config.workflowMaxConcurrency,
@@ -191,6 +216,7 @@ const application = buildApplication(config, repository, {
     searchTool: webSearchTool,
     searchSettings: webSearchSettings,
     imageInputSettings,
+    rawRequestStore: aiRawRequestStore,
   },
   workflow: {
     repository: workflowRepository,
@@ -204,6 +230,12 @@ const application = buildApplication(config, repository, {
   },
   blueBubbles: { settings: blueBubblesSettings, linkPreviewEnricher },
   ...(messageRetention === undefined ? {} : { messageRetention }),
+  imageSummary: {
+    scheduler: imageSummaryWorker,
+    worker: imageSummaryWorker,
+    repository: imageSummaryRepository,
+    imageInput: nativeImageInput,
+  },
 });
 
 const shutdown = async (signal: string) => {

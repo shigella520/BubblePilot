@@ -429,6 +429,83 @@ describe("OpenAiCompatibleClient", () => {
     },
   );
 
+  it("merges adjacent roles without serializing internal trace identities", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ output_text: "ok" }), { status: 200 }),
+      );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    await client.call(
+      { ...provider, apiKind: "responses" },
+      {
+        ...request,
+        messages: [
+          { role: "system", content: "<input_protocol>p</input_protocol>" },
+          { role: "system", content: "<ai_system>s</ai_system>" },
+          {
+            role: "user",
+            content: "<chat_history>a</chat_history>",
+            traceMessageId: "provider-message-a",
+          },
+          {
+            role: "user",
+            content: "<chat_history>b</chat_history>",
+            traceMessageId: "provider-message-b",
+          },
+        ],
+      },
+    );
+    const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+    const rawBody = typeof body === "string" ? body : "";
+    const payload = JSON.parse(rawBody) as { input: unknown[] };
+    expect(payload.input).toHaveLength(2);
+    expect(payload.input[0]).toMatchObject({
+      role: "system",
+      content: "<input_protocol>p</input_protocol>\n<ai_system>s</ai_system>",
+    });
+    expect(payload.input[1]).toMatchObject({
+      role: "user",
+      content: "<chat_history>a</chat_history>\n<chat_history>b</chat_history>",
+    });
+    expect(rawBody).not.toContain("traceMessageId");
+    expect(rawBody).not.toContain("provider-message-a");
+    expect(rawBody).not.toContain("provider-message-b");
+  });
+
+  it("keeps merged plain-text Chat Completions content as a string", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+          { status: 200 },
+        ),
+      );
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+      fetchImplementation,
+    );
+    await client.call(
+      { ...provider, apiKind: "chat-completions" },
+      {
+        ...request,
+        messages: [
+          { role: "user", content: "first" },
+          { role: "user", content: "second" },
+        ],
+      },
+    );
+    const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+    const payload = JSON.parse(typeof body === "string" ? body : "null") as {
+      messages: Array<{ content: unknown }>;
+    };
+    expect(payload.messages[0]?.content).toBe("first\nsecond");
+  });
+
   it("records response shape, request IDs, token usage, and cache counters without content", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

@@ -65,10 +65,10 @@ docker compose exec -T postgres sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$1" -c "SELECT name, applied_at FROM schema_migrations ORDER BY name;"' \
   -- "$RESTORE_DATABASE"
 REQUIRED_TABLES=$(docker compose exec -T postgres sh -c \
-    'psql -v ON_ERROR_STOP=1 -At -U "$POSTGRES_USER" -d "$1" -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '\''public'\'' AND table_name IN ('\''messages'\'', '\''chat_participant_identities'\'', '\''workflow_executions'\'', '\''conversation_context_states'\'', '\''ai_providers'\'', '\''admin_sessions'\'', '\''data_export_jobs'\'');"' \
+    'psql -v ON_ERROR_STOP=1 -At -U "$POSTGRES_USER" -d "$1" -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '\''public'\'' AND table_name IN ('\''messages'\'', '\''message_image_summaries'\'', '\''chat_participant_identities'\'', '\''workflow_executions'\'', '\''conversation_context_states'\'', '\''ai_providers'\'', '\''admin_sessions'\'', '\''data_export_jobs'\'');"' \
   -- "$RESTORE_DATABASE")
 
-if [ "$REQUIRED_TABLES" -ne 7 ]; then
+if [ "$REQUIRED_TABLES" -ne 8 ]; then
   printf '%s\n' "Restore verification failed: required tables are missing." >&2
   exit 1
 fi

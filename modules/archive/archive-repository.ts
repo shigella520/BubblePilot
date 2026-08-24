@@ -7,6 +7,7 @@ import type {
   LinkPreviewBundle,
   LinkPreviewDiagnostic,
 } from "../ingestion/link-preview.js";
+import type { MessageImageSummary } from "../ai/image-summary-types.js";
 
 export type IngestionStatus = "archived" | "ignored" | "duplicate";
 
@@ -57,7 +58,7 @@ export interface ArchivedMessage {
   body: string | null;
   contentType: "text" | "attachment" | "mixed" | "unknown";
   isFromMe: boolean;
-  attachments: readonly unknown[];
+  attachments: readonly MessageAttachment[];
   linkPreview: LinkPreviewBundle;
   linkPreviewDiagnostics: readonly LinkPreviewDiagnostic[];
   linkPreviewFetchedAt: string | null;
@@ -92,6 +93,12 @@ export type ChatMonitoringMutation =
   | { status: "not-found" }
   | { status: "conflict" };
 
+export type ChatDeletionMutation =
+  | { status: "deleted" }
+  | { status: "not-found" }
+  | { status: "conflict" }
+  | { status: "still-enabled" };
+
 export interface PageOptions {
   limit: number;
   cursor: {
@@ -108,6 +115,7 @@ export interface ContextMessage {
   isFromMe: boolean;
   attachments: readonly MessageAttachment[];
   linkPreview: LinkPreviewBundle;
+  imageSummaries?: readonly MessageImageSummary[];
 }
 
 export interface ContextWindowOptions {
@@ -168,6 +176,10 @@ export interface ArchiveRepository {
     enabled: boolean;
     expectedVersion: number;
   }): Promise<ChatMonitoringMutation>;
+  deleteChat(input: {
+    chatId: string;
+    expectedVersion: number;
+  }): Promise<ChatDeletionMutation>;
   getChatParticipants(
     chatId: string,
   ): Promise<ChatParticipantIdentitySet | null>;
@@ -184,6 +196,7 @@ export interface ArchiveRepository {
     chatId: string,
     options: PageOptions,
   ): Promise<readonly ArchivedMessage[]>;
+  findMessage(messageId: string): Promise<ArchivedMessage | null>;
   searchMessages(
     options: MessageSearchOptions,
   ): Promise<readonly MessageSearchResult[]>;

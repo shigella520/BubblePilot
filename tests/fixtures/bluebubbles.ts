@@ -6,6 +6,7 @@ export function newMessageWebhook(
     isFromMe?: boolean;
     senderAddress?: string;
     chatDisplayName?: string | null;
+    chatIdentifier?: string | null;
     dateCreated?: number;
   } = {},
 ) {
@@ -28,7 +29,10 @@ export function newMessageWebhook(
           guid: overrides.chatGuid ?? "iMessage;-;fictional-chat",
           style: 45,
           displayName: overrides.chatDisplayName ?? null,
-          chatIdentifier: "fictional-chat",
+          chatIdentifier:
+            overrides.chatIdentifier === undefined
+              ? "fictional-chat"
+              : overrides.chatIdentifier,
         },
       ],
       attachments: [],

@@ -9,6 +9,7 @@ import type {
   ArchiveRepository,
   ArchivedMessage,
   AutomationOutcome,
+  ChatDeletionMutation,
   ChatMonitoringMutation,
   ChatParticipantIdentity,
   ChatParticipantIdentityMutation,
@@ -138,7 +139,7 @@ function archivedMessage(row: MessageRow): ArchivedMessage {
     body: row.body,
     contentType: row.content_type,
     isFromMe: row.is_from_me,
-    attachments: row.attachments,
+    attachments: messageAttachments(row.attachments),
     linkPreview: linkPreviewBundle(row),
     linkPreviewDiagnostics: Array.isArray(row.link_preview_diagnostics)
       ? (row.link_preview_diagnostics as LinkPreviewDiagnostic[])
@@ -271,6 +272,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          ON CONFLICT (provider, provider_chat_id) DO UPDATE SET
            type = EXCLUDED.type,
            display_name = COALESCE(EXCLUDED.display_name, chats.display_name),
+           deleted_at = NULL,
            updated_at = NOW()
          RETURNING id`,
         [
@@ -509,6 +511,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
        FROM chats c
        LEFT JOIN messages m ON m.chat_id = c.id
        WHERE c.enabled = TRUE
+         AND c.deleted_at IS NULL
          AND (
            $1::timestamptz IS NULL
            OR (c.updated_at, c.id) < ($1::timestamptz, $2::uuid)
@@ -535,10 +538,11 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          c.updated_at, COUNT(m.id)::text AS message_count
        FROM chats c
        LEFT JOIN messages m ON m.chat_id = c.id
-       WHERE (
-         $1::timestamptz IS NULL
-         OR (c.updated_at, c.id) < ($1::timestamptz, $2::uuid)
-       )
+       WHERE c.deleted_at IS NULL
+         AND (
+           $1::timestamptz IS NULL
+           OR (c.updated_at, c.id) < ($1::timestamptz, $2::uuid)
+         )
        GROUP BY c.id
        ORDER BY c.updated_at DESC, c.id DESC
        LIMIT $3`,
@@ -572,13 +576,15 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          enabled = $3,
          version = version + 1,
          updated_at = NOW()
-       WHERE id = $1 AND version = $2
+       WHERE id = $1
+         AND version = $2
+         AND deleted_at IS NULL
        RETURNING id`,
       [input.chatId, input.expectedVersion, input.enabled],
     );
     if (updated.rowCount === 0) {
       const exists = await this.pool.query(
-        "SELECT 1 FROM chats WHERE id = $1",
+        "SELECT 1 FROM chats WHERE id = $1 AND deleted_at IS NULL",
         [input.chatId],
       );
       return { status: exists.rowCount === 0 ? "not-found" : "conflict" };
@@ -588,6 +594,40 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       return { status: "not-found" };
     }
     return { status: "ok", value: chat };
+  }
+
+  async deleteChat(input: {
+    chatId: string;
+    expectedVersion: number;
+  }): Promise<ChatDeletionMutation> {
+    const deleted = await this.pool.query<{ id: string }>(
+      `UPDATE chats
+       SET deleted_at = NOW(),
+           version = version + 1,
+           updated_at = NOW()
+       WHERE id = $1
+         AND version = $2
+         AND enabled = FALSE
+         AND deleted_at IS NULL
+       RETURNING id`,
+      [input.chatId, input.expectedVersion],
+    );
+    if ((deleted.rowCount ?? 0) > 0) {
+      return { status: "deleted" };
+    }
+
+    const existing = await this.pool.query<{
+      enabled: boolean;
+      deleted_at: Date | null;
+    }>("SELECT enabled, deleted_at FROM chats WHERE id = $1", [input.chatId]);
+    const row = existing.rows[0];
+    if (row === undefined || row.deleted_at !== null) {
+      return { status: "not-found" };
+    }
+    if (row.enabled) {
+      return { status: "still-enabled" };
+    }
+    return { status: "conflict" };
   }
 
   getChatParticipants(
@@ -791,6 +831,23 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     }));
   }
 
+  async findMessage(messageId: string): Promise<ArchivedMessage | null> {
+    const result = await this.pool.query<MessageRow>(
+      `SELECT
+         m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
+         m.content_type, m.is_from_me, m.attachments, m.link_preview_status,
+         m.link_previews, m.link_preview_error_code,
+         m.link_preview_diagnostics, m.link_preview_fetched_at,
+         m.content_redacted_at, m.created_at
+       FROM messages m
+       INNER JOIN chats c ON c.id = m.chat_id
+       WHERE m.id = $1 AND c.enabled = TRUE`,
+      [messageId],
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : archivedMessage(row);
+  }
+
   async loadRecentMessages(
     providerChatId: string,
     options: ContextWindowOptions,
@@ -931,6 +988,17 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       );
       const redactedCount = redacted.rowCount ?? 0;
       if (redactedCount > 0) {
+        const messageIds = redacted.rows.map((message) => message.id);
+        await client.query(
+          `UPDATE message_image_summaries
+           SET status = 'redacted', source_key = 'redacted:' || id::text,
+               summary = NULL, image_content_hash = NULL,
+               provider_id = NULL, provider_name = NULL, model = NULL,
+               error_code = 'IMAGE_SUMMARY_REDACTED_BY_RETENTION',
+               lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
+           WHERE message_id = ANY($1::uuid[])`,
+          [messageIds],
+        );
         const chatIds = [
           ...new Set(redacted.rows.map((message) => message.chat_id)),
         ];

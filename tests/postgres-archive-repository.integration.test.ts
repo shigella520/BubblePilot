@@ -209,6 +209,136 @@ describe.runIf(testDatabaseUrl !== undefined)(
       expect([firstPreview, losingPreview]).toContainEqual(firstResult);
     });
 
+    it("soft-deletes a disabled chat and rejects an enabled chat", async () => {
+      const suffix = randomUUID();
+      const adapter = new BlueBubblesWebhookAdapter();
+
+      const disabledChat = `iMessage;-;delete-disabled-${suffix}`;
+      const disabledNormalized = adapter.normalize(
+        newMessageWebhook({
+          messageGuid: `delete-disabled-message-${suffix}`,
+          chatGuid: disabledChat,
+        }),
+        randomUUID(),
+      );
+      expect(disabledNormalized.kind).toBe("message");
+      if (disabledNormalized.kind !== "message") return;
+      await repository.ingestMessage(disabledNormalized.envelope, false);
+
+      const monitoring = await repository.listChatMonitoring({
+        limit: 100,
+        cursor: null,
+      });
+      const disabled = monitoring.find((candidate) =>
+        candidate.providerChatId.endsWith(suffix),
+      );
+      expect(disabled?.enabled).toBe(false);
+
+      await expect(
+        repository.deleteChat({
+          chatId: disabled?.id ?? randomUUID(),
+          expectedVersion: disabled?.version ?? 1,
+        }),
+      ).resolves.toEqual({ status: "deleted" });
+
+      const afterDelete = await repository.listChatMonitoring({
+        limit: 100,
+        cursor: null,
+      });
+      expect(
+        afterDelete.some((candidate) =>
+          candidate.providerChatId.endsWith(suffix),
+        ),
+      ).toBe(false);
+
+      const enabledChat = `iMessage;-;delete-enabled-${suffix}`;
+      const enabledNormalized = adapter.normalize(
+        newMessageWebhook({
+          messageGuid: `delete-enabled-message-${suffix}`,
+          chatGuid: enabledChat,
+        }),
+        randomUUID(),
+      );
+      expect(enabledNormalized.kind).toBe("message");
+      if (enabledNormalized.kind !== "message") return;
+      await repository.ingestMessage(enabledNormalized.envelope, true);
+      const enabledMonitoring = await repository.listChatMonitoring({
+        limit: 100,
+        cursor: null,
+      });
+      const enabled = enabledMonitoring.find((candidate) =>
+        candidate.providerChatId.endsWith(suffix),
+      );
+      await expect(
+        repository.deleteChat({
+          chatId: enabled?.id ?? randomUUID(),
+          expectedVersion: enabled?.version ?? 1,
+        }),
+      ).resolves.toEqual({ status: "still-enabled" });
+    });
+
+    it("restores a soft-deleted chat when a new message arrives", async () => {
+      const suffix = randomUUID();
+      const adapter = new BlueBubblesWebhookAdapter();
+      const chatGuid = `iMessage;-;restore-${suffix}`;
+
+      const first = adapter.normalize(
+        newMessageWebhook({
+          messageGuid: `restore-one-${suffix}`,
+          chatGuid,
+        }),
+        randomUUID(),
+      );
+      expect(first.kind).toBe("message");
+      if (first.kind !== "message") return;
+      await repository.ingestMessage(first.envelope, false);
+
+      const monitoring = await repository.listChatMonitoring({
+        limit: 100,
+        cursor: null,
+      });
+      const chat = monitoring.find(
+        (candidate) => candidate.providerChatId === chatGuid,
+      );
+      expect(chat?.enabled).toBe(false);
+      await expect(
+        repository.deleteChat({
+          chatId: chat?.id ?? randomUUID(),
+          expectedVersion: chat?.version ?? 1,
+        }),
+      ).resolves.toEqual({ status: "deleted" });
+
+      const afterDelete = await repository.listChatMonitoring({
+        limit: 100,
+        cursor: null,
+      });
+      expect(
+        afterDelete.some((candidate) => candidate.providerChatId === chatGuid),
+      ).toBe(false);
+
+      const second = adapter.normalize(
+        newMessageWebhook({
+          messageGuid: `restore-two-${suffix}`,
+          chatGuid,
+        }),
+        randomUUID(),
+      );
+      expect(second.kind).toBe("message");
+      if (second.kind !== "message") return;
+      await repository.ingestMessage(second.envelope, false);
+
+      const restored = await repository.listChatMonitoring({
+        limit: 100,
+        cursor: null,
+      });
+      const restoredChat = restored.find(
+        (candidate) => candidate.providerChatId === chatGuid,
+      );
+      expect(restoredChat).toBeDefined();
+      expect(restoredChat?.id).toBe(chat?.id);
+      expect(restoredChat?.enabled).toBe(false);
+    });
+
     it("freezes loaded context before the triggering message", async () => {
       const suffix = randomUUID();
       const adapter = new BlueBubblesWebhookAdapter();

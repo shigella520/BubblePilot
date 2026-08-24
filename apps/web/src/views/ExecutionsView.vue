@@ -3,6 +3,8 @@ import {
   FileClock,
   Image,
   CircleAlert,
+  ClipboardCopy,
+  FileJson,
   LoaderCircle,
   Minimize2,
   RefreshCw,
@@ -74,6 +76,7 @@ interface ExecutionDetail extends Execution {
   }>;
   aiProviderAttempts: Array<{
     id: string;
+    purpose: "workflow-reply" | "context-summary" | "image-summary";
     nodeId: string;
     routeId: string;
     routeVersion: number;
@@ -92,6 +95,7 @@ interface ExecutionDetail extends Execution {
     errorCode: string | null;
     retryable: boolean | null;
     fallbackAllowed: boolean | null;
+    rawRequest: { status: "available" | "unavailable" };
     diagnostics: {
       clientRequestId: string | null;
       providerRequestId: string | null;
@@ -223,6 +227,8 @@ interface AiUsageReport {
 }
 
 const detail = ref<ExecutionDetail | null>(null);
+const rawRequests = ref<Record<string, string>>({});
+const rawRequestLoadingId = ref<string | null>(null);
 const message = ref("");
 const messageIsError = ref(false);
 const recoveryBusy = ref(false);
@@ -446,6 +452,8 @@ function cacheDivergenceReasonLabel(reason: string | null): string {
 function providerAttemptPurpose(
   item: ExecutionDetail["aiProviderAttempts"][number],
 ) {
+  if (item.purpose === "context-summary") return "历史摘要压缩";
+  if (item.purpose === "image-summary") return "图片摘要";
   const nodeType = detail.value?.nodes.find(
     (node) => node.nodeId === item.nodeId,
   )?.nodeType;
@@ -531,6 +539,7 @@ async function inspect(id: string) {
     );
     if (requestId !== inspectRequestId) return;
     detail.value = loaded;
+    rawRequests.value = {};
   } catch (cause) {
     if (requestId !== inspectRequestId) return;
     message.value = errorMessage(cause);
@@ -543,6 +552,50 @@ function clearDetail() {
   inspectRequestId += 1;
   detailLoadingId.value = null;
   detail.value = null;
+  rawRequests.value = {};
+}
+
+async function loadRawRequest(attemptId: string) {
+  if (
+    detail.value === null ||
+    !session.sensitiveActive ||
+    rawRequestLoadingId.value !== null
+  )
+    return;
+  rawRequestLoadingId.value = attemptId;
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    const result = await apiRequest<{
+      attemptId: string;
+      requestHash: string | null;
+      body: string;
+    }>(
+      `/api/v1/executions/${detail.value.id}/ai-attempts/${attemptId}/raw-request`,
+    );
+    rawRequests.value = {
+      ...rawRequests.value,
+      [attemptId]: JSON.stringify(JSON.parse(result.body), null, 2),
+    };
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    rawRequestLoadingId.value = null;
+  }
+}
+
+async function copyRawRequest(attemptId: string) {
+  const body = rawRequests.value[attemptId];
+  if (body === undefined) return;
+  try {
+    await navigator.clipboard.writeText(body);
+    message.value = "AI 请求原始报文已复制。";
+    messageIsError.value = false;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  }
 }
 async function loadSelected() {
   await load(true);
@@ -1243,6 +1296,41 @@ function resetAuditPage(): Promise<boolean> {
                       >response={{ item.diagnostics.responseBodyHash }}</code
                     >
                   </details>
+                  <details
+                    v-if="item.rawRequest.status === 'available'"
+                    class="raw-request-diagnostic"
+                    @toggle="
+                      ($event.currentTarget as HTMLDetailsElement).open &&
+                      rawRequests[item.id] === undefined &&
+                      loadRawRequest(item.id)
+                    "
+                  >
+                    <summary>
+                      <span><FileJson :size="14" /> 原始请求报文</span>
+                      <button
+                        v-if="rawRequests[item.id] !== undefined"
+                        class="icon-button raw-request-copy"
+                        type="button"
+                        title="复制原始请求报文"
+                        aria-label="复制原始请求报文"
+                        @click.prevent.stop="copyRawRequest(item.id)"
+                      >
+                        <ClipboardCopy :size="14" />
+                      </button>
+                    </summary>
+                    <div
+                      v-if="rawRequestLoadingId === item.id"
+                      class="raw-request-loading"
+                    >
+                      <LoaderCircle :size="14" class="spin" /> 正在读取…
+                    </div>
+                    <pre v-else-if="rawRequests[item.id] !== undefined">{{
+                      rawRequests[item.id]
+                    }}</pre>
+                  </details>
+                  <p v-else class="keyline raw-request-unavailable">
+                    原始请求报文已因应用重启或超过最近 20 个执行而不可用。
+                  </p>
                   <details
                     v-if="item.diagnostics?.requestTrace"
                     class="cache-diagnostic"

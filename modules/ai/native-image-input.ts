@@ -17,6 +17,12 @@ import type {
 } from "./ai-types.js";
 import type { ImageInputSettingsService } from "./image-input-settings-service.js";
 import type { ImageInputRuntimeSettings } from "./image-input-settings-types.js";
+import {
+  attachmentImageReference,
+  isImageAttachment,
+  linkPreviewImageReference,
+} from "./image-reference.js";
+import type { ImageSummarySource } from "./image-summary-types.js";
 
 type ImageCandidate = {
   providerMessageId: string;
@@ -55,7 +61,7 @@ class ImageInputError extends Error {
   }
 }
 
-function imageMime(body: Buffer): string | null {
+export function imageMime(body: Buffer): string | null {
   if (
     body.length >= 3 &&
     body[0] === 0xff &&
@@ -80,17 +86,6 @@ function imageMime(body: Buffer): string | null {
   )
     return "image/webp";
   return null;
-}
-
-function isDeclaredImage(attachment: MessageAttachment): boolean {
-  if (attachment.mimeType?.toLowerCase().startsWith("image/")) return true;
-  return /\.(?:jpe?g|png|webp|gif|heic|heif)$/iu.test(
-    attachment.fileName ?? "",
-  );
-}
-
-function messageReference(providerMessageId: string): string {
-  return `message-${sha256(providerMessageId).slice(0, 16)}`;
 }
 
 function hostName(value: string | null): string | null {
@@ -138,12 +133,15 @@ function currentCandidates(
   if (settings.includeAttachments) {
     let selected = 0;
     for (const [index, attachment] of envelope.message.attachments.entries()) {
-      if (!isDeclaredImage(attachment)) continue;
+      if (!isImageAttachment(attachment)) continue;
       if (selected >= settings.maxCurrentAttachments) break;
       selected += 1;
       candidates.push({
         providerMessageId: envelope.message.providerMessageId,
-        reference: `${messageReference(envelope.message.providerMessageId)}:attachment:${index + 1}`,
+        reference: attachmentImageReference(
+          envelope.message.providerMessageId,
+          index,
+        ),
         source: "attachment",
         attachment,
         label: `消息附件 ${index + 1}`,
@@ -156,7 +154,7 @@ function currentCandidates(
   if (settings.includeLinkPreviewImages && preview !== undefined)
     candidates.push({
       providerMessageId: envelope.message.providerMessageId,
-      reference: `${messageReference(envelope.message.providerMessageId)}:link:1:image`,
+      reference: linkPreviewImageReference(envelope.message.providerMessageId),
       source: "link-preview",
       preview,
       label: "链接卡片主图",
@@ -178,17 +176,17 @@ function historyCandidates(
     if (settings.includeLinkPreviewImages && preview !== undefined)
       result.push({
         providerMessageId: message.providerMessageId,
-        reference: `${messageReference(message.providerMessageId)}:link:1:image`,
+        reference: linkPreviewImageReference(message.providerMessageId),
         source: "link-preview",
         preview,
         label: "链接卡片主图",
       });
     if (settings.includeAttachments) {
       for (const [index, attachment] of message.attachments.entries()) {
-        if (!isDeclaredImage(attachment)) continue;
+        if (!isImageAttachment(attachment)) continue;
         result.push({
           providerMessageId: message.providerMessageId,
-          reference: `${messageReference(message.providerMessageId)}:attachment:${index + 1}`,
+          reference: attachmentImageReference(message.providerMessageId, index),
           source: "attachment",
           attachment,
           label: `消息附件 ${index + 1}`,
@@ -207,6 +205,99 @@ export class NativeImageInputService {
     private readonly repository?: Pick<AiRepository, "recordImageInput">,
     private readonly fetchImplementation: typeof fetch = fetch,
   ) {}
+
+  async loadForSummary(source: ImageSummarySource): Promise<
+    | {
+        status: "succeeded";
+        part: AiImageContentPart;
+        contentHash: string;
+      }
+    | { status: "failed"; errorCode: string; retryable: boolean }
+  > {
+    const settings = await this.settings.resolve();
+    let body: Buffer;
+    try {
+      if (source.sourceType === "attachment") {
+        const blueBubblesSettings = await this.blueBubbles.resolve();
+        const controller = new AbortController();
+        const timeout = setTimeout(
+          () => controller.abort(),
+          settings.fetchTimeoutMs,
+        );
+        try {
+          const endpoint = new URL(
+            `/api/v1/attachment/${encodeURIComponent(source.attachment.providerAttachmentId)}/download`,
+            `${blueBubblesSettings.serverUrl}/`,
+          );
+          endpoint.searchParams.set(
+            "password",
+            blueBubblesSettings.accessToken,
+          );
+          endpoint.searchParams.set("original", "false");
+          const response = await this.fetchImplementation(endpoint, {
+            headers: { accept: "image/*" },
+            signal: controller.signal,
+          });
+          if (!response.ok)
+            throw new ImageInputError(
+              `AI_IMAGE_BLUEBUBBLES_HTTP_${response.status}`,
+            );
+          body = await limitedResponseBody(response, settings.maxImageBytes);
+        } finally {
+          clearTimeout(timeout);
+        }
+      } else {
+        if (source.preview.imageUrl === null)
+          throw new ImageInputError("AI_IMAGE_URL_UNAVAILABLE");
+        const resource = await fetchPublicResource(
+          source.preview.imageUrl,
+          settings.fetchTimeoutMs,
+          settings.maxImageBytes,
+          "image/avif,image/webp,image/png,image/jpeg,image/gif;q=0.8",
+          { trustedProxyHosts: settings.trustedLinkPreviewHosts },
+        );
+        body = resource.body;
+      }
+      const mimeType = imageMime(body);
+      if (mimeType === null)
+        throw new ImageInputError("AI_IMAGE_INVALID_CONTENT");
+      return {
+        status: "succeeded",
+        part: {
+          type: "image",
+          dataUrl: `data:${mimeType};base64,${body.toString("base64")}`,
+          detail: settings.detail,
+          label:
+            source.sourceType === "attachment"
+              ? "待摘要的消息图片"
+              : "待摘要的链接卡片主图",
+        },
+        contentHash: sha256(body.toString("base64")),
+      };
+    } catch (error) {
+      const errorCode =
+        error instanceof ImageInputError
+          ? error.code
+          : error instanceof OpenGraphFetchError
+            ? error.code.replace("LINK_PREVIEW_OG_", "AI_IMAGE_")
+            : error instanceof Error && error.name === "AbortError"
+              ? "AI_IMAGE_FETCH_TIMEOUT"
+              : "AI_IMAGE_FETCH_FAILED";
+      const status = /_HTTP_(\d{3})$/u.exec(errorCode)?.[1];
+      const httpStatus = status === undefined ? null : Number(status);
+      return {
+        status: "failed",
+        errorCode,
+        retryable:
+          errorCode === "AI_IMAGE_FETCH_TIMEOUT" ||
+          errorCode === "AI_IMAGE_FETCH_FAILED" ||
+          errorCode.endsWith("DNS_FAILED") ||
+          httpStatus === 408 ||
+          httpStatus === 429 ||
+          (httpStatus !== null && httpStatus >= 500),
+      };
+    }
+  }
 
   async prepare(input: {
     executionId: string;

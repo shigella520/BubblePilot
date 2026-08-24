@@ -409,6 +409,7 @@ export class ConversationContextService {
             maxOutputCharacters: summaryCharacterLimit,
             outputFormat: "text",
             protectedPrompt: null,
+            purpose: "context-summary",
           });
           const durationMs = Math.max(0, Date.now() - startedAt);
           if (result.status === "succeeded") {

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-labelledby="title desc">
+  <title id="title">BubblePilot AI 请求输入区</title>
+  <desc id="desc">BubblePilot AI 请求由固定协议、系统、会话历史、本轮任务和资源等区域按顺序组成，并映射到 system、user、assistant 三种消息角色。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/><stop offset="1" stop-color="#14243a"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000" flood-opacity=".28"/></filter>
+    <style>
+      text{font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif}
+      .title{fill:#f7f9fc;font-size:40px;font-weight:800}.sub{fill:#9aabc2;font-size:19px}
+      .lane{fill:#0e1a2c;stroke:#2a3b57;stroke-width:2}.laneTitle{fill:#dce7f5;font-size:22px;font-weight:750}
+      .step{fill:#12233a;stroke:#355071;stroke-width:1.5}.stepSystem{fill:#172c3f;stroke:#3f91aa}.stepUser{fill:#192b3b;stroke:#3f8f79}.stepAssistant{fill:#25243b;stroke:#756eae}
+      .name{fill:#f5f8fc;font-size:20px;font-weight:700}.desc{fill:#b8c6d8;font-size:16px}.role{font-size:15px;font-weight:700}
+      .muted{fill:#93a4ba;font-size:16px}.arrow{stroke:#7f9ab8;stroke-width:2.5;marker-end:url(#arrow)}
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#7f9ab8"/></marker>
+  </defs>
+  <rect width="1600" height="1180" fill="url(#bg)"/>
+  <circle cx="1450" cy="-30" r="280" fill="#2c6a8e" opacity=".14"/><circle cx="80" cy="1130" r="260" fill="#138d78" opacity=".10"/>
+  <text x="70" y="76" class="title">BubblePilot AI 请求输入区</text>
+  <text x="70" y="112" class="sub">业务概念 → 请求拼装顺序 · 可选区域为空时不发送 · 链接预览与历史图片内联在所属消息中</text>
+
+  <g transform="translate(70 150)" filter="url(#shadow)">
+    <rect width="1460" height="930" rx="26" class="lane"/>
+    <text x="38" y="48" class="laneTitle">最终 Payload 的消息序列</text>
+
+    <!-- system lane -->
+    <rect x="38" y="72" width="1384" height="155" rx="18" fill="#0b1727" stroke="#2f5269"/>
+    <text x="62" y="105" class="laneTitle">system</text>
+    <rect x="170" y="86" width="565" height="118" rx="14" class="stepSystem"/>
+    <text x="194" y="119" class="name">1 · 固定协议区</text><text x="194" y="147" class="desc">输入结构、顺序、可信边界与安全规则</text><text x="194" y="178" class="role" fill="#64c4df">role = system · 稳定</text>
+    <rect x="765" y="86" width="635" height="118" rx="14" class="stepSystem"/>
+    <text x="789" y="119" class="name">2 · AI 系统区</text><text x="789" y="147" class="desc">工作流配置的角色、行为和业务约束</text><text x="789" y="178" class="role" fill="#64c4df">role = system · 配置不变时稳定</text>
+
+    <!-- user lane -->
+    <rect x="38" y="253" width="1384" height="470" rx="18" fill="#0b1727" stroke="#2f665d"/>
+    <text x="62" y="286" class="laneTitle">user</text>
+    <g transform="translate(170 268)">
+      <rect width="390" height="105" rx="14" class="stepUser"/><text x="22" y="34" class="name">3 · 静态任务区</text><text x="22" y="62" class="desc">固定任务说明（无 Context 变量）</text><text x="22" y="87" class="role" fill="#62d1a7">role = user · 稳定</text>
+      <rect x="410" width="390" height="105" rx="14" class="stepUser"/><text x="432" y="34" class="name">4 · 历史摘要区</text><text x="432" y="62" class="desc">较早聊天记录的压缩背景（可选）</text><text x="432" y="87" class="role" fill="#62d1a7">role = user · 会话动态</text>
+      <rect x="820" width="410" height="105" rx="14" class="stepUser"/><text x="842" y="34" class="name">5 · 聊天历史区</text><text x="842" y="62" class="desc">按时间的消息、链接预览、历史图片</text><text x="842" y="87" class="role" fill="#62d1a7">role = user / assistant · 会话动态</text>
+      <rect y="125" width="390" height="105" rx="14" class="stepUser"/><text x="22" y="159" class="name">6 · 当前消息区</text><text x="22" y="187" class="desc">未被历史或模板吸收时单独追加</text><text x="22" y="212" class="role" fill="#62d1a7">role = user / assistant · 本轮动态</text>
+      <rect x="410" y="125" width="390" height="105" rx="14" class="stepUser"/><text x="432" y="159" class="name">7 · 成员映射区</text><text x="432" y="187" class="desc">实际出现 sender_id 的本名/昵称</text><text x="432" y="212" class="role" fill="#62d1a7">role = user · 会话动态</text>
+      <rect x="820" y="125" width="410" height="105" rx="14" class="stepUser"/><text x="842" y="159" class="name">8 · 动态任务区</text><text x="842" y="187" class="desc">Context 模板结果或上游节点输入</text><text x="842" y="212" class="role" fill="#62d1a7">role = user · 本轮动态</text>
+      <rect y="250" width="590" height="105" rx="14" class="stepUser"/><text x="22" y="284" class="name">9 · 当前资源区</text><text x="22" y="312" class="desc">current_attachments 文本引用 + input_image 图片</text><text x="22" y="337" class="role" fill="#62d1a7">role = user · 本轮动态</text>
+      <rect x="610" y="250" width="620" height="105" rx="14" class="stepUser"/><text x="632" y="284" class="name">10 · 资源诊断区</text><text x="632" y="312" class="desc">资源失败、不可用或降级状态说明（可选）</text><text x="632" y="337" class="role" fill="#62d1a7">role = user · 本轮动态</text>
+    </g>
+    <text x="62" y="755" class="muted">注：历史消息中的链接预览和历史图片属于第 5 区；当前轮图片属于第 9 区。</text>
+
+    <!-- assistant lane -->
+    <rect x="38" y="782" width="1384" height="112" rx="18" fill="#0b1727" stroke="#5f568d"/>
+    <text x="62" y="816" class="laneTitle">assistant</text>
+    <rect x="170" y="798" width="1230" height="78" rx="14" class="stepAssistant"/>
+    <text x="194" y="831" class="name">聊天历史区中的 Bot 历史消息（必要时也可表示当前 Bot 消息）</text><text x="194" y="860" class="role" fill="#b9a9ff">role = assistant · 仅代表 Bot 已产生的消息</text>
+
+    <line x1="730" y1="227" x2="730" y2="249" class="arrow"/><line x1="730" y1="723" x2="730" y2="780" class="arrow"/>
+  </g>
+  <text x="70" y="1140" class="muted">BubblePilot · 输入区是业务抽象；最终由 Chat Completions 或 Responses 适配器转换为 Provider 所需格式。</text>
+</svg>

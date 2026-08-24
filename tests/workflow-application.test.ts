@@ -572,7 +572,7 @@ describe("workflow application", () => {
     expect(firstPage.data).toHaveLength(2);
     expect(firstPage.data[0]).toMatchObject({
       providerChatId: "iMessage;-;fictional-chat",
-      chatDisplayName: null,
+      chatDisplayName: "fictional-chat",
       cachedPromptTokens: null,
       cacheEligiblePromptTokens: 0,
       cacheHitRate: null,

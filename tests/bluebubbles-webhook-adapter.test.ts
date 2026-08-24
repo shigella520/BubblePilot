@@ -27,6 +27,7 @@ describe("BlueBubblesWebhookAdapter", () => {
       chat: {
         providerChatId: "iMessage;-;fictional-chat",
         type: "direct",
+        displayName: "fictional-chat",
       },
       message: {
         senderId: "fictional-user@example.test",
@@ -65,6 +66,61 @@ describe("BlueBubblesWebhookAdapter", () => {
         },
       ],
     });
+  });
+
+  it("falls back a direct chat name to the peer handle when displayName is empty", () => {
+    const result = adapter.normalize(
+      newMessageWebhook({
+        chatDisplayName: null,
+        chatIdentifier: "+8612345678",
+        senderAddress: "+8612345678",
+      }),
+      correlationId,
+    );
+
+    expect(result.kind).toBe("message");
+    if (result.kind !== "message") {
+      return;
+    }
+    expect(result.envelope.chat).toMatchObject({
+      type: "direct",
+      displayName: "+8612345678",
+    });
+  });
+
+  it("derives a direct chat name from the chat guid when chatIdentifier is empty", () => {
+    const result = adapter.normalize(
+      newMessageWebhook({
+        chatDisplayName: null,
+        chatGuid: "iMessage;-;person@example.test",
+        chatIdentifier: null,
+      }),
+      correlationId,
+    );
+
+    expect(result.kind).toBe("message");
+    if (result.kind !== "message") {
+      return;
+    }
+    expect(result.envelope.chat.displayName).toBe("person@example.test");
+  });
+
+  it("keeps group chats unnamed when displayName is empty", () => {
+    const payload = newMessageWebhook({ chatDisplayName: null });
+    payload.data.chats[0] = {
+      guid: "iMessage;+;fictional-group",
+      style: 43,
+      displayName: null,
+      chatIdentifier: "fictional-group-identifier",
+    };
+
+    const result = adapter.normalize(payload, correlationId);
+
+    expect(result.kind).toBe("message");
+    if (result.kind !== "message") {
+      return;
+    }
+    expect(result.envelope.chat.displayName).toBeNull();
   });
 
   it("turns unsupported event types into observable ignored events", () => {

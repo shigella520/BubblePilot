@@ -297,6 +297,56 @@ describe("AiRoutingService", () => {
     ).toBe(false);
   });
 
+  it("does not strip images when a background image summary forbids degradation", async () => {
+    const repository = new InMemoryAiRepository();
+    const vision = await provider(repository, "Primary");
+    Object.assign(repository.providers.get(vision.id)!, {
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: true,
+      },
+      capabilityProbe: {
+        functionCalling: "unknown",
+        hostedWebSearch: "unknown",
+        imageInput: "verified",
+        checkedAt: new Date().toISOString(),
+      },
+    });
+    const configuredRoute = await route(repository, [vision.id], { rounds: 1 });
+    const client = new FakeAiClient(timeoutFailure);
+    const service = new AiRoutingService(repository, client, secretResolver());
+
+    await expect(
+      service.execute({
+        ...routeRequest(configuredRoute.id),
+        allowImageDegrade: false,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Summarize." },
+              {
+                type: "image",
+                dataUrl: "data:image/png;base64,ZmFrZQ==",
+                detail: "high",
+                label: "Fictional image",
+              },
+            ],
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+    expect(client.requests).toHaveLength(1);
+    expect(
+      client.requests[0]?.messages.some(
+        (message) =>
+          typeof message.content !== "string" &&
+          message.content.some((part) => part.type === "image"),
+      ),
+    ).toBe(true);
+  });
+
   it("filters search routes to providers with verified hosted search", async () => {
     const repository = new InMemoryAiRepository();
     const primary = await provider(repository, "Primary");

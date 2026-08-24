@@ -192,6 +192,8 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       ],
     );
     await repository.recordAttempt({
+      purpose: "workflow-reply",
+      backgroundOperationId: null,
       executionId: diagnosticExecutionId,
       nodeId: "ai-node",
       routeId: route.value.id,
@@ -288,6 +290,8 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       },
     ]);
     await repository.recordAttempt({
+      purpose: "workflow-reply",
+      backgroundOperationId: null,
       executionId: diagnosticExecutionId,
       nodeId: "ai-node",
       routeId: route.value.id,

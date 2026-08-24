@@ -339,6 +339,32 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/chats/{chatId}:
+    delete:
+      operationId: deleteChat
+      description: 软删除一个已停止监听的聊天；历史消息、执行记录和审计中的引用仍会保留并继续显示聊天名称。已启用监听的聊天必须先停用。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: chatId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/ExpectedVersion"
+      responses:
+        "200":
+          description: 聊天已软删除。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/v1/chat-monitoring:
     get:
       operationId: listChatMonitoring
@@ -437,6 +463,59 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
         "403":
+          $ref: "#/components/responses/Error"
+  /api/v1/messages/{messageId}/media:
+    get:
+      operationId: getMessageImageMedia
+      description: 返回指定消息的图片附件和链接主图预览元数据，以及已保存的图片摘要状态；需要敏感操作授权，不返回原始图片地址。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: messageId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 图片媒体和摘要诊断；摘要正文只通过该敏感消息查看接口返回。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/messages/{messageId}/image:
+    get:
+      operationId: getMessageImagePreview
+      description: 通过服务端安全读取指定消息图片并返回原生图片响应；需要敏感操作授权，不接受原始附件 ID 或外部 URL。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: messageId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: attachmentRef
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+      responses:
+        "200":
+          description: 图片二进制内容，Content-Type 为 image/jpeg、image/png、image/gif 或 image/webp。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
           $ref: "#/components/responses/Error"
   /api/v1/exports:
     get:
@@ -1462,7 +1541,29 @@ paths:
             format: uuid
       responses:
         "200":
-          description: 执行、节点尝试、含稳定错误类别和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；不返回完整 Prompt、聊天正文、AI 输出、Secret 或原始响应体。
+          description: 执行、节点尝试、含用途和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；接口不返回完整 Prompt、聊天正文、AI 输出、Secret、原图或原始响应体。
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/executions/{executionId}/ai-attempts/{attemptId}/raw-request:
+    get:
+      operationId: getExecutionAiAttemptRawRequest
+      description: 读取当前应用进程内保留的 AI Provider Attempt 原始 JSON 请求报文。仅保留最近活跃的 20 个执行，不落库；应用重启、执行被淘汰或请求由其他实例处理后不可用。响应可能包含聊天正文和图片数据，需要敏感操作二次验证，审计不记录报文正文。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+        - in: path
+          name: attemptId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 返回与指定 Provider Attempt 请求哈希精确匹配的原始 JSON 请求体。
+        "403":
+          $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/retry:

@@ -284,6 +284,8 @@ export type AiContentPart = AiTextContentPart | AiImageContentPart;
 export interface AiChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | readonly AiContentPart[];
+  /** Internal-only stable identity used for cache diagnostics; never serialized. */
+  traceMessageId?: string;
   toolCallId?: string;
   toolCalls?: readonly AiToolCall[];
 }
@@ -304,6 +306,8 @@ export interface AiChatRequest {
   messages: readonly AiChatMessage[];
   maxOutputTokens: number;
   temperature: number | null;
+  /** Internal execution identity for process-local request diagnostics. */
+  executionId?: string;
   clientRequestId?: string;
   sessionId?: string;
   promptTraceKey?: string;
@@ -430,7 +434,9 @@ export type AiCallResult =
   | AiCallFailure;
 
 export interface AiAttemptRecordInput {
-  executionId: string;
+  executionId: string | null;
+  purpose: "workflow-reply" | "context-summary" | "image-summary";
+  backgroundOperationId: string | null;
   nodeId: string;
   routeId: string;
   routeVersion: number;
@@ -534,7 +540,7 @@ export interface AiRouteFailure {
 export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 
 export interface AiRouteRequest {
-  executionId: string;
+  executionId: string | null;
   nodeId: string;
   routeId: string;
   messages: readonly AiChatMessage[];
@@ -551,6 +557,9 @@ export interface AiRouteRequest {
   agentTurn?: number;
   promptTraceKey?: string;
   sessionAffinityKey?: string;
+  purpose?: "workflow-reply" | "context-summary" | "image-summary";
+  backgroundOperationId?: string;
+  allowImageDegrade?: boolean;
 }
 
 export interface AiToolExecutionRecordInput {

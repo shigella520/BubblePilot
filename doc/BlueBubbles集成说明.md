@@ -67,6 +67,7 @@ https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_W
 | `data.chats[0].guid` | `chat.providerChatId` | 监听和回复使用的 Chat GUID |
 | `data.chats[0].style` | `chat.type` | `43` 为群聊，`45` 为一对一，其他为 `unknown` |
 | `data.chats[0].displayName` | `chat.displayName` | 可以为空 |
+| `data.chats[0].chatIdentifier` | `chat.displayName`（一对一兜底） | 一对一私聊没有群名称时，用它作为聊天名称 |
 | `data.handle.address` | `message.senderId` | 自己发送时使用内部值 `self` |
 | `data.dateCreated` | `message.sentAt` | 毫秒时间戳转换为 UTC ISO 8601 |
 | `data.text` | `message.text` | 只在监听范围内保存 |

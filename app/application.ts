@@ -16,10 +16,21 @@ import type { WebSearchSettingsService } from "../modules/ai/web-search-settings
 import { webSearchSettingsUpdateSchema } from "../modules/ai/web-search-settings-types.js";
 import type { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
 import { imageInputSettingsUpdateSchema } from "../modules/ai/image-input-settings-types.js";
+import type { NativeImageInputService } from "../modules/ai/native-image-input.js";
+import type {
+  ImageSummaryScheduler,
+  ImageSummaryWorker,
+} from "../modules/ai/image-summary-service.js";
+import type { ImageSummaryRepository } from "../modules/ai/image-summary-repository.js";
+import {
+  messageImageMediaSources,
+  messageImageMediaViews,
+} from "../modules/ai/message-image-media.js";
 import type {
   AiMutationResult,
   AiRepository,
 } from "../modules/ai/ai-repository.js";
+import type { AiRawRequestStore } from "../modules/ai/ai-raw-request-store.js";
 import {
   aiProviderConfigurationSchema,
   aiProviderEnabledSchema,
@@ -144,6 +155,13 @@ const workflowVersionParametersSchema = workflowParametersSchema.extend({
 
 const triggerParametersSchema = z.object({ triggerId: z.string().uuid() });
 const executionParametersSchema = z.object({ executionId: z.string().uuid() });
+const messageParametersSchema = z.object({ messageId: z.string().uuid() });
+const messageImageQuerySchema = z.object({
+  attachmentRef: z.string().min(1).max(255),
+});
+const executionAttemptParametersSchema = executionParametersSchema.extend({
+  attemptId: z.string().uuid(),
+});
 const aiProviderParametersSchema = z.object({ providerId: z.string().uuid() });
 const aiRouteParametersSchema = z.object({ routeId: z.string().uuid() });
 const dataExportParametersSchema = z.object({ exportId: z.string().uuid() });
@@ -309,6 +327,7 @@ export interface ApplicationOptions {
     searchTool?: WebSearchTool;
     searchSettings?: WebSearchSettingsService;
     imageInputSettings?: ImageInputSettingsService;
+    rawRequestStore?: AiRawRequestStore;
   };
   workflow?: {
     repository: WorkflowRepository;
@@ -325,6 +344,12 @@ export interface ApplicationOptions {
     linkPreviewEnricher?: LinkPreviewEnricher;
   };
   messageRetention?: MessageRetentionWorker;
+  imageSummary?: {
+    scheduler: ImageSummaryScheduler;
+    worker: ImageSummaryWorker;
+    repository: ImageSummaryRepository;
+    imageInput: NativeImageInputService;
+  };
 }
 
 function aiMutationValue<T>(
@@ -587,6 +612,7 @@ export function buildApplication(
     repository,
     config.monitoredChatIds,
     options.blueBubbles?.linkPreviewEnricher,
+    options.imageSummary?.scheduler,
   );
   const adminRateLimiter = new FixedWindowRateLimiter(
     config.adminRateLimitMax,
@@ -598,6 +624,7 @@ export function buildApplication(
   );
   application.addHook("onReady", () => {
     options.messageRetention?.start();
+    options.imageSummary?.worker.start();
   });
   const fingerprint = (request: FastifyRequest): string =>
     sha256(
@@ -1178,6 +1205,41 @@ export function buildApplication(
     },
   );
 
+  application.delete(
+    "/api/v1/chats/:chatId",
+    { preHandler: requireSensitive("chat.delete", "chat") },
+    async (request) => {
+      const parameters = chatParametersSchema.parse(request.params);
+      const query = expectedVersionQuerySchema.parse(request.query);
+      const result = await repository.deleteChat({
+        chatId: parameters.chatId,
+        expectedVersion: query.expectedVersion,
+      });
+      if (result.status === "not-found") {
+        throw new ApplicationError(
+          "CHAT_NOT_FOUND",
+          "The chat does not exist or is unavailable.",
+          404,
+        );
+      }
+      if (result.status === "still-enabled") {
+        throw new ApplicationError(
+          "CHAT_STILL_ENABLED",
+          "Disable monitoring before deleting the chat.",
+          409,
+        );
+      }
+      if (result.status === "conflict") {
+        throw new ApplicationError(
+          "CHAT_DELETE_CONFLICT",
+          "The chat changed; refresh before retrying.",
+          409,
+        );
+      }
+      return { data: { deleted: true } };
+    },
+  );
+
   application.get(
     "/api/v1/chats/:chatId/participants",
     { preHandler: requireSensitive("chat.participants.view", "chat") },
@@ -1299,6 +1361,90 @@ export function buildApplication(
         })),
         page: messagePage.page,
       };
+    },
+  );
+
+  application.get(
+    "/api/v1/messages/:messageId/media",
+    { preHandler: requireSensitive("message.content.view", "message") },
+    async (request) => {
+      const parameters = messageParametersSchema.parse(request.params);
+      const archived = await repository.findMessage(parameters.messageId);
+      if (archived === null) {
+        throw new ApplicationError(
+          "MESSAGE_NOT_FOUND",
+          "The message does not exist or is unavailable.",
+          404,
+        );
+      }
+      const sources = messageImageMediaSources(archived);
+      const summariesByMessage =
+        await options.imageSummary?.repository.listForMessageIds([
+          parameters.messageId,
+        ]);
+      const summaries = summariesByMessage?.get(parameters.messageId) ?? [];
+      return {
+        data: {
+          messageId: parameters.messageId,
+          contentRedactedAt: archived.contentRedactedAt,
+          items: messageImageMediaViews(sources, summaries).map((item) => ({
+            ...item,
+            previewUrl: `/api/v1/messages/${encodeURIComponent(parameters.messageId)}/image?${new URLSearchParams({ attachmentRef: item.attachmentRef }).toString()}`,
+          })),
+        },
+      };
+    },
+  );
+
+  application.get(
+    "/api/v1/messages/:messageId/image",
+    { preHandler: requireSensitive("message.content.view", "message") },
+    async (request, reply) => {
+      const parameters = messageParametersSchema.parse(request.params);
+      const query = messageImageQuerySchema.parse(request.query);
+      const archived = await repository.findMessage(parameters.messageId);
+      if (archived === null || archived.contentRedactedAt !== null) {
+        throw new ApplicationError(
+          "MESSAGE_IMAGE_NOT_FOUND",
+          "The message image does not exist or is unavailable.",
+          404,
+        );
+      }
+      const source = messageImageMediaSources(archived).find(
+        (item) => item.source.attachmentRef === query.attachmentRef,
+      );
+      if (source === undefined || options.imageSummary === undefined) {
+        throw new ApplicationError(
+          "MESSAGE_IMAGE_NOT_FOUND",
+          "The message image does not exist or is unavailable.",
+          404,
+        );
+      }
+      const loaded = await options.imageSummary.imageInput.loadForSummary(
+        source.source,
+      );
+      if (loaded.status === "failed") {
+        throw new ApplicationError(
+          "MESSAGE_IMAGE_PREVIEW_UNAVAILABLE",
+          "The message image preview is currently unavailable.",
+          404,
+        );
+      }
+      const data =
+        /^data:(image\/(?:gif|jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/u.exec(
+          loaded.part.dataUrl,
+        );
+      if (data?.[1] === undefined || data[2] === undefined) {
+        throw new ApplicationError(
+          "MESSAGE_IMAGE_PREVIEW_INVALID",
+          "The message image preview could not be decoded.",
+          500,
+        );
+      }
+      return reply
+        .type(data[1])
+        .header("Cache-Control", "private, max-age=300")
+        .send(Buffer.from(data[2], "base64"));
     },
   );
 
@@ -2127,8 +2273,15 @@ export function buildApplication(
         ? null
         : {
             ...execution,
-            aiProviderAttempts:
-              (await options.ai?.repository.listAttempts(executionId)) ?? [],
+            aiProviderAttempts: (
+              (await options.ai?.repository.listAttempts(executionId)) ?? []
+            ).map((attempt) => ({
+              ...attempt,
+              rawRequest: options.ai?.rawRequestStore?.reference(
+                executionId,
+                attempt.diagnostics?.requestHash ?? "",
+              ) ?? { status: "unavailable" as const },
+            })),
             aiToolExecutions:
               (await options.ai?.repository.listToolExecutions(executionId)) ??
               [],
@@ -2646,6 +2799,60 @@ export function buildApplication(
       },
     );
 
+    application.get(
+      "/api/v1/executions/:executionId/ai-attempts/:attemptId/raw-request",
+      {
+        preHandler: requireSensitive(
+          "execution.ai-request.view",
+          "workflow-execution",
+        ),
+      },
+      async (request) => {
+        const parameters = executionAttemptParametersSchema.parse(
+          request.params,
+        );
+        const execution = await workflowRepository.getExecution(
+          parameters.executionId,
+        );
+        if (execution === null) {
+          throw new ApplicationError(
+            "EXECUTION_NOT_FOUND",
+            "The workflow execution does not exist.",
+            404,
+          );
+        }
+        const attempt = (
+          (await options.ai?.repository.listAttempts(parameters.executionId)) ??
+          []
+        ).find((candidate) => candidate.id === parameters.attemptId);
+        if (attempt === undefined) {
+          throw new ApplicationError(
+            "AI_PROVIDER_ATTEMPT_NOT_FOUND",
+            "The AI provider attempt does not exist in this execution.",
+            404,
+          );
+        }
+        const requestBody = options.ai?.rawRequestStore?.get(
+          parameters.executionId,
+          attempt.diagnostics?.requestHash ?? "",
+        );
+        if (requestBody === undefined || requestBody === null) {
+          throw new ApplicationError(
+            "AI_RAW_REQUEST_UNAVAILABLE",
+            "The raw AI request is no longer available in this process.",
+            404,
+          );
+        }
+        return {
+          data: {
+            attemptId: attempt.id,
+            requestHash: attempt.diagnostics?.requestHash ?? null,
+            body: requestBody,
+          },
+        };
+      },
+    );
+
     application.post(
       "/api/v1/executions/:executionId/retry",
       {
@@ -2726,6 +2933,7 @@ export function buildApplication(
   );
 
   application.addHook("onClose", async () => {
+    await options.imageSummary?.worker.stop();
     await options.messageRetention?.stop();
     await Promise.all([
       repository.close(),
@@ -2737,6 +2945,7 @@ export function buildApplication(
       options.ai?.imageInputSettings?.repository.close() ?? Promise.resolve(),
       options.dataExport?.repository.close() ?? Promise.resolve(),
       options.blueBubbles?.settings.repository.close() ?? Promise.resolve(),
+      options.imageSummary?.repository.close() ?? Promise.resolve(),
     ]);
   });
 
