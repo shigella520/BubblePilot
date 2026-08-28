@@ -2,11 +2,9 @@
 import {
   FileClock,
   Image,
-  CircleAlert,
   ClipboardCopy,
   FileJson,
   LoaderCircle,
-  Minimize2,
   RefreshCw,
   RotateCcw,
   Route,
@@ -51,8 +49,23 @@ interface Execution {
   cachedPromptTokens: number | null;
   cacheEligiblePromptTokens: number;
   cacheHitRate: number | null;
-  summaryCompressionStatus:
-    "none" | "succeeded" | "failed" | "busy" | "superseded";
+}
+interface ConversationCompression {
+  id: string;
+  chatId: string;
+  providerChatId: string;
+  chatDisplayName: string | null;
+  status: string;
+  fromMessageIndex: string;
+  throughMessageIndex: string;
+  baseVersion: number;
+  outputVersion: number | null;
+  durationMs: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  errorCode: string | null;
+  startedAt: string;
+  completedAt: string | null;
 }
 interface ExecutionDetail extends Execution {
   correlationId: string;
@@ -261,10 +274,22 @@ const auditPager = useCursorPager<AuditEvent>((cursor) => {
   if (cursor !== null) query.set("cursor", cursor);
   return apiPageRequest<AuditEvent[]>(`/api/v1/audit-events?${query}`);
 });
+const compressionPager = useCursorPager<ConversationCompression>((cursor) => {
+  const query = new URLSearchParams({ limit: "20" });
+  if (cursor !== null) query.set("cursor", cursor);
+  return apiPageRequest<ConversationCompression[]>(
+    `/api/v1/conversation-compressions?${query}`,
+  );
+});
 const executions = executionPager.items;
 const audits = auditPager.items;
+const compressions = compressionPager.items;
 const busy = computed(
-  () => executionPager.busy.value || auditPager.busy.value || usageBusy.value,
+  () =>
+    executionPager.busy.value ||
+    auditPager.busy.value ||
+    compressionPager.busy.value ||
+    usageBusy.value,
 );
 const usageColors = ["#6c8cff", "#20b486", "#f59e0b", "#e66a9c", "#8b5cf6"];
 const usageProviders = computed(() =>
@@ -348,16 +373,6 @@ function formatTokenCount(value: number): string {
 
 function formatCacheRate(value: number | null): string {
   return value === null ? "暂无数据" : `${(value * 100).toFixed(1)}%`;
-}
-
-function compressionLabel(
-  status: Execution["summaryCompressionStatus"],
-): string {
-  if (status === "succeeded") return "历史摘要压缩成功";
-  if (status === "failed") return "历史摘要压缩失败";
-  if (status === "busy") return "历史摘要压缩处理中";
-  if (status === "superseded") return "历史摘要压缩结果被并发状态替代";
-  return "";
 }
 
 function usageTimeZone(): string {
@@ -485,6 +500,7 @@ async function load(reset = false): Promise<boolean> {
   if (!session.authenticated) {
     executionPager.clear();
     auditPager.clear();
+    compressionPager.clear();
     return false;
   }
   message.value = "";
@@ -492,6 +508,7 @@ async function load(reset = false): Promise<boolean> {
   try {
     const requests = [
       reset ? executionPager.first() : executionPager.refresh(),
+      reset ? compressionPager.first() : compressionPager.refresh(),
       loadUsage(),
     ];
     if (session.sensitiveActive) {
@@ -743,6 +760,19 @@ function refreshUsageWhenVisible() {
 function resetAuditPage(): Promise<boolean> {
   return auditPager.first();
 }
+
+function compressionStatusLabel(status: string): string {
+  return (
+    (
+      {
+        running: "处理中",
+        succeeded: "成功",
+        failed: "失败",
+        superseded: "已替代",
+      } as Record<string, string>
+    )[status] ?? status
+  );
+}
 </script>
 
 <template>
@@ -759,6 +789,9 @@ function resetAuditPage(): Promise<boolean> {
           @click="scrollToSection('executions')"
         >
           <FileClock :size="18" />执行记录
+        </button>
+        <button type="button" @click="scrollToSection('compressions')">
+          <FileClock :size="18" />对话压缩
         </button>
         <button type="button" @click="scrollToSection('audit')">
           <ShieldCheck :size="18" />审计事件
@@ -1010,26 +1043,6 @@ function resetAuditPage(): Promise<boolean> {
                 <td>
                   <span class="cache-rate-line">
                     <strong>{{ formatCacheRate(item.cacheHitRate) }}</strong>
-                    <span
-                      v-if="item.summaryCompressionStatus !== 'none'"
-                      class="compression-indicator"
-                      :class="`compression-${item.summaryCompressionStatus}`"
-                      :title="compressionLabel(item.summaryCompressionStatus)"
-                      :aria-label="
-                        compressionLabel(item.summaryCompressionStatus)
-                      "
-                      role="img"
-                    >
-                      <Minimize2
-                        v-if="item.summaryCompressionStatus === 'succeeded'"
-                        :size="14"
-                      />
-                      <CircleAlert
-                        v-else-if="item.summaryCompressionStatus === 'failed'"
-                        :size="14"
-                      />
-                      <LoaderCircle v-else :size="14" />
-                    </span>
                   </span>
                   <span v-if="item.cachedPromptTokens !== null" class="keyline"
                     >{{ formatTokenCount(item.cachedPromptTokens) }} /
@@ -1061,6 +1074,80 @@ function resetAuditPage(): Promise<boolean> {
           :has-next="executionPager.hasNext.value"
           @previous="changePage(executionPager.previous)"
           @next="changePage(executionPager.next)"
+        />
+      </section>
+      <section id="compressions" class="admin-panel">
+        <div class="panel-head">
+          <div>
+            <p class="card-kicker">CHAT SUMMARY TRACE</p>
+            <h2>对话压缩</h2>
+            <p class="keyline">聊天级后台摘要操作，不属于任何工作流执行。</p>
+          </div>
+          <button
+            class="button secondary"
+            :disabled="busy"
+            @click="compressionPager.refresh()"
+          >
+            <RefreshCw :size="16" />刷新
+          </button>
+        </div>
+        <div class="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>聊天</th>
+                <th>状态</th>
+                <th>原因</th>
+                <th>消息范围</th>
+                <th>版本</th>
+                <th>耗时</th>
+                <th>错误</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="!compressions.length">
+                <td colspan="8" class="empty-cell">暂无对话压缩操作</td>
+              </tr>
+              <tr v-for="item in compressions" :key="item.id">
+                <td>{{ new Date(item.startedAt).toLocaleString() }}</td>
+                <td>
+                  <strong>{{
+                    item.chatDisplayName || item.providerChatId
+                  }}</strong
+                  ><span class="keyline">{{ item.chatId }}</span>
+                </td>
+                <td>
+                  <span class="table-status" :class="item.status">{{
+                    compressionStatusLabel(item.status)
+                  }}</span>
+                </td>
+                <td>消息阈值</td>
+                <td class="mono">
+                  {{ item.fromMessageIndex }}–{{ item.throughMessageIndex }}
+                </td>
+                <td>
+                  v{{ item.baseVersion }} →
+                  {{
+                    item.outputVersion === null ? "—" : `v${item.outputVersion}`
+                  }}
+                </td>
+                <td>
+                  {{ item.durationMs === null ? "—" : `${item.durationMs} ms` }}
+                </td>
+                <td>{{ item.errorCode || "—" }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <CursorPagination
+          :page="compressionPager.pageNumber.value"
+          :item-count="compressions.length"
+          :busy="compressionPager.busy.value"
+          :has-previous="compressionPager.hasPrevious.value"
+          :has-next="compressionPager.hasNext.value"
+          @previous="changePage(compressionPager.previous)"
+          @next="changePage(compressionPager.next)"
         />
       </section>
       <section id="audit" class="admin-panel">

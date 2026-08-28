@@ -1523,7 +1523,7 @@ paths:
             pattern: "^\\s*(created|running|retrying|succeeded|skipped|failed|dead-lettered|closed)(\\s*,\\s*(created|running|retrying|succeeded|skipped|failed|dead-lettered|closed))*\\s*$"
       responses:
         "200":
-          description: 按创建时间倒序分页返回工作流执行列表；每项包含匹配聊天名称/ID、回复缓存统计和历史摘要压缩状态。Retry、Fallback 和 Agent 多轮均计入，历史摘要压缩等辅助 AI 请求不计入回复缓存统计。无可统计的对话回复请求或 Provider 未返回缓存统计时命中率为 null。
+          description: 按创建时间倒序分页返回工作流执行列表；每项包含匹配聊天名称/ID和回复缓存统计。历史摘要压缩是独立的后台操作，通过 conversation-compressions 接口查询，不计入回复缓存统计。无可统计的对话回复请求或 Provider 未返回缓存统计时命中率为 null。
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}:
@@ -1597,6 +1597,38 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
         "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/conversation-compressions:
+    get:
+      operationId: listConversationCompressions
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: 按开始时间倒序分页返回聊天级摘要压缩操作，不返回聊天正文或完整 Prompt。
+        "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/conversation-compressions/{compressionId}:
+    get:
+      operationId: getConversationCompression
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: compressionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 返回单次聊天级摘要压缩操作及脱敏诊断。
+        "404":
           $ref: "#/components/responses/Error"
   /api/v1/operations/status:
     get:

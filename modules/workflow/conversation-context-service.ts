@@ -163,6 +163,24 @@ export interface ConversationContextLoadInput {
   timeZone: string;
 }
 
+export interface ConversationCompressionView {
+  id: string;
+  chatId: string;
+  providerChatId: string;
+  chatDisplayName: string | null;
+  status: "running" | "succeeded" | "failed" | "superseded";
+  fromMessageIndex: string;
+  throughMessageIndex: string;
+  baseVersion: number;
+  outputVersion: number | null;
+  durationMs: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  errorCode: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
 export function conversationContextProfileHash(
   includeFromMe: boolean,
   timeZone = "UTC",
@@ -314,6 +332,69 @@ export class ConversationContextService {
 
   invalidateAll(): void {
     this.cache.clear();
+  }
+
+  async listCompressions(input: {
+    limit: number;
+    cursor?: { timestamp: Date; id: string };
+    id?: string;
+  }): Promise<ConversationCompressionView[]> {
+    const result = await this.pool.query<{
+      id: string;
+      chat_id: string;
+      provider_chat_id: string;
+      chat_display_name: string | null;
+      status: ConversationCompressionView["status"];
+      from_index: string;
+      through_index: string;
+      base_version: number;
+      output_version: number | null;
+      duration_ms: number | null;
+      prompt_tokens: number | null;
+      completion_tokens: number | null;
+      error_code: string | null;
+      started_at: Date;
+      completed_at: Date | null;
+    }>(
+      `SELECT operation.id, state.chat_id, chat.provider_chat_id,
+              chat.display_name AS chat_display_name, operation.status,
+              operation.from_index::text, operation.through_index::text,
+              operation.base_version,
+              CASE WHEN operation.status = 'succeeded' THEN operation.base_version + 1 ELSE NULL END AS output_version,
+              operation.duration_ms, operation.prompt_tokens,
+              operation.completion_tokens, operation.error_code,
+              operation.started_at, operation.completed_at
+       FROM conversation_context_compressions operation
+       INNER JOIN conversation_context_states state ON state.id = operation.context_state_id
+       INNER JOIN chats chat ON chat.id = state.chat_id
+       WHERE ($1::timestamptz IS NULL OR (operation.started_at, operation.id) < ($1, $2::uuid))
+         AND ($4::uuid IS NULL OR operation.id = $4)
+       ORDER BY operation.started_at DESC, operation.id DESC
+       LIMIT $3`,
+      [
+        input.cursor?.timestamp ?? null,
+        input.cursor?.id ?? null,
+        input.limit,
+        input.id ?? null,
+      ],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      chatId: row.chat_id,
+      providerChatId: row.provider_chat_id,
+      chatDisplayName: row.chat_display_name,
+      status: row.status,
+      fromMessageIndex: row.from_index,
+      throughMessageIndex: row.through_index,
+      baseVersion: row.base_version,
+      outputVersion: row.output_version,
+      durationMs: row.duration_ms,
+      promptTokens: row.prompt_tokens,
+      completionTokens: row.completion_tokens,
+      errorCode: row.error_code,
+      startedAt: row.started_at.toISOString(),
+      completedAt: row.completed_at?.toISOString() ?? null,
+    }));
   }
 
   async load(

@@ -333,7 +333,19 @@ export interface ApplicationOptions {
     repository: WorkflowRepository;
     engine: MessageAutomation;
     dispatcher?: WorkflowExecutionDispatcher;
-    contextState?: { close(): Promise<void> };
+    contextState?: {
+      close(): Promise<void>;
+      listCompressions?(input: {
+        limit: number;
+        cursor?: { timestamp: Date; id: string };
+        id?: string;
+      }): Promise<
+        readonly {
+          id: string;
+          startedAt: string;
+        }[]
+      >;
+    };
   };
   dataExport?: {
     repository: DataExportRepository;
@@ -2664,6 +2676,48 @@ export function buildApplication(
           timestamp: execution.createdAt,
           id: execution.id,
         }));
+      },
+    );
+
+    application.get(
+      "/api/v1/conversation-compressions",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const query = pageQuerySchema.parse(request.query);
+        const cursor = decodeCursor(query.cursor);
+        const items =
+          (await options.workflow?.contextState?.listCompressions?.({
+            limit: query.limit + 1,
+            ...(cursor === null ? {} : { cursor }),
+          })) ?? [];
+        return cursorPage(items, query.limit, (item) => ({
+          timestamp: item.startedAt,
+          id: item.id,
+        }));
+      },
+    );
+
+    application.get(
+      "/api/v1/conversation-compressions/:compressionId",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const parameters = z
+          .object({ compressionId: z.string().uuid() })
+          .parse(request.params);
+        const items =
+          (await options.workflow?.contextState?.listCompressions?.({
+            limit: 1,
+            id: parameters.compressionId,
+          })) ?? [];
+        const item = items[0];
+        if (item === undefined) {
+          throw new ApplicationError(
+            "CONVERSATION_COMPRESSION_NOT_FOUND",
+            "The conversation compression operation does not exist.",
+            404,
+          );
+        }
+        return { data: item };
       },
     );
 
