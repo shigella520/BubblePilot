@@ -15,6 +15,8 @@ import type { WebSearchTool } from "../modules/ai/web-search-tool.js";
 import type { WebSearchSettingsService } from "../modules/ai/web-search-settings-service.js";
 import { webSearchSettingsUpdateSchema } from "../modules/ai/web-search-settings-types.js";
 import type { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
+import type { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
+import { summarySettingsUpdateSchema } from "../modules/workflow/summary-settings-types.js";
 import { imageInputSettingsUpdateSchema } from "../modules/ai/image-input-settings-types.js";
 import type { NativeImageInputService } from "../modules/ai/native-image-input.js";
 import type {
@@ -328,6 +330,7 @@ export interface ApplicationOptions {
     searchSettings?: WebSearchSettingsService;
     imageInputSettings?: ImageInputSettingsService;
     rawRequestStore?: AiRawRequestStore;
+    summarySettings?: SummarySettingsService;
   };
   workflow?: {
     repository: WorkflowRepository;
@@ -1639,6 +1642,48 @@ export function buildApplication(
             503,
           );
         return { data: await options.ai.imageInputSettings.view() };
+      },
+    );
+
+    application.get(
+      "/api/v1/ai/summary/settings",
+      { preHandler: requireAdmin },
+      async () => {
+        if (options.ai?.summarySettings === undefined)
+          throw new ApplicationError(
+            "AI_SUMMARY_SETTINGS_UNAVAILABLE",
+            "Summary settings are unavailable.",
+            503,
+          );
+        return { data: await options.ai.summarySettings.view() };
+      },
+    );
+
+    application.put(
+      "/api/v1/ai/summary/settings",
+      {
+        preHandler: requireAuditedAdmin(
+          "ai.summary.settings.update",
+          "conversation-summary-settings",
+        ),
+      },
+      async (request) => {
+        if (options.ai?.summarySettings === undefined)
+          throw new ApplicationError(
+            "AI_SUMMARY_SETTINGS_UNAVAILABLE",
+            "Summary settings are unavailable.",
+            503,
+          );
+        const result = await options.ai.summarySettings.update(
+          summarySettingsUpdateSchema.parse(request.body),
+        );
+        if (result.status === "conflict")
+          throw new ApplicationError(
+            "AI_SUMMARY_SETTINGS_CONFLICT",
+            "Summary settings changed; refresh before retrying.",
+            409,
+          );
+        return { data: result.value };
       },
     );
 

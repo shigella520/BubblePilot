@@ -95,6 +95,18 @@ interface ImageInputSettings {
   version: number;
   updatedAt: string | null;
 }
+interface SummarySettings {
+  enabled: boolean;
+  messageLimit: number;
+  characterLimit: number;
+  compressionBatchSize: number;
+  providerRouteId: string;
+  timeZone: string;
+  source: "defaults" | "database";
+  version: number;
+  policyVersion: number;
+  updatedAt: string | null;
+}
 type ImageInputSettingsForm = Omit<
   ImageInputSettings,
   "source" | "version" | "updatedAt" | "trustedLinkPreviewHosts"
@@ -144,6 +156,16 @@ const searchSettings = ref<WebSearchSettings | null>(null);
 const searchSettingsBusy = ref(false);
 const imageInputSettings = ref<ImageInputSettings | null>(null);
 const imageInputSettingsBusy = ref(false);
+const summarySettings = ref<SummarySettings | null>(null);
+const summarySettingsBusy = ref(false);
+const summarySettingsForm = reactive({
+  enabled: false,
+  messageLimit: 10,
+  characterLimit: 6000,
+  compressionBatchSize: 10,
+  providerRouteId: "",
+  timeZone: "UTC",
+});
 const imageInputSettingsForm = reactive<ImageInputSettingsForm>({
   enabled: false,
   includeAttachments: true,
@@ -229,6 +251,10 @@ function applySearchSettings(value: WebSearchSettings) {
     failurePolicy: value.failurePolicy,
   });
 }
+function applySummarySettings(value: SummarySettings) {
+  summarySettings.value = value;
+  Object.assign(summarySettingsForm, value);
+}
 
 function applyImageInputSettings(value: ImageInputSettings) {
   imageInputSettings.value = value;
@@ -283,6 +309,7 @@ async function load() {
       statusData,
       settingsData,
       imageSettingsData,
+      summarySettingsData,
     ] = await Promise.all([
       apiRequest<Provider[]>("/api/v1/ai/providers"),
       apiRequest<AiRoute[]>("/api/v1/ai/routes"),
@@ -291,17 +318,42 @@ async function load() {
       ),
       apiRequest<WebSearchSettings>("/api/v1/ai/search/settings"),
       apiRequest<ImageInputSettings>("/api/v1/ai/image-input/settings"),
+      apiRequest<SummarySettings>("/api/v1/ai/summary/settings"),
     ]);
     providers.value = providerData;
     routes.value = routeData;
     searchStatus.value = statusData;
     applySearchSettings(settingsData);
     applyImageInputSettings(imageSettingsData);
+    applySummarySettings(summarySettingsData);
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
   } finally {
     busy.value = false;
+  }
+}
+async function saveSummarySettings() {
+  if (summarySettingsBusy.value || summarySettings.value === null) return;
+  summarySettingsBusy.value = true;
+  try {
+    const saved = await apiRequest<SummarySettings>(
+      "/api/v1/ai/summary/settings",
+      {
+        method: "PUT",
+        body: jsonBody({
+          ...summarySettingsForm,
+          expectedVersion: summarySettings.value.version,
+        }),
+      },
+    );
+    applySummarySettings(saved);
+    message.value = "对话摘要全局配置已保存并立即生效。";
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    summarySettingsBusy.value = false;
   }
 }
 async function saveImageInputSettings() {
@@ -884,6 +936,85 @@ onMounted(load);
             <button class="button" type="submit" :disabled="searchSettingsBusy">
               <Save :size="16" />{{
                 searchSettingsBusy ? "保存中…" : "保存全局配置"
+              }}
+            </button>
+          </div>
+        </form>
+      </section>
+      <section id="summary-settings" class="admin-panel">
+        <div class="panel-head">
+          <div>
+            <p class="card-kicker">CHAT SUMMARY</p>
+            <h2>对话摘要压缩</h2>
+          </div>
+          <span class="state-badge">全局配置</span>
+        </div>
+        <p class="panel-description">
+          所有聊天统一使用此摘要压缩策略；压缩由消息归档后的后台任务维护。
+        </p>
+        <form
+          v-if="summarySettings"
+          class="settings-form boxed-form"
+          @submit.prevent="saveSummarySettings"
+        >
+          <div class="field-grid">
+            <label
+              ><span>启用摘要压缩</span
+              ><input v-model="summarySettingsForm.enabled" type="checkbox"
+            /></label>
+            <label
+              ><span>保留原始消息数</span
+              ><input
+                v-model.number="summarySettingsForm.messageLimit"
+                type="number"
+                min="1"
+                max="50"
+                required
+            /></label>
+            <label
+              ><span>目标字符数</span
+              ><input
+                v-model.number="summarySettingsForm.characterLimit"
+                type="number"
+                min="100"
+                max="20000"
+                required
+            /></label>
+            <label
+              ><span>单次压缩消息数</span
+              ><input
+                v-model.number="summarySettingsForm.compressionBatchSize"
+                type="number"
+                min="1"
+                max="50"
+                required
+            /></label>
+            <label
+              ><span>摘要 Provider Route</span
+              ><select v-model="summarySettingsForm.providerRouteId">
+                <option value="">未选择</option>
+                <option
+                  v-for="route in routes"
+                  :key="route.id"
+                  :value="route.id"
+                >
+                  {{ route.name }}
+                </option>
+              </select></label
+            >
+            <label
+              ><span>摘要时区</span
+              ><input v-model="summarySettingsForm.timeZone" required
+            /></label>
+          </div>
+          <div class="form-actions">
+            <button
+              class="button"
+              type="submit"
+              :disabled="summarySettingsBusy"
+            >
+              <Save :size="16" />{{
+                summarySettingsBusy ? "保存中…" : "保存摘要配置"
               }}
             </button>
           </div>

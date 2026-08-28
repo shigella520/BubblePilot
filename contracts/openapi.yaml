@@ -1251,6 +1251,46 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/ai/summary/settings:
+    get:
+      operationId: getAiSummarySettings
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200": { description: 返回全局对话摘要配置。 }
+    put:
+      operationId: updateAiSummarySettings
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                [
+                  enabled,
+                  messageLimit,
+                  characterLimit,
+                  compressionBatchSize,
+                  providerRouteId,
+                  timeZone,
+                  expectedVersion,
+                ]
+              properties:
+                enabled: { type: boolean }
+                messageLimit: { type: integer, minimum: 1, maximum: 50 }
+                characterLimit: { type: integer, minimum: 100, maximum: 20000 }
+                compressionBatchSize: { type: integer, minimum: 1, maximum: 50 }
+                providerRouteId: { type: string, format: uuid }
+                timeZone: { type: string }
+                expectedVersion: { type: integer, minimum: 0 }
+      responses:
+        "200": { description: 已保存全局对话摘要配置。 }
+        "409": { $ref: "#/components/responses/Error" }
         "503":
           $ref: "#/components/responses/Error"
   /api/v1/ai/providers/reorder:

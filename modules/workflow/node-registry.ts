@@ -24,6 +24,7 @@ import type { WorkflowNode } from "./workflow-definition.js";
 import { WorkflowExecutionError } from "./workflow-errors.js";
 import type { WorkflowRepository } from "./workflow-repository.js";
 import type { ConversationContextService } from "./conversation-context-service.js";
+import type { SummarySettingsService } from "./summary-settings-service.js";
 import { formatContextTimestamp } from "./context-time.js";
 
 export interface NodeExecutionContext {
@@ -416,6 +417,7 @@ class LoadContextNodeHandler extends BaseNodeHandler {
       ImageSummaryRepository,
       "listForProviderMessageIds"
     >,
+    private readonly summarySettings?: SummarySettingsService,
   ) {
     super();
   }
@@ -431,7 +433,9 @@ class LoadContextNodeHandler extends BaseNodeHandler {
   ): Promise<NodeHandlerResult> {
     this.assertType(node, this.type);
     try {
-      const summaryEnabled = node.config.summaryEnabled ?? false;
+      const globalSummary = await this.summarySettings?.resolve();
+      const summaryEnabled =
+        globalSummary?.enabled ?? node.config.summaryEnabled ?? false;
       const summarized = summaryEnabled
         ? await this.conversationContext?.load({
             executionId: context.executionId,
@@ -440,10 +444,18 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             provider: context.envelope.provider,
             providerChatId: context.envelope.chat.providerChatId,
             beforeProviderMessageId: context.envelope.message.providerMessageId,
-            routeId: node.config.summaryProviderRouteId ?? "",
-            messageLimit: node.config.messageLimit,
-            characterLimit: node.config.characterLimit,
-            compressionBatchSize: node.config.compressionBatchSize ?? 10,
+            routeId:
+              globalSummary?.providerRouteId ??
+              node.config.summaryProviderRouteId ??
+              "",
+            messageLimit:
+              globalSummary?.messageLimit ?? node.config.messageLimit,
+            characterLimit:
+              globalSummary?.characterLimit ?? node.config.characterLimit,
+            compressionBatchSize:
+              globalSummary?.compressionBatchSize ??
+              node.config.compressionBatchSize ??
+              10,
             includeFromMe: node.config.includeFromMe,
             timeZone: context.timeZone,
           })
@@ -1358,6 +1370,7 @@ export function createDefaultNodeRegistry(
     imageInput?: NativeImageInputService;
     conversationContext?: ConversationContextService;
     imageSummaries?: ImageSummaryRepository;
+    summarySettings?: SummarySettingsService;
   },
 ): NodeRegistry {
   const registry = new NodeRegistry();
@@ -1374,6 +1387,7 @@ export function createDefaultNodeRegistry(
         capabilities.archive,
         capabilities.conversationContext,
         capabilities.imageSummaries,
+        capabilities.summarySettings,
       ),
     );
     registry.register(

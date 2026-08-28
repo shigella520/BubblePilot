@@ -37,6 +37,8 @@ import { InProcessWorkflowExecutionDispatcher } from "../modules/workflow/execut
 import { PostgresWorkflowRepository } from "../modules/workflow/postgres-workflow-repository.js";
 import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
 import { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
+import { PostgresSummarySettingsRepository } from "../modules/workflow/postgres-summary-settings-repository.js";
+import { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
 
 const config = loadConfig();
 const repository = new PostgresArchiveRepository(
@@ -158,6 +160,20 @@ const conversationContext = new ConversationContextService(
   aiRouting,
   config.databaseQueryTimeoutMs,
 );
+const summarySettings = new SummarySettingsService(
+  new PostgresSummarySettingsRepository(
+    config.databaseUrl,
+    config.databaseQueryTimeoutMs,
+  ),
+  {
+    enabled: false,
+    messageLimit: 10,
+    characterLimit: 6000,
+    compressionBatchSize: 10,
+    providerRouteId: "",
+    timeZone: "UTC",
+  },
+);
 const messageRetention =
   config.messageRetentionDays > 0
     ? new MessageRetentionWorker(
@@ -197,6 +213,7 @@ const workflowEngine = new WorkflowEngine(
     aiAgent,
     imageInput: nativeImageInput,
     conversationContext,
+    summarySettings,
     imageSummaries: imageSummaryRepository,
   }),
   {
@@ -217,6 +234,7 @@ const application = buildApplication(config, repository, {
     searchSettings: webSearchSettings,
     imageInputSettings,
     rawRequestStore: aiRawRequestStore,
+    summarySettings,
   },
   workflow: {
     repository: workflowRepository,
