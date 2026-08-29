@@ -149,8 +149,8 @@ export interface ConversationContextResult {
 }
 
 export interface ConversationContextLoadInput {
-  executionId: string;
-  workflowId: string;
+  executionId: string | null;
+  workflowId: string | null;
   nodeId: string;
   provider: string;
   providerChatId: string;
@@ -182,13 +182,12 @@ export interface ConversationCompressionView {
 }
 
 export function conversationContextProfileHash(
-  includeFromMe: boolean,
+  _includeFromMe: boolean,
   timeZone = "UTC",
 ): string {
   return sha256(
     JSON.stringify({
       contract: "conversation-summary-v1",
-      includeFromMe,
       timeZone,
     }),
   );
@@ -197,12 +196,18 @@ export function conversationContextProfileHash(
 export function conversationContextCacheKey(input: {
   provider: string;
   providerChatId: string;
-  workflowId: string;
-  nodeId: string;
+  workflowId?: string;
+  nodeId?: string;
   profileHash: string;
 }): string {
+  const { provider, providerChatId, profileHash } = input;
   return `context-summary-v1:${sha256(
-    JSON.stringify({ instanceNamespace: "default", ...input }),
+    JSON.stringify({
+      instanceNamespace: "default",
+      provider,
+      providerChatId,
+      profileHash,
+    }),
   )}`;
 }
 
@@ -334,6 +339,26 @@ export class ConversationContextService {
     this.cache.clear();
   }
 
+  async enqueueForMessage(input: {
+    provider: string;
+    providerChatId: string;
+    providerMessageId: string;
+    routeId: string;
+    messageLimit: number;
+    characterLimit: number;
+    compressionBatchSize: number;
+    timeZone: string;
+  }): Promise<void> {
+    await this.load({
+      executionId: null,
+      workflowId: null,
+      nodeId: "conversation-summary",
+      beforeProviderMessageId: input.providerMessageId,
+      includeFromMe: true,
+      ...input,
+    });
+  }
+
   async listCompressions(input: {
     limit: number;
     cursor?: { timestamp: Date; id: string };
@@ -407,8 +432,6 @@ export class ConversationContextService {
     const cacheKey = conversationContextCacheKey({
       provider: input.provider,
       providerChatId: input.providerChatId,
-      workflowId: input.workflowId,
-      nodeId: input.nodeId,
       profileHash,
     });
     let cacheHit = true;
@@ -491,6 +514,7 @@ export class ConversationContextService {
             outputFormat: "text",
             protectedPrompt: null,
             purpose: "context-summary",
+            backgroundOperationId: claim.id,
           });
           const durationMs = Math.max(0, Date.now() - startedAt);
           if (result.status === "succeeded") {
@@ -646,10 +670,10 @@ export class ConversationContextService {
          WHERE provider = $1 AND provider_chat_id = $2 AND enabled = TRUE
        ), inserted AS (
          INSERT INTO conversation_context_states (
-           id, chat_id, workflow_id, node_id, profile_hash
+           id, chat_id, profile_hash
          )
-         SELECT $3, id, $4, $5, $6 FROM selected_chat
-         ON CONFLICT (instance_namespace, chat_id, workflow_id, node_id, profile_hash)
+         SELECT $3, id, $4 FROM selected_chat
+         ON CONFLICT (instance_namespace, chat_id, profile_hash)
            DO NOTHING
          RETURNING id, summary, covered_through_index::text, version, status
        )
@@ -658,16 +682,9 @@ export class ConversationContextService {
        SELECT s.id, s.summary, s.covered_through_index::text, s.version, s.status
        FROM conversation_context_states s
        INNER JOIN selected_chat c ON c.id = s.chat_id
-       WHERE s.workflow_id = $4 AND s.node_id = $5 AND s.profile_hash = $6
+       WHERE s.profile_hash = $4
        LIMIT 1`,
-      [
-        input.provider,
-        input.providerChatId,
-        id,
-        input.workflowId,
-        input.nodeId,
-        profileHash,
-      ],
+      [input.provider, input.providerChatId, id, profileHash],
     );
     const row = result.rows[0];
     if (row === undefined) {
@@ -770,7 +787,7 @@ export class ConversationContextService {
 
   private async claimCompression(
     state: ContextState,
-    executionId: string,
+    executionId: string | null,
     fromIndex: string,
     throughIndex: string,
   ): Promise<CompressionClaim | null> {
@@ -831,7 +848,7 @@ export class ConversationContextService {
   private async upsertCompression(
     client: PoolClient,
     state: ContextState,
-    executionId: string,
+    executionId: string | null,
     fromIndex: string,
     throughIndex: string,
   ): Promise<string> {

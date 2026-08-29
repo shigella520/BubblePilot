@@ -434,8 +434,7 @@ class LoadContextNodeHandler extends BaseNodeHandler {
     this.assertType(node, this.type);
     try {
       const globalSummary = await this.summarySettings?.resolve();
-      const summaryEnabled =
-        globalSummary?.enabled ?? node.config.summaryEnabled ?? false;
+      const summaryEnabled = globalSummary?.enabled ?? false;
       const summarized = summaryEnabled
         ? await this.conversationContext?.load({
             executionId: context.executionId,
@@ -444,18 +443,12 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             provider: context.envelope.provider,
             providerChatId: context.envelope.chat.providerChatId,
             beforeProviderMessageId: context.envelope.message.providerMessageId,
-            routeId:
-              globalSummary?.providerRouteId ??
-              node.config.summaryProviderRouteId ??
-              "",
+            routeId: globalSummary?.providerRouteId ?? "",
             messageLimit:
               globalSummary?.messageLimit ?? node.config.messageLimit,
             characterLimit:
               globalSummary?.characterLimit ?? node.config.characterLimit,
-            compressionBatchSize:
-              globalSummary?.compressionBatchSize ??
-              node.config.compressionBatchSize ??
-              10,
+            compressionBatchSize: globalSummary?.compressionBatchSize ?? 10,
             includeFromMe: node.config.includeFromMe,
             timeZone: context.timeZone,
           })

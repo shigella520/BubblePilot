@@ -116,14 +116,18 @@ describe("conversation context summary contract", () => {
       new Set([
         base,
         conversationContextCacheKey({ ...common, providerChatId: "chat-b" }),
-        conversationContextCacheKey({ ...common, workflowId: "workflow-b" }),
-        conversationContextCacheKey({ ...common, nodeId: "other-node" }),
         conversationContextCacheKey({
           ...common,
           profileHash: conversationContextProfileHash(false),
         }),
       ]).size,
-    ).toBe(5);
+    ).toBe(2);
+    expect(
+      conversationContextCacheKey({ ...common, workflowId: "workflow-b" }),
+    ).toBe(base);
+    expect(
+      conversationContextCacheKey({ ...common, nodeId: "other-node" }),
+    ).toBe(base);
     expect(conversationContextProfileHash(true, "UTC")).not.toBe(
       conversationContextProfileHash(true, "Asia/Shanghai"),
     );

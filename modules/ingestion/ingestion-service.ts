@@ -5,6 +5,8 @@ import type {
 import type { BlueBubblesWebhookAdapter } from "../integrations/bluebubbles/webhook-adapter.js";
 import type { LinkPreviewEnricher } from "../integrations/bluebubbles/link-preview-enricher.js";
 import type { ImageSummaryScheduler } from "../ai/image-summary-service.js";
+import type { ConversationContextService } from "../workflow/conversation-context-service.js";
+import type { SummarySettingsService } from "../workflow/summary-settings-service.js";
 import { emptyLinkPreview } from "./link-preview.js";
 import type { MessageEnvelope } from "./message-envelope.js";
 
@@ -29,6 +31,8 @@ export class IngestionService {
     private readonly monitoredChatIds: ReadonlySet<string>,
     private readonly linkPreviewEnricher?: LinkPreviewEnricher,
     private readonly imageSummary?: ImageSummaryScheduler,
+    private readonly conversationSummary?: ConversationContextService,
+    private readonly summarySettings?: SummarySettingsService,
   ) {}
 
   async ingest(
@@ -58,6 +62,27 @@ export class IngestionService {
       scheduleImageSummary(() =>
         imageSummary.enqueueAttachments(messageId, normalized.envelope),
       );
+    }
+    if (
+      result.messageId !== null &&
+      this.conversationSummary !== undefined &&
+      this.summarySettings !== undefined
+    ) {
+      const settings = await this.summarySettings.resolve();
+      if (settings.enabled && settings.providerRouteId !== "") {
+        scheduleImageSummary(() =>
+          this.conversationSummary!.enqueueForMessage({
+            provider: normalized.envelope.provider,
+            providerChatId: normalized.envelope.chat.providerChatId,
+            providerMessageId: normalized.envelope.message.providerMessageId,
+            routeId: settings.providerRouteId,
+            messageLimit: settings.messageLimit,
+            characterLimit: settings.characterLimit,
+            compressionBatchSize: settings.compressionBatchSize,
+            timeZone: settings.timeZone,
+          }),
+        );
+      }
     }
     let automationEnvelope = normalized.envelope;
     if (

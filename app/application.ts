@@ -16,6 +16,7 @@ import type { WebSearchSettingsService } from "../modules/ai/web-search-settings
 import { webSearchSettingsUpdateSchema } from "../modules/ai/web-search-settings-types.js";
 import type { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
 import type { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
+import type { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
 import { summarySettingsUpdateSchema } from "../modules/workflow/summary-settings-types.js";
 import { imageInputSettingsUpdateSchema } from "../modules/ai/image-input-settings-types.js";
 import type { NativeImageInputService } from "../modules/ai/native-image-input.js";
@@ -349,6 +350,7 @@ export interface ApplicationOptions {
         }[]
       >;
     };
+    conversationSummary?: ConversationContextService;
   };
   dataExport?: {
     repository: DataExportRepository;
@@ -628,6 +630,8 @@ export function buildApplication(
     config.monitoredChatIds,
     options.blueBubbles?.linkPreviewEnricher,
     options.imageSummary?.scheduler,
+    options.workflow?.conversationSummary,
+    options.ai?.summarySettings,
   );
   const adminRateLimiter = new FixedWindowRateLimiter(
     config.adminRateLimitMax,
@@ -733,6 +737,8 @@ export function buildApplication(
       options.ai?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.searchSettings?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.imageInputSettings?.repository.isReady() ??
+        Promise.resolve(true),
+      options.ai?.summarySettings?.repository.isReady() ??
         Promise.resolve(true),
       options.dataExport?.repository.isReady() ?? Promise.resolve(true),
       options.blueBubbles?.settings.repository.isReady() ??

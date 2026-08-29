@@ -37,6 +37,16 @@ export class PostgresSummarySettingsRepository implements SummarySettingsReposit
   constructor(databaseUrl: string, timeout?: number) {
     this.pool = createPostgresPool(databaseUrl, 3, timeout);
   }
+  async isReady(): Promise<boolean> {
+    try {
+      await this.pool.query(
+        "SELECT 1 FROM conversation_summary_settings LIMIT 1",
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
   async find() {
     const result = await this.pool.query<Row>(
       `SELECT ${cols} FROM conversation_summary_settings WHERE id = 1`,

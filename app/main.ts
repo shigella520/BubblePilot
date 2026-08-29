@@ -241,6 +241,7 @@ const application = buildApplication(config, repository, {
     engine: workflowEngine,
     dispatcher: workflowDispatcher,
     contextState: conversationContext,
+    conversationSummary: conversationContext,
   },
   dataExport: {
     repository: dataExportRepository,
