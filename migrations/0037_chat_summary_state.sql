@@ -31,4 +31,4 @@ ALTER TABLE ai_provider_attempts
     OR
     (purpose = 'workflow-reply'
       AND execution_id IS NOT NULL AND background_operation_id IS NULL)
-  );
+  ) NOT VALID;
