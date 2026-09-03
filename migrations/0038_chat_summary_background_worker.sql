@@ -26,6 +26,8 @@ ALTER TABLE conversation_context_compressions
   ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+DROP INDEX IF EXISTS conversation_context_states_chat_profile_key;
+
 WITH ranked AS (
   SELECT id,
          ROW_NUMBER() OVER (
@@ -41,7 +43,6 @@ WHERE state.id = ranked.id
 
 CREATE UNIQUE INDEX IF NOT EXISTS conversation_context_states_chat_policy_key
   ON conversation_context_states (instance_namespace, chat_id, summary_policy_version);
-DROP INDEX IF EXISTS conversation_context_states_chat_profile_key;
 CREATE INDEX IF NOT EXISTS conversation_context_compressions_queue_idx
   ON conversation_context_compressions (status, lease_expires_at, started_at);
 

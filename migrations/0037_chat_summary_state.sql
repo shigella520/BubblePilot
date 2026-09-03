@@ -5,6 +5,10 @@ ALTER TABLE conversation_context_states
 ALTER TABLE conversation_context_states
   DROP CONSTRAINT IF EXISTS conversation_context_states_instance_namespace_chat_id_workflow_id_node_id_profile_hash_key;
 
+-- A previous interrupted/manual migration may have left the replacement index
+-- behind even though the migration itself was not recorded as applied.
+DROP INDEX IF EXISTS conversation_context_states_chat_profile_key;
+
 -- Older installations can contain several workflow/node states with the same
 -- chat/profile. Keep the most advanced state before enforcing chat-level
 -- uniqueness; dependent compression attempts are removed with the discarded
