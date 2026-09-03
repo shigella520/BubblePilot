@@ -43,6 +43,7 @@ interface WorkflowVersion {
   version: number;
   status: string;
   definition: unknown;
+  needsResave?: boolean;
 }
 interface Trigger {
   id: string;
@@ -187,9 +188,6 @@ const triggerPreviewForm = reactive({
 const triggerPreview = ref<TriggerPreviewResult | null>(null);
 const aiFlowForm = reactive({
   providerRouteId: "",
-  messageLimit: 10,
-  characterLimit: 6000,
-  includeFromMe: true,
   systemPrompt: "你是群聊助手，请严格根据提供的聊天上下文回答。",
   promptTemplate: "请根据前面的聊天记录执行以下任务：\n{{message.text}}",
   replyTemplate: "{{variables.aiReply}}",
@@ -376,9 +374,9 @@ const defaultDefinition = (name: string) =>
   );
 const latestCandidate = computed(
   () =>
-    versions.value.find((item) => item.status === "validated") ??
-    versions.value[0] ??
-    null,
+    versions.value.find(
+      (item) => item.status === "validated" && !item.needsResave,
+    ) ?? null,
 );
 const activeWorkflows = computed(() =>
   workflows.value.filter(
@@ -470,8 +468,7 @@ async function load() {
         ? {
             ...block,
             config: block.config.map((item: any) =>
-              item.name === "providerRouteId" ||
-              item.name === "summaryProviderRouteId"
+              item.name === "providerRouteId"
                 ? {
                     ...item,
                     options: aiRoutes.value.map((route) => ({
@@ -516,11 +513,7 @@ function aiConversationDefinition(name: string) {
         id: "load-context",
         type: "load-context",
         version: 1,
-        config: {
-          messageLimit: aiFlowForm.messageLimit,
-          characterLimit: aiFlowForm.characterLimit,
-          includeFromMe: aiFlowForm.includeFromMe,
-        },
+        config: {},
         onSuccess: "ask-ai",
         onFailure: "failed",
       },
@@ -1016,26 +1009,6 @@ onMounted(load);
                   {{ route.name }}{{ route.enabled ? "" : "（已停用）" }}
                 </option>
               </select></label
-            ><label
-              ><span>最近消息条数</span
-              ><input
-                v-model.number="aiFlowForm.messageLimit"
-                type="number"
-                min="1"
-                max="50"
-                required /></label
-            ><label
-              ><span>上下文字数上限</span
-              ><input
-                v-model.number="aiFlowForm.characterLimit"
-                type="number"
-                min="100"
-                max="20000"
-                required /></label
-            ><label class="checkbox-field"
-              ><input v-model="aiFlowForm.includeFromMe" type="checkbox" /><span
-                >包含自己/机器人发送的消息</span
-              ></label
             ><label class="wide-field"
               ><span>System Prompt</span
               ><textarea v-model="aiFlowForm.systemPrompt" rows="3"></textarea>
@@ -1096,6 +1069,9 @@ onMounted(load);
           </form>
           <form class="settings-form" @submit.prevent="createVersion">
             <h3><Save :size="18" />编辑候选版本</h3>
+            <p v-if="versions.some((item) => item.needsResave)" class="keyline">
+              旧版本包含已移除的节点级摘要配置，请保存为新版本后再发布。
+            </p>
             <label
               ><span>工作流</span
               ><select v-model="selectedWorkflowId">

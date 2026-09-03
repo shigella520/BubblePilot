@@ -23,7 +23,10 @@ import type { MessageEnvelope } from "../ingestion/message-envelope.js";
 import type { WorkflowNode } from "./workflow-definition.js";
 import { WorkflowExecutionError } from "./workflow-errors.js";
 import type { WorkflowRepository } from "./workflow-repository.js";
-import type { ConversationContextService } from "./conversation-context-service.js";
+import type {
+  ConversationContextService,
+  ConversationContextSnapshot,
+} from "./conversation-context-service.js";
 import type { SummarySettingsService } from "./summary-settings-service.js";
 import { formatContextTimestamp } from "./context-time.js";
 
@@ -38,6 +41,7 @@ export interface NodeExecutionContext {
   historySummary: { text: string; coveredThroughIndex: string } | null;
   participantIdentities: Record<string, ChatParticipantIdentity>;
   outputs: Record<string, Record<string, unknown>>;
+  contextSnapshot: ConversationContextSnapshot | null;
 }
 
 export interface NodeHandlerResult {
@@ -434,27 +438,57 @@ class LoadContextNodeHandler extends BaseNodeHandler {
     this.assertType(node, this.type);
     try {
       const globalSummary = await this.summarySettings?.resolve();
-      const summaryEnabled = globalSummary?.enabled ?? false;
-      const summarized = summaryEnabled
-        ? await this.conversationContext?.load({
-            executionId: context.executionId,
-            workflowId: context.workflowId,
-            nodeId: node.id,
-            provider: context.envelope.provider,
-            providerChatId: context.envelope.chat.providerChatId,
-            beforeProviderMessageId: context.envelope.message.providerMessageId,
-            routeId: globalSummary?.providerRouteId ?? "",
-            messageLimit:
-              globalSummary?.messageLimit ?? node.config.messageLimit,
-            characterLimit:
-              globalSummary?.characterLimit ?? node.config.characterLimit,
-            compressionBatchSize: globalSummary?.compressionBatchSize ?? 10,
-            includeFromMe: globalSummary?.includeFromMe ?? true,
-            timeZone: context.timeZone,
-            summaryPolicyVersion: globalSummary?.policyVersion ?? 1,
-          })
-        : undefined;
-      if (summaryEnabled && summarized === undefined) {
+      const rawSnapshot = context.contextSnapshot as Readonly<
+        Record<string, unknown>
+      > | null;
+      const coveredThroughIndex =
+        typeof rawSnapshot?.coveredThroughIndex === "string"
+          ? rawSnapshot.coveredThroughIndex
+          : typeof rawSnapshot?.summaryCoveredThroughIndex === "string"
+            ? rawSnapshot.summaryCoveredThroughIndex
+            : null;
+      const stateId =
+        typeof rawSnapshot?.stateId === "string"
+          ? rawSnapshot.stateId
+          : typeof rawSnapshot?.summaryStateId === "string"
+            ? rawSnapshot.summaryStateId
+            : null;
+      const summarySnapshot =
+        rawSnapshot !== null &&
+        stateId !== null &&
+        typeof rawSnapshot.summaryVersion === "number" &&
+        coveredThroughIndex !== null
+          ? ({
+              stateId,
+              summaryVersion: rawSnapshot.summaryVersion,
+              coveredThroughIndex,
+              ...(typeof rawSnapshot.summary === "string"
+                ? { summary: rawSnapshot.summary }
+                : {}),
+              ...(typeof rawSnapshot.summaryPolicyVersion === "number"
+                ? { summaryPolicyVersion: rawSnapshot.summaryPolicyVersion }
+                : {}),
+              ...(typeof rawSnapshot.compressionOperationId === "string"
+                ? { compressionOperationId: rawSnapshot.compressionOperationId }
+                : {}),
+            } satisfies ConversationContextSnapshot)
+          : null;
+      const summarized =
+        globalSummary !== undefined
+          ? await this.conversationContext?.load({
+              executionId: context.executionId,
+              provider: context.envelope.provider,
+              providerChatId: context.envelope.chat.providerChatId,
+              beforeProviderMessageId:
+                context.envelope.message.providerMessageId,
+              characterLimit: globalSummary?.characterLimit ?? 6_000,
+              includeFromMe: globalSummary?.includeFromMe ?? true,
+              timeZone: context.timeZone,
+              summaryPolicyVersion: globalSummary?.policyVersion ?? 1,
+              summarySnapshot,
+            })
+          : undefined;
+      if (globalSummary !== undefined && summarized === undefined) {
         throw new Error("Conversation history summary is unavailable.");
       }
       const loadedMessages =
@@ -462,8 +496,12 @@ class LoadContextNodeHandler extends BaseNodeHandler {
         (await this.archive.loadRecentMessages(
           context.envelope.chat.providerChatId,
           {
-            limit: node.config.messageLimit,
-            maxCharacters: node.config.characterLimit,
+            // This compatibility path is used only when the chat-summary
+            // module is not wired (for example, a lightweight test host). Do
+            // not impose the old fixed 50-message retention limit here; the
+            // character budget remains the only context extraction bound.
+            limit: Number.MAX_SAFE_INTEGER,
+            maxCharacters: globalSummary?.characterLimit ?? 6_000,
             includeFromMe: globalSummary?.includeFromMe ?? true,
             beforeProviderMessageId: context.envelope.message.providerMessageId,
           },
@@ -530,6 +568,7 @@ class LoadContextNodeHandler extends BaseNodeHandler {
           participantIdentityCount: participants.length,
           summaryCharacters: summarized?.summary.length ?? 0,
           summaryVersion: summarized?.summaryVersion ?? null,
+          summaryPolicyVersion: summarized?.summaryPolicyVersion ?? null,
           summaryCoveredThroughIndex: summarized?.coveredThroughIndex ?? null,
           summaryStateCacheHit: summarized?.cacheHit ?? null,
           uncompressedMessageCount:
@@ -541,6 +580,8 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             summarized?.temporaryOverflowCharacters ?? 0,
           truncatedMessageCount: summarized?.truncatedMessageCount ?? 0,
           contextIncomplete: summarized?.contextIncomplete ?? false,
+          usedPreviousSummary: summarized?.usedPreviousSummary ?? false,
+          compressionOperationId: summarized?.compressionOperationId ?? null,
         },
         outputs: {
           messages,
@@ -873,6 +914,23 @@ function assemblePromptZones(zones: AiPromptZones): AiChatMessage[] {
   return messages;
 }
 
+// The context extractor applies the user-configured character budget. This
+// larger guard only protects the downstream provider request from pathological
+// prompt assembly (for example, a huge template plus many image references).
+const AI_CHAT_INPUT_HARD_CHARACTER_LIMIT = 128_000;
+
+function promptMessageCharacters(message: AiChatMessage): number {
+  if (typeof message.content === "string") return message.content.length;
+  return message.content.reduce(
+    (total, part) =>
+      total +
+      (part.type === "text"
+        ? part.text.length
+        : part.dataUrl.length + part.label.length),
+    0,
+  );
+}
+
 function templateContainsCurrentMessage(template: string): boolean {
   return /\{\{\s*message\.text\s*\}\}/u.test(template);
 }
@@ -1080,6 +1138,17 @@ class AiChatNodeHandler extends BaseNodeHandler {
       currentResources,
       diagnostics,
     });
+    const assembledCharacters = messages.reduce(
+      (total, message) => total + promptMessageCharacters(message),
+      0,
+    );
+    if (assembledCharacters > AI_CHAT_INPUT_HARD_CHARACTER_LIMIT) {
+      throw new WorkflowExecutionError(
+        "AI_INPUT_TOO_LARGE",
+        "The assembled AI input exceeds the safety limit.",
+        false,
+      );
+    }
 
     let result;
     try {

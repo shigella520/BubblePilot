@@ -99,9 +99,9 @@ interface ImageInputSettings {
 interface SummarySettings {
   enabled: boolean;
   includeFromMe: boolean;
-  messageLimit: number;
+  baseMessageWindow: number;
   characterLimit: number;
-  compressionBatchSize: number;
+  redundancyMessageWindow: number;
   providerRouteId: string;
   timeZone: string;
   source: "defaults" | "database";
@@ -163,9 +163,9 @@ const summarySettingsBusy = ref(false);
 const summarySettingsForm = reactive({
   enabled: false,
   includeFromMe: true,
-  messageLimit: 10,
+  baseMessageWindow: 10,
   characterLimit: 6000,
-  compressionBatchSize: 10,
+  redundancyMessageWindow: 10,
   providerRouteId: "",
   timeZone: "UTC",
 });
@@ -959,7 +959,8 @@ onMounted(load);
           <span class="state-badge">全局配置</span>
         </div>
         <p class="panel-description">
-          所有聊天统一使用此摘要压缩策略；压缩由消息归档后的后台任务维护。
+          所有聊天统一使用此摘要压缩策略；未压缩消息数（包含当前消息）达到基础窗口与冗余窗口之和时，后台任务压缩最早的冗余窗口消息。字符数只约束上下文提取，不限制下游
+          AI 对话请求。
         </p>
         <form
           v-if="summarySettings"
@@ -978,16 +979,16 @@ onMounted(load);
                 type="checkbox"
             /></label>
             <label
-              ><span>保留原始消息数</span
+              ><span>基础消息窗口</span
               ><input
-                v-model.number="summarySettingsForm.messageLimit"
+                v-model.number="summarySettingsForm.baseMessageWindow"
                 type="number"
                 min="1"
                 max="50"
                 required
             /></label>
             <label
-              ><span>目标字符数</span
+              ><span>上下文提取目标字符数</span
               ><input
                 v-model.number="summarySettingsForm.characterLimit"
                 type="number"
@@ -996,9 +997,9 @@ onMounted(load);
                 required
             /></label>
             <label
-              ><span>单次压缩消息数</span
+              ><span>冗余消息窗口</span
               ><input
-                v-model.number="summarySettingsForm.compressionBatchSize"
+                v-model.number="summarySettingsForm.redundancyMessageWindow"
                 type="number"
                 min="1"
                 max="50"

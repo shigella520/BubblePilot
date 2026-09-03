@@ -24,6 +24,7 @@ import type {
   WorkflowVersionStatus,
 } from "./workflow-repository.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
+import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
 import {
   linkPreviewItemSchema,
   linkPreviewStatusSchema,
@@ -47,6 +48,7 @@ interface WorkflowVersionRow {
   definition: unknown;
   created_at: Date;
   published_at: Date | null;
+  needs_resave: boolean;
 }
 
 interface WorkflowRow {
@@ -171,7 +173,7 @@ interface DeliveryRow {
 
 const versionSelect = `SELECT
   v.id, v.workflow_id, w.name AS workflow_name, v.version, v.status,
-  v.definition, v.created_at, v.published_at
+  v.definition, v.created_at, v.published_at, v.needs_resave
 FROM workflow_versions v
 INNER JOIN workflows w ON w.id = v.workflow_id`;
 
@@ -233,6 +235,7 @@ function versionRecord(row: WorkflowVersionRow): WorkflowVersionRecord {
     definition: parseWorkflowDefinition(row.definition),
     createdAt: row.created_at.toISOString(),
     publishedAt: row.published_at?.toISOString() ?? null,
+    needsResave: row.needs_resave,
   };
 }
 
@@ -288,10 +291,13 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
       cachedPromptTokens === null || cacheEligiblePromptTokens === 0
         ? null
         : cachedPromptTokens / cacheEligiblePromptTokens,
-    contextSnapshot: {
-      ...(row.context_snapshot ?? {}),
-      triggerMessageIndex: row.trigger_message_index,
-    },
+    contextSnapshot:
+      row.context_snapshot === null && row.trigger_message_index === null
+        ? null
+        : {
+            ...(row.context_snapshot ?? {}),
+            triggerMessageIndex: row.trigger_message_index,
+          },
   };
 }
 
@@ -458,6 +464,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         `SELECT id FROM workflow_versions
          WHERE workflow_id = $1 AND version = $2
            AND status IN ('validated', 'published')
+           AND needs_resave = FALSE
            AND EXISTS (SELECT 1 FROM workflows w WHERE w.id = workflow_versions.workflow_id AND w.deleted_at IS NULL)
          FOR UPDATE`,
         [workflowId, version],
@@ -721,12 +728,14 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
+    summaryTrigger?: ConversationSummaryTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }> {
     const id = randomUUID();
     const inserted = await this.pool.query<IdentifierRow>(
       `INSERT INTO workflow_executions (
          id, provider, external_event_id, source_message_id, trigger_id,
-         workflow_version_id, correlation_id, status, trigger_message_index
+         workflow_version_id, correlation_id, status, trigger_message_index,
+         context_snapshot
        ) VALUES (
          $1, $2, $3,
          COALESCE(
@@ -737,8 +746,9 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
             WHERE i.provider = $2 AND i.external_event_id = $3)
          ),
          $5, $6, $7, 'created',
-         (SELECT message_index FROM messages
-          WHERE provider = $2 AND provider_message_id = $4)
+         COALESCE($8::bigint, (SELECT message_index FROM messages
+          WHERE provider = $2 AND provider_message_id = $4)),
+         $9::jsonb
        )
        ON CONFLICT (provider, external_event_id, trigger_id, workflow_version_id)
        DO NOTHING
@@ -751,6 +761,26 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         input.trigger.id,
         input.trigger.workflowVersionId,
         input.envelope.correlationId,
+        input.summaryTrigger?.triggerMessageIndex ?? null,
+        input.summaryTrigger === undefined
+          ? null
+          : JSON.stringify({
+              chatId: input.envelope.chat.providerChatId,
+              triggerMessageIndex: input.summaryTrigger.triggerMessageIndex,
+              summaryVersion:
+                input.summaryTrigger.summarySnapshot.summaryVersion,
+              summaryCoveredThroughIndex:
+                input.summaryTrigger.summarySnapshot.coveredThroughIndex,
+              summaryPolicyVersion:
+                input.summaryTrigger.summarySnapshot.summaryPolicyVersion ??
+                null,
+              stateId: input.summaryTrigger.summarySnapshot.stateId,
+              summaryStateId: input.summaryTrigger.summarySnapshot.stateId,
+              compressionOperationId:
+                input.summaryTrigger.compressionOperationId ??
+                input.summaryTrigger.summarySnapshot.compressionOperationId ??
+                null,
+            }),
       ],
     );
     const persistedId = inserted.rows[0]?.id ?? id;
@@ -882,10 +912,11 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         `INSERT INTO workflow_executions (
            id, provider, external_event_id, source_message_id, trigger_id,
            workflow_version_id, retry_of_execution_id, recovery_attempt,
-           correlation_id, status
+           correlation_id, status, trigger_message_index, context_snapshot
          ) SELECT
            $2, provider, $3, source_message_id, trigger_id,
            workflow_version_id, id, recovery_attempt + 1, $4, 'created'
+           , trigger_message_index, context_snapshot
          FROM workflow_executions WHERE id = $1`,
         [executionId, recoveryId, syntheticEventId, correlationId],
       );
@@ -1007,7 +1038,9 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     snapshot: Readonly<Record<string, unknown>>,
   ): Promise<void> {
     await this.pool.query(
-      `UPDATE workflow_executions SET context_snapshot = $2::jsonb WHERE id = $1`,
+      `UPDATE workflow_executions
+       SET context_snapshot = COALESCE(context_snapshot, '{}'::jsonb) || $2::jsonb
+       WHERE id = $1`,
       [executionId, JSON.stringify(snapshot)],
     );
   }

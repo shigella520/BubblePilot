@@ -171,9 +171,9 @@ const summarySettings = new SummarySettingsService(
   {
     enabled: false,
     includeFromMe: true,
-    messageLimit: 10,
+    baseMessageWindow: 10,
     characterLimit: 6000,
-    compressionBatchSize: 10,
+    redundancyMessageWindow: 10,
     providerRouteId: "",
     timeZone: "UTC",
   },
@@ -182,6 +182,19 @@ const conversationSummaryWorker = new ConversationSummaryWorker(
   conversationContext,
   async () => (await summarySettings.resolve()).providerRouteId,
   async () => (await summarySettings.resolve()).timeZone,
+  5_000,
+  async () => {
+    const settings = await summarySettings.resolve();
+    return {
+      enabled: settings.enabled && settings.providerRouteId !== "",
+      providerRouteId: settings.providerRouteId,
+      baseMessageWindow: settings.baseMessageWindow,
+      redundancyMessageWindow: settings.redundancyMessageWindow,
+      includeFromMe: settings.includeFromMe,
+      timeZone: settings.timeZone,
+      policyVersion: settings.policyVersion ?? 1,
+    };
+  },
 );
 const messageRetention =
   config.messageRetentionDays > 0

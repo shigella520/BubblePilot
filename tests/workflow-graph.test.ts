@@ -12,7 +12,7 @@ const base = {
       type: "load-context",
       version: 1,
       position: { x: 0, y: 0 },
-      config: { messageLimit: 10, characterLimit: 6000, includeFromMe: true },
+      config: {},
       inputs: {},
     },
     {

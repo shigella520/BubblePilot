@@ -1,20 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  CONTEXT_HARD_CHARACTER_LIMIT,
-  contextAppendOnlyLimit,
+  contextRetentionThreshold,
   contextCompressionBatchRange,
   conversationContextCacheKey,
   conversationContextProfileHash,
   contextCompressionPlan,
+  fitContextMessages,
 } from "../modules/workflow/conversation-context-service.js";
 import { conversationHistoryMessages } from "../modules/workflow/node-registry.js";
 import type { ContextMessage } from "../modules/archive/archive-repository.js";
 import type { PreparedImageInputItem } from "../modules/ai/native-image-input.js";
 import { emptyLinkPreview } from "../modules/ingestion/link-preview.js";
 import { parseWorkflowDefinition } from "../modules/workflow/workflow-definition.js";
-
-const routeId = "11111111-1111-4111-8111-111111111111";
 
 function definition(config: Record<string, unknown>) {
   return {
@@ -27,12 +25,7 @@ function definition(config: Record<string, unknown>) {
         id: "load-history",
         type: "load-context",
         version: 1,
-        config: {
-          messageLimit: 10,
-          characterLimit: 6_000,
-          includeFromMe: true,
-          ...config,
-        },
+        config,
         onSuccess: "end",
       },
       {
@@ -77,30 +70,21 @@ function sharedMessagePrefixLength(
 }
 
 describe("conversation context summary contract", () => {
-  it("keeps existing load-context definitions summary-disabled", () => {
+  it("keeps load-context configuration global", () => {
     const parsed = parseWorkflowDefinition(definition({}));
     const node = parsed.nodes[0];
     expect(node?.type).toBe("load-context");
     if (node?.type !== "load-context") return;
-    expect(node.config).toMatchObject({
-      summaryEnabled: false,
-      compressionBatchSize: 10,
-    });
+    expect(node.config).toEqual({});
   });
 
-  it("requires a Provider route when summary is enabled", () => {
+  it("does not accept node-level summary settings as runtime inputs", () => {
+    const parsed = parseWorkflowDefinition(definition({}));
+    const node = parsed.nodes[0];
+    expect(node?.type === "load-context" ? node.config : null).toEqual({});
     expect(() =>
-      parseWorkflowDefinition(definition({ summaryEnabled: true })),
-    ).toThrow(/summary Provider route/u);
-    expect(() =>
-      parseWorkflowDefinition(
-        definition({
-          summaryEnabled: true,
-          summaryProviderRouteId: routeId,
-          compressionBatchSize: 5,
-        }),
-      ),
-    ).not.toThrow();
+      parseWorkflowDefinition(definition({ messageLimit: 4 })),
+    ).toThrow();
   });
 
   it("isolates cache keys by chat, workflow, node and semantic profile", () => {
@@ -121,7 +105,7 @@ describe("conversation context summary contract", () => {
           profileHash: conversationContextProfileHash(false),
         }),
       ]).size,
-    ).toBe(2);
+    ).toBe(3);
     expect(
       conversationContextCacheKey({ ...common, workflowId: "workflow-b" }),
     ).toBe(base);
@@ -148,32 +132,23 @@ describe("conversation context summary contract", () => {
   });
 
   it("keeps the raw window append-only until the compression boundary", () => {
-    expect(contextAppendOnlyLimit(50, 10)).toBe(59);
+    expect(contextRetentionThreshold(50, 10)).toBe(60);
     for (const eligibleCount of [50, 51, 58, 59]) {
       expect(
         contextCompressionPlan({
           coveredThroughIndex: "20",
-          summaryCharacters: 200,
           eligibleCount,
-          messageCharacterCounts: Array.from(
-            { length: eligibleCount },
-            () => 100,
-          ),
-          messageLimit: 50,
-          characterLimit: 3_000,
-          compressionBatchSize: 10,
+          baseMessageWindow: 50,
+          redundancyMessageWindow: 10,
         }),
       ).toEqual({ reason: null, count: 0 });
     }
     expect(
       contextCompressionPlan({
         coveredThroughIndex: "20",
-        summaryCharacters: 200,
         eligibleCount: 60,
-        messageCharacterCounts: Array.from({ length: 60 }, () => 100),
-        messageLimit: 50,
-        characterLimit: 3_000,
-        compressionBatchSize: 10,
+        baseMessageWindow: 50,
+        redundancyMessageWindow: 10,
       }),
     ).toEqual({ reason: "message-threshold", count: 10 });
   });
@@ -182,67 +157,89 @@ describe("conversation context summary contract", () => {
     expect(
       contextCompressionPlan({
         coveredThroughIndex: "0",
-        summaryCharacters: 0,
         eligibleCount: 83,
-        messageCharacterCounts: Array.from({ length: 83 }, () => 100),
-        messageLimit: 50,
-        characterLimit: 3_000,
-        compressionBatchSize: 10,
+        baseMessageWindow: 50,
+        redundancyMessageWindow: 10,
       }),
     ).toEqual({ reason: "initial-catchup", count: 10 });
     expect(
       contextCompressionPlan({
         coveredThroughIndex: "20",
-        summaryCharacters: 300,
         eligibleCount: 83,
-        messageCharacterCounts: Array.from({ length: 83 }, () => 100),
-        messageLimit: 50,
-        characterLimit: 3_000,
-        compressionBatchSize: 10,
+        baseMessageWindow: 50,
+        redundancyMessageWindow: 10,
       }),
-    ).toEqual({ reason: "initial-catchup", count: 10 });
+    ).toEqual({ reason: "message-threshold", count: 10 });
     expect(
       contextCompressionBatchRange({
         candidateCount: 83,
-        messageLimit: 50,
+        baseMessageWindow: 50,
         count: 10,
         reason: "initial-catchup",
       }),
-    ).toEqual({ start: 23, end: 33 });
+    ).toEqual({ start: 0, end: 10 });
     expect(
       contextCompressionBatchRange({
         candidateCount: 60,
-        messageLimit: 50,
+        baseMessageWindow: 50,
         count: 10,
         reason: "message-threshold",
       }),
     ).toEqual({ start: 0, end: 10 });
   });
 
-  it("allows temporary overflow but compacts at the absolute safety limit", () => {
+  it("uses the message windows independently from character trimming", () => {
     expect(
       contextCompressionPlan({
         coveredThroughIndex: "20",
-        summaryCharacters: 100,
-        eligibleCount: 55,
-        messageCharacterCounts: Array.from({ length: 55 }, () => 500),
-        messageLimit: 50,
-        characterLimit: 3_000,
-        compressionBatchSize: 10,
+        eligibleCount: 6,
+        baseMessageWindow: 4,
+        redundancyMessageWindow: 3,
       }),
     ).toEqual({ reason: null, count: 0 });
-    const plan = contextCompressionPlan({
-      coveredThroughIndex: "20",
-      summaryCharacters: 100,
-      eligibleCount: 55,
-      messageCharacterCounts: Array.from({ length: 55 }, () => 600),
-      messageLimit: 50,
-      characterLimit: 3_000,
-      compressionBatchSize: 10,
-    });
-    expect(100 + 55 * 600).toBeGreaterThan(CONTEXT_HARD_CHARACTER_LIMIT);
-    expect(plan.reason).toBe("safety-limit");
-    expect(plan.count).toBeGreaterThan(0);
+    expect(
+      contextCompressionPlan({
+        coveredThroughIndex: "20",
+        eligibleCount: 7,
+        baseMessageWindow: 4,
+        redundancyMessageWindow: 3,
+      }),
+    ).toEqual({ reason: "message-threshold", count: 3 });
+    expect(
+      contextCompressionBatchRange({
+        candidateCount: 7,
+        baseMessageWindow: 4,
+        count: 3,
+        reason: "message-threshold",
+      }),
+    ).toEqual({ start: 0, end: 3 });
+  });
+
+  it("trims older complete messages while retaining the newest suffix", () => {
+    const messages = [
+      contextMessage("1", { body: "old" }),
+      contextMessage("2", { body: "middle" }),
+      contextMessage("3", { body: "newest" }),
+    ];
+    expect(
+      fitContextMessages(messages, "middle".length + "newest".length).map(
+        (message) => message.providerMessageId,
+      ),
+    ).toEqual(["2", "3"]);
+    expect(
+      fitContextMessages(messages, 1).map(
+        (message) => message.providerMessageId,
+      ),
+    ).toEqual(["3"]);
+  });
+
+  it("keeps a single newest message even when it exceeds the character budget", () => {
+    const messages = [contextMessage("1", { body: "newest message" })];
+    expect(
+      fitContextMessages(messages, 1).map(
+        (message) => message.providerMessageId,
+      ),
+    ).toEqual(["1"]);
   });
 
   it("serializes history as exact append-only provider message blocks", () => {

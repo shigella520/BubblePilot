@@ -203,7 +203,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
     type: "load-context",
     version: 1,
     name: "加载聊天上下文",
-    description: "读取当前聊天最近的归档消息。",
+    description: "读取当前聊天摘要与触发消息之前的归档增量。",
     category: "context",
     inputs: noInputs,
     outputs: [
@@ -211,7 +211,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         name: "messages",
         label: "消息列表",
         type: "messages",
-        description: "最近聊天消息。",
+        description: "摘要游标之后、当前消息之前的上下文消息。",
       },
       {
         name: "count",
@@ -238,23 +238,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         description: "摘要已经覆盖到的稳定消息索引。",
       },
     ],
-    config: [
-      {
-        name: "messageLimit",
-        label: "消息条数",
-        type: "number",
-        required: true,
-        description: "1 到 50 条。",
-      },
-      {
-        name: "characterLimit",
-        label: "字符上限",
-        type: "number",
-        required: true,
-        description:
-          "上下文读取阶段的严格字符上限；只保留完整消息，不截断单条消息。",
-      },
-    ],
+    config: [],
   },
   {
     type: "ai-chat",

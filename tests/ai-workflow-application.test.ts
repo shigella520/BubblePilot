@@ -219,13 +219,7 @@ describe("AI workflow", () => {
           id: "load-history",
           type: "load-context",
           version: 1,
-          config: {
-            messageLimit: 3,
-            characterLimit: 1_000,
-            includeFromMe: true,
-            summaryEnabled: false,
-            compressionBatchSize: 10,
-          },
+          config: {},
           onSuccess: "map-question",
           onFailure: "failed",
         },
@@ -484,7 +478,9 @@ describe("AI workflow", () => {
           '<upstream_input source="ask-ai.text">\nFictional AI answer\n</upstream_input>',
       },
     ]);
-    expect(JSON.stringify(aiClient.requests)).not.toContain(
+    // Node-level message limits are no longer applied; the global context
+    // reader owns retention and includes the complete historical increment.
+    expect(JSON.stringify(aiClient.requests)).toContain(
       "outside-user@example.test",
     );
     expect(replyGateway.commands).toMatchObject([
@@ -563,13 +559,7 @@ describe("AI workflow", () => {
           id: "load-history",
           type: "load-context",
           version: 1,
-          config: {
-            messageLimit: 20,
-            characterLimit: 20_000,
-            includeFromMe: true,
-            summaryEnabled: false,
-            compressionBatchSize: 10,
-          },
+          config: {},
           onSuccess: "ask-ai",
           onFailure: "done",
         },
@@ -744,13 +734,7 @@ describe("AI workflow", () => {
           id: "load-history",
           type: "load-context",
           version: 1,
-          config: {
-            messageLimit: 20,
-            characterLimit: 20_000,
-            includeFromMe: true,
-            summaryEnabled: false,
-            compressionBatchSize: 10,
-          },
+          config: {},
           onSuccess: "ask-ai",
           onFailure: "done",
         },

@@ -1,4 +1,5 @@
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
+import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
 import type { TriggerConditions } from "./trigger-matcher.js";
 import type {
   WorkflowDefinition,
@@ -27,6 +28,7 @@ export interface WorkflowVersionRecord {
   definition: WorkflowDefinition;
   createdAt: string;
   publishedAt: string | null;
+  needsResave?: boolean;
 }
 
 export interface WorkflowRecord {
@@ -230,6 +232,7 @@ export interface WorkflowRepository {
   createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
+    summaryTrigger?: ConversationSummaryTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }>;
   createManualRetry(
     executionId: string,

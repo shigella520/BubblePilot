@@ -923,19 +923,20 @@ export class PostgresAiRepository implements AiRepository {
       }
       const workflowReference = await client.query(
         `SELECT 1
-         FROM workflow_versions w
-         INNER JOIN workflows workflow
-           ON workflow.published_version_id = w.id
-          AND workflow.status = 'active'
-          AND workflow.deleted_at IS NULL
-         CROSS JOIN LATERAL jsonb_array_elements(w.definition -> 'nodes') AS node
-         WHERE (
-           (node ->> 'type' = 'ai-chat'
-             AND node -> 'config' ->> 'providerRouteId' = $1)
-           OR
-           (node ->> 'type' = 'load-context'
-             AND node -> 'config' ->> 'summaryEnabled' = 'true'
-             AND node -> 'config' ->> 'summaryProviderRouteId' = $1)
+         WHERE EXISTS (
+           SELECT 1
+           FROM workflow_versions w
+           INNER JOIN workflows workflow
+             ON workflow.published_version_id = w.id
+            AND workflow.status = 'active'
+            AND workflow.deleted_at IS NULL
+           CROSS JOIN LATERAL jsonb_array_elements(w.definition -> 'nodes') AS node
+           WHERE node ->> 'type' = 'ai-chat'
+             AND node -> 'config' ->> 'providerRouteId' = $1
+         )
+         OR EXISTS (
+           SELECT 1 FROM conversation_summary_settings settings
+           WHERE settings.provider_route_id = $1
          )
          LIMIT 1`,
         [routeId],

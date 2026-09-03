@@ -115,9 +115,11 @@ const compressionListQuerySchema = pageQuerySchema.extend({
     .enum(["queued", "running", "succeeded", "failed", "superseded"])
     .optional(),
   reason: z
-    .enum(["initial-catchup", "message-threshold", "safety-limit"])
+    .enum(["initial-catchup", "message-threshold", "policy-rebuild"])
     .optional(),
   provider: z.string().max(100).optional(),
+  startedFrom: z.string().datetime({ offset: true }).optional(),
+  startedTo: z.string().datetime({ offset: true }).optional(),
 });
 
 const workflowExecutionStatusSchema = z.enum([
@@ -359,8 +361,10 @@ export interface ApplicationOptions {
         id?: string;
         chatId?: string;
         status?: "queued" | "running" | "succeeded" | "failed" | "superseded";
-        reason?: "initial-catchup" | "message-threshold" | "safety-limit";
+        reason?: "initial-catchup" | "message-threshold" | "policy-rebuild";
         provider?: string;
+        startedFrom?: Date;
+        startedTo?: Date;
       }): Promise<readonly ConversationCompressionView[]>;
     };
     conversationSummary?: ConversationContextService;
@@ -646,6 +650,9 @@ export function buildApplication(
     options.imageSummary?.scheduler,
     options.workflow?.conversationSummary,
     options.ai?.summarySettings,
+    options.workflow?.summaryWorker === undefined
+      ? undefined
+      : () => options.workflow?.summaryWorker?.trigger(),
   );
   const adminRateLimiter = new FixedWindowRateLimiter(
     config.adminRateLimitMax,
@@ -793,9 +800,19 @@ export function buildApplication(
       if (options.workflow === undefined) {
         decision = "not-evaluated";
       } else {
-        automation = await (options.workflow.dispatcher?.dispatch(
-          outcome.automationEnvelope,
-        ) ?? options.workflow.engine.handleMessage(outcome.automationEnvelope));
+        const dispatchOptions =
+          outcome.summaryTrigger === undefined
+            ? undefined
+            : { summaryTrigger: outcome.summaryTrigger };
+        automation = await (options.workflow.dispatcher === undefined
+          ? options.workflow.engine.handleMessage(
+              outcome.automationEnvelope,
+              dispatchOptions,
+            )
+          : options.workflow.dispatcher.dispatch(
+              outcome.automationEnvelope,
+              dispatchOptions,
+            ));
         decision =
           automation.activeTriggerCount === 0
             ? "no-active-triggers"
@@ -1704,6 +1721,24 @@ export function buildApplication(
             "Summary settings changed; refresh before retrying.",
             409,
           );
+        if (
+          result.value.enabled &&
+          options.workflow?.conversationSummary !== undefined
+        ) {
+          void options.workflow.conversationSummary
+            .enqueuePolicyRebuild({
+              routeId: result.value.providerRouteId,
+              baseMessageWindow: result.value.baseMessageWindow,
+              redundancyMessageWindow: result.value.redundancyMessageWindow,
+              includeFromMe: result.value.includeFromMe,
+              timeZone: result.value.timeZone,
+              summaryPolicyVersion: result.value.policyVersion ?? 1,
+              correlationId: request.id,
+            })
+            .catch(() => {
+              // Rebuild is best-effort; queued messages will retry on arrival.
+            });
+        }
         return { data: result.value };
       },
     );
@@ -2076,7 +2111,7 @@ export function buildApplication(
           format: "BubblePilotWorkflow bubblepilot.io/v1 JSON",
           rules: [
             "Use spec for workflow logic and bindings for external AI routes and chats.",
-            "Use providerRouteRef, summaryProviderRouteRef and chatRefs in node config; never invent instance IDs.",
+            "Use providerRouteRef and chatRefs in node config; summary Provider is global and never belongs in a node; never invent instance IDs.",
             "Keep node IDs stable, connect every node, and keep the graph acyclic.",
             "set-variable is deprecated; use render-text with Context paths for new workflows.",
             "Import always creates an unpublished candidate version.",
@@ -2757,11 +2792,61 @@ export function buildApplication(
             ...(query.provider === undefined
               ? {}
               : { provider: query.provider }),
+            ...(query.startedFrom === undefined
+              ? {}
+              : { startedFrom: new Date(query.startedFrom) }),
+            ...(query.startedTo === undefined
+              ? {}
+              : { startedTo: new Date(query.startedTo) }),
           })) ?? [];
         return cursorPage(items, query.limit, (item) => ({
           timestamp: item.startedAt,
           id: item.id,
         }));
+      },
+    );
+
+    application.post(
+      "/api/v1/conversation-compressions/rebuild",
+      {
+        preHandler: requireSensitive(
+          "conversation-summary.rebuild",
+          "conversation-summary",
+        ),
+      },
+      async (request) => {
+        const summarySettings = options.ai?.summarySettings;
+        const conversationSummary = options.workflow?.conversationSummary;
+        if (
+          summarySettings === undefined ||
+          conversationSummary === undefined
+        ) {
+          throw new ApplicationError(
+            "AI_SUMMARY_SETTINGS_UNAVAILABLE",
+            "Summary settings are unavailable.",
+            503,
+          );
+        }
+        const settings = await summarySettings.view();
+        if (!settings.enabled || settings.providerRouteId === "") {
+          throw new ApplicationError(
+            "AI_SUMMARY_NOT_ENABLED",
+            "Enable a summary Provider route before rebuilding summaries.",
+            409,
+          );
+        }
+        const queued = await conversationSummary.enqueuePolicyRebuild({
+          routeId: settings.providerRouteId,
+          baseMessageWindow: settings.baseMessageWindow,
+          redundancyMessageWindow: settings.redundancyMessageWindow,
+          includeFromMe: settings.includeFromMe,
+          timeZone: settings.timeZone,
+          summaryPolicyVersion: settings.policyVersion,
+          correlationId: request.id,
+        });
+        return {
+          data: { queued, summaryPolicyVersion: settings.policyVersion },
+        };
       },
     );
 
@@ -3051,6 +3136,38 @@ export function buildApplication(
         timestamp: message.sentAt,
         id: message.id,
       }));
+    },
+  );
+
+  application.delete(
+    "/api/v1/chats/:chatId/summary",
+    {
+      preHandler: requireSensitive(
+        "conversation-summary.clear",
+        "conversation-summary",
+      ),
+    },
+    async (request) => {
+      const parameters = chatParametersSchema.parse(request.params);
+      const conversationSummary = options.workflow?.conversationSummary;
+      if (conversationSummary === undefined) {
+        throw new ApplicationError(
+          "AI_SUMMARY_SETTINGS_UNAVAILABLE",
+          "Summary state is unavailable.",
+          503,
+        );
+      }
+      const result = await conversationSummary.clearChatSummary(
+        parameters.chatId,
+      );
+      if (result === null) {
+        throw new ApplicationError(
+          "CHAT_NOT_FOUND",
+          "The chat does not exist.",
+          404,
+        );
+      }
+      return { data: { chatId: parameters.chatId, ...result } };
     },
   );
 

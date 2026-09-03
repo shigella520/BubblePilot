@@ -262,6 +262,31 @@ paths:
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
+  /api/v1/chats/{chatId}/summary:
+    delete:
+      operationId: clearChatSummary
+      description: 二次验证后清理该聊天的派生摘要；原始消息不会删除，正在运行的摘要任务会被标记为 superseded。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: chatId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 摘要已清理并从空摘要 revision 重新开始。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /api/v1/chats/{chatId}/participants:
     get:
       operationId: getChatParticipants
@@ -1258,7 +1283,17 @@ paths:
         - bearerAuth: []
         - sessionAuth: []
       responses:
-        "200": { description: 返回全局对话摘要配置。 }
+        "200":
+          description: 返回全局对话摘要配置。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ConversationSummarySettingsView"
+                additionalProperties: false
     put:
       operationId: updateAiSummarySettings
       security:
@@ -1269,29 +1304,19 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                [
-                  enabled,
-                  includeFromMe,
-                  messageLimit,
-                  characterLimit,
-                  compressionBatchSize,
-                  providerRouteId,
-                  timeZone,
-                  expectedVersion,
-                ]
-              properties:
-                enabled: { type: boolean }
-                includeFromMe: { type: boolean, default: true }
-                messageLimit: { type: integer, minimum: 1, maximum: 50 }
-                characterLimit: { type: integer, minimum: 100, maximum: 20000 }
-                compressionBatchSize: { type: integer, minimum: 1, maximum: 50 }
-                providerRouteId: { type: string, format: uuid }
-                timeZone: { type: string }
-                expectedVersion: { type: integer, minimum: 0 }
+              $ref: "#/components/schemas/ConversationSummarySettingsUpdate"
       responses:
-        "200": { description: 已保存全局对话摘要配置。 }
+        "200":
+          description: 已保存全局对话摘要配置。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ConversationSummarySettingsView"
+                additionalProperties: false
         "409": { $ref: "#/components/responses/Error" }
         "503":
           $ref: "#/components/responses/Error"
@@ -1664,15 +1689,71 @@ paths:
           schema:
             {
               type: string,
-              enum: [initial-catchup, message-threshold, safety-limit],
+              enum: [initial-catchup, message-threshold, policy-rebuild],
             }
         - in: query
           name: provider
           schema: { type: string, maxLength: 100 }
+        - in: query
+          name: startedFrom
+          schema: { type: string, format: date-time }
+        - in: query
+          name: startedTo
+          schema: { type: string, format: date-time }
       responses:
         "200":
           description: 按开始时间倒序分页返回聊天级摘要压缩操作，不返回聊天正文或完整 Prompt。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ConversationCompression"
+                  page:
+                    type: object
+                    required: [nextCursor]
+                    properties:
+                      nextCursor:
+                        type: [string, "null"]
+                    additionalProperties: false
+                additionalProperties: false
         "401":
+          $ref: "#/components/responses/Error"
+  /api/v1/conversation-compressions/rebuild:
+    post:
+      operationId: rebuildConversationSummaries
+      description: 二次验证后按当前全局摘要策略为所有已监听聊天入队渐进重建任务。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 返回已入队任务数量和策略版本。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [queued, summaryPolicyVersion]
+                    properties:
+                      queued: { type: integer, minimum: 0 }
+                      summaryPolicyVersion: { type: integer, minimum: 1 }
+                    additionalProperties: false
+                additionalProperties: false
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
           $ref: "#/components/responses/Error"
   /api/v1/conversation-compressions/{compressionId}:
     get:
@@ -1690,6 +1771,15 @@ paths:
       responses:
         "200":
           description: 返回单次聊天级摘要压缩操作及脱敏诊断。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ConversationCompression"
+                additionalProperties: false
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/operations/status:
@@ -1916,6 +2006,183 @@ components:
         updatedAt:
           type: [string, "null"]
           format: date-time
+      additionalProperties: false
+    ConversationSummarySettingsUpdate:
+      type: object
+      required:
+        [
+          enabled,
+          includeFromMe,
+          baseMessageWindow,
+          characterLimit,
+          redundancyMessageWindow,
+          providerRouteId,
+          timeZone,
+          expectedVersion,
+        ]
+      properties:
+        enabled: { type: boolean }
+        includeFromMe: { type: boolean, default: true }
+        baseMessageWindow:
+          type: integer
+          minimum: 1
+          maximum: 50
+          description: 摘要提交后游标之后保留的原始消息数量。
+        characterLimit:
+          type: integer
+          minimum: 100
+          maximum: 20000
+          description: 上下文提取阶段的目标字符数；不限制下游 AI 请求。
+        redundancyMessageWindow:
+          type: integer
+          minimum: 1
+          maximum: 50
+          description: 达到基础窗口与冗余窗口之和时每次压缩的最早消息数量。
+        providerRouteId:
+          oneOf:
+            - type: string
+              format: uuid
+            - type: string
+              const: ""
+          description: 摘要 Provider Route；启用摘要时必须填写 UUID。
+        timeZone: { type: string, minLength: 1, maxLength: 100 }
+        expectedVersion: { type: integer, minimum: 0 }
+      additionalProperties: false
+    ConversationSummarySettingsView:
+      type: object
+      required:
+        [
+          enabled,
+          includeFromMe,
+          baseMessageWindow,
+          characterLimit,
+          redundancyMessageWindow,
+          providerRouteId,
+          timeZone,
+          source,
+          version,
+          policyVersion,
+          updatedAt,
+        ]
+      properties:
+        enabled: { type: boolean }
+        includeFromMe: { type: boolean }
+        baseMessageWindow: { type: integer, minimum: 1, maximum: 50 }
+        characterLimit: { type: integer, minimum: 100, maximum: 20000 }
+        redundancyMessageWindow: { type: integer, minimum: 1, maximum: 50 }
+        providerRouteId:
+          oneOf:
+            - type: string
+              format: uuid
+            - type: string
+              const: ""
+        timeZone: { type: string }
+        source: { type: string, enum: [defaults, database] }
+        version: { type: integer, minimum: 0 }
+        policyVersion: { type: integer, minimum: 1 }
+        updatedAt: { type: [string, "null"], format: date-time }
+      additionalProperties: false
+    ConversationCompression:
+      type: object
+      required:
+        - id
+        - chatId
+        - providerChatId
+        - chatDisplayName
+        - status
+        - fromMessageIndex
+        - throughMessageIndex
+        - triggerMessageIndex
+        - baseVersion
+        - outputVersion
+        - summaryPolicyVersion
+        - durationMs
+        - promptTokens
+        - completionTokens
+        - errorCode
+        - startedAt
+        - completedAt
+        - reason
+        - providerName
+        - model
+        - correlationId
+        - includeFromMe
+        - leaseOwner
+        - leaseExpiresAt
+      properties:
+        id: { type: string, format: uuid }
+        chatId: { type: string, format: uuid }
+        providerChatId: { type: string }
+        chatDisplayName: { type: [string, "null"] }
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, superseded]
+        fromMessageIndex: { type: string }
+        throughMessageIndex: { type: string }
+        triggerMessageIndex: { type: [string, "null"] }
+        baseVersion: { type: integer, minimum: 1 }
+        outputVersion: { type: [integer, "null"], minimum: 1 }
+        summaryPolicyVersion: { type: integer, minimum: 1 }
+        durationMs: { type: [integer, "null"], minimum: 0 }
+        promptTokens: { type: [integer, "null"], minimum: 0 }
+        completionTokens: { type: [integer, "null"], minimum: 0 }
+        errorCode: { type: [string, "null"] }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        reason:
+          type: string
+          enum: [initial-catchup, message-threshold, policy-rebuild]
+        providerName: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+        correlationId: { type: [string, "null"], format: uuid }
+        includeFromMe: { type: boolean }
+        leaseOwner: { type: [string, "null"] }
+        leaseExpiresAt: { type: [string, "null"], format: date-time }
+        statusEvents:
+          type: array
+          items:
+            type: object
+            required: [status, errorCode, createdAt]
+            properties:
+              status:
+                type: string
+                enum: [queued, running, succeeded, failed, superseded]
+              errorCode: { type: [string, "null"] }
+              createdAt: { type: string, format: date-time }
+            additionalProperties: false
+        providerAttempt:
+          oneOf:
+            - type: "null"
+            - type: object
+              required:
+                - id
+                - status
+                - durationMs
+                - errorCode
+                - promptTokens
+                - completionTokens
+              properties:
+                id: { type: string, format: uuid }
+                status: { type: string }
+                durationMs: { type: integer, minimum: 0 }
+                errorCode: { type: [string, "null"] }
+                promptTokens: { type: [integer, "null"], minimum: 0 }
+                completionTokens: { type: [integer, "null"], minimum: 0 }
+              additionalProperties: false
+        workflowExecutions:
+          type: array
+          items:
+            type: object
+            required:
+              [id, workflowId, workflowName, status, createdAt, summaryVersion]
+            properties:
+              id: { type: string, format: uuid }
+              workflowId: { type: string, format: uuid }
+              workflowName: { type: string }
+              status: { type: string }
+              createdAt: { type: string, format: date-time }
+              summaryVersion: { type: [integer, "null"], minimum: 1 }
+            additionalProperties: false
       additionalProperties: false
     InboundEventSummary:
       type: object

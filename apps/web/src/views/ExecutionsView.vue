@@ -59,8 +59,10 @@ interface ConversationCompression {
   status: string;
   fromMessageIndex: string;
   throughMessageIndex: string;
+  triggerMessageIndex: string | null;
   baseVersion: number;
   outputVersion: number | null;
+  summaryPolicyVersion: number;
   durationMs: number | null;
   promptTokens: number | null;
   completionTokens: number | null;
@@ -69,8 +71,32 @@ interface ConversationCompression {
   providerName: string | null;
   model: string | null;
   correlationId: string | null;
+  includeFromMe: boolean;
+  leaseOwner: string | null;
+  leaseExpiresAt: string | null;
   startedAt: string;
   completedAt: string | null;
+  statusEvents?: Array<{
+    status: string;
+    errorCode: string | null;
+    createdAt: string;
+  }>;
+  providerAttempt?: {
+    id: string;
+    status: string;
+    durationMs: number;
+    errorCode: string | null;
+    promptTokens: number | null;
+    completionTokens: number | null;
+  } | null;
+  workflowExecutions?: Array<{
+    id: string;
+    workflowId: string;
+    workflowName: string;
+    status: string;
+    createdAt: string;
+    summaryVersion: number | null;
+  }>;
 }
 interface ExecutionDetail extends Execution {
   correlationId: string;
@@ -252,6 +278,8 @@ const messageIsError = ref(false);
 const recoveryBusy = ref(false);
 const recoveryOnly = ref(false);
 const detailLoadingId = ref<string | null>(null);
+const compressionDetail = ref<ConversationCompression | null>(null);
+const compressionDetailLoadingId = ref<string | null>(null);
 const detailDialog = ref<HTMLElement | null>(null);
 const usage = ref<AiUsageReport | null>(null);
 const usageHours = ref<AiUsageReport["hours"]>(24);
@@ -266,6 +294,12 @@ let applicationRoot: HTMLElement | null = null;
 let applicationRootWasInert = false;
 const route = useRoute();
 const session = useSessionStore();
+const compressionStatusFilter = ref("");
+const compressionReasonFilter = ref("");
+const compressionProviderFilter = ref("");
+const compressionChatFilter = ref("");
+const compressionStartedFrom = ref("");
+const compressionStartedTo = ref("");
 const executionPager = useCursorPager<Execution>((cursor) => {
   const query = new URLSearchParams({ limit: "10" });
   if (recoveryOnly.value) {
@@ -281,6 +315,21 @@ const auditPager = useCursorPager<AuditEvent>((cursor) => {
 });
 const compressionPager = useCursorPager<ConversationCompression>((cursor) => {
   const query = new URLSearchParams({ limit: "20" });
+  if (compressionStatusFilter.value)
+    query.set("status", compressionStatusFilter.value);
+  if (compressionReasonFilter.value)
+    query.set("reason", compressionReasonFilter.value);
+  if (compressionProviderFilter.value)
+    query.set("provider", compressionProviderFilter.value);
+  if (compressionChatFilter.value)
+    query.set("chatId", compressionChatFilter.value);
+  if (compressionStartedFrom.value)
+    query.set(
+      "startedFrom",
+      new Date(compressionStartedFrom.value).toISOString(),
+    );
+  if (compressionStartedTo.value)
+    query.set("startedTo", new Date(compressionStartedTo.value).toISOString());
   if (cursor !== null) query.set("cursor", cursor);
   return apiPageRequest<ConversationCompression[]>(
     `/api/v1/conversation-compressions?${query}`,
@@ -409,6 +458,11 @@ async function loadUsage(): Promise<boolean> {
 }
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+}
+function openCompressionFromExecution(operationId: unknown) {
+  if (typeof operationId !== "string" || operationId.length === 0) return;
+  scrollToSection("compressions");
+  void inspectCompression(operationId);
 }
 const providerHealthLabels: Record<string, string> = {
   healthy: "健康",
@@ -570,6 +624,26 @@ async function inspect(id: string) {
     if (requestId === inspectRequestId) detailLoadingId.value = null;
   }
 }
+
+async function inspectCompression(id: string) {
+  if (!session.authenticated) return;
+  compressionDetailLoadingId.value = id;
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    compressionDetail.value = await apiRequest<ConversationCompression>(
+      `/api/v1/conversation-compressions/${id}`,
+    );
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    if (compressionDetailLoadingId.value === id) {
+      compressionDetailLoadingId.value = null;
+    }
+  }
+}
+
 function clearDetail() {
   inspectRequestId += 1;
   detailLoadingId.value = null;
@@ -740,6 +814,7 @@ watch(
     else {
       executionPager.clear();
       auditPager.clear();
+      compressionDetail.value = null;
       usage.value = null;
       clearDetail();
     }
@@ -786,7 +861,7 @@ function compressionReasonLabel(reason: string): string {
       {
         "initial-catchup": "初始追赶",
         "message-threshold": "消息阈值",
-        "safety-limit": "安全字符阈值",
+        "policy-rebuild": "策略重建",
       } as Record<string, string>
     )[reason] ?? reason
   );
@@ -1109,6 +1184,134 @@ function compressionReasonLabel(reason: string): string {
             <RefreshCw :size="16" />刷新
           </button>
         </div>
+        <div class="filter-row">
+          <label
+            >状态
+            <select
+              v-model="compressionStatusFilter"
+              @change="compressionPager.first()"
+            >
+              <option value="">全部</option>
+              <option value="queued">排队中</option>
+              <option value="running">处理中</option>
+              <option value="succeeded">成功</option>
+              <option value="failed">失败</option>
+              <option value="superseded">已替代</option>
+            </select>
+          </label>
+          <label
+            >原因
+            <select
+              v-model="compressionReasonFilter"
+              @change="compressionPager.first()"
+            >
+              <option value="">全部</option>
+              <option value="initial-catchup">初始追赶</option>
+              <option value="message-threshold">消息阈值</option>
+              <option value="policy-rebuild">策略重建</option>
+            </select>
+          </label>
+          <label
+            >Provider
+            <input
+              v-model="compressionProviderFilter"
+              placeholder="按 Provider 筛选"
+              @change="compressionPager.first()"
+            />
+          </label>
+          <label
+            >Chat ID
+            <input
+              v-model="compressionChatFilter"
+              placeholder="UUID"
+              @change="compressionPager.first()"
+            />
+          </label>
+          <label
+            >开始时间
+            <input
+              v-model="compressionStartedFrom"
+              type="datetime-local"
+              @change="compressionPager.first()"
+            />
+          </label>
+          <label
+            >结束时间
+            <input
+              v-model="compressionStartedTo"
+              type="datetime-local"
+              @change="compressionPager.first()"
+            />
+          </label>
+        </div>
+        <div
+          v-if="compressionDetail"
+          class="context-snapshot-card compression-detail-panel"
+        >
+          <div class="panel-head">
+            <div>
+              <strong>压缩详情 · {{ compressionDetail.id }}</strong>
+              <span class="keyline">
+                {{ compressionStatusLabel(compressionDetail.status) }} ·
+                {{ compressionDetail.fromMessageIndex }}–{{
+                  compressionDetail.throughMessageIndex
+                }}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="button tiny secondary"
+              @click="compressionDetail = null"
+            >
+              关闭
+            </button>
+          </div>
+          <div class="compression-detail">
+            <span class="keyline">
+              Chat
+              {{
+                compressionDetail.chatDisplayName ||
+                compressionDetail.providerChatId
+              }}
+              · 策略 v{{ compressionDetail.summaryPolicyVersion }} · 触发消息
+              {{ compressionDetail.triggerMessageIndex || "—" }}
+            </span>
+            <span class="keyline">
+              租约 {{ compressionDetail.leaseOwner || "—" }} ·
+              {{
+                compressionDetail.leaseExpiresAt
+                  ? new Date(compressionDetail.leaseExpiresAt).toLocaleString()
+                  : "无"
+              }}
+            </span>
+            <strong>状态变化</strong>
+            <span
+              v-for="event in compressionDetail.statusEvents ?? []"
+              :key="event.createdAt + event.status"
+              class="keyline"
+            >
+              {{ new Date(event.createdAt).toLocaleString() }} ·
+              {{ compressionStatusLabel(event.status) }} ·
+              {{ event.errorCode || "无错误" }}
+            </span>
+            <span v-if="compressionDetail.providerAttempt" class="keyline">
+              Provider Attempt {{ compressionDetail.providerAttempt.id }} ·
+              {{ compressionDetail.providerAttempt.status }} ·
+              {{ compressionDetail.providerAttempt.durationMs }} ms · Prompt
+              {{ compressionDetail.providerAttempt.promptTokens ?? "—" }} /
+              Completion
+              {{ compressionDetail.providerAttempt.completionTokens ?? "—" }}
+            </span>
+            <span
+              v-for="execution in compressionDetail.workflowExecutions ?? []"
+              :key="execution.id"
+              class="keyline"
+            >
+              工作流 {{ execution.workflowName }} · {{ execution.status }} ·
+              摘要 v{{ execution.summaryVersion ?? "—" }} · {{ execution.id }}
+            </span>
+          </div>
+        </div>
         <div class="table-shell">
           <table>
             <thead>
@@ -1117,15 +1320,16 @@ function compressionReasonLabel(reason: string): string {
                 <th>聊天</th>
                 <th>状态</th>
                 <th>原因</th>
-                <th>消息范围</th>
+                <th>消息范围 / 触发消息</th>
                 <th>版本</th>
                 <th>耗时</th>
                 <th>Provider / 错误</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!compressions.length">
-                <td colspan="8" class="empty-cell">暂无对话压缩操作</td>
+                <td colspan="9" class="empty-cell">暂无对话压缩操作</td>
               </tr>
               <tr v-for="item in compressions" :key="item.id">
                 <td>{{ new Date(item.startedAt).toLocaleString() }}</td>
@@ -1142,13 +1346,17 @@ function compressionReasonLabel(reason: string): string {
                 </td>
                 <td>{{ compressionReasonLabel(item.reason) }}</td>
                 <td class="mono">
-                  {{ item.fromMessageIndex }}–{{ item.throughMessageIndex }}
+                  {{ item.fromMessageIndex }}–{{ item.throughMessageIndex
+                  }}<br />
+                  触发 {{ item.triggerMessageIndex || "—" }}
                 </td>
                 <td>
                   v{{ item.baseVersion }} →
                   {{
-                    item.outputVersion === null ? "—" : `v${item.outputVersion}`
-                  }}
+                    item.outputVersion === null
+                      ? "—"
+                      : `v${item.outputVersion}`
+                  }}<br />策略 v{{ item.summaryPolicyVersion }}
                 </td>
                 <td>
                   {{ item.durationMs === null ? "—" : `${item.durationMs} ms` }}
@@ -1156,6 +1364,19 @@ function compressionReasonLabel(reason: string): string {
                 <td>
                   {{ item.providerName || "—" }} · {{ item.model || "—" }}<br />
                   <span class="keyline">{{ item.errorCode || "—" }}</span>
+                </td>
+                <td>
+                  <button
+                    class="button tiny secondary"
+                    :disabled="compressionDetailLoadingId === item.id"
+                    @click="inspectCompression(item.id)"
+                  >
+                    <Search :size="14" />{{
+                      compressionDetailLoadingId === item.id
+                        ? "加载中…"
+                        : "详情"
+                    }}
+                  </button>
                 </td>
               </tr>
             </tbody>
@@ -1292,6 +1513,21 @@ function compressionReasonLabel(reason: string): string {
         <div class="execution-detail-body">
           <section v-if="detail.contextSnapshot" class="context-snapshot-card">
             <h3>上下文读取</h3>
+            <button
+              v-if="
+                typeof detail.contextSnapshot.compressionOperationId ===
+                'string'
+              "
+              type="button"
+              class="button tiny secondary"
+              @click="
+                openCompressionFromExecution(
+                  detail.contextSnapshot.compressionOperationId,
+                )
+              "
+            >
+              查看对话压缩轨迹
+            </button>
             <pre>{{ JSON.stringify(detail.contextSnapshot, null, 2) }}</pre>
           </section>
           <div class="trace-columns">

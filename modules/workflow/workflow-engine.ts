@@ -19,6 +19,8 @@ import type {
   WorkflowRepository,
 } from "./workflow-repository.js";
 import { runtimeTimeZone } from "./context-time.js";
+import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
+import type { ConversationContextSnapshot } from "./conversation-context-service.js";
 
 export interface AutomationResult {
   executionIds: readonly string[];
@@ -27,7 +29,10 @@ export interface AutomationResult {
 }
 
 export interface MessageAutomation {
-  handleMessage(envelope: MessageEnvelope): Promise<AutomationResult>;
+  handleMessage(
+    envelope: MessageEnvelope,
+    options?: { summaryTrigger?: ConversationSummaryTrigger },
+  ): Promise<AutomationResult>;
   retryExecution(
     executionId: string,
     correlationId: string,
@@ -83,7 +88,10 @@ export class WorkflowEngine implements MessageAutomation {
     this.timeZone = options.timeZone ?? runtimeTimeZone();
   }
 
-  async handleMessage(envelope: MessageEnvelope): Promise<AutomationResult> {
+  async handleMessage(
+    envelope: MessageEnvelope,
+    options: { summaryTrigger?: ConversationSummaryTrigger } = {},
+  ): Promise<AutomationResult> {
     const bindings = await this.repository.listActiveTriggerBindings();
     const matched = bindings.filter(
       (binding) =>
@@ -98,6 +106,9 @@ export class WorkflowEngine implements MessageAutomation {
           const claimed = await this.repository.createExecution({
             envelope,
             trigger,
+            ...(options.summaryTrigger === undefined
+              ? {}
+              : { summaryTrigger: options.summaryTrigger }),
           });
           if (claimed.created) {
             await this.run(claimed.execution, trigger, envelope);
@@ -256,6 +267,9 @@ export class WorkflowEngine implements MessageAutomation {
             },
             participantIdentities,
             outputs,
+            contextSnapshot:
+              (execution.contextSnapshot as ConversationContextSnapshot | null) ??
+              null,
           });
           if (
             node.type === "load-context" &&
@@ -266,6 +280,8 @@ export class WorkflowEngine implements MessageAutomation {
               triggerMessageIndex:
                 execution.contextSnapshot?.triggerMessageIndex ?? null,
               summaryVersion: result.outputSummary.summaryVersion ?? null,
+              summaryPolicyVersion:
+                result.outputSummary.summaryPolicyVersion ?? null,
               summaryCoveredThroughIndex:
                 result.outputSummary.summaryCoveredThroughIndex ?? null,
               uncompressedMessageCount:
@@ -275,7 +291,16 @@ export class WorkflowEngine implements MessageAutomation {
                 result.outputSummary.contextIncomplete ?? false,
               truncatedMessageCount:
                 result.outputSummary.truncatedMessageCount ?? 0,
-              compressionOperationId: null,
+              usedPreviousSummary:
+                result.outputSummary.usedPreviousSummary ?? false,
+              compressionOperationId:
+                result.outputSummary.compressionOperationId ??
+                execution.contextSnapshot?.compressionOperationId ??
+                null,
+              summaryStateId:
+                execution.contextSnapshot?.stateId ??
+                execution.contextSnapshot?.summaryStateId ??
+                null,
             });
           }
           await this.repository.finishNodeExecution({

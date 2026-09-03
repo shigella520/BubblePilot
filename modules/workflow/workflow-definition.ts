@@ -105,32 +105,9 @@ const loadContextNodeSchema = z.object({
   id: nodeIdSchema,
   type: z.literal("load-context"),
   version: z.literal(1),
-  config: z
-    .object({
-      messageLimit: z.number().int().min(1).max(50).default(10),
-      characterLimit: z.number().int().min(100).max(20_000).default(6_000),
-      // Accepted only for one-time legacy definition migration; runtime ignores them.
-      includeFromMe: z.boolean().default(true),
-      summaryEnabled: z.boolean().default(false),
-      summaryProviderRouteId: z
-        .union([z.string().uuid(), z.literal("")])
-        .optional(),
-      compressionBatchSize: z.number().int().min(1).max(50).default(10),
-    })
-    .superRefine((config, context) => {
-      if (
-        config.summaryEnabled &&
-        (config.summaryProviderRouteId === undefined ||
-          config.summaryProviderRouteId === "")
-      ) {
-        context.addIssue({
-          code: "custom",
-          path: ["summaryProviderRouteId"],
-          message:
-            "A summary Provider route is required when history summary is enabled.",
-        });
-      }
-    }),
+  // Summary policy is global. load-context only controls graph flow and has no
+  // node-level retention or compression settings.
+  config: z.object({}).strict().default({}),
   onSuccess: nextNodeIdSchema,
   onFailure: nextNodeIdSchema.optional(),
 });
