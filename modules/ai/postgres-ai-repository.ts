@@ -932,14 +932,14 @@ export class PostgresAiRepository implements AiRepository {
             AND workflow.deleted_at IS NULL
            CROSS JOIN LATERAL jsonb_array_elements(w.definition -> 'nodes') AS node
            WHERE node ->> 'type' = 'ai-chat'
-             AND node -> 'config' ->> 'providerRouteId' = $1
+             AND node -> 'config' ->> 'providerRouteId' = $1::text
          )
          OR EXISTS (
            SELECT 1 FROM conversation_summary_settings settings
-           WHERE settings.provider_route_id = $1
+           WHERE settings.provider_route_id = $2::uuid
          )
          LIMIT 1`,
-        [routeId],
+        [routeId, routeId],
       );
       if (workflowReference.rowCount !== 0) {
         await client.query("ROLLBACK");
