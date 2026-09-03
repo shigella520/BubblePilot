@@ -68,7 +68,7 @@ export class IngestionService {
       this.conversationSummary !== undefined &&
       this.summarySettings !== undefined
     ) {
-      const settings = await this.summarySettings.resolve();
+      const settings = await this.summarySettings.view();
       if (settings.enabled && settings.providerRouteId !== "") {
         scheduleImageSummary(() =>
           this.conversationSummary!.enqueueForMessage({
@@ -80,6 +80,9 @@ export class IngestionService {
             characterLimit: settings.characterLimit,
             compressionBatchSize: settings.compressionBatchSize,
             timeZone: settings.timeZone,
+            summaryPolicyVersion: settings.policyVersion,
+            correlationId,
+            includeFromMe: settings.includeFromMe,
           }),
         );
       }

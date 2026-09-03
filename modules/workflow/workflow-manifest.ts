@@ -218,16 +218,6 @@ export function exportWorkflowManifest(input: {
       );
       delete config.providerRouteId;
     }
-    if (
-      node.type === "load-context" &&
-      typeof config.summaryProviderRouteId === "string" &&
-      config.summaryProviderRouteId !== ""
-    ) {
-      config.summaryProviderRouteRef = routeRef(config.summaryProviderRouteId, [
-        "text",
-      ]);
-      delete config.summaryProviderRouteId;
-    }
     if (node.type === "message-trigger" && Array.isArray(config.chatIds)) {
       config.chatRefs = config.chatIds
         .filter((id): id is string => typeof id === "string")
@@ -378,12 +368,6 @@ export function importWorkflowManifest(input: {
     if (typeof config.providerRouteRef === "string") {
       config.providerRouteId = selected.get(config.providerRouteRef);
       delete config.providerRouteRef;
-    }
-    if (typeof config.summaryProviderRouteRef === "string") {
-      config.summaryProviderRouteId = selected.get(
-        config.summaryProviderRouteRef,
-      );
-      delete config.summaryProviderRouteRef;
     }
     if (Array.isArray(config.chatRefs)) {
       config.chatIds = config.chatRefs.map((ref) => selected.get(String(ref)));

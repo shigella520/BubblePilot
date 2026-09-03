@@ -1273,6 +1273,7 @@ paths:
               required:
                 [
                   enabled,
+                  includeFromMe,
                   messageLimit,
                   characterLimit,
                   compressionBatchSize,
@@ -1282,6 +1283,7 @@ paths:
                 ]
               properties:
                 enabled: { type: boolean }
+                includeFromMe: { type: boolean, default: true }
                 messageLimit: { type: integer, minimum: 1, maximum: 50 }
                 characterLimit: { type: integer, minimum: 100, maximum: 20000 }
                 compressionBatchSize: { type: integer, minimum: 1, maximum: 50 }
@@ -1647,6 +1649,26 @@ paths:
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
+        - in: query
+          name: chatId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: status
+          schema:
+            {
+              type: string,
+              enum: [queued, running, succeeded, failed, superseded],
+            }
+        - in: query
+          name: reason
+          schema:
+            {
+              type: string,
+              enum: [initial-catchup, message-threshold, safety-limit],
+            }
+        - in: query
+          name: provider
+          schema: { type: string, maxLength: 100 }
       responses:
         "200":
           description: 按开始时间倒序分页返回聊天级摘要压缩操作，不返回聊天正文或完整 Prompt。

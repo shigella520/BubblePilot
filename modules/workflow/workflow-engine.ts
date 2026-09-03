@@ -257,6 +257,27 @@ export class WorkflowEngine implements MessageAutomation {
             participantIdentities,
             outputs,
           });
+          if (
+            node.type === "load-context" &&
+            result.outputSummary !== undefined
+          ) {
+            await this.repository.recordContextSnapshot?.(execution.id, {
+              chatId: envelope.chat.providerChatId,
+              triggerMessageIndex:
+                execution.contextSnapshot?.triggerMessageIndex ?? null,
+              summaryVersion: result.outputSummary.summaryVersion ?? null,
+              summaryCoveredThroughIndex:
+                result.outputSummary.summaryCoveredThroughIndex ?? null,
+              uncompressedMessageCount:
+                result.outputSummary.uncompressedMessageCount ?? null,
+              contextCharacters: result.outputSummary.contextCharacters ?? null,
+              contextIncomplete:
+                result.outputSummary.contextIncomplete ?? false,
+              truncatedMessageCount:
+                result.outputSummary.truncatedMessageCount ?? 0,
+              compressionOperationId: null,
+            });
+          }
           await this.repository.finishNodeExecution({
             nodeExecutionId,
             status: result.status,

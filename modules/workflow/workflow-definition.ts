@@ -109,6 +109,7 @@ const loadContextNodeSchema = z.object({
     .object({
       messageLimit: z.number().int().min(1).max(50).default(10),
       characterLimit: z.number().int().min(100).max(20_000).default(6_000),
+      // Accepted only for one-time legacy definition migration; runtime ignores them.
       includeFromMe: z.boolean().default(true),
       summaryEnabled: z.boolean().default(false),
       summaryProviderRouteId: z

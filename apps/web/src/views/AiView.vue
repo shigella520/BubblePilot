@@ -97,6 +97,7 @@ interface ImageInputSettings {
 }
 interface SummarySettings {
   enabled: boolean;
+  includeFromMe: boolean;
   messageLimit: number;
   characterLimit: number;
   compressionBatchSize: number;
@@ -160,6 +161,7 @@ const summarySettings = ref<SummarySettings | null>(null);
 const summarySettingsBusy = ref(false);
 const summarySettingsForm = reactive({
   enabled: false,
+  includeFromMe: true,
   messageLimit: 10,
   characterLimit: 6000,
   compressionBatchSize: 10,
@@ -961,6 +963,12 @@ onMounted(load);
             <label
               ><span>启用摘要压缩</span
               ><input v-model="summarySettingsForm.enabled" type="checkbox"
+            /></label>
+            <label
+              ><span>包含机器人消息</span
+              ><input
+                v-model="summarySettingsForm.includeFromMe"
+                type="checkbox"
             /></label>
             <label
               ><span>保留原始消息数</span

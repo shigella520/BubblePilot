@@ -252,35 +252,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         type: "number",
         required: true,
         description:
-          "压缩后的目标字符数；压缩批次内可临时增长，绝对上限为 32,000 字符。",
-      },
-      {
-        name: "includeFromMe",
-        label: "包含自己消息",
-        type: "boolean",
-        description: "是否包含机器人发送的消息。",
-      },
-      {
-        name: "summaryEnabled",
-        label: "启用历史摘要",
-        type: "boolean",
-        description: "用增量摘要保留近期窗口之前的重要历史；默认关闭。",
-      },
-      {
-        name: "summaryProviderRouteId",
-        label: "摘要 Provider 路由",
-        type: "select",
-        required: true,
-        visibleWhen: { field: "summaryEnabled", equals: true },
-        description: "只用于生成增量历史摘要，不影响下游 AI 节点路由。",
-      },
-      {
-        name: "compressionBatchSize",
-        label: "单次压缩消息数",
-        type: "number",
-        visibleWhen: { field: "summaryEnabled", equals: true },
-        description:
-          "压缩周期包含的消息块数量；周期内只追加，到达边界后压缩最早一批。",
+          "上下文读取阶段的严格字符上限；只保留完整消息，不截断单条消息。",
       },
     ],
   },

@@ -2,11 +2,13 @@ import { z } from "zod";
 
 export interface SummaryRuntimeSettings {
   enabled: boolean;
+  includeFromMe: boolean;
   messageLimit: number;
   characterLimit: number;
   compressionBatchSize: number;
   providerRouteId: string;
   timeZone: string;
+  policyVersion?: number;
 }
 
 export interface SummarySettingsView extends SummaryRuntimeSettings {
@@ -18,6 +20,7 @@ export interface SummarySettingsView extends SummaryRuntimeSettings {
 
 export const summarySettingsUpdateSchema = z.object({
   enabled: z.boolean(),
+  includeFromMe: z.boolean().default(true),
   messageLimit: z.number().int().min(1).max(50),
   characterLimit: z.number().int().min(100).max(20_000),
   compressionBatchSize: z.number().int().min(1).max(50),

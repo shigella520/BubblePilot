@@ -8,6 +8,7 @@ import type { SummarySettingsUpdate } from "./summary-settings-types.js";
 
 interface Row {
   enabled: boolean;
+  include_from_me: boolean;
   message_limit: number;
   character_limit: number;
   compression_batch_size: number;
@@ -18,10 +19,11 @@ interface Row {
   updated_at: Date;
 }
 const cols =
-  "enabled, message_limit, character_limit, compression_batch_size, provider_route_id, time_zone, version, policy_version, updated_at";
+  "enabled, include_from_me, message_limit, character_limit, compression_batch_size, provider_route_id, time_zone, version, policy_version, updated_at";
 function map(row: Row): SummarySettingsRecord {
   return {
     enabled: row.enabled,
+    includeFromMe: row.include_from_me,
     messageLimit: row.message_limit,
     characterLimit: row.character_limit,
     compressionBatchSize: row.compression_batch_size,
@@ -56,6 +58,7 @@ export class PostgresSummarySettingsRepository implements SummarySettingsReposit
   async save(input: SummarySettingsUpdate) {
     const values = [
       input.enabled,
+      input.includeFromMe,
       input.messageLimit,
       input.characterLimit,
       input.compressionBatchSize,
@@ -65,11 +68,11 @@ export class PostgresSummarySettingsRepository implements SummarySettingsReposit
     const result =
       input.expectedVersion === 0
         ? await this.pool.query<Row>(
-            `INSERT INTO conversation_summary_settings (id, enabled, message_limit, character_limit, compression_batch_size, provider_route_id, time_zone) VALUES (1,$1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING RETURNING ${cols}`,
+            `INSERT INTO conversation_summary_settings (id, enabled, include_from_me, message_limit, character_limit, compression_batch_size, provider_route_id, time_zone) VALUES (1,$1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING RETURNING ${cols}`,
             values,
           )
         : await this.pool.query<Row>(
-            `UPDATE conversation_summary_settings SET enabled=$1,message_limit=$2,character_limit=$3,compression_batch_size=$4,provider_route_id=$5,time_zone=$6,version=version+1,policy_version=policy_version+1,updated_at=NOW() WHERE id=1 AND version=$7 RETURNING ${cols}`,
+            `UPDATE conversation_summary_settings SET enabled=$1,include_from_me=$2,message_limit=$3,character_limit=$4,compression_batch_size=$5,provider_route_id=$6,time_zone=$7,version=version+1,policy_version=policy_version+1,updated_at=NOW() WHERE id=1 AND version=$8 RETURNING ${cols}`,
             [...values, input.expectedVersion],
           );
     return result.rows[0]

@@ -16,7 +16,11 @@ import type { WebSearchSettingsService } from "../modules/ai/web-search-settings
 import { webSearchSettingsUpdateSchema } from "../modules/ai/web-search-settings-types.js";
 import type { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
 import type { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
-import type { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
+import type {
+  ConversationContextService,
+  ConversationSummaryWorker,
+  ConversationCompressionView,
+} from "../modules/workflow/conversation-context-service.js";
 import { summarySettingsUpdateSchema } from "../modules/workflow/summary-settings-types.js";
 import { imageInputSettingsUpdateSchema } from "../modules/ai/image-input-settings-types.js";
 import type { NativeImageInputService } from "../modules/ai/native-image-input.js";
@@ -104,6 +108,16 @@ import { readBearerToken, secretsEqual } from "./security.js";
 const pageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   cursor: z.string().min(1).optional(),
+});
+const compressionListQuerySchema = pageQuerySchema.extend({
+  chatId: z.string().uuid().optional(),
+  status: z
+    .enum(["queued", "running", "succeeded", "failed", "superseded"])
+    .optional(),
+  reason: z
+    .enum(["initial-catchup", "message-threshold", "safety-limit"])
+    .optional(),
+  provider: z.string().max(100).optional(),
 });
 
 const workflowExecutionStatusSchema = z.enum([
@@ -343,14 +357,14 @@ export interface ApplicationOptions {
         limit: number;
         cursor?: { timestamp: Date; id: string };
         id?: string;
-      }): Promise<
-        readonly {
-          id: string;
-          startedAt: string;
-        }[]
-      >;
+        chatId?: string;
+        status?: "queued" | "running" | "succeeded" | "failed" | "superseded";
+        reason?: "initial-catchup" | "message-threshold" | "safety-limit";
+        provider?: string;
+      }): Promise<readonly ConversationCompressionView[]>;
     };
     conversationSummary?: ConversationContextService;
+    summaryWorker?: ConversationSummaryWorker;
   };
   dataExport?: {
     repository: DataExportRepository;
@@ -644,6 +658,7 @@ export function buildApplication(
   application.addHook("onReady", () => {
     options.messageRetention?.start();
     options.imageSummary?.worker.start();
+    options.workflow?.summaryWorker?.start();
   });
   const fingerprint = (request: FastifyRequest): string =>
     sha256(
@@ -2453,11 +2468,7 @@ export function buildApplication(
         >();
         for (const node of candidate?.definition.nodes ?? []) {
           const routeId =
-            node.type === "ai-chat"
-              ? node.config.providerRouteId
-              : node.type === "load-context" && node.config.summaryEnabled
-                ? node.config.summaryProviderRouteId
-                : undefined;
+            node.type === "ai-chat" ? node.config.providerRouteId : undefined;
           if (routeId === undefined) continue;
           const policy =
             node.type === "ai-chat"
@@ -2734,12 +2745,18 @@ export function buildApplication(
       "/api/v1/conversation-compressions",
       { preHandler: requireAdmin },
       async (request) => {
-        const query = pageQuerySchema.parse(request.query);
+        const query = compressionListQuerySchema.parse(request.query);
         const cursor = decodeCursor(query.cursor);
         const items =
           (await options.workflow?.contextState?.listCompressions?.({
             limit: query.limit + 1,
             ...(cursor === null ? {} : { cursor }),
+            ...(query.chatId === undefined ? {} : { chatId: query.chatId }),
+            ...(query.status === undefined ? {} : { status: query.status }),
+            ...(query.reason === undefined ? {} : { reason: query.reason }),
+            ...(query.provider === undefined
+              ? {}
+              : { provider: query.provider }),
           })) ?? [];
         return cursorPage(items, query.limit, (item) => ({
           timestamp: item.startedAt,
@@ -3039,6 +3056,7 @@ export function buildApplication(
 
   application.addHook("onClose", async () => {
     await options.imageSummary?.worker.stop();
+    await options.workflow?.summaryWorker?.stop();
     await options.messageRetention?.stop();
     await Promise.all([
       repository.close(),

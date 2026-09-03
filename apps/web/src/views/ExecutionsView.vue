@@ -49,6 +49,7 @@ interface Execution {
   cachedPromptTokens: number | null;
   cacheEligiblePromptTokens: number;
   cacheHitRate: number | null;
+  contextSnapshot: Record<string, unknown> | null;
 }
 interface ConversationCompression {
   id: string;
@@ -64,6 +65,10 @@ interface ConversationCompression {
   promptTokens: number | null;
   completionTokens: number | null;
   errorCode: string | null;
+  reason: string;
+  providerName: string | null;
+  model: string | null;
+  correlationId: string | null;
   startedAt: string;
   completedAt: string | null;
 }
@@ -765,12 +770,25 @@ function compressionStatusLabel(status: string): string {
   return (
     (
       {
+        queued: "排队中",
         running: "处理中",
         succeeded: "成功",
         failed: "失败",
         superseded: "已替代",
       } as Record<string, string>
     )[status] ?? status
+  );
+}
+
+function compressionReasonLabel(reason: string): string {
+  return (
+    (
+      {
+        "initial-catchup": "初始追赶",
+        "message-threshold": "消息阈值",
+        "safety-limit": "安全字符阈值",
+      } as Record<string, string>
+    )[reason] ?? reason
   );
 }
 </script>
@@ -1102,7 +1120,7 @@ function compressionStatusLabel(status: string): string {
                 <th>消息范围</th>
                 <th>版本</th>
                 <th>耗时</th>
-                <th>错误</th>
+                <th>Provider / 错误</th>
               </tr>
             </thead>
             <tbody>
@@ -1122,7 +1140,7 @@ function compressionStatusLabel(status: string): string {
                     compressionStatusLabel(item.status)
                   }}</span>
                 </td>
-                <td>消息阈值</td>
+                <td>{{ compressionReasonLabel(item.reason) }}</td>
                 <td class="mono">
                   {{ item.fromMessageIndex }}–{{ item.throughMessageIndex }}
                 </td>
@@ -1135,7 +1153,10 @@ function compressionStatusLabel(status: string): string {
                 <td>
                   {{ item.durationMs === null ? "—" : `${item.durationMs} ms` }}
                 </td>
-                <td>{{ item.errorCode || "—" }}</td>
+                <td>
+                  {{ item.providerName || "—" }} · {{ item.model || "—" }}<br />
+                  <span class="keyline">{{ item.errorCode || "—" }}</span>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -1269,6 +1290,10 @@ function compressionStatusLabel(status: string): string {
           </div>
         </header>
         <div class="execution-detail-body">
+          <section v-if="detail.contextSnapshot" class="context-snapshot-card">
+            <h3>上下文读取</h3>
+            <pre>{{ JSON.stringify(detail.contextSnapshot, null, 2) }}</pre>
+          </section>
           <div class="trace-columns">
             <section>
               <h3>节点轨迹</h3>

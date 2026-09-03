@@ -36,7 +36,10 @@ import { createDefaultNodeRegistry } from "../modules/workflow/node-registry.js"
 import { InProcessWorkflowExecutionDispatcher } from "../modules/workflow/execution-dispatcher.js";
 import { PostgresWorkflowRepository } from "../modules/workflow/postgres-workflow-repository.js";
 import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
-import { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
+import {
+  ConversationContextService,
+  ConversationSummaryWorker,
+} from "../modules/workflow/conversation-context-service.js";
 import { PostgresSummarySettingsRepository } from "../modules/workflow/postgres-summary-settings-repository.js";
 import { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
 
@@ -167,12 +170,18 @@ const summarySettings = new SummarySettingsService(
   ),
   {
     enabled: false,
+    includeFromMe: true,
     messageLimit: 10,
     characterLimit: 6000,
     compressionBatchSize: 10,
     providerRouteId: "",
     timeZone: "UTC",
   },
+);
+const conversationSummaryWorker = new ConversationSummaryWorker(
+  conversationContext,
+  async () => (await summarySettings.resolve()).providerRouteId,
+  async () => (await summarySettings.resolve()).timeZone,
 );
 const messageRetention =
   config.messageRetentionDays > 0
@@ -242,6 +251,7 @@ const application = buildApplication(config, repository, {
     dispatcher: workflowDispatcher,
     contextState: conversationContext,
     conversationSummary: conversationContext,
+    summaryWorker: conversationSummaryWorker,
   },
   dataExport: {
     repository: dataExportRepository,

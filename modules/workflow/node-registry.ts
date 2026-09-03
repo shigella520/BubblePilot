@@ -449,8 +449,9 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             characterLimit:
               globalSummary?.characterLimit ?? node.config.characterLimit,
             compressionBatchSize: globalSummary?.compressionBatchSize ?? 10,
-            includeFromMe: node.config.includeFromMe,
+            includeFromMe: globalSummary?.includeFromMe ?? true,
             timeZone: context.timeZone,
+            summaryPolicyVersion: globalSummary?.policyVersion ?? 1,
           })
         : undefined;
       if (summaryEnabled && summarized === undefined) {
@@ -463,7 +464,7 @@ class LoadContextNodeHandler extends BaseNodeHandler {
           {
             limit: node.config.messageLimit,
             maxCharacters: node.config.characterLimit,
-            includeFromMe: node.config.includeFromMe,
+            includeFromMe: globalSummary?.includeFromMe ?? true,
             beforeProviderMessageId: context.envelope.message.providerMessageId,
           },
         ));
@@ -527,7 +528,6 @@ class LoadContextNodeHandler extends BaseNodeHandler {
           ),
           includesSentMessages: messages.some((message) => message.isFromMe),
           participantIdentityCount: participants.length,
-          summaryEnabled,
           summaryCharacters: summarized?.summary.length ?? 0,
           summaryVersion: summarized?.summaryVersion ?? null,
           summaryCoveredThroughIndex: summarized?.coveredThroughIndex ?? null,
@@ -539,18 +539,8 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             messages.reduce((total, message) => total + message.body.length, 0),
           temporaryOverflowCharacters:
             summarized?.temporaryOverflowCharacters ?? 0,
-          compressionReason: summarized?.compressionReason ?? null,
-          compressionStatus: summarized?.compression.status ?? "disabled",
-          ...(summarized?.compression.status === "succeeded" ||
-          summarized?.compression.status === "failed" ||
-          summarized?.compression.status === "superseded"
-            ? {
-                compressionFromIndex: summarized.compression.fromIndex,
-                compressionThroughIndex: summarized.compression.throughIndex,
-                compressionDurationMs: summarized.compression.durationMs,
-                compressionErrorCode: summarized.compression.errorCode,
-              }
-            : {}),
+          truncatedMessageCount: summarized?.truncatedMessageCount ?? 0,
+          contextIncomplete: summarized?.contextIncomplete ?? false,
         },
         outputs: {
           messages,
