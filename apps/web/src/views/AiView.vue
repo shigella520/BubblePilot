@@ -6,6 +6,7 @@ import {
   ChevronUp,
   GripVertical,
   Image,
+  MessageCircle,
   Plus,
   RefreshCw,
   Route,
@@ -825,6 +826,12 @@ onMounted(load);
           @click="scrollToSection('search-settings')"
         >
           <Search :size="18" />联网搜索
+        </button>
+        <button type="button" @click="scrollToSection('summary-settings')">
+          <MessageCircle :size="18" />对话摘要压缩
+        </button>
+        <button type="button" @click="scrollToSection('image-input-settings')">
+          <Image :size="18" />原生图片输入
         </button>
         <button type="button" @click="scrollToSection('providers')">
           <Bot :size="18" />Provider
