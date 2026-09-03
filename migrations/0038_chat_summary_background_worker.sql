@@ -26,6 +26,19 @@ ALTER TABLE conversation_context_compressions
   ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+WITH ranked AS (
+  SELECT id,
+         ROW_NUMBER() OVER (
+           PARTITION BY instance_namespace, chat_id, summary_policy_version
+           ORDER BY covered_through_index DESC, version DESC, updated_at DESC, id DESC
+         ) AS rn
+  FROM conversation_context_states
+)
+DELETE FROM conversation_context_states state
+USING ranked
+WHERE state.id = ranked.id
+  AND ranked.rn > 1;
+
 CREATE UNIQUE INDEX IF NOT EXISTS conversation_context_states_chat_policy_key
   ON conversation_context_states (instance_namespace, chat_id, summary_policy_version);
 DROP INDEX IF EXISTS conversation_context_states_chat_profile_key;

@@ -4,6 +4,24 @@ ALTER TABLE conversation_context_states
 
 ALTER TABLE conversation_context_states
   DROP CONSTRAINT IF EXISTS conversation_context_states_instance_namespace_chat_id_workflow_id_node_id_profile_hash_key;
+
+-- Older installations can contain several workflow/node states with the same
+-- chat/profile. Keep the most advanced state before enforcing chat-level
+-- uniqueness; dependent compression attempts are removed with the discarded
+-- state via the existing foreign-key cascade.
+WITH ranked AS (
+  SELECT id,
+         ROW_NUMBER() OVER (
+           PARTITION BY instance_namespace, chat_id, profile_hash
+           ORDER BY covered_through_index DESC, version DESC, updated_at DESC, id DESC
+         ) AS rn
+  FROM conversation_context_states
+)
+DELETE FROM conversation_context_states state
+USING ranked
+WHERE state.id = ranked.id
+  AND ranked.rn > 1;
+
 CREATE UNIQUE INDEX conversation_context_states_chat_profile_key
   ON conversation_context_states (instance_namespace, chat_id, profile_hash);
 
