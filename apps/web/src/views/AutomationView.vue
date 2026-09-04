@@ -43,7 +43,6 @@ interface WorkflowVersion {
   version: number;
   status: string;
   definition: unknown;
-  needsResave?: boolean;
 }
 interface Trigger {
   id: string;
@@ -373,10 +372,7 @@ const defaultDefinition = (name: string) =>
     2,
   );
 const latestCandidate = computed(
-  () =>
-    versions.value.find(
-      (item) => item.status === "validated" && !item.needsResave,
-    ) ?? null,
+  () => versions.value.find((item) => item.status === "validated") ?? null,
 );
 const activeWorkflows = computed(() =>
   workflows.value.filter(
@@ -1069,9 +1065,6 @@ onMounted(load);
           </form>
           <form class="settings-form" @submit.prevent="createVersion">
             <h3><Save :size="18" />编辑候选版本</h3>
-            <p v-if="versions.some((item) => item.needsResave)" class="keyline">
-              旧版本包含已移除的节点级摘要配置，请保存为新版本后再发布。
-            </p>
             <label
               ><span>工作流</span
               ><select v-model="selectedWorkflowId">

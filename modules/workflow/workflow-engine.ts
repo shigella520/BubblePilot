@@ -276,7 +276,8 @@ export class WorkflowEngine implements MessageAutomation {
             result.outputSummary !== undefined
           ) {
             await this.repository.recordContextSnapshot?.(execution.id, {
-              chatId: envelope.chat.providerChatId,
+              chatId: execution.contextSnapshot?.chatId ?? null,
+              providerChatId: envelope.chat.providerChatId,
               triggerMessageIndex:
                 execution.contextSnapshot?.triggerMessageIndex ?? null,
               summaryVersion: result.outputSummary.summaryVersion ?? null,
@@ -296,6 +297,10 @@ export class WorkflowEngine implements MessageAutomation {
               compressionOperationId:
                 result.outputSummary.compressionOperationId ??
                 execution.contextSnapshot?.compressionOperationId ??
+                null,
+              scheduledCompressionOperationId:
+                result.outputSummary.scheduledCompressionOperationId ??
+                execution.contextSnapshot?.scheduledCompressionOperationId ??
                 null,
               summaryStateId:
                 execution.contextSnapshot?.stateId ??

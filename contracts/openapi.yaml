@@ -1732,7 +1732,7 @@ paths:
   /api/v1/conversation-compressions/rebuild:
     post:
       operationId: rebuildConversationSummaries
-      description: 二次验证后按当前全局摘要策略为所有已监听聊天入队渐进重建任务。
+      description: 二次验证后创建新的摘要策略版本，并为所有已监听聊天从原始消息入队渐进重建任务。
       security:
         - bearerAuth: []
         - sessionAuth: []

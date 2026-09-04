@@ -28,7 +28,6 @@ export interface WorkflowVersionRecord {
   definition: WorkflowDefinition;
   createdAt: string;
   publishedAt: string | null;
-  needsResave?: boolean;
 }
 
 export interface WorkflowRecord {

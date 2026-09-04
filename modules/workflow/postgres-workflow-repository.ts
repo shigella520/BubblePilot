@@ -48,7 +48,6 @@ interface WorkflowVersionRow {
   definition: unknown;
   created_at: Date;
   published_at: Date | null;
-  needs_resave: boolean;
 }
 
 interface WorkflowRow {
@@ -173,7 +172,7 @@ interface DeliveryRow {
 
 const versionSelect = `SELECT
   v.id, v.workflow_id, w.name AS workflow_name, v.version, v.status,
-  v.definition, v.created_at, v.published_at, v.needs_resave
+  v.definition, v.created_at, v.published_at
 FROM workflow_versions v
 INNER JOIN workflows w ON w.id = v.workflow_id`;
 
@@ -235,7 +234,6 @@ function versionRecord(row: WorkflowVersionRow): WorkflowVersionRecord {
     definition: parseWorkflowDefinition(row.definition),
     createdAt: row.created_at.toISOString(),
     publishedAt: row.published_at?.toISOString() ?? null,
-    needsResave: row.needs_resave,
   };
 }
 
@@ -464,7 +462,6 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         `SELECT id FROM workflow_versions
          WHERE workflow_id = $1 AND version = $2
            AND status IN ('validated', 'published')
-           AND needs_resave = FALSE
            AND EXISTS (SELECT 1 FROM workflows w WHERE w.id = workflow_versions.workflow_id AND w.deleted_at IS NULL)
          FOR UPDATE`,
         [workflowId, version],
@@ -765,7 +762,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         input.summaryTrigger === undefined
           ? null
           : JSON.stringify({
-              chatId: input.envelope.chat.providerChatId,
+              chatId: input.summaryTrigger.summarySnapshot.chatId ?? null,
+              providerChatId: input.envelope.chat.providerChatId,
               triggerMessageIndex: input.summaryTrigger.triggerMessageIndex,
               summaryVersion:
                 input.summaryTrigger.summarySnapshot.summaryVersion,
@@ -777,8 +775,12 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
               stateId: input.summaryTrigger.summarySnapshot.stateId,
               summaryStateId: input.summaryTrigger.summarySnapshot.stateId,
               compressionOperationId:
-                input.summaryTrigger.compressionOperationId ??
                 input.summaryTrigger.summarySnapshot.compressionOperationId ??
+                null,
+              scheduledCompressionOperationId:
+                input.summaryTrigger.compressionOperationId ??
+                input.summaryTrigger.summarySnapshot
+                  .scheduledCompressionOperationId ??
                 null,
             }),
       ],

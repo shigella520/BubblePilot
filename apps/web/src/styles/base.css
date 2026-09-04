@@ -872,15 +872,6 @@ td .keyline {
   min-height: 0;
   padding-top: 14px;
 }
-.workflow-resave-warning {
-  margin: 12px 0 0;
-  padding: 10px 14px;
-  border: 1px solid rgba(246, 174, 95, 0.45);
-  border-radius: 10px;
-  color: #8a4b08;
-  background: rgba(246, 174, 95, 0.14);
-  font-size: 13px;
-}
 .workflow-canvas-main .workflow-editor-v2 {
   min-height: calc(100vh - 180px);
 }

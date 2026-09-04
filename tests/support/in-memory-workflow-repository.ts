@@ -373,7 +373,10 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
         input.summaryTrigger === undefined
           ? null
           : {
-              chatId: input.envelope.chat.providerChatId,
+              chatId:
+                input.summaryTrigger.summarySnapshot.chatId ??
+                input.envelope.chat.providerChatId,
+              providerChatId: input.envelope.chat.providerChatId,
               triggerMessageIndex: input.summaryTrigger.triggerMessageIndex,
               summaryVersion:
                 input.summaryTrigger.summarySnapshot.summaryVersion,
@@ -385,8 +388,12 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
               stateId: input.summaryTrigger.summarySnapshot.stateId,
               summaryStateId: input.summaryTrigger.summarySnapshot.stateId,
               compressionOperationId:
-                input.summaryTrigger.compressionOperationId ??
                 input.summaryTrigger.summarySnapshot.compressionOperationId ??
+                null,
+              scheduledCompressionOperationId:
+                input.summaryTrigger.compressionOperationId ??
+                input.summaryTrigger.summarySnapshot
+                  .scheduledCompressionOperationId ??
                 null,
             },
       sourceProviderMessageId: input.envelope.message.providerMessageId,

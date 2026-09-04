@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   contextRetentionThreshold,
@@ -7,6 +7,8 @@ import {
   conversationContextProfileHash,
   contextCompressionPlan,
   contextFastForwardPlan,
+  ConversationSummaryWorker,
+  type ConversationContextService,
   conversationCompressionPrompt,
   conversationCompressionTranscript,
   fitContextMessages,
@@ -73,6 +75,36 @@ function sharedMessagePrefixLength(
 }
 
 describe("conversation context summary contract", () => {
+  it("continues queued work when policy-rebuild recovery fails", async () => {
+    const processQueued = vi.fn().mockResolvedValue(false);
+    const worker = new ConversationSummaryWorker(
+      {
+        resumePendingPolicyRebuilds: vi
+          .fn()
+          .mockRejectedValue(new Error("fictional recovery failure")),
+        processQueued,
+      } as unknown as ConversationContextService,
+      () => Promise.resolve("11111111-1111-4111-8111-111111111111"),
+      () => Promise.resolve("UTC"),
+      5_000,
+      () =>
+        Promise.resolve({
+          enabled: true,
+          providerRouteId: "11111111-1111-4111-8111-111111111111",
+          baseMessageWindow: 4,
+          redundancyMessageWindow: 3,
+          includeFromMe: true,
+          timeZone: "UTC",
+          policyVersion: 2,
+        }),
+    );
+
+    worker.trigger();
+    await worker.stop();
+
+    expect(processQueued).toHaveBeenCalledOnce();
+  });
+
   it("keeps load-context configuration global", () => {
     const parsed = parseWorkflowDefinition(definition({}));
     const node = parsed.nodes[0];
@@ -275,6 +307,43 @@ describe("conversation context summary contract", () => {
         (message) => message.providerMessageId,
       ),
     ).toEqual(["1"]);
+  });
+
+  it("counts attachment metadata and image annotations in the character budget", () => {
+    const newest = contextMessage("2", {
+      body: "new",
+      attachments: [
+        {
+          providerAttachmentId: "attachment-new",
+          mimeType: "image/jpeg",
+          fileName: "new.jpg",
+          sizeBytes: 12,
+        },
+      ],
+      imageSummaries: [
+        {
+          attachmentRef: "message-test:attachment:1",
+          sourceType: "attachment",
+          sourceKeyHash: "source",
+          imageContentHash: "image",
+          status: "succeeded",
+          summary: "annotated image text",
+          providerName: "Fictional AI",
+          model: "fictional-model",
+          contractVersion: "image-summary-v1",
+          attemptCount: 1,
+          errorCode: null,
+          durationMs: 10,
+          generatedAt: "2026-08-10T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(
+      fitContextMessages(
+        [contextMessage("1", { body: "older" }), newest],
+        55,
+      ).map((message) => message.providerMessageId),
+    ).toEqual(["2"]);
   });
 
   it("preserves non-body message material in compression input", () => {

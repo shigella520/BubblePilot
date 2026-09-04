@@ -460,6 +460,9 @@ class LoadContextNodeHandler extends BaseNodeHandler {
         coveredThroughIndex !== null
           ? ({
               stateId,
+              ...(typeof rawSnapshot.chatId === "string"
+                ? { chatId: rawSnapshot.chatId }
+                : {}),
               summaryVersion: rawSnapshot.summaryVersion,
               coveredThroughIndex,
               ...(typeof rawSnapshot.summary === "string"
@@ -470,6 +473,13 @@ class LoadContextNodeHandler extends BaseNodeHandler {
                 : {}),
               ...(typeof rawSnapshot.compressionOperationId === "string"
                 ? { compressionOperationId: rawSnapshot.compressionOperationId }
+                : {}),
+              ...(typeof rawSnapshot.scheduledCompressionOperationId ===
+              "string"
+                ? {
+                    scheduledCompressionOperationId:
+                      rawSnapshot.scheduledCompressionOperationId,
+                  }
                 : {}),
             } satisfies ConversationContextSnapshot)
           : null;
@@ -582,6 +592,8 @@ class LoadContextNodeHandler extends BaseNodeHandler {
           contextIncomplete: summarized?.contextIncomplete ?? false,
           usedPreviousSummary: summarized?.usedPreviousSummary ?? false,
           compressionOperationId: summarized?.compressionOperationId ?? null,
+          scheduledCompressionOperationId:
+            summarized?.scheduledCompressionOperationId ?? null,
         },
         outputs: {
           messages,

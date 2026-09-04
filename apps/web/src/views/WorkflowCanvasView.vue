@@ -30,7 +30,6 @@ const definition = ref<any | undefined>(undefined);
 const workflowStatus = ref("draft");
 const publishedVersion = ref<number | null>(null);
 const candidateVersion = ref<number | null>(null);
-const candidateNeedsResave = ref(false);
 const busy = ref(false);
 const message = ref("");
 const messageIsError = ref(false);
@@ -94,7 +93,6 @@ const versionDefinition = async () => {
     workflowName.value = candidate.workflowName;
     definition.value = candidate.definition;
     candidateVersion.value = candidate.version;
-    candidateNeedsResave.value = candidate.needsResave === true;
   }
 };
 
@@ -139,7 +137,6 @@ async function create(name: string, nextDefinition: any) {
     messageIsError.value = false;
     saveState.value = "saved";
     candidateVersion.value = version.version;
-    candidateNeedsResave.value = false;
     workflowName.value = version.workflowName ?? name;
     definition.value = version.definition ?? nextDefinition;
     await router.replace(`/automation/${version.workflowId}`);
@@ -163,7 +160,6 @@ async function saveVersion(name: string, nextDefinition: any) {
       },
     );
     candidateVersion.value = version.version;
-    candidateNeedsResave.value = false;
     definition.value = version.definition ?? nextDefinition;
     workflowName.value = name;
     if (workflowStatus.value === "active") {
@@ -317,10 +313,6 @@ onMounted(load);
       @close="message = ''"
       >{{ message }}</DismissibleMessage
     >
-    <p v-if="candidateNeedsResave" class="workflow-resave-warning">
-      当前版本包含已移除的节点级摘要配置。请保存为新版本并确认 AI
-      设置页的全局摘要配置后，再发布或启用工作流。
-    </p>
     <section v-if="!busy" class="workflow-canvas-main">
       <WorkflowEditor
         :blocks="blocks"

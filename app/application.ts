@@ -1749,7 +1749,10 @@ export function buildApplication(
               correlationId: request.id,
             })
             .catch(() => {
-              // Rebuild is best-effort; queued messages will retry on arrival.
+              // The in-process worker also scans for missing rebuild work.
+            })
+            .finally(() => {
+              options.workflow?.summaryWorker?.trigger();
             });
         }
         return { data: result.value };
@@ -2848,17 +2851,61 @@ export function buildApplication(
             409,
           );
         }
-        const queued = await conversationSummary.enqueuePolicyRebuild({
-          routeId: settings.providerRouteId,
-          baseMessageWindow: settings.baseMessageWindow,
-          redundancyMessageWindow: settings.redundancyMessageWindow,
+        let generation = await summarySettings.update({
+          enabled: settings.enabled,
           includeFromMe: settings.includeFromMe,
+          baseMessageWindow: settings.baseMessageWindow,
+          characterLimit: settings.characterLimit,
+          redundancyMessageWindow: settings.redundancyMessageWindow,
+          providerRouteId: settings.providerRouteId,
           timeZone: settings.timeZone,
-          summaryPolicyVersion: settings.policyVersion,
+          expectedVersion: settings.version,
+        });
+        if (generation.status === "conflict") {
+          throw new ApplicationError(
+            "AI_SUMMARY_SETTINGS_CONFLICT",
+            "Summary settings changed; refresh before rebuilding.",
+            409,
+          );
+        }
+        // Persisted settings normally increment the policy generation in one
+        // update. When the installation still uses defaults (version 0), the
+        // first write materializes policy 1, so advance once more to ensure a
+        // manual rebuild never reuses an existing policy-1 summary state.
+        if (generation.value.policyVersion <= settings.policyVersion) {
+          generation = await summarySettings.update({
+            enabled: generation.value.enabled,
+            includeFromMe: generation.value.includeFromMe,
+            baseMessageWindow: generation.value.baseMessageWindow,
+            characterLimit: generation.value.characterLimit,
+            redundancyMessageWindow: generation.value.redundancyMessageWindow,
+            providerRouteId: generation.value.providerRouteId,
+            timeZone: generation.value.timeZone,
+            expectedVersion: generation.value.version,
+          });
+          if (generation.status === "conflict") {
+            throw new ApplicationError(
+              "AI_SUMMARY_SETTINGS_CONFLICT",
+              "Summary settings changed; refresh before rebuilding.",
+              409,
+            );
+          }
+        }
+        const queued = await conversationSummary.enqueuePolicyRebuild({
+          routeId: generation.value.providerRouteId,
+          baseMessageWindow: generation.value.baseMessageWindow,
+          redundancyMessageWindow: generation.value.redundancyMessageWindow,
+          includeFromMe: generation.value.includeFromMe,
+          timeZone: generation.value.timeZone,
+          summaryPolicyVersion: generation.value.policyVersion,
           correlationId: request.id,
         });
+        options.workflow?.summaryWorker?.trigger();
         return {
-          data: { queued, summaryPolicyVersion: settings.policyVersion },
+          data: {
+            queued,
+            summaryPolicyVersion: generation.value.policyVersion,
+          },
         };
       },
     );

@@ -22,24 +22,6 @@ const returning = `max_attempts, attempt_timeout_ms, retry_delay_ms,
                     max_results, failure_policy,
                     version, updated_at`;
 
-// Migration 0021 made total_timeout_ms mandatory. Keep writing a derived
-// compatibility value while that legacy column exists; runtime behavior no
-// longer reads it as a separate budget.
-function legacyTotalTimeoutMs(input: {
-  maxAttempts: number;
-  attemptTimeoutMs: number;
-  retryDelayMs: number;
-}): number {
-  return Math.min(
-    120_000,
-    Math.max(
-      input.attemptTimeoutMs,
-      input.maxAttempts * input.attemptTimeoutMs +
-        Math.max(0, input.maxAttempts - 1) * input.retryDelayMs,
-    ),
-  );
-}
-
 function record(row: SettingsRow): WebSearchSettingsRecord {
   return {
     maxAttempts: row.max_attempts,
@@ -73,7 +55,6 @@ export class PostgresWebSearchSettingsRepository implements WebSearchSettingsRep
     const values = [
       input.maxAttempts,
       input.attemptTimeoutMs,
-      legacyTotalTimeoutMs(input),
       input.retryDelayMs,
       input.maxResults,
       input.failurePolicy,
@@ -82,9 +63,9 @@ export class PostgresWebSearchSettingsRepository implements WebSearchSettingsRep
       input.expectedVersion === 0
         ? await this.pool.query<SettingsRow>(
             `INSERT INTO ai_web_search_settings (
-               id, max_attempts, attempt_timeout_ms, total_timeout_ms,
+               id, max_attempts, attempt_timeout_ms,
                retry_delay_ms, max_results, failure_policy
-             ) VALUES (1, $1, $2, $3, $4, $5, $6)
+             ) VALUES (1, $1, $2, $3, $4, $5)
              ON CONFLICT (id) DO NOTHING
              RETURNING ${returning}`,
             values,
@@ -93,13 +74,12 @@ export class PostgresWebSearchSettingsRepository implements WebSearchSettingsRep
             `UPDATE ai_web_search_settings
              SET max_attempts = $1,
                  attempt_timeout_ms = $2,
-                 total_timeout_ms = $3,
-                 retry_delay_ms = $4,
-                 max_results = $5,
-                 failure_policy = $6,
+                 retry_delay_ms = $3,
+                 max_results = $4,
+                 failure_policy = $5,
                  version = version + 1,
                  updated_at = NOW()
-             WHERE id = 1 AND version = $7
+             WHERE id = 1 AND version = $6
              RETURNING ${returning}`,
             [...values, input.expectedVersion],
           );
