@@ -1734,27 +1734,7 @@ export function buildApplication(
             "Summary settings changed; refresh before retrying.",
             409,
           );
-        if (
-          result.value.enabled &&
-          options.workflow?.conversationSummary !== undefined
-        ) {
-          void options.workflow.conversationSummary
-            .enqueuePolicyRebuild({
-              routeId: result.value.providerRouteId,
-              baseMessageWindow: result.value.baseMessageWindow,
-              redundancyMessageWindow: result.value.redundancyMessageWindow,
-              includeFromMe: result.value.includeFromMe,
-              timeZone: result.value.timeZone,
-              summaryPolicyVersion: result.value.policyVersion ?? 1,
-              correlationId: request.id,
-            })
-            .catch(() => {
-              // The in-process worker also scans for missing rebuild work.
-            })
-            .finally(() => {
-              options.workflow?.summaryWorker?.trigger();
-            });
-        }
+        options.workflow?.summaryWorker?.trigger();
         return { data: result.value };
       },
     );
@@ -2822,94 +2802,6 @@ export function buildApplication(
       },
     );
 
-    application.post(
-      "/api/v1/conversation-compressions/rebuild",
-      {
-        preHandler: requireSensitive(
-          "conversation-summary.rebuild",
-          "conversation-summary",
-        ),
-      },
-      async (request) => {
-        const summarySettings = options.ai?.summarySettings;
-        const conversationSummary = options.workflow?.conversationSummary;
-        if (
-          summarySettings === undefined ||
-          conversationSummary === undefined
-        ) {
-          throw new ApplicationError(
-            "AI_SUMMARY_SETTINGS_UNAVAILABLE",
-            "Summary settings are unavailable.",
-            503,
-          );
-        }
-        const settings = await summarySettings.view();
-        if (!settings.enabled || settings.providerRouteId === "") {
-          throw new ApplicationError(
-            "AI_SUMMARY_NOT_ENABLED",
-            "Enable a summary Provider route before rebuilding summaries.",
-            409,
-          );
-        }
-        let generation = await summarySettings.update({
-          enabled: settings.enabled,
-          includeFromMe: settings.includeFromMe,
-          baseMessageWindow: settings.baseMessageWindow,
-          characterLimit: settings.characterLimit,
-          redundancyMessageWindow: settings.redundancyMessageWindow,
-          providerRouteId: settings.providerRouteId,
-          timeZone: settings.timeZone,
-          expectedVersion: settings.version,
-        });
-        if (generation.status === "conflict") {
-          throw new ApplicationError(
-            "AI_SUMMARY_SETTINGS_CONFLICT",
-            "Summary settings changed; refresh before rebuilding.",
-            409,
-          );
-        }
-        // Persisted settings normally increment the policy generation in one
-        // update. When the installation still uses defaults (version 0), the
-        // first write materializes policy 1, so advance once more to ensure a
-        // manual rebuild never reuses an existing policy-1 summary state.
-        if (generation.value.policyVersion <= settings.policyVersion) {
-          generation = await summarySettings.update({
-            enabled: generation.value.enabled,
-            includeFromMe: generation.value.includeFromMe,
-            baseMessageWindow: generation.value.baseMessageWindow,
-            characterLimit: generation.value.characterLimit,
-            redundancyMessageWindow: generation.value.redundancyMessageWindow,
-            providerRouteId: generation.value.providerRouteId,
-            timeZone: generation.value.timeZone,
-            expectedVersion: generation.value.version,
-          });
-          if (generation.status === "conflict") {
-            throw new ApplicationError(
-              "AI_SUMMARY_SETTINGS_CONFLICT",
-              "Summary settings changed; refresh before rebuilding.",
-              409,
-            );
-          }
-        }
-        const queued = await conversationSummary.enqueuePolicyRebuild({
-          routeId: generation.value.providerRouteId,
-          baseMessageWindow: generation.value.baseMessageWindow,
-          redundancyMessageWindow: generation.value.redundancyMessageWindow,
-          includeFromMe: generation.value.includeFromMe,
-          timeZone: generation.value.timeZone,
-          summaryPolicyVersion: generation.value.policyVersion,
-          correlationId: request.id,
-        });
-        options.workflow?.summaryWorker?.trigger();
-        return {
-          data: {
-            queued,
-            summaryPolicyVersion: generation.value.policyVersion,
-          },
-        };
-      },
-    );
-
     application.get(
       "/api/v1/conversation-compressions/:compressionId/content",
       {
@@ -3273,6 +3165,7 @@ export function buildApplication(
       options.ai?.repository.close() ?? Promise.resolve(),
       options.ai?.searchSettings?.repository.close() ?? Promise.resolve(),
       options.ai?.imageInputSettings?.repository.close() ?? Promise.resolve(),
+      options.ai?.summarySettings?.repository.close?.() ?? Promise.resolve(),
       options.dataExport?.repository.close() ?? Promise.resolve(),
       options.blueBubbles?.settings.repository.close() ?? Promise.resolve(),
       options.imageSummary?.repository.close() ?? Promise.resolve(),

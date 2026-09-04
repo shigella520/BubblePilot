@@ -1729,38 +1729,6 @@ paths:
                 additionalProperties: false
         "401":
           $ref: "#/components/responses/Error"
-  /api/v1/conversation-compressions/rebuild:
-    post:
-      operationId: rebuildConversationSummaries
-      description: 二次验证后创建新的摘要策略版本，并为所有已监听聊天从原始消息入队渐进重建任务。
-      security:
-        - bearerAuth: []
-        - sessionAuth: []
-      responses:
-        "200":
-          description: 返回已入队任务数量和策略版本。
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data:
-                    type: object
-                    required: [queued, summaryPolicyVersion]
-                    properties:
-                      queued: { type: integer, minimum: 0 }
-                      summaryPolicyVersion: { type: integer, minimum: 1 }
-                    additionalProperties: false
-                additionalProperties: false
-        "401":
-          $ref: "#/components/responses/Error"
-        "403":
-          $ref: "#/components/responses/Error"
-        "409":
-          $ref: "#/components/responses/Error"
-        "503":
-          $ref: "#/components/responses/Error"
   /api/v1/conversation-compressions/{compressionId}:
     get:
       operationId: getConversationCompression
@@ -2123,7 +2091,11 @@ components:
         timeZone: { type: string }
         source: { type: string, enum: [defaults, database] }
         version: { type: integer, minimum: 0 }
-        policyVersion: { type: integer, minimum: 1 }
+        policyVersion:
+          type: integer
+          minimum: 1
+          deprecated: true
+          description: 兼容已有摘要状态的固定代次标识；保存配置时不再递增，也不会触发重建。
         updatedAt: { type: [string, "null"], format: date-time }
       additionalProperties: false
     ConversationCompression:
@@ -2166,7 +2138,11 @@ components:
         triggerMessageIndex: { type: [string, "null"] }
         baseVersion: { type: integer, minimum: 1 }
         outputVersion: { type: [integer, "null"], minimum: 1 }
-        summaryPolicyVersion: { type: integer, minimum: 1 }
+        summaryPolicyVersion:
+          type: integer
+          minimum: 1
+          deprecated: true
+          description: 历史状态代次标识；仅用于关联既有数据，不表示存在策略重建流程。
         durationMs: { type: [integer, "null"], minimum: 0 }
         promptTokens: { type: [integer, "null"], minimum: 0 }
         completionTokens: { type: [integer, "null"], minimum: 0 }

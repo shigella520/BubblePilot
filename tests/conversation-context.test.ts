@@ -75,13 +75,12 @@ function sharedMessagePrefixLength(
 }
 
 describe("conversation context summary contract", () => {
-  it("continues queued work when policy-rebuild recovery fails", async () => {
+  it("runs one startup catch-up scan before processing queued work", async () => {
+    const enqueueStartupCatchups = vi.fn().mockResolvedValue(2);
     const processQueued = vi.fn().mockResolvedValue(false);
     const worker = new ConversationSummaryWorker(
       {
-        resumePendingPolicyRebuilds: vi
-          .fn()
-          .mockRejectedValue(new Error("fictional recovery failure")),
+        enqueueStartupCatchups,
         processQueued,
       } as unknown as ConversationContextService,
       () => Promise.resolve("11111111-1111-4111-8111-111111111111"),
@@ -101,8 +100,11 @@ describe("conversation context summary contract", () => {
 
     worker.trigger();
     await worker.stop();
+    worker.trigger();
+    await worker.stop();
 
-    expect(processQueued).toHaveBeenCalledOnce();
+    expect(enqueueStartupCatchups).toHaveBeenCalledOnce();
+    expect(processQueued).toHaveBeenCalledTimes(2);
   });
 
   it("keeps load-context configuration global", () => {

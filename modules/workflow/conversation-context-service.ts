@@ -25,7 +25,6 @@ interface ContextState {
   version: number;
   status: "idle" | "compressing";
   summaryPolicyVersion: number;
-  rebuilding: boolean;
 }
 
 interface StateRow {
@@ -36,7 +35,6 @@ interface StateRow {
   version: number;
   status: "idle" | "compressing";
   summary_policy_version: number;
-  rebuilding: boolean;
 }
 
 interface MessageRow {
@@ -69,7 +67,7 @@ export interface ConversationSummaryTrigger {
   compressionOperationId?: string;
 }
 
-export interface ConversationSummaryRebuildSettings {
+export interface ConversationSummaryRuntimeSettings {
   enabled: boolean;
   providerRouteId: string;
   baseMessageWindow: number;
@@ -363,7 +361,6 @@ function contextState(row: StateRow): ContextState {
     version: row.version,
     status: row.status,
     summaryPolicyVersion: row.summary_policy_version,
-    rebuilding: row.rebuilding,
   };
 }
 
@@ -599,7 +596,6 @@ export class ConversationContextService {
     includeFromMe?: boolean;
     summaryPolicyVersion?: number;
     correlationId?: string;
-    reasonOverride?: ContextCompressionReason;
   }): Promise<ConversationSummaryTrigger> {
     const includeFromMe = input.includeFromMe ?? true;
     const correlationId = input.correlationId ?? randomUUID();
@@ -629,19 +625,7 @@ export class ConversationContextService {
       input.redundancyMessageWindow,
     );
     if (eligibleCount < threshold) {
-      if (state.rebuilding) {
-        await this.completePolicyRebuild(
-          input.provider,
-          input.providerChatId,
-          summaryPolicyVersion,
-        );
-        state.rebuilding = false;
-      }
-      const snapshot = await this.summarySnapshotForState(
-        state,
-        input.provider,
-        input.providerChatId,
-      );
+      const snapshot = await this.summarySnapshotForState(state);
       return { triggerMessageIndex, summarySnapshot: snapshot };
     }
     const messageQuery = {
@@ -650,14 +634,11 @@ export class ConversationContextService {
       beforeProviderMessageId: input.providerMessageId,
       includeFromMe,
     };
-    const fastForwardPlan =
-      input.reasonOverride === undefined && !state.rebuilding
-        ? contextFastForwardPlan({
-            eligibleCount,
-            baseMessageWindow: input.baseMessageWindow,
-            redundancyMessageWindow: input.redundancyMessageWindow,
-          })
-        : null;
+    const fastForwardPlan = contextFastForwardPlan({
+      eligibleCount,
+      baseMessageWindow: input.baseMessageWindow,
+      redundancyMessageWindow: input.redundancyMessageWindow,
+    });
     const candidates =
       fastForwardPlan === null
         ? await this.loadMessagesBefore(
@@ -675,11 +656,7 @@ export class ConversationContextService {
     const first = candidates[0];
     const last = candidates.at(-1);
     if (first === undefined || last === undefined) {
-      const snapshot = await this.summarySnapshotForState(
-        state,
-        input.provider,
-        input.providerChatId,
-      );
+      const snapshot = await this.summarySnapshotForState(state);
       return { triggerMessageIndex, summarySnapshot: snapshot };
     }
     const compressionOperationId = await this.queueCompression({
@@ -689,11 +666,9 @@ export class ConversationContextService {
       triggerMessageIndex,
       reason:
         fastForwardPlan === null
-          ? (input.reasonOverride ??
-            (state.rebuilding ? "policy-rebuild" : null) ??
-            (state.coveredThroughIndex === "0"
-              ? "initial-catchup"
-              : "message-threshold"))
+          ? state.coveredThroughIndex === "0"
+            ? "initial-catchup"
+            : "message-threshold"
           : "backlog-fast-forward",
       summaryPolicyVersion,
       correlationId,
@@ -712,11 +687,7 @@ export class ConversationContextService {
             },
           }),
     });
-    const snapshot = await this.summarySnapshotForState(
-      state,
-      input.provider,
-      input.providerChatId,
-    );
+    const snapshot = await this.summarySnapshotForState(state);
     return {
       triggerMessageIndex,
       summarySnapshot: {
@@ -740,11 +711,7 @@ export class ConversationContextService {
       input.providerChatId,
       input.summaryPolicyVersion ?? 1,
     );
-    const snapshot = await this.summarySnapshotForState(
-      state,
-      input.provider,
-      input.providerChatId,
-    );
+    const snapshot = await this.summarySnapshotForState(state);
     return {
       triggerMessageIndex: await this.messageIndexForProviderMessage(
         input.provider,
@@ -755,123 +722,11 @@ export class ConversationContextService {
     };
   }
 
-  /** Queue one initial rebuild cycle for every enabled chat after a policy
-   * change. Subsequent messages continue the rebuild under the new policy. */
-  async enqueuePolicyRebuild(input: {
-    routeId: string;
-    baseMessageWindow: number;
-    redundancyMessageWindow: number;
-    includeFromMe: boolean;
-    timeZone: string;
-    summaryPolicyVersion: number;
-    correlationId?: string;
-  }): Promise<number> {
-    if (input.routeId === "") return 0;
-    const chats = await this.pool.query<{
-      provider: string;
-      provider_chat_id: string;
-      provider_message_id: string;
-    }>(
-      `SELECT c.provider, c.provider_chat_id, latest.provider_message_id
-       FROM chats c
-       INNER JOIN LATERAL (
-         SELECT m.provider_message_id
-         FROM messages m WHERE m.chat_id = c.id
-         ORDER BY m.message_index DESC LIMIT 1
-       ) latest ON TRUE
-       WHERE c.enabled = TRUE`,
-    );
-    let queued = 0;
-    for (const chat of chats.rows) {
-      const before = await this.pool.query<{ id: string }>(
-        `SELECT id FROM conversation_context_compressions operation
-         INNER JOIN conversation_context_states state
-           ON state.id = operation.context_state_id
-         WHERE state.chat_id = (
-           SELECT id FROM chats WHERE provider = $1 AND provider_chat_id = $2
-         ) AND operation.status IN ('queued', 'running')
-           AND operation.reason = 'policy-rebuild'
-           AND operation.summary_policy_version = $3
-         LIMIT 1`,
-        [chat.provider, chat.provider_chat_id, input.summaryPolicyVersion],
-      );
-      if ((before.rowCount ?? 0) > 0) continue;
-      const trigger = await this.enqueueForMessage({
-        provider: chat.provider,
-        providerChatId: chat.provider_chat_id,
-        providerMessageId: chat.provider_message_id,
-        routeId: input.routeId,
-        baseMessageWindow: input.baseMessageWindow,
-        redundancyMessageWindow: input.redundancyMessageWindow,
-        timeZone: input.timeZone,
-        includeFromMe: input.includeFromMe,
-        summaryPolicyVersion: input.summaryPolicyVersion,
-        ...(input.correlationId === undefined
-          ? {}
-          : { correlationId: input.correlationId }),
-        reasonOverride: "policy-rebuild",
-      });
-      if (trigger.compressionOperationId !== undefined) queued += 1;
-    }
-    await this.recordSystemAudit(
-      "conversation-summary.policy.rebuild-requested",
-      randomUUID(),
-      input.correlationId ?? null,
-      { summaryPolicyVersion: input.summaryPolicyVersion, queued },
-    );
-    return queued;
-  }
-
-  /**
-   * Continue draining a policy-rebuild backlog after a successful batch. The
-   * latest archived message is used only as the trigger boundary, so the
-   * boundary message itself remains raw and is not absorbed by the batch.
-   */
-  async continuePolicyRebuild(input: {
-    provider: string;
-    providerChatId: string;
-    routeId: string;
-    baseMessageWindow: number;
-    redundancyMessageWindow: number;
-    includeFromMe: boolean;
-    timeZone: string;
-    summaryPolicyVersion: number;
-    correlationId?: string | null;
-  }): Promise<ConversationSummaryTrigger | null> {
-    const latest = await this.pool.query<{ provider_message_id: string }>(
-      `SELECT m.provider_message_id
-       FROM messages m
-       INNER JOIN chats c ON c.id = m.chat_id
-       WHERE c.provider = $1 AND c.provider_chat_id = $2 AND c.enabled = TRUE
-       ORDER BY m.message_index DESC
-       LIMIT 1`,
-      [input.provider, input.providerChatId],
-    );
-    const providerMessageId = latest.rows[0]?.provider_message_id;
-    if (providerMessageId === undefined) return null;
-    return this.enqueueForMessage({
-      provider: input.provider,
-      providerChatId: input.providerChatId,
-      providerMessageId,
-      routeId: input.routeId,
-      baseMessageWindow: input.baseMessageWindow,
-      redundancyMessageWindow: input.redundancyMessageWindow,
-      includeFromMe: input.includeFromMe,
-      timeZone: input.timeZone,
-      summaryPolicyVersion: input.summaryPolicyVersion,
-      reasonOverride: "policy-rebuild",
-      ...(input.correlationId === undefined || input.correlationId === null
-        ? {}
-        : { correlationId: input.correlationId }),
-    });
-  }
-
-  /** Recover policy generations that have no active operation. This is called
-   * by the in-process worker, so a transient continuation/enqueue failure does
-   * not require another chat message to resume rebuilding. */
-  async resumePendingPolicyRebuilds(
-    input: ConversationSummaryRebuildSettings,
-    limit = 10,
+  /** On process startup, give every enabled chat one normal threshold check.
+   * Excessive backlog uses the same single-window fast-forward rule as a new
+   * message; it never starts a full-history rebuild. */
+  async enqueueStartupCatchups(
+    input: ConversationSummaryRuntimeSettings,
   ): Promise<number> {
     if (!input.enabled || input.providerRouteId === "") return 0;
     const chats = await this.pool.query<{
@@ -888,16 +743,8 @@ export class ConversationContextService {
          ORDER BY message.message_index DESC
          LIMIT 1
        ) latest ON TRUE
-       LEFT JOIN conversation_context_states state
-         ON state.chat_id = chat.id
-        AND state.instance_namespace = 'default'
-        AND state.legacy = FALSE
-        AND state.summary_policy_version = $1
        WHERE chat.enabled = TRUE
-         AND (state.id IS NULL OR state.rebuilding = TRUE)
-       ORDER BY chat.updated_at, chat.id
-       LIMIT $2`,
-      [input.policyVersion, limit],
+       ORDER BY chat.updated_at, chat.id`,
     );
     let queued = 0;
     for (const chat of chats.rows) {
@@ -912,12 +759,10 @@ export class ConversationContextService {
           includeFromMe: input.includeFromMe,
           timeZone: input.timeZone,
           summaryPolicyVersion: input.policyVersion,
-          reasonOverride: "policy-rebuild",
         });
         if (trigger.compressionOperationId !== undefined) queued += 1;
       } catch {
-        // A broken chat must not prevent other rebuilds from being recovered.
-        // The same state remains eligible for a later worker scan.
+        // One broken chat must not prevent startup catch-up for other chats.
       }
     }
     return queued;
@@ -1298,7 +1143,6 @@ export class ConversationContextService {
               input.summarySnapshot.summaryPolicyVersion ??
               input.summaryPolicyVersion ??
               1,
-            rebuilding: false,
           };
     if (
       input.summarySnapshot !== null &&
@@ -1434,35 +1278,23 @@ export class ConversationContextService {
         `WITH selected_chat AS (
            SELECT id FROM chats
            WHERE provider = $1 AND provider_chat_id = $2 AND enabled = TRUE
-         ), previous AS (
-           SELECT state.id
-           FROM conversation_context_states state
-           INNER JOIN selected_chat chat ON chat.id = state.chat_id
-           WHERE (state.instance_namespace = 'default'
-                  AND state.legacy = FALSE
-                  AND state.summary_policy_version < $4)
-              OR (state.legacy = TRUE
-                  AND state.summary_policy_version <= $4)
-            ORDER BY state.summary_policy_version DESC, state.version DESC
-           LIMIT 1
          ), inserted AS (
-             INSERT INTO conversation_context_states (
+           INSERT INTO conversation_context_states (
              id, chat_id, summary_policy_version,
-             summary, covered_through_index, rebuilding
+             summary, covered_through_index
            )
            SELECT $3, chat.id, $4,
-                  '', 0, previous.id IS NOT NULL
+                  '', 0
            FROM selected_chat chat
-           LEFT JOIN previous ON TRUE
            ON CONFLICT (instance_namespace, chat_id, summary_policy_version)
              DO NOTHING
            RETURNING id, chat_id, summary, covered_through_index::text, version, status,
-                     summary_policy_version, rebuilding
+                     summary_policy_version
          )
          SELECT * FROM inserted
          UNION ALL
          SELECT s.id, s.chat_id, s.summary, s.covered_through_index::text, s.version, s.status,
-                s.summary_policy_version, s.rebuilding
+                s.summary_policy_version
          FROM conversation_context_states s
          INNER JOIN selected_chat c ON c.id = s.chat_id
          WHERE s.instance_namespace = 'default'
@@ -1497,43 +1329,9 @@ export class ConversationContextService {
     }
   }
 
-  private async workflowReadState(
-    state: ContextState,
-    provider: string,
-    providerChatId: string,
-  ): Promise<ContextState> {
-    if (!state.rebuilding) return state;
-    const previous = await this.pool.query<StateRow>(
-      `SELECT previous.id, previous.chat_id, previous.summary,
-              previous.covered_through_index::text, previous.version,
-              previous.status, previous.summary_policy_version,
-              previous.rebuilding
-       FROM conversation_context_states previous
-       INNER JOIN chats chat ON chat.id = previous.chat_id
-       WHERE chat.provider = $1 AND chat.provider_chat_id = $2
-         AND previous.instance_namespace = 'default'
-         AND previous.summary_policy_version < $3
-         AND previous.legacy = FALSE
-         AND previous.rebuilding = FALSE
-       ORDER BY previous.summary_policy_version DESC, previous.version DESC
-       LIMIT 1`,
-      [provider, providerChatId, state.summaryPolicyVersion],
-    );
-    return previous.rows[0] === undefined
-      ? state
-      : contextState(previous.rows[0]);
-  }
-
   private async summarySnapshotForState(
     state: ContextState,
-    provider: string,
-    providerChatId: string,
   ): Promise<ConversationContextSnapshot> {
-    const readState = await this.workflowReadState(
-      state,
-      provider,
-      providerChatId,
-    );
     const source = await this.pool.query<{ id: string }>(
       `SELECT id
        FROM conversation_context_compressions
@@ -1542,58 +1340,17 @@ export class ConversationContextService {
          AND base_version + 1 = $2
        ORDER BY completed_at DESC NULLS LAST, id DESC
        LIMIT 1`,
-      [readState.id, readState.version],
+      [state.id, state.version],
     );
     return {
-      stateId: readState.id,
-      chatId: readState.chatId,
-      summary: readState.summary,
-      summaryVersion: readState.version,
-      coveredThroughIndex: readState.coveredThroughIndex,
-      summaryPolicyVersion: readState.summaryPolicyVersion,
+      stateId: state.id,
+      chatId: state.chatId,
+      summary: state.summary,
+      summaryVersion: state.version,
+      coveredThroughIndex: state.coveredThroughIndex,
+      summaryPolicyVersion: state.summaryPolicyVersion,
       compressionOperationId: source.rows[0]?.id ?? null,
     };
-  }
-
-  private async completePolicyRebuild(
-    provider: string,
-    providerChatId: string,
-    summaryPolicyVersion: number,
-  ): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      const current = await client.query<{ id: string }>(
-        `UPDATE conversation_context_states state
-         SET rebuilding = FALSE, updated_at = NOW()
-         FROM chats chat
-         WHERE chat.id = state.chat_id
-           AND chat.provider = $1 AND chat.provider_chat_id = $2
-           AND state.instance_namespace = 'default'
-           AND state.summary_policy_version = $3
-         RETURNING state.id`,
-        [provider, providerChatId, summaryPolicyVersion],
-      );
-      if (current.rows[0] !== undefined) {
-        await client.query(
-          `UPDATE conversation_context_states older
-           SET legacy = TRUE, updated_at = NOW()
-           WHERE older.instance_namespace = 'default'
-             AND older.chat_id = (
-               SELECT chat_id FROM conversation_context_states WHERE id = $1
-             )
-             AND older.summary_policy_version < $2`,
-          [current.rows[0].id, summaryPolicyVersion],
-        );
-      }
-      await client.query("COMMIT");
-      this.invalidateAll();
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
   }
 
   private async messageIndexForProviderMessage(
@@ -2044,7 +1801,6 @@ export class ConversationContextService {
     routeId: string,
     timeZone: string,
     leaseOwner = "bubblepilot-summary-worker",
-    policyRebuildSettings?: () => Promise<ConversationSummaryRebuildSettings>,
   ): Promise<boolean> {
     const client = await this.pool.connect();
     try {
@@ -2206,7 +1962,6 @@ export class ConversationContextService {
             version: row.version,
             status: "compressing",
             summaryPolicyVersion: row.summary_policy_version,
-            rebuilding: row.reason === "policy-rebuild",
           },
         };
         await this.failCompression(
@@ -2242,7 +1997,6 @@ export class ConversationContextService {
           version: row.version,
           status: "compressing",
           summaryPolicyVersion: row.summary_policy_version,
-          rebuilding: row.reason === "policy-rebuild",
         },
       };
       let result: Awaited<ReturnType<AiRoutingService["execute"]>>;
@@ -2305,37 +2059,6 @@ export class ConversationContextService {
           row.correlation_id,
           { reason: row.reason, throughMessageIndex: row.through_index },
         );
-        if (committed && row.reason === "policy-rebuild") {
-          try {
-            // The callback is optional for compatibility with lightweight
-            // embedders/tests. Production wiring always supplies it so a
-            // policy rebuild drains without requiring a new message.
-            const settings = await policyRebuildSettings?.();
-            if (settings !== undefined && settings.enabled) {
-              const continuation = await this.continuePolicyRebuild({
-                provider: row.provider,
-                providerChatId: row.provider_chat_id,
-                routeId: settings.providerRouteId,
-                baseMessageWindow: settings.baseMessageWindow,
-                redundancyMessageWindow: settings.redundancyMessageWindow,
-                includeFromMe: settings.includeFromMe,
-                timeZone: settings.timeZone,
-                summaryPolicyVersion: settings.policyVersion,
-                correlationId: row.correlation_id,
-              });
-              if (continuation?.compressionOperationId === undefined) {
-                await this.completePolicyRebuild(
-                  row.provider,
-                  row.provider_chat_id,
-                  settings.policyVersion,
-                );
-              }
-            }
-          } catch {
-            // The committed batch stays durable. The worker's rebuilding-state
-            // scan recreates the missing continuation on a later poll.
-          }
-        }
       } else {
         await this.failCompression(claim, result.code, durationMs);
         await this.recordSystemAudit(
@@ -2379,6 +2102,7 @@ export class ConversationContextService {
 export class ConversationSummaryWorker {
   private timer: NodeJS.Timeout | null = null;
   private inFlight: Promise<void> | null = null;
+  private startupCatchupPending = true;
   private readonly leaseOwner = `summary-worker:${randomUUID()}`;
 
   constructor(
@@ -2386,7 +2110,7 @@ export class ConversationSummaryWorker {
     private readonly routeId: () => Promise<string>,
     private readonly timeZone: () => Promise<string>,
     private readonly intervalMs = 5_000,
-    private readonly policyRebuildSettings?: () => Promise<ConversationSummaryRebuildSettings>,
+    private readonly runtimeSettings?: () => Promise<ConversationSummaryRuntimeSettings>,
   ) {}
 
   start(): void {
@@ -2404,26 +2128,20 @@ export class ConversationSummaryWorker {
 
   trigger(): void {
     if (this.inFlight !== null) return;
+    const startupSettings = this.startupCatchupPending
+      ? this.runtimeSettings?.()
+      : Promise.resolve(undefined);
     this.inFlight = Promise.all([
       this.routeId(),
       this.timeZone(),
-      this.policyRebuildSettings?.(),
+      startupSettings,
     ])
-      .then(async ([routeId, timeZone, rebuildSettings]) => {
-        if (rebuildSettings !== undefined) {
-          try {
-            await this.context.resumePendingPolicyRebuilds(rebuildSettings);
-          } catch {
-            // Queue processing is independent from rebuild recovery. A
-            // recovery scan failure must not starve already queued work.
-          }
+      .then(async ([routeId, timeZone, settings]) => {
+        if (settings !== undefined) {
+          await this.context.enqueueStartupCatchups(settings);
         }
-        await this.context.processQueued(
-          routeId,
-          timeZone,
-          this.leaseOwner,
-          this.policyRebuildSettings,
-        );
+        this.startupCatchupPending = false;
+        await this.context.processQueued(routeId, timeZone, this.leaseOwner);
       })
       .catch(() => undefined)
       .finally(() => {

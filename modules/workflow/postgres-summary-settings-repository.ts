@@ -39,6 +39,9 @@ export class PostgresSummarySettingsRepository implements SummarySettingsReposit
   constructor(databaseUrl: string, timeout?: number) {
     this.pool = createPostgresPool(databaseUrl, 3, timeout);
   }
+  close(): Promise<void> {
+    return this.pool.end();
+  }
   async isReady(): Promise<boolean> {
     try {
       await this.pool.query(
@@ -72,7 +75,7 @@ export class PostgresSummarySettingsRepository implements SummarySettingsReposit
             values,
           )
         : await this.pool.query<Row>(
-            `UPDATE conversation_summary_settings SET enabled=$1,include_from_me=$2,base_message_window=$3,character_limit=$4,redundancy_message_window=$5,provider_route_id=$6,time_zone=$7,version=version+1,policy_version=policy_version+1,updated_at=NOW() WHERE id=1 AND version=$8 RETURNING ${cols}`,
+            `UPDATE conversation_summary_settings SET enabled=$1,include_from_me=$2,base_message_window=$3,character_limit=$4,redundancy_message_window=$5,provider_route_id=$6,time_zone=$7,version=version+1,updated_at=NOW() WHERE id=1 AND version=$8 RETURNING ${cols}`,
             [...values, input.expectedVersion],
           );
     return result.rows[0]

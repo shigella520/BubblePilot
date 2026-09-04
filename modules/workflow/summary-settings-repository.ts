@@ -10,6 +10,7 @@ export interface SummarySettingsRecord extends SummaryRuntimeSettings {
 }
 
 export interface SummarySettingsRepository {
+  close?(): Promise<void>;
   isReady(): Promise<boolean>;
   find(): Promise<SummarySettingsRecord | null>;
   save(

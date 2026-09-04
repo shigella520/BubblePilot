@@ -964,7 +964,7 @@ function compressionReasonLabel(reason: string): string {
       {
         "initial-catchup": "初始追赶",
         "message-threshold": "消息阈值",
-        "policy-rebuild": "策略重建",
+        "policy-rebuild": "历史策略重建",
         "backlog-fast-forward": "积压自动追赶",
       } as Record<string, string>
     )[reason] ?? reason
@@ -1345,10 +1345,8 @@ function contextSnapshotValue(
                 <td>
                   v{{ item.baseVersion }} →
                   {{
-                    item.outputVersion === null
-                      ? "—"
-                      : `v${item.outputVersion}`
-                  }}<br />策略 v{{ item.summaryPolicyVersion }}
+                    item.outputVersion === null ? "—" : `v${item.outputVersion}`
+                  }}
                 </td>
                 <td>
                   {{ item.durationMs === null ? "—" : `${item.durationMs} ms` }}
@@ -1550,12 +1548,6 @@ function contextSnapshotValue(
                     contextSnapshotValue(
                       detail.contextSnapshot,
                       "summaryVersion",
-                    )
-                  }}
-                  · 策略 v{{
-                    contextSnapshotValue(
-                      detail.contextSnapshot,
-                      "summaryPolicyVersion",
                     )
                   }}
                 </dd>
@@ -2086,10 +2078,6 @@ function contextSnapshotValue(
             <section class="compression-detail-card">
               <h3>压缩操作</h3>
               <dl class="compression-detail-list">
-                <div>
-                  <dt>策略版本</dt>
-                  <dd>v{{ compressionDetail.summaryPolicyVersion }}</dd>
-                </div>
                 <div>
                   <dt>触发消息</dt>
                   <dd>{{ compressionDetail.triggerMessageIndex || "—" }}</dd>

@@ -71,11 +71,21 @@ describe.runIf(testDatabaseUrl !== undefined)(
                ('conversation_context_states', 'workflow_id'),
                ('conversation_context_states', 'node_id'),
                ('conversation_context_states', 'profile_hash'),
+               ('conversation_context_states', 'rebuilding'),
                ('conversation_context_compressions', 'execution_id'),
                ('workflow_versions', 'needs_resave')
              )`,
         );
         expect(columns.rows).toEqual([]);
+        const retiredRebuilds = await database.query<{
+          active_rebuilds: string;
+        }>(
+          `SELECT COUNT(*)::text AS active_rebuilds
+           FROM conversation_context_compressions
+           WHERE reason = 'policy-rebuild'
+             AND status IN ('queued', 'running')`,
+        );
+        expect(retiredRebuilds.rows[0]).toEqual({ active_rebuilds: "0" });
       } finally {
         await database.end();
       }
