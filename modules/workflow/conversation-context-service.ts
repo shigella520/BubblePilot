@@ -224,6 +224,28 @@ export interface ConversationCompressionView {
   }[];
 }
 
+export interface ConversationCompressionContentView {
+  id: string;
+  chatId: string;
+  providerChatId: string;
+  chatDisplayName: string | null;
+  status: ConversationCompressionView["status"];
+  fromMessageIndex: string;
+  throughMessageIndex: string;
+  baseVersion: number;
+  outputVersion: number | null;
+  previousSummary: string;
+  outputSummary: string | null;
+  messages: readonly {
+    messageIndex: string;
+    providerMessageId: string;
+    senderId: string | null;
+    sentAt: string;
+    body: string;
+    isFromMe: boolean;
+  }[];
+}
+
 export function conversationContextProfileHash(
   includeFromMe: boolean,
   timeZone = "UTC",
@@ -925,6 +947,85 @@ export class ConversationContextService {
         })),
       },
     ];
+  }
+
+  /**
+   * Read the text material used by one compression operation. This method is
+   * intentionally exposed through a separately protected application route;
+   * callers must not include its result in the ordinary compression list or
+   * metadata detail response.
+   */
+  async getCompressionContent(
+    compressionId: string,
+  ): Promise<ConversationCompressionContentView | null> {
+    const result = await this.pool.query<{
+      id: string;
+      chat_id: string;
+      provider_chat_id: string;
+      chat_display_name: string | null;
+      status: ConversationCompressionView["status"];
+      from_index: string;
+      through_index: string;
+      base_version: number;
+      output_version: number | null;
+      previous_summary: string | null;
+      output_summary: string | null;
+      provider: string;
+      include_from_me: boolean;
+    }>(
+      `SELECT operation.id, state.chat_id, chat.provider_chat_id,
+              chat.display_name AS chat_display_name, operation.status,
+              operation.from_index::text, operation.through_index::text,
+              operation.base_version,
+              output_revision.version AS output_version,
+              base_revision.summary AS previous_summary,
+              output_revision.summary AS output_summary,
+              chat.provider, operation.include_from_me
+       FROM conversation_context_compressions operation
+       INNER JOIN conversation_context_states state
+         ON state.id = operation.context_state_id
+       INNER JOIN chats chat ON chat.id = state.chat_id
+       LEFT JOIN conversation_context_summary_revisions base_revision
+         ON base_revision.context_state_id = state.id
+        AND base_revision.version = operation.base_version
+       LEFT JOIN conversation_context_summary_revisions output_revision
+         ON output_revision.context_state_id = state.id
+        AND output_revision.version = operation.base_version + 1
+        AND operation.status = 'succeeded'
+       WHERE operation.id = $1
+       LIMIT 1`,
+      [compressionId],
+    );
+    const row = result.rows[0];
+    if (row === undefined) return null;
+    const messages = await this.loadMessagesByRange(
+      row.provider,
+      row.provider_chat_id,
+      row.from_index,
+      row.through_index,
+      row.include_from_me,
+    );
+    return {
+      id: row.id,
+      chatId: row.chat_id,
+      providerChatId: row.provider_chat_id,
+      chatDisplayName: row.chat_display_name,
+      status: row.status,
+      fromMessageIndex: row.from_index,
+      throughMessageIndex: row.through_index,
+      baseVersion: row.base_version,
+      outputVersion: row.output_version,
+      previousSummary: row.previous_summary ?? "",
+      outputSummary: row.output_summary,
+      messages: messages.map((message) => ({
+        messageIndex: message.messageIndex,
+        providerMessageId: message.providerMessageId,
+        senderId: message.senderId,
+        sentAt: message.sentAt,
+        body: message.body,
+        isFromMe: message.isFromMe,
+      })),
+    };
   }
 
   async load(

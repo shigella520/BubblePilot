@@ -2361,6 +2361,165 @@ legend {
   box-shadow: 0 28px 80px rgba(15, 23, 42, 0.28);
   animation: execution-detail-dialog-in 0.18s ease-out;
 }
+.compression-detail-dialog {
+  width: min(1080px, calc(100vw - 48px));
+}
+.compression-metadata-columns {
+  margin-top: 0;
+}
+.compression-detail-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: 16px;
+  background: rgba(247, 250, 255, 0.62);
+}
+.compression-detail-card h3,
+.compression-detail-card h4 {
+  margin: 0;
+}
+.compression-detail-list {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+}
+.compression-detail-list > div {
+  display: grid;
+  grid-template-columns: minmax(86px, 0.35fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+.compression-detail-list dt {
+  color: var(--bubblepilot-muted);
+  font-size: 10px;
+}
+.compression-detail-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.compression-status-card {
+  margin-top: 18px;
+}
+.compression-status-events {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.compression-status-event {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  font-size: 10px;
+}
+.compression-content-section {
+  margin-top: 18px;
+}
+.compression-content-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.compression-content-heading > svg {
+  flex: 0 0 auto;
+  color: var(--bubblepilot-blue);
+}
+.compression-content-heading h3 {
+  margin-bottom: 5px;
+}
+.compression-content-section .sensitive-mask {
+  margin-top: 15px;
+}
+.compression-content-body {
+  margin-top: 15px;
+}
+.compression-content-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.compression-content-grid article {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: 12px;
+  background: #fff;
+}
+.compression-content-grid h4 {
+  margin-bottom: 9px;
+  color: var(--bubblepilot-muted);
+  font-size: 11px;
+}
+.compression-content-grid pre {
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--bubblepilot-text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.compression-messages-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 0 10px;
+}
+.compression-messages-heading h4 {
+  margin: 0;
+}
+.compression-message-list {
+  display: grid;
+  max-height: 420px;
+  gap: 9px;
+  overflow: auto;
+  padding-right: 3px;
+}
+.compression-message {
+  padding: 11px 13px;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: 11px;
+  background: #fff;
+}
+.compression-message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--bubblepilot-muted);
+  font-size: 10px;
+}
+.compression-message-meta strong {
+  color: var(--bubblepilot-blue);
+  font-family: var(--font-mono);
+}
+.compression-message-meta time {
+  margin-left: auto;
+}
+.compression-message p {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.compression-workflow-links {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+.compression-workflow-links > div {
+  display: grid;
+  gap: 3px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #fff;
+}
 
 .workflow-ai-tools {
   display: flex;
@@ -2900,6 +3059,7 @@ legend {
   .two-column-forms,
   .route-grid,
   .trace-columns,
+  .compression-content-grid,
   .export-summary-grid {
     grid-template-columns: 1fr;
   }

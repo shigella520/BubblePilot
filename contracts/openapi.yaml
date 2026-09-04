@@ -1782,6 +1782,38 @@ paths:
                 additionalProperties: false
         "404":
           $ref: "#/components/responses/Error"
+  /api/v1/conversation-compressions/{compressionId}/content:
+    get:
+      operationId: getConversationCompressionContent
+      description: 二次验证后返回本次压缩使用的摘要和消息正文。内容可能包含饮食、健康等敏感信息；不返回完整 Prompt、Provider 原始响应或 Secret。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: compressionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 返回受保护的摘要压缩内容。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ConversationCompressionContent"
+                additionalProperties: false
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/operations/status:
     get:
       operationId: getOperationsStatus
@@ -2182,6 +2214,57 @@ components:
               status: { type: string }
               createdAt: { type: string, format: date-time }
               summaryVersion: { type: [integer, "null"], minimum: 1 }
+            additionalProperties: false
+      additionalProperties: false
+    ConversationCompressionContent:
+      type: object
+      required:
+        - id
+        - chatId
+        - providerChatId
+        - chatDisplayName
+        - status
+        - fromMessageIndex
+        - throughMessageIndex
+        - baseVersion
+        - outputVersion
+        - previousSummary
+        - outputSummary
+        - messages
+      properties:
+        id: { type: string, format: uuid }
+        chatId: { type: string, format: uuid }
+        providerChatId: { type: string }
+        chatDisplayName: { type: [string, "null"] }
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed, superseded]
+        fromMessageIndex: { type: string }
+        throughMessageIndex: { type: string }
+        baseVersion: { type: integer, minimum: 1 }
+        outputVersion: { type: [integer, "null"], minimum: 1 }
+        previousSummary: { type: string }
+        outputSummary: { type: [string, "null"] }
+        messages:
+          type: array
+          items:
+            type: object
+            required:
+              [
+                messageIndex,
+                providerMessageId,
+                senderId,
+                sentAt,
+                body,
+                isFromMe,
+              ]
+            properties:
+              messageIndex: { type: string }
+              providerMessageId: { type: string }
+              senderId: { type: [string, "null"] }
+              sentAt: { type: string, format: date-time }
+              body: { type: string }
+              isFromMe: { type: boolean }
             additionalProperties: false
       additionalProperties: false
     InboundEventSummary:

@@ -17,6 +17,7 @@ import { InMemoryWorkflowRepository } from "./support/in-memory-workflow-reposit
 
 const loginPassword = "fictional-login-password";
 const sensitivePassword = "fictional-sensitive-password";
+const compressionContentId = "00000000-0000-4000-8000-000000000042";
 let loginPasswordHash: string;
 let sensitiveOperationPasswordHash: string;
 
@@ -115,7 +116,41 @@ describe("Web admin authentication", () => {
           secrets,
         ),
       },
-      workflow: { repository: workflowRepository, engine: workflowEngine },
+      workflow: {
+        repository: workflowRepository,
+        engine: workflowEngine,
+        contextState: {
+          close: () => Promise.resolve(),
+          getCompressionContent: (id) =>
+            Promise.resolve(
+              id === compressionContentId
+                ? {
+                    id,
+                    chatId: "00000000-0000-4000-8000-000000000043",
+                    providerChatId: "fictional-chat",
+                    chatDisplayName: "Fictional chat",
+                    status: "succeeded" as const,
+                    fromMessageIndex: "10",
+                    throughMessageIndex: "12",
+                    baseVersion: 3,
+                    outputVersion: 4,
+                    previousSummary: "Fictional previous summary",
+                    outputSummary: "Fictional compressed summary",
+                    messages: [
+                      {
+                        messageIndex: "10",
+                        providerMessageId: "fictional-message-10",
+                        senderId: "fictional-sender",
+                        sentAt: "2026-01-01T00:00:00.000Z",
+                        body: "Fictional meal note",
+                        isFromMe: false,
+                      },
+                    ],
+                  }
+                : null,
+            ),
+        },
+      },
     });
   });
 
@@ -328,6 +363,71 @@ describe("Web admin authentication", () => {
     expect(retry.json()).toMatchObject({
       error: { code: "SENSITIVE_AUTH_REQUIRED" },
     });
+  });
+
+  it("protects conversation compression content with the sensitive grant", async () => {
+    const anonymous = await application.inject({
+      method: "GET",
+      url: `/api/v1/conversation-compressions/${compressionContentId}/content`,
+    });
+    expect(anonymous.statusCode).toBe(401);
+
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.headers["set-cookie"];
+
+    const denied = await application.inject({
+      method: "GET",
+      url: `/api/v1/conversation-compressions/${compressionContentId}/content`,
+      headers: { cookie },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toMatchObject({
+      error: { code: "SENSITIVE_AUTH_REQUIRED" },
+    });
+
+    const verified = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/sensitive",
+      headers: { cookie },
+      payload: { password: sensitivePassword },
+    });
+    expect(verified.statusCode).toBe(200);
+
+    const allowed = await application.inject({
+      method: "GET",
+      url: `/api/v1/conversation-compressions/${compressionContentId}/content`,
+      headers: { cookie },
+    });
+    expect(allowed.statusCode).toBe(200);
+    const allowedPayload = allowed.json<{
+      data: {
+        previousSummary: string;
+        outputSummary: string | null;
+        messages: Array<{ body: string }>;
+      };
+    }>();
+    expect(allowedPayload.data.previousSummary).toBe(
+      "Fictional previous summary",
+    );
+    expect(allowedPayload.data.outputSummary).toBe(
+      "Fictional compressed summary",
+    );
+    expect(allowedPayload.data.messages).toEqual([
+      expect.objectContaining({ body: "Fictional meal note" }),
+    ]);
+    expect(allowed.body).not.toContain("prompt");
+    expect(allowed.body).not.toContain("secret");
+
+    const missing = await application.inject({
+      method: "GET",
+      url: "/api/v1/conversation-compressions/00000000-0000-4000-8000-000000000099/content",
+      headers: { cookie },
+    });
+    expect(missing.statusCode).toBe(404);
   });
 
   it("allows provider changes after login and audits the outcome", async () => {

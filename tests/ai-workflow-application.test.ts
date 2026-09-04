@@ -22,7 +22,10 @@ import type {
   SendReplyCommand,
 } from "../modules/integrations/bluebubbles/reply-gateway.js";
 import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/webhook-adapter.js";
-import { createDefaultNodeRegistry } from "../modules/workflow/node-registry.js";
+import {
+  aiChatInputPayloadBytes,
+  createDefaultNodeRegistry,
+} from "../modules/workflow/node-registry.js";
 import type { WorkflowDefinition } from "../modules/workflow/workflow-definition.js";
 import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
 import { newMessageWebhook } from "./fixtures/bluebubbles.js";
@@ -206,6 +209,30 @@ describe("AI workflow", () => {
 
   afterEach(async () => {
     await application.close();
+  });
+
+  it("counts image input by decoded bytes instead of Base64 text length", () => {
+    const encodedImage = `data:image/jpeg;base64,${"A".repeat(200_000)}`;
+    const size = aiChatInputPayloadBytes([
+      {
+        role: "user",
+        content: [
+          {
+            type: "image",
+            dataUrl: encodedImage,
+            detail: "high",
+            label: "Fictional attachment",
+          },
+        ],
+      },
+    ]);
+
+    // 200,000 Base64 characters represent roughly 150 KB of image data. The
+    // input guard must not treat the encoded representation as 200,000 text
+    // characters, which previously caused normal multi-image requests to be
+    // rejected before reaching the Provider.
+    expect(size).toBeGreaterThan(140_000);
+    expect(size).toBeLessThan(160_000);
   });
 
   it("labels conversation members once and keeps chained AI output distinct", async () => {

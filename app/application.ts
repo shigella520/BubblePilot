@@ -19,6 +19,7 @@ import type { SummarySettingsService } from "../modules/workflow/summary-setting
 import type {
   ConversationContextService,
   ConversationSummaryWorker,
+  ConversationCompressionContentView,
   ConversationCompressionView,
 } from "../modules/workflow/conversation-context-service.js";
 import { summarySettingsUpdateSchema } from "../modules/workflow/summary-settings-types.js";
@@ -366,6 +367,9 @@ export interface ApplicationOptions {
         startedFrom?: Date;
         startedTo?: Date;
       }): Promise<readonly ConversationCompressionView[]>;
+      getCompressionContent?(
+        compressionId: string,
+      ): Promise<ConversationCompressionContentView | null>;
     };
     conversationSummary?: ConversationContextService;
     summaryWorker?: ConversationSummaryWorker;
@@ -2847,6 +2851,33 @@ export function buildApplication(
         return {
           data: { queued, summaryPolicyVersion: settings.policyVersion },
         };
+      },
+    );
+
+    application.get(
+      "/api/v1/conversation-compressions/:compressionId/content",
+      {
+        preHandler: requireSensitive(
+          "conversation-summary.content.view",
+          "conversation-compression",
+        ),
+      },
+      async (request) => {
+        const parameters = z
+          .object({ compressionId: z.string().uuid() })
+          .parse(request.params);
+        const content =
+          (await options.workflow?.contextState?.getCompressionContent?.(
+            parameters.compressionId,
+          )) ?? null;
+        if (content === null) {
+          throw new ApplicationError(
+            "CONVERSATION_COMPRESSION_NOT_FOUND",
+            "The conversation compression operation does not exist.",
+            404,
+          );
+        }
+        return { data: content };
       },
     );
 
