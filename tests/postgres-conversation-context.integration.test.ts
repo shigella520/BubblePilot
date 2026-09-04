@@ -140,6 +140,19 @@ describe.runIf(testDatabaseUrl !== undefined)(
           through_index: "6",
           trigger_message_index: "8",
         });
+        await database.query(
+          `WITH cancelled AS (
+             UPDATE conversation_context_compressions
+             SET status = 'superseded', updated_at = NOW()
+             WHERE id = $1 AND status = 'queued'
+             RETURNING context_state_id
+           )
+           UPDATE conversation_context_states state
+           SET status = 'idle', updated_at = NOW()
+           FROM cancelled
+           WHERE state.id = cancelled.context_state_id`,
+          [trigger.compressionOperationId],
+        );
       } finally {
         await database.end();
         await service.close();
