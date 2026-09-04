@@ -965,6 +965,7 @@ function compressionReasonLabel(reason: string): string {
         "initial-catchup": "初始追赶",
         "message-threshold": "消息阈值",
         "policy-rebuild": "策略重建",
+        "backlog-fast-forward": "积压自动追赶",
       } as Record<string, string>
     )[reason] ?? reason
   );

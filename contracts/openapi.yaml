@@ -1689,7 +1689,13 @@ paths:
           schema:
             {
               type: string,
-              enum: [initial-catchup, message-threshold, policy-rebuild],
+              enum:
+                [
+                  initial-catchup,
+                  message-threshold,
+                  policy-rebuild,
+                  backlog-fast-forward,
+                ],
             }
         - in: query
           name: provider
@@ -2169,7 +2175,13 @@ components:
         completedAt: { type: [string, "null"], format: date-time }
         reason:
           type: string
-          enum: [initial-catchup, message-threshold, policy-rebuild]
+          enum:
+            [
+              initial-catchup,
+              message-threshold,
+              policy-rebuild,
+              backlog-fast-forward,
+            ]
         providerName: { type: [string, "null"] }
         model: { type: [string, "null"] }
         correlationId: { type: [string, "null"], format: uuid }

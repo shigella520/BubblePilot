@@ -116,7 +116,12 @@ const compressionListQuerySchema = pageQuerySchema.extend({
     .enum(["queued", "running", "succeeded", "failed", "superseded"])
     .optional(),
   reason: z
-    .enum(["initial-catchup", "message-threshold", "policy-rebuild"])
+    .enum([
+      "initial-catchup",
+      "message-threshold",
+      "policy-rebuild",
+      "backlog-fast-forward",
+    ])
     .optional(),
   provider: z.string().max(100).optional(),
   startedFrom: z.string().datetime({ offset: true }).optional(),
@@ -362,7 +367,11 @@ export interface ApplicationOptions {
         id?: string;
         chatId?: string;
         status?: "queued" | "running" | "succeeded" | "failed" | "superseded";
-        reason?: "initial-catchup" | "message-threshold" | "policy-rebuild";
+        reason?:
+          | "initial-catchup"
+          | "message-threshold"
+          | "policy-rebuild"
+          | "backlog-fast-forward";
         provider?: string;
         startedFrom?: Date;
         startedTo?: Date;

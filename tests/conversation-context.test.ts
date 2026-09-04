@@ -6,6 +6,8 @@ import {
   conversationContextCacheKey,
   conversationContextProfileHash,
   contextCompressionPlan,
+  contextFastForwardPlan,
+  conversationCompressionPrompt,
   conversationCompressionTranscript,
   fitContextMessages,
 } from "../modules/workflow/conversation-context-service.js";
@@ -216,6 +218,38 @@ describe("conversation context summary contract", () => {
     ).toEqual({ start: 0, end: 3 });
   });
 
+  it("fast-forwards only one newest window and skips older backlog", () => {
+    expect(
+      contextFastForwardPlan({
+        eligibleCount: 159,
+        baseMessageWindow: 50,
+        redundancyMessageWindow: 30,
+      }),
+    ).toBeNull();
+    expect(
+      contextFastForwardPlan({
+        eligibleCount: 160,
+        baseMessageWindow: 50,
+        redundancyMessageWindow: 30,
+      }),
+    ).toEqual({
+      skippedMessageCount: 80,
+      compressionMessageCount: 30,
+      retainedMessageCount: 50,
+    });
+    expect(
+      contextFastForwardPlan({
+        eligibleCount: 1_898,
+        baseMessageWindow: 50,
+        redundancyMessageWindow: 30,
+      }),
+    ).toEqual({
+      skippedMessageCount: 1_818,
+      compressionMessageCount: 30,
+      retainedMessageCount: 50,
+    });
+  });
+
   it("trims older complete messages while retaining the newest suffix", () => {
     const messages = [
       contextMessage("1", { body: "old" }),
@@ -305,6 +339,23 @@ describe("conversation context summary contract", () => {
     expect(transcript).toContain("fictional-meal.jpg");
     expect(transcript).toContain("A fictional preview summary");
     expect(transcript).toContain("A plate of fictional food");
+  });
+
+  it("requires every incremental summary to replace and preserve the previous summary", () => {
+    const prompt = conversationCompressionPrompt(
+      "Existing unresolved decision",
+      [{ ...contextMessage("2"), messageIndex: "2" }],
+      new Map(),
+      "UTC",
+    );
+    expect(prompt[0]?.content).toContain(
+      "可完全替代 previous_summary 的新摘要",
+    );
+    expect(prompt[0]?.content).toContain("不得只总结 new_messages");
+    expect(prompt[1]?.content).toContain(
+      "<previous_summary>\nExisting unresolved decision\n</previous_summary>",
+    );
+    expect(prompt[1]?.content).toContain("message-2");
   });
 
   it("serializes history as exact append-only provider message blocks", () => {
