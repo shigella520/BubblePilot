@@ -24,6 +24,7 @@ import type {
   WorkflowVersionStatus,
 } from "./workflow-repository.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
+import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
 import {
   linkPreviewItemSchema,
   linkPreviewStatusSchema,
@@ -99,8 +100,8 @@ interface ExecutionRow {
   created_at: Date;
   cached_prompt_tokens: string | null;
   cache_eligible_prompt_tokens: string | null;
-  summary_compression_status:
-    "none" | "succeeded" | "failed" | "busy" | "superseded";
+  trigger_message_index: string | null;
+  context_snapshot: Record<string, unknown> | null;
 }
 
 interface RecoveryEnvelopeRow {
@@ -191,7 +192,7 @@ const executionSelect = `SELECT
   e.status, e.current_node_id, e.error_code, e.error_summary, e.next_retry_at,
   e.started_at, e.completed_at, e.created_at,
   cache_usage.cached_prompt_tokens, cache_usage.cache_eligible_prompt_tokens,
-  COALESCE(summary_usage.summary_compression_status, 'none') AS summary_compression_status
+  e.trigger_message_index, e.context_snapshot
 FROM workflow_executions e
 INNER JOIN bot_triggers t ON t.id = e.trigger_id
 INNER JOIN workflow_versions v ON v.id = e.workflow_version_id
@@ -221,17 +222,7 @@ LEFT JOIN LATERAL (
         AND node ->> 'type' = 'ai-chat'
     )
 ) cache_usage ON TRUE
-LEFT JOIN LATERAL (
-  SELECT CASE
-    WHEN BOOL_OR(n.output_summary ->> 'compressionStatus' = 'succeeded') THEN 'succeeded'
-    WHEN BOOL_OR(n.output_summary ->> 'compressionStatus' = 'failed') THEN 'failed'
-    WHEN BOOL_OR(n.output_summary ->> 'compressionStatus' = 'busy') THEN 'busy'
-    WHEN BOOL_OR(n.output_summary ->> 'compressionStatus' = 'superseded') THEN 'superseded'
-    ELSE 'none'
-  END AS summary_compression_status
-  FROM node_executions n
-  WHERE n.execution_id = e.id AND n.node_type = 'load-context'
-) summary_usage ON TRUE`;
+`;
 
 function versionRecord(row: WorkflowVersionRow): WorkflowVersionRecord {
   return {
@@ -298,7 +289,13 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
       cachedPromptTokens === null || cacheEligiblePromptTokens === 0
         ? null
         : cachedPromptTokens / cacheEligiblePromptTokens,
-    summaryCompressionStatus: row.summary_compression_status,
+    contextSnapshot:
+      row.context_snapshot === null && row.trigger_message_index === null
+        ? null
+        : {
+            ...(row.context_snapshot ?? {}),
+            triggerMessageIndex: row.trigger_message_index,
+          },
   };
 }
 
@@ -728,12 +725,14 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
+    summaryTrigger?: ConversationSummaryTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }> {
     const id = randomUUID();
     const inserted = await this.pool.query<IdentifierRow>(
       `INSERT INTO workflow_executions (
          id, provider, external_event_id, source_message_id, trigger_id,
-         workflow_version_id, correlation_id, status
+         workflow_version_id, correlation_id, status, trigger_message_index,
+         context_snapshot
        ) VALUES (
          $1, $2, $3,
          COALESCE(
@@ -743,7 +742,10 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
             INNER JOIN messages m ON m.source_event_id = i.id
             WHERE i.provider = $2 AND i.external_event_id = $3)
          ),
-         $5, $6, $7, 'created'
+         $5, $6, $7, 'created',
+         COALESCE($8::bigint, (SELECT message_index FROM messages
+          WHERE provider = $2 AND provider_message_id = $4)),
+         $9::jsonb
        )
        ON CONFLICT (provider, external_event_id, trigger_id, workflow_version_id)
        DO NOTHING
@@ -756,6 +758,31 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         input.trigger.id,
         input.trigger.workflowVersionId,
         input.envelope.correlationId,
+        input.summaryTrigger?.triggerMessageIndex ?? null,
+        input.summaryTrigger === undefined
+          ? null
+          : JSON.stringify({
+              chatId: input.summaryTrigger.summarySnapshot.chatId ?? null,
+              providerChatId: input.envelope.chat.providerChatId,
+              triggerMessageIndex: input.summaryTrigger.triggerMessageIndex,
+              summaryVersion:
+                input.summaryTrigger.summarySnapshot.summaryVersion,
+              summaryCoveredThroughIndex:
+                input.summaryTrigger.summarySnapshot.coveredThroughIndex,
+              summaryPolicyVersion:
+                input.summaryTrigger.summarySnapshot.summaryPolicyVersion ??
+                null,
+              stateId: input.summaryTrigger.summarySnapshot.stateId,
+              summaryStateId: input.summaryTrigger.summarySnapshot.stateId,
+              compressionOperationId:
+                input.summaryTrigger.summarySnapshot.compressionOperationId ??
+                null,
+              scheduledCompressionOperationId:
+                input.summaryTrigger.compressionOperationId ??
+                input.summaryTrigger.summarySnapshot
+                  .scheduledCompressionOperationId ??
+                null,
+            }),
       ],
     );
     const persistedId = inserted.rows[0]?.id ?? id;
@@ -887,10 +914,11 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         `INSERT INTO workflow_executions (
            id, provider, external_event_id, source_message_id, trigger_id,
            workflow_version_id, retry_of_execution_id, recovery_attempt,
-           correlation_id, status
+           correlation_id, status, trigger_message_index, context_snapshot
          ) SELECT
            $2, provider, $3, source_message_id, trigger_id,
            workflow_version_id, id, recovery_attempt + 1, $4, 'created'
+           , trigger_message_index, context_snapshot
          FROM workflow_executions WHERE id = $1`,
         [executionId, recoveryId, syntheticEventId, correlationId],
       );
@@ -1004,6 +1032,18 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
            started_at = COALESCE(started_at, NOW()), next_retry_at = NULL
        WHERE id = $1`,
       [executionId, nodeId],
+    );
+  }
+
+  async recordContextSnapshot(
+    executionId: string,
+    snapshot: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE workflow_executions
+       SET context_snapshot = COALESCE(context_snapshot, '{}'::jsonb) || $2::jsonb
+       WHERE id = $1`,
+      [executionId, JSON.stringify(snapshot)],
     );
   }
 

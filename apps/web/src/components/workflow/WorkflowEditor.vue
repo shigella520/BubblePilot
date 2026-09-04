@@ -85,15 +85,6 @@ function defaultConfig(block: Block): Record<string, unknown> {
             : item.name === "promptTemplate"
               ? "请根据聊天上下文回答当前消息。"
               : "";
-  if (block.type === "load-context")
-    Object.assign(values, {
-      messageLimit: 10,
-      characterLimit: 6000,
-      includeFromMe: true,
-      summaryEnabled: false,
-      summaryProviderRouteId: "",
-      compressionBatchSize: 10,
-    });
   if (block.type === "render-text")
     values.template = "{{context.event.message.text}}";
   if (block.type === "ai-chat")

@@ -36,7 +36,12 @@ import { createDefaultNodeRegistry } from "../modules/workflow/node-registry.js"
 import { InProcessWorkflowExecutionDispatcher } from "../modules/workflow/execution-dispatcher.js";
 import { PostgresWorkflowRepository } from "../modules/workflow/postgres-workflow-repository.js";
 import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
-import { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
+import {
+  ConversationContextService,
+  ConversationSummaryWorker,
+} from "../modules/workflow/conversation-context-service.js";
+import { PostgresSummarySettingsRepository } from "../modules/workflow/postgres-summary-settings-repository.js";
+import { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
 
 const config = loadConfig();
 const repository = new PostgresArchiveRepository(
@@ -153,10 +158,48 @@ const aiAgent = new AgentRunner(
   aiRepository,
   webSearchSettings,
 );
+const imageSummaryRepository = new PostgresImageSummaryRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
 const conversationContext = new ConversationContextService(
   config.databaseUrl,
   aiRouting,
   config.databaseQueryTimeoutMs,
+  imageSummaryRepository,
+);
+const summarySettings = new SummarySettingsService(
+  new PostgresSummarySettingsRepository(
+    config.databaseUrl,
+    config.databaseQueryTimeoutMs,
+  ),
+  {
+    enabled: false,
+    includeFromMe: true,
+    baseMessageWindow: 10,
+    characterLimit: 6000,
+    redundancyMessageWindow: 10,
+    providerRouteId: "",
+    timeZone: "UTC",
+  },
+);
+const conversationSummaryWorker = new ConversationSummaryWorker(
+  conversationContext,
+  async () => (await summarySettings.resolve()).providerRouteId,
+  async () => (await summarySettings.resolve()).timeZone,
+  5_000,
+  async () => {
+    const settings = await summarySettings.resolve();
+    return {
+      enabled: settings.enabled && settings.providerRouteId !== "",
+      providerRouteId: settings.providerRouteId,
+      baseMessageWindow: settings.baseMessageWindow,
+      redundancyMessageWindow: settings.redundancyMessageWindow,
+      includeFromMe: settings.includeFromMe,
+      timeZone: settings.timeZone,
+      policyVersion: settings.policyVersion ?? 1,
+    };
+  },
 );
 const messageRetention =
   config.messageRetentionDays > 0
@@ -176,10 +219,6 @@ const nativeImageInput = new NativeImageInputService(
   blueBubblesSettings,
   aiRepository,
 );
-const imageSummaryRepository = new PostgresImageSummaryRepository(
-  config.databaseUrl,
-  config.databaseQueryTimeoutMs,
-);
 const imageSummaryWorker = new ImageSummaryWorker(
   imageSummaryRepository,
   new ImageSummaryService(
@@ -197,6 +236,7 @@ const workflowEngine = new WorkflowEngine(
     aiAgent,
     imageInput: nativeImageInput,
     conversationContext,
+    summarySettings,
     imageSummaries: imageSummaryRepository,
   }),
   {
@@ -217,12 +257,15 @@ const application = buildApplication(config, repository, {
     searchSettings: webSearchSettings,
     imageInputSettings,
     rawRequestStore: aiRawRequestStore,
+    summarySettings,
   },
   workflow: {
     repository: workflowRepository,
     engine: workflowEngine,
     dispatcher: workflowDispatcher,
     contextState: conversationContext,
+    conversationSummary: conversationContext,
+    summaryWorker: conversationSummaryWorker,
   },
   dataExport: {
     repository: dataExportRepository,

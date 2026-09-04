@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1260" viewBox="0 0 1920 1260" role="img" aria-labelledby="title desc">
+  <title id="title">BubblePilot 聊天级摘要压缩与工作流读取数轴</title>
+  <desc id="desc">以基础窗口和冗余窗口定义消息保留窗口，展示当前消息计入阈值、消息归档后触发压缩、压缩与工作流并行执行、摘要成功后推进游标，以及上下文提取如何按目标字符数裁剪完整消息。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/><stop offset="0.55" stop-color="#0c1728"/><stop offset="1" stop-color="#111d31"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#8fa6c6" stroke-opacity=".055"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="170%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity=".24"/>
+    </filter>
+    <marker id="blueArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" viewBox="0 0 10 10"><path d="M0 0L10 5L0 10Z" fill="#57bce9"/></marker>
+    <marker id="greenArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" viewBox="0 0 10 10"><path d="M0 0L10 5L0 10Z" fill="#45d6ac"/></marker>
+    <marker id="orangeArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" viewBox="0 0 10 10"><path d="M0 0L10 5L0 10Z" fill="#f6ae5f"/></marker>
+    <style>
+      text { font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
+      .title { fill:#f8fbff; font-size:36px; font-weight:800; }
+      .subtitle { fill:#9aacc4; font-size:17px; }
+      .eyebrow { fill:#7589a7; font-size:14px; font-weight:700; letter-spacing:2px; }
+      .section { fill:#eef5ff; font-size:24px; font-weight:700; }
+      .card-title { fill:#f7f9fd; font-size:18px; font-weight:700; }
+      .body { fill:#b7c5d9; font-size:15px; }
+      .small { fill:#8fa0b8; font-size:13px; }
+      .tiny { fill:#8192aa; font-size:12px; }
+      .number { fill:#07111f; font-size:13px; font-weight:800; }
+      .mono { font-family:"SFMono-Regular", Consolas, monospace; }
+      .line { fill:none; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+      .chip-label { fill:#dcecff; font-size:14px; font-weight:700; }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1260" fill="url(#bg)"/>
+  <rect width="1920" height="1260" fill="url(#grid)"/>
+  <circle cx="1780" cy="80" r="330" fill="#5868d8" opacity=".10"/>
+  <circle cx="120" cy="1190" r="300" fill="#18a985" opacity=".08"/>
+
+  <text x="64" y="65" class="title">BubblePilot 聊天级摘要压缩与工作流读取</text>
+  <text x="64" y="101" class="subtitle">按消息游标固定边界；压缩是后台任务，工作流读取只使用已提交状态</text>
+
+  <g transform="translate(64 140)">
+    <rect width="255" height="64" rx="16" fill="#102a40" stroke="#2e6f91"/>
+    <text x="22" y="27" class="eyebrow">消息保留窗口</text><text x="22" y="51" class="chip-label">基础窗口 + 冗余窗口</text>
+    <rect x="275" width="255" height="64" rx="16" fill="#142a32" stroke="#2f8c76"/>
+    <text x="297" y="27" class="eyebrow">基础窗口</text><text x="297" y="51" class="chip-label">压缩后保留最新消息</text>
+    <rect x="550" width="255" height="64" rx="16" fill="#30243a" stroke="#8a5ab8"/>
+    <text x="572" y="27" class="eyebrow">冗余窗口</text><text x="572" y="51" class="chip-label">每次压缩最早消息</text>
+    <rect x="850" width="500" height="64" rx="16" fill="#182338" stroke="#38547b"/>
+    <text x="875" y="27" class="eyebrow">实际触发条件</text><text x="875" y="51" class="chip-label">未压缩消息数 ≥ 冗余窗口 + 基础窗口（当前消息计入）</text>
+  </g>
+
+  <text x="64" y="272" class="eyebrow">01 · MESSAGE NUMBER LINE</text>
+  <text x="64" y="304" class="section">示例数轴：基础窗口 = 4，冗余窗口 = 3；M11 到达时触发</text>
+
+  <g transform="translate(64 330)">
+    <line x1="34" y1="38" x2="1770" y2="38" stroke="#56708e" stroke-width="2" marker-end="url(#blueArrow)"/>
+    <rect x="0" y="0" width="510" height="76" rx="14" fill="#16324a" fill-opacity=".9" stroke="#2e6f91"/>
+    <text x="22" y="25" class="small">已提交摘要 S1</text><text x="22" y="52" class="body">coveredThrough = M4</text>
+    <rect x="522" y="0" width="375" height="76" rx="14" fill="#4a3420" fill-opacity=".9" stroke="#a97136"/>
+    <text x="544" y="25" class="small">本次固定压缩冗余窗口</text><text x="544" y="52" class="body">M5 – M7（3 条最早消息）</text>
+    <rect x="909" y="0" width="500" height="76" rx="14" fill="#173b36" fill-opacity=".9" stroke="#2e8c75"/>
+    <text x="931" y="25" class="small">基础窗口中的历史消息</text><text x="931" y="52" class="body">M8 – M10（当前消息之前）</text>
+    <rect x="1421" y="0" width="150" height="76" rx="14" fill="#30274a" fill-opacity=".9" stroke="#8a5ab8"/>
+    <text x="1442" y="25" class="small">当前触发消息</text><text x="1442" y="52" class="body">M11</text>
+    <g transform="translate(0 102)">
+      <text x="0" y="0" class="tiny">摘要游标左侧</text><text x="530" y="0" class="tiny">冗余窗口压缩输入</text><text x="954" y="0" class="tiny">基础窗口历史</text><text x="1450" y="0" class="tiny">当前消息计入阈值</text>
+    </g>
+  </g>
+
+  <text x="64" y="500" class="eyebrow">02 · STEP-BY-STEP FLOW</text>
+  <text x="64" y="532" class="section">从归档到下一次上下文读取</text>
+
+  <g transform="translate(64 562)" filter="url(#shadow)">
+    <rect width="352" height="182" rx="19" fill="#101e32" stroke="#263b58"/>
+    <circle cx="30" cy="30" r="15" fill="#57bce9"/><text x="30" y="35" text-anchor="middle" class="number">1</text>
+    <text x="58" y="36" class="card-title">消息归档</text>
+    <text x="24" y="78" class="body">M11 写入归档后，读取当前全局策略。</text>
+    <text x="24" y="108" class="body">统计 M5–M11，共 7 条未压缩消息。</text>
+    <text x="24" y="150" class="small">7 ≥ 冗余窗口 + 基础窗口 = 3 + 4</text>
+    <path d="M352 91H390" class="line" stroke="#57bce9" marker-end="url(#blueArrow)"/>
+  </g>
+
+  <g transform="translate(454 562)" filter="url(#shadow)">
+    <rect width="352" height="182" rx="19" fill="#101e32" stroke="#263b58"/>
+    <circle cx="30" cy="30" r="15" fill="#57bce9"/><text x="30" y="35" text-anchor="middle" class="number">2</text>
+    <text x="58" y="36" class="card-title">固定任务快照</text>
+    <text x="24" y="78" class="body">压缩任务固定：</text>
+    <text x="24" y="106" class="small mono">base = S1 · from = M5 · through = M7</text>
+    <text x="24" y="140" class="body">M11 只作为触发边界，不进入本次压缩。</text>
+    <path d="M352 91H390" class="line" stroke="#57bce9" marker-end="url(#blueArrow)"/>
+  </g>
+
+  <g transform="translate(844 562)" filter="url(#shadow)">
+    <rect width="430" height="182" rx="19" fill="#101e32" stroke="#263b58"/>
+    <circle cx="30" cy="30" r="15" fill="#57bce9"/><text x="30" y="35" text-anchor="middle" class="number">3</text>
+    <text x="58" y="36" class="card-title">两个任务并行</text>
+    <rect x="24" y="61" width="180" height="78" rx="12" fill="#4a3420" stroke="#a97136"/>
+    <text x="40" y="89" class="small">摘要 Worker</text><text x="40" y="117" class="body">S1 + M5–M7</text>
+    <rect x="226" y="61" width="180" height="78" rx="12" fill="#173b36" stroke="#2e8c75"/>
+    <text x="242" y="89" class="small">工作流执行</text><text x="242" y="117" class="body">S1 + M5–M10 + M11</text>
+    <path d="M430 91H468" class="line" stroke="#57bce9" marker-end="url(#blueArrow)"/>
+  </g>
+
+  <g transform="translate(1320 562)" filter="url(#shadow)">
+    <rect width="500" height="182" rx="19" fill="#101e32" stroke="#263b58"/>
+    <circle cx="30" cy="30" r="15" fill="#45d6ac"/><text x="30" y="35" text-anchor="middle" class="number">4</text>
+    <text x="58" y="36" class="card-title">成功提交 / 失败回滚</text>
+    <text x="24" y="78" class="body">成功：S2 与 coveredThrough = M7 原子提交。</text>
+    <text x="24" y="108" class="body">失败、租约过期或版本冲突：游标不推进。</text>
+    <text x="24" y="150" class="small">M11 本次执行仍用 S1；后续工作流才读取 S2。</text>
+  </g>
+
+  <path d="M1060 770V820H230V850" class="line" stroke="#f6ae5f" marker-end="url(#orangeArrow)"/>
+  <path d="M1570 770V820H1650V850" class="line" stroke="#45d6ac" marker-end="url(#greenArrow)"/>
+
+  <g transform="translate(64 850)" filter="url(#shadow)">
+    <rect width="1110" height="210" rx="19" fill="#101e32" stroke="#263b58"/>
+    <circle cx="30" cy="30" r="15" fill="#45d6ac"/><text x="30" y="35" text-anchor="middle" class="number">5</text>
+    <text x="58" y="36" class="card-title">后续 load-context：读取增量并应用字符数限制</text>
+    <text x="24" y="78" class="body">压缩前：S1 + M5～当前消息之前的全部原始增量。</text>
+    <text x="24" y="112" class="body">压缩后：S2 + M8～当前消息之前的全部原始增量。</text>
+    <text x="24" y="146" class="body">超过目标字符数时，从较早消息开始整条舍弃。</text>
+    <text x="24" y="184" class="small">基础窗口不是读取时的固定条数上限；不截断单条消息。</text>
+  </g>
+
+  <text x="64" y="1150" class="eyebrow">03 · ONE-LINE SUMMARY</text>
+  <text x="64" y="1190" class="section">归档触发（当前消息计入）→ 固定冗余窗口 → 压缩与工作流并行 → 成功推进游标 → 后续读取新摘要并按字符数裁剪</text>
+</svg>

@@ -23,7 +23,11 @@ import type { MessageEnvelope } from "../ingestion/message-envelope.js";
 import type { WorkflowNode } from "./workflow-definition.js";
 import { WorkflowExecutionError } from "./workflow-errors.js";
 import type { WorkflowRepository } from "./workflow-repository.js";
-import type { ConversationContextService } from "./conversation-context-service.js";
+import type {
+  ConversationContextService,
+  ConversationContextSnapshot,
+} from "./conversation-context-service.js";
+import type { SummarySettingsService } from "./summary-settings-service.js";
 import { formatContextTimestamp } from "./context-time.js";
 
 export interface NodeExecutionContext {
@@ -37,6 +41,7 @@ export interface NodeExecutionContext {
   historySummary: { text: string; coveredThroughIndex: string } | null;
   participantIdentities: Record<string, ChatParticipantIdentity>;
   outputs: Record<string, Record<string, unknown>>;
+  contextSnapshot: ConversationContextSnapshot | null;
 }
 
 export interface NodeHandlerResult {
@@ -416,6 +421,7 @@ class LoadContextNodeHandler extends BaseNodeHandler {
       ImageSummaryRepository,
       "listForProviderMessageIds"
     >,
+    private readonly summarySettings?: SummarySettingsService,
   ) {
     super();
   }
@@ -431,24 +437,68 @@ class LoadContextNodeHandler extends BaseNodeHandler {
   ): Promise<NodeHandlerResult> {
     this.assertType(node, this.type);
     try {
-      const summaryEnabled = node.config.summaryEnabled ?? false;
-      const summarized = summaryEnabled
-        ? await this.conversationContext?.load({
-            executionId: context.executionId,
-            workflowId: context.workflowId,
-            nodeId: node.id,
-            provider: context.envelope.provider,
-            providerChatId: context.envelope.chat.providerChatId,
-            beforeProviderMessageId: context.envelope.message.providerMessageId,
-            routeId: node.config.summaryProviderRouteId ?? "",
-            messageLimit: node.config.messageLimit,
-            characterLimit: node.config.characterLimit,
-            compressionBatchSize: node.config.compressionBatchSize ?? 10,
-            includeFromMe: node.config.includeFromMe,
-            timeZone: context.timeZone,
-          })
-        : undefined;
-      if (summaryEnabled && summarized === undefined) {
+      const globalSummary = await this.summarySettings?.resolve();
+      const rawSnapshot = context.contextSnapshot as Readonly<
+        Record<string, unknown>
+      > | null;
+      const coveredThroughIndex =
+        typeof rawSnapshot?.coveredThroughIndex === "string"
+          ? rawSnapshot.coveredThroughIndex
+          : typeof rawSnapshot?.summaryCoveredThroughIndex === "string"
+            ? rawSnapshot.summaryCoveredThroughIndex
+            : null;
+      const stateId =
+        typeof rawSnapshot?.stateId === "string"
+          ? rawSnapshot.stateId
+          : typeof rawSnapshot?.summaryStateId === "string"
+            ? rawSnapshot.summaryStateId
+            : null;
+      const summarySnapshot =
+        rawSnapshot !== null &&
+        stateId !== null &&
+        typeof rawSnapshot.summaryVersion === "number" &&
+        coveredThroughIndex !== null
+          ? ({
+              stateId,
+              ...(typeof rawSnapshot.chatId === "string"
+                ? { chatId: rawSnapshot.chatId }
+                : {}),
+              summaryVersion: rawSnapshot.summaryVersion,
+              coveredThroughIndex,
+              ...(typeof rawSnapshot.summary === "string"
+                ? { summary: rawSnapshot.summary }
+                : {}),
+              ...(typeof rawSnapshot.summaryPolicyVersion === "number"
+                ? { summaryPolicyVersion: rawSnapshot.summaryPolicyVersion }
+                : {}),
+              ...(typeof rawSnapshot.compressionOperationId === "string"
+                ? { compressionOperationId: rawSnapshot.compressionOperationId }
+                : {}),
+              ...(typeof rawSnapshot.scheduledCompressionOperationId ===
+              "string"
+                ? {
+                    scheduledCompressionOperationId:
+                      rawSnapshot.scheduledCompressionOperationId,
+                  }
+                : {}),
+            } satisfies ConversationContextSnapshot)
+          : null;
+      const summarized =
+        globalSummary !== undefined
+          ? await this.conversationContext?.load({
+              executionId: context.executionId,
+              provider: context.envelope.provider,
+              providerChatId: context.envelope.chat.providerChatId,
+              beforeProviderMessageId:
+                context.envelope.message.providerMessageId,
+              characterLimit: globalSummary?.characterLimit ?? 6_000,
+              includeFromMe: globalSummary?.includeFromMe ?? true,
+              timeZone: context.timeZone,
+              summaryPolicyVersion: globalSummary?.policyVersion ?? 1,
+              summarySnapshot,
+            })
+          : undefined;
+      if (globalSummary !== undefined && summarized === undefined) {
         throw new Error("Conversation history summary is unavailable.");
       }
       const loadedMessages =
@@ -456,9 +506,13 @@ class LoadContextNodeHandler extends BaseNodeHandler {
         (await this.archive.loadRecentMessages(
           context.envelope.chat.providerChatId,
           {
-            limit: node.config.messageLimit,
-            maxCharacters: node.config.characterLimit,
-            includeFromMe: node.config.includeFromMe,
+            // This compatibility path is used only when the chat-summary
+            // module is not wired (for example, a lightweight test host). Do
+            // not impose the old fixed 50-message retention limit here; the
+            // character budget remains the only context extraction bound.
+            limit: Number.MAX_SAFE_INTEGER,
+            maxCharacters: globalSummary?.characterLimit ?? 6_000,
+            includeFromMe: globalSummary?.includeFromMe ?? true,
             beforeProviderMessageId: context.envelope.message.providerMessageId,
           },
         ));
@@ -522,9 +576,9 @@ class LoadContextNodeHandler extends BaseNodeHandler {
           ),
           includesSentMessages: messages.some((message) => message.isFromMe),
           participantIdentityCount: participants.length,
-          summaryEnabled,
           summaryCharacters: summarized?.summary.length ?? 0,
           summaryVersion: summarized?.summaryVersion ?? null,
+          summaryPolicyVersion: summarized?.summaryPolicyVersion ?? null,
           summaryCoveredThroughIndex: summarized?.coveredThroughIndex ?? null,
           summaryStateCacheHit: summarized?.cacheHit ?? null,
           uncompressedMessageCount:
@@ -534,18 +588,12 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             messages.reduce((total, message) => total + message.body.length, 0),
           temporaryOverflowCharacters:
             summarized?.temporaryOverflowCharacters ?? 0,
-          compressionReason: summarized?.compressionReason ?? null,
-          compressionStatus: summarized?.compression.status ?? "disabled",
-          ...(summarized?.compression.status === "succeeded" ||
-          summarized?.compression.status === "failed" ||
-          summarized?.compression.status === "superseded"
-            ? {
-                compressionFromIndex: summarized.compression.fromIndex,
-                compressionThroughIndex: summarized.compression.throughIndex,
-                compressionDurationMs: summarized.compression.durationMs,
-                compressionErrorCode: summarized.compression.errorCode,
-              }
-            : {}),
+          truncatedMessageCount: summarized?.truncatedMessageCount ?? 0,
+          contextIncomplete: summarized?.contextIncomplete ?? false,
+          usedPreviousSummary: summarized?.usedPreviousSummary ?? false,
+          compressionOperationId: summarized?.compressionOperationId ?? null,
+          scheduledCompressionOperationId:
+            summarized?.scheduledCompressionOperationId ?? null,
         },
         outputs: {
           messages,
@@ -878,6 +926,45 @@ function assemblePromptZones(zones: AiPromptZones): AiChatMessage[] {
   return messages;
 }
 
+// The context extractor applies the user-configured character budget. The AI
+// node deliberately does not reuse that budget: it only keeps a large guard
+// against pathological prompt assembly. Image payloads are counted as their
+// decoded bytes, never as the much larger Base64 Data URL string. Image input
+// itself is already bounded by the native-image-input settings.
+const AI_CHAT_INPUT_HARD_PAYLOAD_BYTES = 64 * 1024 * 1024;
+
+function dataUrlDecodedBytes(value: string): number {
+  const match = /^data:[^,]*;base64,([A-Za-z0-9+/=\s]*)$/su.exec(value);
+  if (match?.[1] === undefined) return Buffer.byteLength(value, "utf8");
+  const encoded = match[1].replace(/\s/gu, "");
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((encoded.length * 3) / 4) - padding);
+}
+
+function promptMessagePayloadBytes(message: AiChatMessage): number {
+  if (typeof message.content === "string") {
+    return Buffer.byteLength(message.content, "utf8");
+  }
+  return message.content.reduce(
+    (total, part) =>
+      total +
+      (part.type === "text"
+        ? Buffer.byteLength(part.text, "utf8")
+        : dataUrlDecodedBytes(part.dataUrl) +
+          Buffer.byteLength(part.label, "utf8")),
+    0,
+  );
+}
+
+export function aiChatInputPayloadBytes(
+  messages: readonly AiChatMessage[],
+): number {
+  return messages.reduce(
+    (total, message) => total + promptMessagePayloadBytes(message),
+    0,
+  );
+}
+
 function templateContainsCurrentMessage(template: string): boolean {
   return /\{\{\s*message\.text\s*\}\}/u.test(template);
 }
@@ -1085,6 +1172,14 @@ class AiChatNodeHandler extends BaseNodeHandler {
       currentResources,
       diagnostics,
     });
+    const assembledPayloadBytes = aiChatInputPayloadBytes(messages);
+    if (assembledPayloadBytes > AI_CHAT_INPUT_HARD_PAYLOAD_BYTES) {
+      throw new WorkflowExecutionError(
+        "AI_INPUT_TOO_LARGE",
+        "The assembled AI input exceeds the safety limit.",
+        false,
+      );
+    }
 
     let result;
     try {
@@ -1358,6 +1453,7 @@ export function createDefaultNodeRegistry(
     imageInput?: NativeImageInputService;
     conversationContext?: ConversationContextService;
     imageSummaries?: ImageSummaryRepository;
+    summarySettings?: SummarySettingsService;
   },
 ): NodeRegistry {
   const registry = new NodeRegistry();
@@ -1374,6 +1470,7 @@ export function createDefaultNodeRegistry(
         capabilities.archive,
         capabilities.conversationContext,
         capabilities.imageSummaries,
+        capabilities.summarySettings,
       ),
     );
     registry.register(

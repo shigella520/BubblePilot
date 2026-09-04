@@ -53,11 +53,7 @@ function enrichActionBlocks(
   return actionBlocks.map((block) => ({
     ...block,
     config: block.config.map((item: any) => {
-      if (
-        (block.type === "ai-chat" || block.type === "load-context") &&
-        (item.name === "providerRouteId" ||
-          item.name === "summaryProviderRouteId")
-      ) {
+      if (block.type === "ai-chat" && item.name === "providerRouteId") {
         return {
           ...item,
           options: aiRoutes.map((aiRoute) => ({

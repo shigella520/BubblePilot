@@ -5,12 +5,18 @@ import type {
 import type { BlueBubblesWebhookAdapter } from "../integrations/bluebubbles/webhook-adapter.js";
 import type { LinkPreviewEnricher } from "../integrations/bluebubbles/link-preview-enricher.js";
 import type { ImageSummaryScheduler } from "../ai/image-summary-service.js";
+import type {
+  ConversationContextService,
+  ConversationSummaryTrigger,
+} from "../workflow/conversation-context-service.js";
+import type { SummarySettingsService } from "../workflow/summary-settings-service.js";
 import { emptyLinkPreview } from "./link-preview.js";
 import type { MessageEnvelope } from "./message-envelope.js";
 
 export interface IngestionOutcome {
   result: IngestionResult;
   automationEnvelope: MessageEnvelope | null;
+  summaryTrigger?: ConversationSummaryTrigger;
 }
 
 function scheduleImageSummary(operation: (() => Promise<void>) | undefined) {
@@ -29,6 +35,9 @@ export class IngestionService {
     private readonly monitoredChatIds: ReadonlySet<string>,
     private readonly linkPreviewEnricher?: LinkPreviewEnricher,
     private readonly imageSummary?: ImageSummaryScheduler,
+    private readonly conversationSummary?: ConversationContextService,
+    private readonly summarySettings?: SummarySettingsService,
+    private readonly wakeSummaryWorker?: () => void,
   ) {}
 
   async ingest(
@@ -58,6 +67,55 @@ export class IngestionService {
       scheduleImageSummary(() =>
         imageSummary.enqueueAttachments(messageId, normalized.envelope),
       );
+    }
+    let summaryTrigger: ConversationSummaryTrigger | undefined;
+    if (
+      result.messageId !== null &&
+      this.conversationSummary !== undefined &&
+      this.summarySettings !== undefined
+    ) {
+      // Summary scheduling is deliberately best-effort after archive commit.
+      // A transient summary database/provider failure must not prevent the
+      // workflow task from being created for this already-persisted message.
+      try {
+        const settings = await this.summarySettings.view();
+        if (settings.enabled && settings.providerRouteId !== "") {
+          try {
+            summaryTrigger = await this.conversationSummary.enqueueForMessage({
+              provider: normalized.envelope.provider,
+              providerChatId: normalized.envelope.chat.providerChatId,
+              providerMessageId: normalized.envelope.message.providerMessageId,
+              routeId: settings.providerRouteId,
+              baseMessageWindow: settings.baseMessageWindow,
+              redundancyMessageWindow: settings.redundancyMessageWindow,
+              timeZone: settings.timeZone,
+              summaryPolicyVersion: settings.policyVersion,
+              correlationId,
+              includeFromMe: settings.includeFromMe,
+            });
+            this.wakeSummaryWorker?.();
+          } catch {
+            // Keep a read snapshot when possible so this workflow still has
+            // a fixed trigger boundary even if queue insertion failed.
+            try {
+              summaryTrigger =
+                await this.conversationSummary.snapshotForMessage({
+                  provider: normalized.envelope.provider,
+                  providerChatId: normalized.envelope.chat.providerChatId,
+                  providerMessageId:
+                    normalized.envelope.message.providerMessageId,
+                  includeFromMe: settings.includeFromMe,
+                  timeZone: settings.timeZone,
+                  summaryPolicyVersion: settings.policyVersion,
+                });
+            } catch {
+              // The workflow can still use its message boundary fallback.
+            }
+          }
+        }
+      } catch {
+        // Summary settings are optional for message automation availability.
+      }
     }
     let automationEnvelope = normalized.envelope;
     if (
@@ -122,6 +180,7 @@ export class IngestionService {
           result.automationOutcome === "evaluation-pending")
           ? automationEnvelope
           : null,
+      ...(summaryTrigger === undefined ? {} : { summaryTrigger }),
     };
   }
 }

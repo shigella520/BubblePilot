@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1330" viewBox="0 0 1920 1330" role="img" aria-labelledby="title desc">
   <title id="title">BubblePilot 消息轮换压缩、工作流编排与 Prompt Cache 优化</title>
-  <desc id="desc">图示 BlueBubbles 入站消息如何标准化、归档、匹配触发器并通过节点注册表执行工作流；上下文如何在基础窗口和冗余缓冲内只追加，并在批次边界以旧摘要加最早一批消息生成新版摘要；以及稳定请求前缀、后置增强材料和固定会话缓存键如何提高 Provider Prompt Cache 命中率。</desc>
+  <desc id="desc">图示 BlueBubbles 入站消息如何标准化、归档、匹配触发器并通过节点注册表执行工作流；上下文如何在基础窗口和冗余窗口达到阈值后，以旧摘要加最早一批消息生成新版摘要；以及稳定请求前缀、后置增强材料和固定会话缓存键如何提高 Provider Prompt Cache 命中率。</desc>
 
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
@@ -56,7 +56,7 @@
   <circle cx="110" cy="1260" r="310" fill="#18a985" opacity=".08"/>
 
   <text x="64" y="64" fill="#f8fbff" font-size="36" font-weight="800">BubblePilot 消息轮换压缩与编排</text>
-  <text x="64" y="100" fill="#9aacc4" font-size="17">让上下文“周期内只追加、边界处再换代”，把动态变化推到 Prompt 尾部</text>
+  <text x="64" y="100" fill="#9aacc4" font-size="17">摘要未提交期间保留原始增量，提交边界再换代，把动态变化推到 Prompt 尾部</text>
   <g transform="translate(1505 51)">
     <rect width="351" height="44" rx="22" fill="#14243a" stroke="#2a415f"/>
     <circle cx="24" cy="22" r="6" fill="#45d6ac" filter="url(#glow)"/>
@@ -138,75 +138,74 @@
 
   <!-- 02 · context rotation -->
   <text x="64" y="440" class="eyebrow">02 · CONTEXT ROTATION &amp; COMPRESSION</text>
-  <text x="64" y="471" class="section">上下文轮换：周期内严格追加，批次边界才替换摘要</text>
-  <text x="1856" y="469" text-anchor="end" class="small">L = messageLimit · B = compressionBatchSize</text>
+  <text x="64" y="471" class="section">上下文轮换：读取全部增量，达到消息保留窗口后替换摘要</text>
+  <text x="1856" y="469" text-anchor="end" class="small">基础窗口 + 冗余窗口；当前消息计入阈值</text>
 
   <g transform="translate(64 496)">
     <rect width="1792" height="336" rx="22" fill="#0d192a" stroke="#233954"/>
 
     <g transform="translate(24 22)">
       <rect width="530" height="292" rx="17" fill="#101f33" stroke="#29405d"/>
-      <text x="22" y="31" class="chip">A · 稳定期</text>
-      <text x="22" y="62" class="card-title">原始窗口只在尾部追加</text>
+      <text x="22" y="31" class="chip">压缩前 · 当前摘要</text>
+      <text x="22" y="62" class="card-title">读取摘要游标后的全部原始增量</text>
       <g transform="translate(22 84)">
         <rect width="486" height="48" rx="10" fill="#183852"/>
-        <text x="18" y="30" class="body">摘要 v3 · coveredThroughIndex = k</text>
+        <text x="18" y="30" class="body">摘要 S1 · coveredThroughIndex = M4</text>
         <g transform="translate(0 66)">
-          <rect width="60" height="44" rx="8" fill="#244b66"/><text x="30" y="27" text-anchor="middle" class="chip">m1</text>
-          <rect x="67" width="60" height="44" rx="8" fill="#244b66"/><text x="97" y="27" text-anchor="middle" class="chip">m2</text>
+          <rect width="60" height="44" rx="8" fill="#244b66"/><text x="30" y="27" text-anchor="middle" class="chip">M5</text>
+          <rect x="67" width="60" height="44" rx="8" fill="#244b66"/><text x="97" y="27" text-anchor="middle" class="chip">M6</text>
           <rect x="134" width="60" height="44" rx="8" fill="#244b66"/><text x="164" y="27" text-anchor="middle" class="chip">…</text>
-          <rect x="201" width="60" height="44" rx="8" fill="#244b66"/><text x="231" y="27" text-anchor="middle" class="chip">mL</text>
-          <rect x="276" width="60" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="306" y="27" text-anchor="middle" class="chip">+1</text>
-          <rect x="343" width="60" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="373" y="27" text-anchor="middle" class="chip">…</text>
-          <rect x="410" width="76" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="448" y="27" text-anchor="middle" class="chip">B−1</text>
+          <rect x="201" width="60" height="44" rx="8" fill="#244b66"/><text x="231" y="27" text-anchor="middle" class="chip">M10</text>
+          <rect x="276" width="60" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="306" y="27" text-anchor="middle" class="chip">M11</text>
+          <rect x="343" width="143" height="44" rx="8" fill="#1d3a50" stroke="#47769a" stroke-dasharray="5 4"/><text x="414" y="27" text-anchor="middle" class="chip">当前消息计入</text>
         </g>
         <path d="M276 126H486" fill="none" stroke="#f6ae5f" stroke-width="2"/>
-        <text x="381" y="148" text-anchor="middle" fill="#e7b876" font-size="11">冗余缓冲：允许暂时超过目标字符数</text>
+        <text x="381" y="148" text-anchor="middle" fill="#e7b876" font-size="11">目标字符数只在上下文提取阶段裁剪</text>
       </g>
-      <text x="22" y="267" class="small">窗口范围始终是 L … L+B−1；共同前缀持续增长</text>
+      <text x="22" y="267" class="small">基础窗口不是读取上限；压缩前保留完整原始增量</text>
     </g>
 
     <path d="M566 153H602" fill="none" stroke="#f6ae5f" stroke-width="3" marker-end="url(#arrowOrange)"/>
-    <text x="584" y="132" text-anchor="middle" fill="#e7b876" font-size="11">第 L+B 条</text>
+    <text x="584" y="132" text-anchor="middle" fill="#e7b876" font-size="11">达到冗余窗口 + 基础窗口</text>
 
     <g transform="translate(624 22)">
       <rect width="520" height="292" rx="17" fill="#101f33" stroke="#6f512d"/>
-      <text x="22" y="31" fill="#ffd49a" font-size="12" font-weight="700">B · 压缩边界</text>
-      <text x="22" y="62" class="card-title">旧摘要 + 最早 B 条 → 新摘要</text>
+      <text x="22" y="31" fill="#ffd49a" font-size="12" font-weight="700">压缩边界</text>
+      <text x="22" y="62" class="card-title">旧摘要 + 最早冗余窗口 → 新摘要</text>
       <g transform="translate(22 86)">
         <rect width="178" height="48" rx="10" fill="#183852"/>
-        <text x="89" y="30" text-anchor="middle" class="body">摘要 v3</text>
+        <text x="89" y="30" text-anchor="middle" class="body">摘要 S1</text>
         <text x="199" y="31" fill="#f6ae5f" font-size="19" font-weight="800">＋</text>
         <rect x="224" width="154" height="48" rx="10" fill="#4d4028"/>
-        <text x="301" y="30" text-anchor="middle" class="body">最早 B 条</text>
+        <text x="301" y="30" text-anchor="middle" class="body">最早 3 条</text>
         <path d="M395 24H447" fill="none" stroke="#f6ae5f" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
         <rect y="72" width="476" height="56" rx="11" fill="#2e4051" stroke="#45d6ac"/>
-        <text x="238" y="106" text-anchor="middle" fill="#c7f7e7" font-size="14" font-weight="700">摘要 v4 · 新覆盖游标 k+B</text>
+        <text x="238" y="106" text-anchor="middle" fill="#c7f7e7" font-size="14" font-weight="700">摘要 S2 · coveredThroughIndex = M7</text>
       </g>
       <text x="22" y="242" class="small">租约防并发重复压缩；仅模型成功且状态版本未变时原子提交</text>
-      <text x="22" y="267" class="small">失败 / busy / superseded：保留旧摘要，降级为有界近期历史</text>
+      <text x="22" y="267" class="small">失败 / busy / superseded：保留旧摘要；本次工作流仍使用 S1</text>
     </g>
 
     <path d="M1156 153H1192" fill="none" stroke="#45d6ac" stroke-width="3" marker-end="url(#arrowGreen)"/>
 
     <g transform="translate(1214 22)">
       <rect width="530" height="292" rx="17" fill="#10233a" stroke="#27634f"/>
-      <text x="22" y="31" fill="#9ef0d5" font-size="12" font-weight="700">C · 新一轮稳定期</text>
-      <text x="22" y="62" class="card-title">回到基础窗口，再次只追加</text>
+      <text x="22" y="31" fill="#9ef0d5" font-size="12" font-weight="700">压缩提交后</text>
+      <text x="22" y="62" class="card-title">摘要游标推进，基础窗口自然保留</text>
       <g transform="translate(22 84)">
         <rect width="486" height="48" rx="10" fill="#225147"/>
-        <text x="18" y="30" fill="#c7f7e7" font-size="14">摘要 v4 · 已覆盖被移出的 B 条</text>
+        <text x="18" y="30" fill="#c7f7e7" font-size="14">摘要 S2 · 已覆盖 M5～M7</text>
         <g transform="translate(0 66)">
-          <rect width="70" height="44" rx="8" fill="#244b66"/><text x="35" y="27" text-anchor="middle" class="chip">mB+1</text>
-          <rect x="77" width="70" height="44" rx="8" fill="#244b66"/><text x="112" y="27" text-anchor="middle" class="chip">mB+2</text>
+          <rect width="70" height="44" rx="8" fill="#244b66"/><text x="35" y="27" text-anchor="middle" class="chip">M8</text>
+          <rect x="77" width="70" height="44" rx="8" fill="#244b66"/><text x="112" y="27" text-anchor="middle" class="chip">M9</text>
           <rect x="154" width="60" height="44" rx="8" fill="#244b66"/><text x="184" y="27" text-anchor="middle" class="chip">…</text>
-          <rect x="221" width="78" height="44" rx="8" fill="#244b66"/><text x="260" y="27" text-anchor="middle" class="chip">mL+B</text>
+          <rect x="221" width="78" height="44" rx="8" fill="#244b66"/><text x="260" y="27" text-anchor="middle" class="chip">M10</text>
           <rect x="318" width="168" height="44" rx="8" fill="#1d3a50" stroke="#47769a" stroke-dasharray="5 4"/>
-          <text x="402" y="27" text-anchor="middle" class="chip">下一条继续追加</text>
+          <text x="402" y="27" text-anchor="middle" class="chip">M11 / 后续追加</text>
         </g>
       </g>
-      <text x="22" y="242" class="small">安全阈值：渲染上下文绝不超过 32,000 字符</text>
-      <text x="22" y="267" class="small">首次积压只建立一个近期周期游标，不追赶全部旧消息</text>
+      <text x="22" y="242" class="small">目标字符数超限：从较早消息开始整条舍弃</text>
+      <text x="22" y="267" class="small">后续工作流读取 S2 + M8～当前消息之前的全部原始增量</text>
     </g>
   </g>
 

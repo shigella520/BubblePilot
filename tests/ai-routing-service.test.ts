@@ -674,6 +674,36 @@ describe("AiRoutingService", () => {
     expect(JSON.stringify(repository.attempts)).not.toContain("primary-secret");
   });
 
+  it("allows protected conversation summaries to preserve archived secret text", async () => {
+    const repository = new InMemoryAiRepository();
+    const primary = await provider(repository, "primary");
+    const configuredRoute = await route(repository, [primary.id]);
+    const client = new FakeAiClient(() => ({
+      status: "succeeded",
+      text: "The archived participant wrote primary-secret",
+      durationMs: 8,
+    }));
+    const service = new AiRoutingService(repository, client, secretResolver());
+
+    const result = await service.execute({
+      ...routeRequest(configuredRoute.id),
+      executionId: null,
+      purpose: "context-summary",
+      backgroundOperationId: "summary-operation",
+    });
+
+    expect(result).toMatchObject({
+      status: "succeeded",
+      text: "The archived participant wrote primary-secret",
+      attemptCount: 1,
+    });
+    expect(repository.attempts[0]).toMatchObject({
+      purpose: "context-summary",
+      status: "succeeded",
+      errorCode: null,
+    });
+  });
+
   it("degrades a failed primary and restores it with one half-open probe", async () => {
     let now = Date.parse("2026-08-03T00:00:00.000Z");
     const repository = new InMemoryAiRepository(() => now);

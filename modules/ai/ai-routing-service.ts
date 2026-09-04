@@ -86,15 +86,22 @@ function validateOutput(
       durationMs,
     );
   }
-  for (const provider of snapshot.providers) {
-    const secret = resolveProviderSecret(provider, secrets);
-    if (secret !== null && secret.length >= 8 && text.includes(secret)) {
-      return outputFailure(
-        "AI_OUTPUT_SECRET_DISCLOSURE",
-        "The AI output contains a configured server secret.",
-        false,
-        durationMs,
-      );
+  // Conversation summaries are protected derivatives of the archived chat.
+  // A participant may legitimately paste text that is identical to a
+  // configured Provider secret, and reproducing it in the summary must not
+  // permanently block the chat's compression cursor. User-facing workflow
+  // replies and image summaries retain the disclosure guard.
+  if (request.purpose !== "context-summary") {
+    for (const provider of snapshot.providers) {
+      const secret = resolveProviderSecret(provider, secrets);
+      if (secret !== null && secret.length >= 8 && text.includes(secret)) {
+        return outputFailure(
+          "AI_OUTPUT_SECRET_DISCLOSURE",
+          "The AI output contains a configured server secret.",
+          false,
+          durationMs,
+        );
+      }
     }
   }
   return null;

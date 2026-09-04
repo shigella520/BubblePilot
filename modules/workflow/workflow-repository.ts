@@ -1,4 +1,5 @@
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
+import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
 import type { TriggerConditions } from "./trigger-matcher.js";
 import type {
   WorkflowDefinition,
@@ -81,8 +82,7 @@ export interface WorkflowExecutionRecord {
   cachedPromptTokens: number | null;
   cacheEligiblePromptTokens: number;
   cacheHitRate: number | null;
-  summaryCompressionStatus:
-    "none" | "succeeded" | "failed" | "busy" | "superseded";
+  contextSnapshot: Readonly<Record<string, unknown>> | null;
 }
 
 export interface MessageExecutionLink {
@@ -231,6 +231,7 @@ export interface WorkflowRepository {
   createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
+    summaryTrigger?: ConversationSummaryTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }>;
   createManualRetry(
     executionId: string,
@@ -239,6 +240,10 @@ export interface WorkflowRepository {
   ): Promise<ExecutionRecoveryClaim>;
   closeExecution(executionId: string): Promise<ExecutionCloseResult>;
   markExecutionRunning(executionId: string, nodeId: string): Promise<void>;
+  recordContextSnapshot?(
+    executionId: string,
+    snapshot: Readonly<Record<string, unknown>>,
+  ): Promise<void>;
   markExecutionRetrying(
     executionId: string,
     nodeId: string,

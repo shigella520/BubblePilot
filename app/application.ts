@@ -15,6 +15,14 @@ import type { WebSearchTool } from "../modules/ai/web-search-tool.js";
 import type { WebSearchSettingsService } from "../modules/ai/web-search-settings-service.js";
 import { webSearchSettingsUpdateSchema } from "../modules/ai/web-search-settings-types.js";
 import type { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
+import type { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
+import type {
+  ConversationContextService,
+  ConversationSummaryWorker,
+  ConversationCompressionContentView,
+  ConversationCompressionView,
+} from "../modules/workflow/conversation-context-service.js";
+import { summarySettingsUpdateSchema } from "../modules/workflow/summary-settings-types.js";
 import { imageInputSettingsUpdateSchema } from "../modules/ai/image-input-settings-types.js";
 import type { NativeImageInputService } from "../modules/ai/native-image-input.js";
 import type {
@@ -101,6 +109,23 @@ import { readBearerToken, secretsEqual } from "./security.js";
 const pageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   cursor: z.string().min(1).optional(),
+});
+const compressionListQuerySchema = pageQuerySchema.extend({
+  chatId: z.string().uuid().optional(),
+  status: z
+    .enum(["queued", "running", "succeeded", "failed", "superseded"])
+    .optional(),
+  reason: z
+    .enum([
+      "initial-catchup",
+      "message-threshold",
+      "policy-rebuild",
+      "backlog-fast-forward",
+    ])
+    .optional(),
+  provider: z.string().max(100).optional(),
+  startedFrom: z.string().datetime({ offset: true }).optional(),
+  startedTo: z.string().datetime({ offset: true }).optional(),
 });
 
 const workflowExecutionStatusSchema = z.enum([
@@ -328,12 +353,35 @@ export interface ApplicationOptions {
     searchSettings?: WebSearchSettingsService;
     imageInputSettings?: ImageInputSettingsService;
     rawRequestStore?: AiRawRequestStore;
+    summarySettings?: SummarySettingsService;
   };
   workflow?: {
     repository: WorkflowRepository;
     engine: MessageAutomation;
     dispatcher?: WorkflowExecutionDispatcher;
-    contextState?: { close(): Promise<void> };
+    contextState?: {
+      close(): Promise<void>;
+      listCompressions?(input: {
+        limit: number;
+        cursor?: { timestamp: Date; id: string };
+        id?: string;
+        chatId?: string;
+        status?: "queued" | "running" | "succeeded" | "failed" | "superseded";
+        reason?:
+          | "initial-catchup"
+          | "message-threshold"
+          | "policy-rebuild"
+          | "backlog-fast-forward";
+        provider?: string;
+        startedFrom?: Date;
+        startedTo?: Date;
+      }): Promise<readonly ConversationCompressionView[]>;
+      getCompressionContent?(
+        compressionId: string,
+      ): Promise<ConversationCompressionContentView | null>;
+    };
+    conversationSummary?: ConversationContextService;
+    summaryWorker?: ConversationSummaryWorker;
   };
   dataExport?: {
     repository: DataExportRepository;
@@ -613,6 +661,11 @@ export function buildApplication(
     config.monitoredChatIds,
     options.blueBubbles?.linkPreviewEnricher,
     options.imageSummary?.scheduler,
+    options.workflow?.conversationSummary,
+    options.ai?.summarySettings,
+    options.workflow?.summaryWorker === undefined
+      ? undefined
+      : () => options.workflow?.summaryWorker?.trigger(),
   );
   const adminRateLimiter = new FixedWindowRateLimiter(
     config.adminRateLimitMax,
@@ -625,6 +678,7 @@ export function buildApplication(
   application.addHook("onReady", () => {
     options.messageRetention?.start();
     options.imageSummary?.worker.start();
+    options.workflow?.summaryWorker?.start();
   });
   const fingerprint = (request: FastifyRequest): string =>
     sha256(
@@ -719,6 +773,8 @@ export function buildApplication(
       options.ai?.searchSettings?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.imageInputSettings?.repository.isReady() ??
         Promise.resolve(true),
+      options.ai?.summarySettings?.repository.isReady() ??
+        Promise.resolve(true),
       options.dataExport?.repository.isReady() ?? Promise.resolve(true),
       options.blueBubbles?.settings.repository.isReady() ??
         Promise.resolve(true),
@@ -757,9 +813,19 @@ export function buildApplication(
       if (options.workflow === undefined) {
         decision = "not-evaluated";
       } else {
-        automation = await (options.workflow.dispatcher?.dispatch(
-          outcome.automationEnvelope,
-        ) ?? options.workflow.engine.handleMessage(outcome.automationEnvelope));
+        const dispatchOptions =
+          outcome.summaryTrigger === undefined
+            ? undefined
+            : { summaryTrigger: outcome.summaryTrigger };
+        automation = await (options.workflow.dispatcher === undefined
+          ? options.workflow.engine.handleMessage(
+              outcome.automationEnvelope,
+              dispatchOptions,
+            )
+          : options.workflow.dispatcher.dispatch(
+              outcome.automationEnvelope,
+              dispatchOptions,
+            ));
         decision =
           automation.activeTriggerCount === 0
             ? "no-active-triggers"
@@ -1630,6 +1696,49 @@ export function buildApplication(
       },
     );
 
+    application.get(
+      "/api/v1/ai/summary/settings",
+      { preHandler: requireAdmin },
+      async () => {
+        if (options.ai?.summarySettings === undefined)
+          throw new ApplicationError(
+            "AI_SUMMARY_SETTINGS_UNAVAILABLE",
+            "Summary settings are unavailable.",
+            503,
+          );
+        return { data: await options.ai.summarySettings.view() };
+      },
+    );
+
+    application.put(
+      "/api/v1/ai/summary/settings",
+      {
+        preHandler: requireAuditedAdmin(
+          "ai.summary.settings.update",
+          "conversation-summary-settings",
+        ),
+      },
+      async (request) => {
+        if (options.ai?.summarySettings === undefined)
+          throw new ApplicationError(
+            "AI_SUMMARY_SETTINGS_UNAVAILABLE",
+            "Summary settings are unavailable.",
+            503,
+          );
+        const result = await options.ai.summarySettings.update(
+          summarySettingsUpdateSchema.parse(request.body),
+        );
+        if (result.status === "conflict")
+          throw new ApplicationError(
+            "AI_SUMMARY_SETTINGS_CONFLICT",
+            "Summary settings changed; refresh before retrying.",
+            409,
+          );
+        options.workflow?.summaryWorker?.trigger();
+        return { data: result.value };
+      },
+    );
+
     application.put(
       "/api/v1/ai/image-input/settings",
       {
@@ -1998,7 +2107,7 @@ export function buildApplication(
           format: "BubblePilotWorkflow bubblepilot.io/v1 JSON",
           rules: [
             "Use spec for workflow logic and bindings for external AI routes and chats.",
-            "Use providerRouteRef, summaryProviderRouteRef and chatRefs in node config; never invent instance IDs.",
+            "Use providerRouteRef and chatRefs in node config; summary Provider is global and never belongs in a node; never invent instance IDs.",
             "Keep node IDs stable, connect every node, and keep the graph acyclic.",
             "set-variable is deprecated; use render-text with Context paths for new workflows.",
             "Import always creates an unpublished candidate version.",
@@ -2390,11 +2499,7 @@ export function buildApplication(
         >();
         for (const node of candidate?.definition.nodes ?? []) {
           const routeId =
-            node.type === "ai-chat"
-              ? node.config.providerRouteId
-              : node.type === "load-context" && node.config.summaryEnabled
-                ? node.config.summaryProviderRouteId
-                : undefined;
+            node.type === "ai-chat" ? node.config.providerRouteId : undefined;
           if (routeId === undefined) continue;
           const policy =
             node.type === "ai-chat"
@@ -2668,6 +2773,90 @@ export function buildApplication(
     );
 
     application.get(
+      "/api/v1/conversation-compressions",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const query = compressionListQuerySchema.parse(request.query);
+        const cursor = decodeCursor(query.cursor);
+        const items =
+          (await options.workflow?.contextState?.listCompressions?.({
+            limit: query.limit + 1,
+            ...(cursor === null ? {} : { cursor }),
+            ...(query.chatId === undefined ? {} : { chatId: query.chatId }),
+            ...(query.status === undefined ? {} : { status: query.status }),
+            ...(query.reason === undefined ? {} : { reason: query.reason }),
+            ...(query.provider === undefined
+              ? {}
+              : { provider: query.provider }),
+            ...(query.startedFrom === undefined
+              ? {}
+              : { startedFrom: new Date(query.startedFrom) }),
+            ...(query.startedTo === undefined
+              ? {}
+              : { startedTo: new Date(query.startedTo) }),
+          })) ?? [];
+        return cursorPage(items, query.limit, (item) => ({
+          timestamp: item.startedAt,
+          id: item.id,
+        }));
+      },
+    );
+
+    application.get(
+      "/api/v1/conversation-compressions/:compressionId/content",
+      {
+        preHandler: requireSensitive(
+          "conversation-summary.content.view",
+          "conversation-compression",
+        ),
+      },
+      async (request, reply) => {
+        const parameters = z
+          .object({ compressionId: z.string().uuid() })
+          .parse(request.params);
+        const content =
+          (await options.workflow?.contextState?.getCompressionContent?.(
+            parameters.compressionId,
+          )) ?? null;
+        if (content === null) {
+          throw new ApplicationError(
+            "CONVERSATION_COMPRESSION_NOT_FOUND",
+            "The conversation compression operation does not exist.",
+            404,
+          );
+        }
+        return reply
+          .header("cache-control", "no-store")
+          .header("pragma", "no-cache")
+          .send({ data: content });
+      },
+    );
+
+    application.get(
+      "/api/v1/conversation-compressions/:compressionId",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const parameters = z
+          .object({ compressionId: z.string().uuid() })
+          .parse(request.params);
+        const items =
+          (await options.workflow?.contextState?.listCompressions?.({
+            limit: 1,
+            id: parameters.compressionId,
+          })) ?? [];
+        const item = items[0];
+        if (item === undefined) {
+          throw new ApplicationError(
+            "CONVERSATION_COMPRESSION_NOT_FOUND",
+            "The conversation compression operation does not exist.",
+            404,
+          );
+        }
+        return { data: item };
+      },
+    );
+
+    application.get(
       "/api/v1/operations/status",
       { preHandler: requireAdmin },
       async () => {
@@ -2932,8 +3121,41 @@ export function buildApplication(
     },
   );
 
+  application.delete(
+    "/api/v1/chats/:chatId/summary",
+    {
+      preHandler: requireSensitive(
+        "conversation-summary.clear",
+        "conversation-summary",
+      ),
+    },
+    async (request) => {
+      const parameters = chatParametersSchema.parse(request.params);
+      const conversationSummary = options.workflow?.conversationSummary;
+      if (conversationSummary === undefined) {
+        throw new ApplicationError(
+          "AI_SUMMARY_SETTINGS_UNAVAILABLE",
+          "Summary state is unavailable.",
+          503,
+        );
+      }
+      const result = await conversationSummary.clearChatSummary(
+        parameters.chatId,
+      );
+      if (result === null) {
+        throw new ApplicationError(
+          "CHAT_NOT_FOUND",
+          "The chat does not exist.",
+          404,
+        );
+      }
+      return { data: { chatId: parameters.chatId, ...result } };
+    },
+  );
+
   application.addHook("onClose", async () => {
     await options.imageSummary?.worker.stop();
+    await options.workflow?.summaryWorker?.stop();
     await options.messageRetention?.stop();
     await Promise.all([
       repository.close(),
@@ -2943,6 +3165,7 @@ export function buildApplication(
       options.ai?.repository.close() ?? Promise.resolve(),
       options.ai?.searchSettings?.repository.close() ?? Promise.resolve(),
       options.ai?.imageInputSettings?.repository.close() ?? Promise.resolve(),
+      options.ai?.summarySettings?.repository.close?.() ?? Promise.resolve(),
       options.dataExport?.repository.close() ?? Promise.resolve(),
       options.blueBubbles?.settings.repository.close() ?? Promise.resolve(),
       options.imageSummary?.repository.close() ?? Promise.resolve(),

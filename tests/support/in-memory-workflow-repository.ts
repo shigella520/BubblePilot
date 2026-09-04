@@ -22,6 +22,7 @@ import type {
   WorkflowRuntimeSummary,
   WorkflowVersionRecord,
 } from "../../modules/workflow/workflow-repository.js";
+import type { ConversationSummaryTrigger } from "../../modules/workflow/conversation-context-service.js";
 
 interface StoredWorkflow extends WorkflowRecord {
   versions: WorkflowVersionRecord[];
@@ -329,6 +330,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   async createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
+    summaryTrigger?: ConversationSummaryTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }> {
     const existing = [...this.executions.values()].find(
       (execution) =>
@@ -367,7 +369,33 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       cachedPromptTokens: null,
       cacheEligiblePromptTokens: 0,
       cacheHitRate: null,
-      summaryCompressionStatus: "none",
+      contextSnapshot:
+        input.summaryTrigger === undefined
+          ? null
+          : {
+              chatId:
+                input.summaryTrigger.summarySnapshot.chatId ??
+                input.envelope.chat.providerChatId,
+              providerChatId: input.envelope.chat.providerChatId,
+              triggerMessageIndex: input.summaryTrigger.triggerMessageIndex,
+              summaryVersion:
+                input.summaryTrigger.summarySnapshot.summaryVersion,
+              summaryCoveredThroughIndex:
+                input.summaryTrigger.summarySnapshot.coveredThroughIndex,
+              summaryPolicyVersion:
+                input.summaryTrigger.summarySnapshot.summaryPolicyVersion ??
+                null,
+              stateId: input.summaryTrigger.summarySnapshot.stateId,
+              summaryStateId: input.summaryTrigger.summarySnapshot.stateId,
+              compressionOperationId:
+                input.summaryTrigger.summarySnapshot.compressionOperationId ??
+                null,
+              scheduledCompressionOperationId:
+                input.summaryTrigger.compressionOperationId ??
+                input.summaryTrigger.summarySnapshot
+                  .scheduledCompressionOperationId ??
+                null,
+            },
       sourceProviderMessageId: input.envelope.message.providerMessageId,
       sourceEnvelope: structuredClone(input.envelope),
       nodes: [],
@@ -483,7 +511,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       cachedPromptTokens: null,
       cacheEligiblePromptTokens: 0,
       cacheHitRate: null,
-      summaryCompressionStatus: "none",
+      contextSnapshot: source.contextSnapshot,
       sourceProviderMessageId: source.sourceProviderMessageId,
       sourceEnvelope: {
         ...structuredClone(source.sourceEnvelope),
@@ -851,7 +879,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       cachedPromptTokens: execution.cachedPromptTokens,
       cacheEligiblePromptTokens: execution.cacheEligiblePromptTokens,
       cacheHitRate: execution.cacheHitRate,
-      summaryCompressionStatus: execution.summaryCompressionStatus,
+      contextSnapshot: execution.contextSnapshot,
     };
   }
 }

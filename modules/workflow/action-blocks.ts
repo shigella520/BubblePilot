@@ -203,7 +203,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
     type: "load-context",
     version: 1,
     name: "加载聊天上下文",
-    description: "读取当前聊天最近的归档消息。",
+    description: "读取当前聊天摘要与触发消息之前的归档增量。",
     category: "context",
     inputs: noInputs,
     outputs: [
@@ -211,7 +211,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         name: "messages",
         label: "消息列表",
         type: "messages",
-        description: "最近聊天消息。",
+        description: "摘要游标之后、当前消息之前的上下文消息。",
       },
       {
         name: "count",
@@ -238,51 +238,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         description: "摘要已经覆盖到的稳定消息索引。",
       },
     ],
-    config: [
-      {
-        name: "messageLimit",
-        label: "消息条数",
-        type: "number",
-        required: true,
-        description: "1 到 50 条。",
-      },
-      {
-        name: "characterLimit",
-        label: "字符上限",
-        type: "number",
-        required: true,
-        description:
-          "压缩后的目标字符数；压缩批次内可临时增长，绝对上限为 32,000 字符。",
-      },
-      {
-        name: "includeFromMe",
-        label: "包含自己消息",
-        type: "boolean",
-        description: "是否包含机器人发送的消息。",
-      },
-      {
-        name: "summaryEnabled",
-        label: "启用历史摘要",
-        type: "boolean",
-        description: "用增量摘要保留近期窗口之前的重要历史；默认关闭。",
-      },
-      {
-        name: "summaryProviderRouteId",
-        label: "摘要 Provider 路由",
-        type: "select",
-        required: true,
-        visibleWhen: { field: "summaryEnabled", equals: true },
-        description: "只用于生成增量历史摘要，不影响下游 AI 节点路由。",
-      },
-      {
-        name: "compressionBatchSize",
-        label: "单次压缩消息数",
-        type: "number",
-        visibleWhen: { field: "summaryEnabled", equals: true },
-        description:
-          "压缩周期包含的消息块数量；周期内只追加，到达边界后压缩最早一批。",
-      },
-    ],
+    config: [],
   },
   {
     type: "ai-chat",
