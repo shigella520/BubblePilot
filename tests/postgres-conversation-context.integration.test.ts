@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 
 import { Client } from "pg";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import type { AiRoutingService } from "../modules/ai/ai-routing-service.js";
 import { PostgresArchiveRepository } from "../modules/archive/postgres-archive-repository.js";
@@ -15,7 +23,7 @@ describe.runIf(testDatabaseUrl !== undefined)(
   "ConversationContextService PostgreSQL integrity",
   () => {
     let archive: PostgresArchiveRepository;
-    const execute = vi.fn().mockResolvedValue({
+    const successfulResult = {
       status: "succeeded",
       text: "Merged fictional summary",
       toolCalls: [],
@@ -28,6 +36,13 @@ describe.runIf(testDatabaseUrl !== undefined)(
       attemptCount: 1,
       durationMs: 8,
       diagnostics: null,
+    } as const;
+    const execute = vi.fn();
+
+    beforeEach(() => {
+      // Vitest restores mock implementations after every test. Reinstall the
+      // routing result so each PostgreSQL case remains independent.
+      execute.mockResolvedValue(successfulResult);
     });
 
     beforeAll(() => {
