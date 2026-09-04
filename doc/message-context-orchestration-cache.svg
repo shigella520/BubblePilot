@@ -139,7 +139,7 @@
   <!-- 02 · context rotation -->
   <text x="64" y="440" class="eyebrow">02 · CONTEXT ROTATION &amp; COMPRESSION</text>
   <text x="64" y="471" class="section">上下文轮换：读取全部增量，达到消息保留窗口后替换摘要</text>
-  <text x="1856" y="469" text-anchor="end" class="small">基础窗口 + 冗余窗口；当前消息计入阈值</text>
+  <text x="1856" y="469" text-anchor="end" class="small">本图示例：基础窗口 B = 4 · 冗余窗口 R = 3 · 触发阈值 B + R = 7（当前消息计入）</text>
 
   <g transform="translate(64 496)">
     <rect width="1792" height="336" rx="22" fill="#0d192a" stroke="#233954"/>
@@ -150,23 +150,26 @@
       <text x="22" y="62" class="card-title">读取摘要游标后的全部原始增量</text>
       <g transform="translate(22 84)">
         <rect width="486" height="48" rx="10" fill="#183852"/>
-        <text x="18" y="30" class="body">摘要 S1 · coveredThroughIndex = M4</text>
+        <text x="18" y="30" class="body">摘要 S1 · 已累计覆盖至 M4（包含 M4）</text>
         <g transform="translate(0 66)">
-          <rect width="60" height="44" rx="8" fill="#244b66"/><text x="30" y="27" text-anchor="middle" class="chip">M5</text>
-          <rect x="67" width="60" height="44" rx="8" fill="#244b66"/><text x="97" y="27" text-anchor="middle" class="chip">M6</text>
-          <rect x="134" width="60" height="44" rx="8" fill="#244b66"/><text x="164" y="27" text-anchor="middle" class="chip">…</text>
-          <rect x="201" width="60" height="44" rx="8" fill="#244b66"/><text x="231" y="27" text-anchor="middle" class="chip">M10</text>
-          <rect x="276" width="60" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="306" y="27" text-anchor="middle" class="chip">M11</text>
-          <rect x="343" width="143" height="44" rx="8" fill="#1d3a50" stroke="#47769a" stroke-dasharray="5 4"/><text x="414" y="27" text-anchor="middle" class="chip">当前消息计入</text>
+          <rect width="62" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="31" y="27" text-anchor="middle" class="chip">M5</text>
+          <rect x="69" width="62" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="100" y="27" text-anchor="middle" class="chip">M6</text>
+          <rect x="138" width="62" height="44" rx="8" fill="#4d4028" stroke="#b77a34"/><text x="169" y="27" text-anchor="middle" class="chip">M7</text>
+          <rect x="207" width="62" height="44" rx="8" fill="#244b66"/><text x="238" y="27" text-anchor="middle" class="chip">M8</text>
+          <rect x="276" width="62" height="44" rx="8" fill="#244b66"/><text x="307" y="27" text-anchor="middle" class="chip">M9</text>
+          <rect x="345" width="62" height="44" rx="8" fill="#244b66"/><text x="376" y="27" text-anchor="middle" class="chip">M10</text>
+          <rect x="414" width="72" height="44" rx="8" fill="#1d3a50" stroke="#47769a" stroke-dasharray="5 4"/><text x="450" y="27" text-anchor="middle" class="chip">M11 · 当前</text>
         </g>
-        <path d="M276 126H486" fill="none" stroke="#f6ae5f" stroke-width="2"/>
-        <text x="381" y="148" text-anchor="middle" fill="#e7b876" font-size="11">目标字符数只在上下文提取阶段裁剪</text>
+        <path d="M0 126H200" fill="none" stroke="#f6ae5f" stroke-width="2"/>
+        <text x="100" y="146" text-anchor="middle" fill="#e7b876" font-size="11">冗余窗口 R = 3：进入摘要</text>
+        <path d="M207 126H486" fill="none" stroke="#57bce9" stroke-width="2"/>
+        <text x="346" y="146" text-anchor="middle" fill="#9ddcf7" font-size="11">基础窗口 B = 4：压缩后保留</text>
       </g>
-      <text x="22" y="267" class="small">基础窗口不是读取上限；压缩前保留完整原始增量</text>
+      <text x="22" y="267" class="small">基础窗口不是读取上限；字符限制只在上下文提取阶段裁剪</text>
     </g>
 
     <path d="M566 153H602" fill="none" stroke="#f6ae5f" stroke-width="3" marker-end="url(#arrowOrange)"/>
-    <text x="584" y="132" text-anchor="middle" fill="#e7b876" font-size="11">达到冗余窗口 + 基础窗口</text>
+    <text x="584" y="132" text-anchor="middle" fill="#e7b876" font-size="11">未压缩数 ≥ B + R</text>
 
     <g transform="translate(624 22)">
       <rect width="520" height="292" rx="17" fill="#101f33" stroke="#6f512d"/>
@@ -177,10 +180,11 @@
         <text x="89" y="30" text-anchor="middle" class="body">摘要 S1</text>
         <text x="199" y="31" fill="#f6ae5f" font-size="19" font-weight="800">＋</text>
         <rect x="224" width="154" height="48" rx="10" fill="#4d4028"/>
-        <text x="301" y="30" text-anchor="middle" class="body">最早 3 条</text>
+        <text x="301" y="21" text-anchor="middle" class="body">冗余窗口 R = 3</text>
+        <text x="301" y="38" text-anchor="middle" class="small">本例为 M5～M7</text>
         <path d="M395 24H447" fill="none" stroke="#f6ae5f" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
         <rect y="72" width="476" height="56" rx="11" fill="#2e4051" stroke="#45d6ac"/>
-        <text x="238" y="106" text-anchor="middle" fill="#c7f7e7" font-size="14" font-weight="700">摘要 S2 · coveredThroughIndex = M7</text>
+        <text x="238" y="106" text-anchor="middle" fill="#c7f7e7" font-size="14" font-weight="700">摘要 S2 · 已累计覆盖至 M7（包含 M7）</text>
       </g>
       <text x="22" y="242" class="small">租约防并发重复压缩；仅模型成功且状态版本未变时原子提交</text>
       <text x="22" y="267" class="small">失败 / busy / superseded：保留旧摘要；本次工作流仍使用 S1</text>
@@ -194,7 +198,7 @@
       <text x="22" y="62" class="card-title">摘要游标推进，基础窗口自然保留</text>
       <g transform="translate(22 84)">
         <rect width="486" height="48" rx="10" fill="#225147"/>
-        <text x="18" y="30" fill="#c7f7e7" font-size="14">摘要 S2 · 已覆盖 M5～M7</text>
+        <text x="18" y="30" fill="#c7f7e7" font-size="14">摘要 S2 · 累计覆盖至 M7；本轮纳入 M5～M7</text>
         <g transform="translate(0 66)">
           <rect width="70" height="44" rx="8" fill="#244b66"/><text x="35" y="27" text-anchor="middle" class="chip">M8</text>
           <rect x="77" width="70" height="44" rx="8" fill="#244b66"/><text x="112" y="27" text-anchor="middle" class="chip">M9</text>
