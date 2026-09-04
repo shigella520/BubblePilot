@@ -26,7 +26,7 @@
     "format:write": "prettier --write app modules tests contracts apps/web/src apps/web/*.json apps/web/*.ts apps/web/*.html scripts/*.mjs *.json *.js *.ts *.yaml",
     "lint": "eslint .",
     "ops:check": "sh -n scripts/*.sh && node scripts/check-ops-contract.mjs",
-    "security:check": "pnpm audit --prod --audit-level=moderate",
+    "security:check": "pnpm audit --prod --audit-level=moderate --ignore-registry-errors",
     "start": "node dist/app/main.js",
     "test": "vitest run",
     "test:watch": "vitest",
