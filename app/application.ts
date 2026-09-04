@@ -2862,7 +2862,7 @@ export function buildApplication(
           "conversation-compression",
         ),
       },
-      async (request) => {
+      async (request, reply) => {
         const parameters = z
           .object({ compressionId: z.string().uuid() })
           .parse(request.params);
@@ -2877,7 +2877,10 @@ export function buildApplication(
             404,
           );
         }
-        return { data: content };
+        return reply
+          .header("cache-control", "no-store")
+          .header("pragma", "no-cache")
+          .send({ data: content });
       },
     );
 

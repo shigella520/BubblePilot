@@ -1799,6 +1799,12 @@ paths:
       responses:
         "200":
           description: 返回受保护的摘要压缩内容。
+          headers:
+            Cache-Control:
+              description: 防止受保护内容被浏览器或中间缓存保存。
+              schema:
+                type: string
+                const: no-store
           content:
             application/json:
               schema:

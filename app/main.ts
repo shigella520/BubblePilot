@@ -158,10 +158,15 @@ const aiAgent = new AgentRunner(
   aiRepository,
   webSearchSettings,
 );
+const imageSummaryRepository = new PostgresImageSummaryRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
 const conversationContext = new ConversationContextService(
   config.databaseUrl,
   aiRouting,
   config.databaseQueryTimeoutMs,
+  imageSummaryRepository,
 );
 const summarySettings = new SummarySettingsService(
   new PostgresSummarySettingsRepository(
@@ -213,10 +218,6 @@ const nativeImageInput = new NativeImageInputService(
   imageInputSettings,
   blueBubblesSettings,
   aiRepository,
-);
-const imageSummaryRepository = new PostgresImageSummaryRepository(
-  config.databaseUrl,
-  config.databaseQueryTimeoutMs,
 );
 const imageSummaryWorker = new ImageSummaryWorker(
   imageSummaryRepository,

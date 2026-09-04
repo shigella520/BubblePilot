@@ -324,12 +324,6 @@ let applicationRoot: HTMLElement | null = null;
 let applicationRootWasInert = false;
 const route = useRoute();
 const session = useSessionStore();
-const compressionStatusFilter = ref("");
-const compressionReasonFilter = ref("");
-const compressionProviderFilter = ref("");
-const compressionChatFilter = ref("");
-const compressionStartedFrom = ref("");
-const compressionStartedTo = ref("");
 const executionPager = useCursorPager<Execution>((cursor) => {
   const query = new URLSearchParams({ limit: "10" });
   if (recoveryOnly.value) {
@@ -345,21 +339,6 @@ const auditPager = useCursorPager<AuditEvent>((cursor) => {
 });
 const compressionPager = useCursorPager<ConversationCompression>((cursor) => {
   const query = new URLSearchParams({ limit: "20" });
-  if (compressionStatusFilter.value)
-    query.set("status", compressionStatusFilter.value);
-  if (compressionReasonFilter.value)
-    query.set("reason", compressionReasonFilter.value);
-  if (compressionProviderFilter.value)
-    query.set("provider", compressionProviderFilter.value);
-  if (compressionChatFilter.value)
-    query.set("chatId", compressionChatFilter.value);
-  if (compressionStartedFrom.value)
-    query.set(
-      "startedFrom",
-      new Date(compressionStartedFrom.value).toISOString(),
-    );
-  if (compressionStartedTo.value)
-    query.set("startedTo", new Date(compressionStartedTo.value).toISOString());
   if (cursor !== null) query.set("cursor", cursor);
   return apiPageRequest<ConversationCompression[]>(
     `/api/v1/conversation-compressions?${query}`,
@@ -990,6 +969,23 @@ function compressionReasonLabel(reason: string): string {
     )[reason] ?? reason
   );
 }
+
+function contextSnapshotValue(
+  snapshot: Record<string, unknown>,
+  key: string,
+): string {
+  const value = snapshot[key];
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  return "—";
+}
 </script>
 
 <template>
@@ -1307,66 +1303,6 @@ function compressionReasonLabel(reason: string): string {
             <RefreshCw :size="16" />刷新
           </button>
         </div>
-        <div class="filter-row">
-          <label
-            >状态
-            <select
-              v-model="compressionStatusFilter"
-              @change="compressionPager.first()"
-            >
-              <option value="">全部</option>
-              <option value="queued">排队中</option>
-              <option value="running">处理中</option>
-              <option value="succeeded">成功</option>
-              <option value="failed">失败</option>
-              <option value="superseded">已替代</option>
-            </select>
-          </label>
-          <label
-            >原因
-            <select
-              v-model="compressionReasonFilter"
-              @change="compressionPager.first()"
-            >
-              <option value="">全部</option>
-              <option value="initial-catchup">初始追赶</option>
-              <option value="message-threshold">消息阈值</option>
-              <option value="policy-rebuild">策略重建</option>
-            </select>
-          </label>
-          <label
-            >Provider
-            <input
-              v-model="compressionProviderFilter"
-              placeholder="按 Provider 筛选"
-              @change="compressionPager.first()"
-            />
-          </label>
-          <label
-            >Chat ID
-            <input
-              v-model="compressionChatFilter"
-              placeholder="UUID"
-              @change="compressionPager.first()"
-            />
-          </label>
-          <label
-            >开始时间
-            <input
-              v-model="compressionStartedFrom"
-              type="datetime-local"
-              @change="compressionPager.first()"
-            />
-          </label>
-          <label
-            >结束时间
-            <input
-              v-model="compressionStartedTo"
-              type="datetime-local"
-              @change="compressionPager.first()"
-            />
-          </label>
-        </div>
         <div class="table-shell">
           <table>
             <thead>
@@ -1567,23 +1503,127 @@ function compressionReasonLabel(reason: string): string {
         </header>
         <div class="execution-detail-body">
           <section v-if="detail.contextSnapshot" class="context-snapshot-card">
-            <h3>上下文读取</h3>
-            <button
-              v-if="
-                typeof detail.contextSnapshot.compressionOperationId ===
-                'string'
-              "
-              type="button"
-              class="button tiny secondary"
-              @click="
-                openCompressionFromExecution(
-                  detail.contextSnapshot.compressionOperationId,
-                )
-              "
+            <div class="context-snapshot-heading">
+              <div>
+                <h3>上下文读取</h3>
+                <p class="keyline">本次执行固定使用的摘要与消息水位线。</p>
+              </div>
+              <button
+                v-if="
+                  typeof detail.contextSnapshot.compressionOperationId ===
+                  'string'
+                "
+                type="button"
+                class="button tiny secondary"
+                @click="
+                  openCompressionFromExecution(
+                    detail.contextSnapshot.compressionOperationId,
+                  )
+                "
+              >
+                查看对话压缩轨迹
+              </button>
+            </div>
+            <dl class="context-snapshot-grid">
+              <div>
+                <dt>聊天</dt>
+                <dd>
+                  {{ contextSnapshotValue(detail.contextSnapshot, "chatId") }}
+                </dd>
+              </div>
+              <div>
+                <dt>触发消息</dt>
+                <dd>
+                  M{{
+                    contextSnapshotValue(
+                      detail.contextSnapshot,
+                      "triggerMessageIndex",
+                    )
+                  }}
+                </dd>
+              </div>
+              <div>
+                <dt>摘要版本</dt>
+                <dd>
+                  v{{
+                    contextSnapshotValue(
+                      detail.contextSnapshot,
+                      "summaryVersion",
+                    )
+                  }}
+                  · 策略 v{{
+                    contextSnapshotValue(
+                      detail.contextSnapshot,
+                      "summaryPolicyVersion",
+                    )
+                  }}
+                </dd>
+              </div>
+              <div>
+                <dt>摘要覆盖到</dt>
+                <dd>
+                  M{{
+                    contextSnapshotValue(
+                      detail.contextSnapshot,
+                      "summaryCoveredThroughIndex",
+                    )
+                  }}
+                </dd>
+              </div>
+              <div>
+                <dt>未压缩消息</dt>
+                <dd>
+                  {{
+                    contextSnapshotValue(
+                      detail.contextSnapshot,
+                      "uncompressedMessageCount",
+                    )
+                  }}
+                  条
+                </dd>
+              </div>
+              <div>
+                <dt>实际上下文</dt>
+                <dd>
+                  {{
+                    contextSnapshotValue(
+                      detail.contextSnapshot,
+                      "contextCharacters",
+                    )
+                  }}
+                  字符
+                </dd>
+              </div>
+              <div>
+                <dt>历史裁剪</dt>
+                <dd>
+                  {{
+                    contextSnapshotValue(
+                      detail.contextSnapshot,
+                      "truncatedMessageCount",
+                    )
+                  }}
+                  条
+                </dd>
+              </div>
+              <div>
+                <dt>读取上一版摘要</dt>
+                <dd>
+                  {{
+                    contextSnapshotValue(
+                      detail.contextSnapshot,
+                      "usedPreviousSummary",
+                    )
+                  }}
+                </dd>
+              </div>
+            </dl>
+            <p
+              v-if="detail.contextSnapshot.contextIncomplete === true"
+              class="context-snapshot-warning"
             >
-              查看对话压缩轨迹
-            </button>
-            <pre>{{ JSON.stringify(detail.contextSnapshot, null, 2) }}</pre>
+              本次上下文超过保护边界，内容可能不完整。
+            </p>
           </section>
           <div class="trace-columns">
             <section>

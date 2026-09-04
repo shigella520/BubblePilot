@@ -403,6 +403,8 @@ describe("Web admin authentication", () => {
       headers: { cookie },
     });
     expect(allowed.statusCode).toBe(200);
+    expect(allowed.headers["cache-control"]).toBe("no-store");
+    expect(allowed.headers.pragma).toBe("no-cache");
     const allowedPayload = allowed.json<{
       data: {
         previousSummary: string;

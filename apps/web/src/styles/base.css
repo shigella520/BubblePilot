@@ -2656,7 +2656,54 @@ legend {
   padding: 22px 24px 28px;
 }
 .execution-detail-body .trace-columns {
-  margin-top: 0;
+  margin-top: 22px;
+}
+.context-snapshot-card {
+  padding: 16px;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: 16px;
+  background: rgba(247, 250, 255, 0.62);
+}
+.context-snapshot-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.context-snapshot-heading h3 {
+  margin: 0 0 5px;
+}
+.context-snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 0;
+}
+.context-snapshot-grid > div {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.82);
+}
+.context-snapshot-grid dt {
+  margin-bottom: 5px;
+  color: var(--bubblepilot-muted);
+  font-size: 10px;
+}
+.context-snapshot-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 700;
+}
+.context-snapshot-warning {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: #9d2d26;
+  background: rgba(227, 75, 67, 0.08);
+  font-size: 11px;
 }
 @keyframes execution-detail-backdrop-in {
   from {
@@ -3059,6 +3106,7 @@ legend {
   .two-column-forms,
   .route-grid,
   .trace-columns,
+  .context-snapshot-grid,
   .compression-content-grid,
   .export-summary-grid {
     grid-template-columns: 1fr;

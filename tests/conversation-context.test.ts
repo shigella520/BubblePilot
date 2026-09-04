@@ -6,6 +6,7 @@ import {
   conversationContextCacheKey,
   conversationContextProfileHash,
   contextCompressionPlan,
+  conversationCompressionTranscript,
   fitContextMessages,
 } from "../modules/workflow/conversation-context-service.js";
 import { conversationHistoryMessages } from "../modules/workflow/node-registry.js";
@@ -240,6 +241,70 @@ describe("conversation context summary contract", () => {
         (message) => message.providerMessageId,
       ),
     ).toEqual(["1"]);
+  });
+
+  it("preserves non-body message material in compression input", () => {
+    const message = {
+      ...contextMessage("1", {
+        body: "",
+        attachments: [
+          {
+            providerAttachmentId: "attachment-1",
+            mimeType: "image/jpeg",
+            fileName: "fictional-meal.jpg",
+            sizeBytes: 1234,
+          },
+        ],
+        linkPreview: {
+          status: "available" as const,
+          errorCode: null,
+          items: [
+            {
+              source: "open-graph" as const,
+              url: "https://example.test/meal",
+              originalUrl: null,
+              title: "Fictional meal",
+              summary: "A fictional preview summary",
+              siteName: "Example Test",
+              imageAvailable: true,
+              imageUrl: null,
+              imageSource: null,
+              iconAvailable: false,
+            },
+          ],
+        },
+      }),
+      messageIndex: "1",
+    };
+    const transcript = conversationCompressionTranscript(
+      [message],
+      new Map([
+        [
+          "1",
+          [
+            {
+              attachmentRef: "attachment-1",
+              sourceType: "attachment" as const,
+              sourceKeyHash: "sha256:fictional",
+              imageContentHash: "sha256:fictional-image",
+              status: "succeeded" as const,
+              summary: "A plate of fictional food",
+              providerName: "Fictional AI",
+              model: "fictional-model",
+              contractVersion: "image-summary-v1",
+              attemptCount: 1,
+              errorCode: null,
+              durationMs: 10,
+              generatedAt: "2026-08-10T00:00:00.000Z",
+            },
+          ],
+        ],
+      ]),
+      "UTC",
+    );
+    expect(transcript).toContain("fictional-meal.jpg");
+    expect(transcript).toContain("A fictional preview summary");
+    expect(transcript).toContain("A plate of fictional food");
   });
 
   it("serializes history as exact append-only provider message blocks", () => {

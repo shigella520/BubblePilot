@@ -6,6 +6,8 @@ import { sha256 } from "../../app/canonical-json.js";
 import { formatContextTimestamp } from "./context-time.js";
 import type { AiRoutingService } from "../ai/ai-routing-service.js";
 import type { AiCallDiagnostics } from "../ai/ai-types.js";
+import type { ImageSummaryRepository } from "../ai/image-summary-repository.js";
+import type { MessageImageSummary } from "../ai/image-summary-types.js";
 import type { ContextMessage } from "../archive/archive-repository.js";
 import type { MessageAttachment } from "../ingestion/message-envelope.js";
 import {
@@ -21,6 +23,8 @@ interface ContextState {
   coveredThroughIndex: string;
   version: number;
   status: "idle" | "compressing";
+  summaryPolicyVersion: number;
+  rebuilding: boolean;
 }
 
 interface StateRow {
@@ -29,6 +33,8 @@ interface StateRow {
   covered_through_index: string;
   version: number;
   status: "idle" | "compressing";
+  summary_policy_version: number;
+  rebuilding: boolean;
 }
 
 interface MessageRow {
@@ -44,7 +50,7 @@ interface MessageRow {
   link_preview_error_code: string | null;
 }
 
-interface IndexedContextMessage extends ContextMessage {
+export interface IndexedContextMessage extends ContextMessage {
   messageIndex: string;
 }
 
@@ -326,6 +332,8 @@ function contextState(row: StateRow): ContextState {
     coveredThroughIndex: row.covered_through_index,
     version: row.version,
     status: row.status,
+    summaryPolicyVersion: row.summary_policy_version,
+    rebuilding: row.rebuilding,
   };
 }
 
@@ -424,6 +432,58 @@ export function fitContextMessages(
   return selected;
 }
 
+export function conversationCompressionTranscript(
+  messages: readonly IndexedContextMessage[],
+  imageSummaries: ReadonlyMap<string, readonly MessageImageSummary[]>,
+  timeZone: string,
+): string {
+  return messages
+    .map((message) => {
+      const material: string[] = [];
+      if (message.body.length > 0) material.push(message.body);
+      if (message.attachments.length > 0) {
+        material.push(
+          `<attachments>${JSON.stringify(
+            message.attachments.map((attachment) => ({
+              reference: attachment.providerAttachmentId,
+              mimeType: attachment.mimeType,
+              fileName: attachment.fileName,
+              sizeBytes: attachment.sizeBytes,
+            })),
+          )}</attachments>`,
+        );
+      }
+      if (message.linkPreview.items.length > 0) {
+        material.push(
+          `<link_previews>${JSON.stringify(
+            message.linkPreview.items.map((preview) => ({
+              url: preview.url,
+              title: preview.title,
+              summary: preview.summary,
+              siteName: preview.siteName,
+            })),
+          )}</link_previews>`,
+        );
+      }
+      const summaries = (imageSummaries.get(message.providerMessageId) ?? [])
+        .filter((summary) => summary.status === "succeeded" && summary.summary)
+        .map((summary) => ({
+          attachmentRef: summary.attachmentRef,
+          sourceType: summary.sourceType,
+          summary: summary.summary,
+        }));
+      if (summaries.length > 0) {
+        material.push(
+          `<image_summaries>${JSON.stringify(summaries)}</image_summaries>`,
+        );
+      }
+      return `[${formatContextTimestamp(message.sentAt, timeZone)}] [sender=${
+        message.isFromMe ? "Bot" : (message.senderId ?? "unknown")
+      }] ${material.join("\n")}`;
+    })
+    .join("\n");
+}
+
 export class ConversationContextService {
   private readonly pool: Pool;
   private readonly cache = new ContextStateCache();
@@ -432,6 +492,10 @@ export class ConversationContextService {
     databaseUrl: string,
     private readonly routing: AiRoutingService,
     queryTimeoutMs?: number,
+    private readonly imageSummaries?: Pick<
+      ImageSummaryRepository,
+      "listForProviderMessageIds"
+    >,
   ) {
     this.pool = createPostgresPool(databaseUrl, 5, queryTimeoutMs);
   }
@@ -485,24 +549,24 @@ export class ConversationContextService {
       state.coveredThroughIndex,
       true,
     );
-    const snapshot: ConversationContextSnapshot = {
-      stateId: state.id,
-      summary: state.summary,
-      summaryVersion: state.version,
-      coveredThroughIndex: state.coveredThroughIndex,
-      summaryPolicyVersion,
-    };
     const threshold = contextRetentionThreshold(
       input.baseMessageWindow,
       input.redundancyMessageWindow,
     );
-    // A policy rebuild is explicitly requested by an administrator and may
-    // need to drain a backlog smaller than the normal rolling threshold.
-    // Ordinary message arrivals still require the base+redundancy threshold.
-    if (
-      eligibleCount < threshold &&
-      input.reasonOverride !== "policy-rebuild"
-    ) {
+    if (eligibleCount < threshold) {
+      if (state.rebuilding) {
+        await this.completePolicyRebuild(
+          input.provider,
+          input.providerChatId,
+          summaryPolicyVersion,
+        );
+        state.rebuilding = false;
+      }
+      const snapshot = await this.summarySnapshotForState(
+        state,
+        input.provider,
+        input.providerChatId,
+      );
       return { triggerMessageIndex, summarySnapshot: snapshot };
     }
     const candidates = await this.loadMessagesBefore(
@@ -518,6 +582,11 @@ export class ConversationContextService {
     const first = candidates[0];
     const last = candidates.at(-1);
     if (first === undefined || last === undefined) {
+      const snapshot = await this.summarySnapshotForState(
+        state,
+        input.provider,
+        input.providerChatId,
+      );
       return { triggerMessageIndex, summarySnapshot: snapshot };
     }
     const compressionOperationId = await this.queueCompression({
@@ -527,6 +596,7 @@ export class ConversationContextService {
       triggerMessageIndex,
       reason:
         input.reasonOverride ??
+        (state.rebuilding ? "policy-rebuild" : null) ??
         (state.coveredThroughIndex === "0"
           ? "initial-catchup"
           : "message-threshold"),
@@ -536,6 +606,11 @@ export class ConversationContextService {
       timeZone: input.timeZone,
       includeFromMe,
     });
+    const snapshot = await this.summarySnapshotForState(
+      state,
+      input.provider,
+      input.providerChatId,
+    );
     return {
       triggerMessageIndex,
       summarySnapshot: {
@@ -564,6 +639,11 @@ export class ConversationContextService {
       input.summaryPolicyVersion ?? 1,
       profileHash,
     );
+    const readState = await this.workflowReadState(
+      state,
+      input.provider,
+      input.providerChatId,
+    );
     return {
       triggerMessageIndex: await this.messageIndexForProviderMessage(
         input.provider,
@@ -571,11 +651,11 @@ export class ConversationContextService {
         input.providerMessageId,
       ),
       summarySnapshot: {
-        stateId: state.id,
-        summary: state.summary,
-        summaryVersion: state.version,
-        coveredThroughIndex: state.coveredThroughIndex,
-        summaryPolicyVersion: input.summaryPolicyVersion ?? 1,
+        stateId: readState.id,
+        summary: readState.summary,
+        summaryVersion: readState.version,
+        coveredThroughIndex: readState.coveredThroughIndex,
+        summaryPolicyVersion: readState.summaryPolicyVersion,
       },
     };
   }
@@ -1062,6 +1142,11 @@ export class ConversationContextService {
             coveredThroughIndex: input.summarySnapshot.coveredThroughIndex,
             version: input.summarySnapshot.summaryVersion,
             status: "idle",
+            summaryPolicyVersion:
+              input.summarySnapshot.summaryPolicyVersion ??
+              input.summaryPolicyVersion ??
+              1,
+            rebuilding: false,
           };
     if (
       input.summarySnapshot !== null &&
@@ -1184,30 +1269,30 @@ export class ConversationContextService {
            SELECT id FROM chats
            WHERE provider = $1 AND provider_chat_id = $2 AND enabled = TRUE
          ), previous AS (
-           SELECT state.summary, state.covered_through_index
+           SELECT state.id
            FROM conversation_context_states state
            INNER JOIN selected_chat chat ON chat.id = state.chat_id
            WHERE state.summary_policy_version < $5
-             AND state.profile_hash = $4
-           ORDER BY state.summary_policy_version DESC, state.version DESC
+            ORDER BY state.summary_policy_version DESC, state.version DESC
            LIMIT 1
          ), inserted AS (
              INSERT INTO conversation_context_states (
              id, chat_id, profile_hash, summary_policy_version,
-             summary, covered_through_index
+             summary, covered_through_index, rebuilding
            )
            SELECT $3, chat.id, $4, $5,
-                  COALESCE(previous.summary, ''),
-                  COALESCE(previous.covered_through_index, 0)
+                  '', 0, previous.id IS NOT NULL
            FROM selected_chat chat
            LEFT JOIN previous ON TRUE
            ON CONFLICT (instance_namespace, chat_id, summary_policy_version)
              DO NOTHING
-           RETURNING id, summary, covered_through_index::text, version, status
+           RETURNING id, summary, covered_through_index::text, version, status,
+                     summary_policy_version, rebuilding
          )
          SELECT * FROM inserted
          UNION ALL
-         SELECT s.id, s.summary, s.covered_through_index::text, s.version, s.status
+         SELECT s.id, s.summary, s.covered_through_index::text, s.version, s.status,
+                s.summary_policy_version, s.rebuilding
          FROM conversation_context_states s
          INNER JOIN selected_chat c ON c.id = s.chat_id
          WHERE s.summary_policy_version = $5
@@ -1244,6 +1329,93 @@ export class ConversationContextService {
       } catch {
         // The transaction may already have been rolled back by PostgreSQL.
       }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async workflowReadState(
+    state: ContextState,
+    provider: string,
+    providerChatId: string,
+  ): Promise<ContextState> {
+    if (!state.rebuilding) return state;
+    const previous = await this.pool.query<StateRow>(
+      `SELECT previous.id, previous.summary,
+              previous.covered_through_index::text, previous.version,
+              previous.status, previous.summary_policy_version,
+              previous.rebuilding
+       FROM conversation_context_states previous
+       INNER JOIN chats chat ON chat.id = previous.chat_id
+       WHERE chat.provider = $1 AND chat.provider_chat_id = $2
+         AND previous.instance_namespace = 'default'
+         AND previous.summary_policy_version < $3
+         AND previous.legacy = FALSE
+         AND previous.rebuilding = FALSE
+       ORDER BY previous.summary_policy_version DESC, previous.version DESC
+       LIMIT 1`,
+      [provider, providerChatId, state.summaryPolicyVersion],
+    );
+    return previous.rows[0] === undefined
+      ? state
+      : contextState(previous.rows[0]);
+  }
+
+  private async summarySnapshotForState(
+    state: ContextState,
+    provider: string,
+    providerChatId: string,
+  ): Promise<ConversationContextSnapshot> {
+    const readState = await this.workflowReadState(
+      state,
+      provider,
+      providerChatId,
+    );
+    return {
+      stateId: readState.id,
+      summary: readState.summary,
+      summaryVersion: readState.version,
+      coveredThroughIndex: readState.coveredThroughIndex,
+      summaryPolicyVersion: readState.summaryPolicyVersion,
+    };
+  }
+
+  private async completePolicyRebuild(
+    provider: string,
+    providerChatId: string,
+    summaryPolicyVersion: number,
+  ): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query<{ id: string }>(
+        `UPDATE conversation_context_states state
+         SET rebuilding = FALSE, updated_at = NOW()
+         FROM chats chat
+         WHERE chat.id = state.chat_id
+           AND chat.provider = $1 AND chat.provider_chat_id = $2
+           AND state.instance_namespace = 'default'
+           AND state.summary_policy_version = $3
+         RETURNING state.id`,
+        [provider, providerChatId, summaryPolicyVersion],
+      );
+      if (current.rows[0] !== undefined) {
+        await client.query(
+          `UPDATE conversation_context_states older
+           SET legacy = TRUE, updated_at = NOW()
+           WHERE older.instance_namespace = 'default'
+             AND older.chat_id = (
+               SELECT chat_id FROM conversation_context_states WHERE id = $1
+             )
+             AND older.summary_policy_version < $2`,
+          [current.rows[0].id, summaryPolicyVersion],
+        );
+      }
+      await client.query("COMMIT");
+      this.invalidateAll();
+    } catch (error) {
+      await client.query("ROLLBACK");
       throw error;
     } finally {
       client.release();
@@ -1328,6 +1500,7 @@ export class ConversationContextService {
     const client = await this.pool.connect();
     let operationId: string | undefined;
     let created = false;
+    let requeued = false;
     try {
       await client.query("BEGIN");
       const queued = await client.query<{ id: string }>(
@@ -1376,7 +1549,66 @@ export class ConversationContextService {
         );
         operationId = existing.rows[0]?.id;
       }
-      if (operationId !== undefined && created) {
+      if (operationId === undefined) {
+        // Compatibility guard for databases that still have the legacy full
+        // range UNIQUE constraint. Such a constraint lets a terminal failed
+        // row block a fresh INSERT even though only active rows should be
+        // unique. Migration 0040 removes it by column identity; until that
+        // migration has run successfully, safely recycle the failed row.
+        const recovered = await client.query<{ id: string }>(
+          `UPDATE conversation_context_compressions operation
+           SET status = 'queued', lease_expires_at = NOW(), lease_owner = NULL,
+               duration_ms = NULL, prompt_tokens = NULL,
+               completion_tokens = NULL, error_code = NULL,
+               completed_at = NULL, started_at = NOW(), updated_at = NOW(),
+               summary_policy_version = $5, correlation_id = $6,
+               reason = $7, route_id = $8, trigger_message_index = $9,
+               time_zone = $10, include_from_me = $11
+           WHERE operation.id = (
+             SELECT failed.id
+             FROM conversation_context_compressions failed
+             WHERE failed.context_state_id = $1
+               AND failed.base_version = $2
+               AND failed.from_index = $3
+               AND failed.through_index = $4
+               AND failed.status = 'failed'
+             ORDER BY failed.completed_at DESC NULLS LAST,
+                      failed.started_at DESC, failed.id DESC
+             FOR UPDATE SKIP LOCKED
+             LIMIT 1
+           )
+             AND EXISTS (
+               SELECT 1 FROM conversation_context_states state
+               WHERE state.id = $1 AND state.version = $2
+                 AND state.status = 'idle'
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM conversation_context_compressions active
+               WHERE active.context_state_id = $1
+                 AND active.base_version = $2
+                 AND active.from_index = $3
+                 AND active.through_index = $4
+                 AND active.status IN ('queued', 'running')
+             )
+           RETURNING operation.id`,
+          [
+            input.state.id,
+            input.state.version,
+            input.fromIndex,
+            input.throughIndex,
+            input.summaryPolicyVersion,
+            input.correlationId,
+            input.reason,
+            input.routeId,
+            input.triggerMessageIndex,
+            input.timeZone,
+            input.includeFromMe,
+          ],
+        );
+        operationId = recovered.rows[0]?.id;
+        requeued = operationId !== undefined;
+      }
+      if (operationId !== undefined && (created || requeued)) {
         await client.query(
           `INSERT INTO conversation_context_compression_events
            (id, compression_id, status, metadata)
@@ -1388,6 +1620,7 @@ export class ConversationContextService {
               triggerMessageIndex: input.triggerMessageIndex,
               fromMessageIndex: input.fromIndex,
               throughMessageIndex: input.throughIndex,
+              ...(requeued ? { recoveredFailedOperation: true } : {}),
             }),
           ],
         );
@@ -1407,6 +1640,18 @@ export class ConversationContextService {
         {
           reason: input.reason,
           summaryPolicyVersion: input.summaryPolicyVersion,
+        },
+      );
+    }
+    if (operationId !== undefined && requeued) {
+      await this.recordSystemAudit(
+        "conversation-summary.compression.requeued",
+        operationId,
+        input.correlationId,
+        {
+          reason: input.reason,
+          summaryPolicyVersion: input.summaryPolicyVersion,
+          recoveredFailedOperation: true,
         },
       );
     }
@@ -1506,22 +1751,6 @@ export class ConversationContextService {
            WHERE id = $1`,
           [claim.state.id, provider.id, provider.model],
         );
-        if (claim.reason === "policy-rebuild") {
-          await client.query(
-            `UPDATE conversation_context_states legacy_state
-             SET legacy = TRUE, updated_at = NOW()
-             WHERE legacy_state.id <> $1
-               AND legacy_state.chat_id = (
-                 SELECT chat_id FROM conversation_context_states
-                 WHERE id = $1
-               )
-               AND legacy_state.summary_policy_version < (
-                 SELECT summary_policy_version
-                 FROM conversation_context_states WHERE id = $1
-               )`,
-            [claim.state.id],
-          );
-        }
       }
       await client.query(
         `UPDATE conversation_context_compressions
@@ -1596,14 +1825,14 @@ export class ConversationContextService {
   private compressionPrompt(
     previousSummary: string,
     messages: readonly IndexedContextMessage[],
+    imageSummaries: ReadonlyMap<string, readonly MessageImageSummary[]>,
     timeZone: string,
   ) {
-    const transcript = messages
-      .map(
-        (message) =>
-          `[${formatContextTimestamp(message.sentAt, timeZone)}] [sender=${message.isFromMe ? "Bot" : (message.senderId ?? "unknown")}] ${message.body}`,
-      )
-      .join("\n");
+    const transcript = conversationCompressionTranscript(
+      messages,
+      imageSummaries,
+      timeZone,
+    );
     return [
       {
         role: "system" as const,
@@ -1675,6 +1904,7 @@ export class ConversationContextService {
         reason: ContextCompressionReason;
         trigger_message_index: string | null;
         time_zone: string;
+        summary_policy_version: number;
         base_version: number;
         attempt_count: number;
         include_from_me: boolean;
@@ -1685,8 +1915,9 @@ export class ConversationContextService {
                 operation.from_index::text, operation.through_index::text,
                 chat.provider, chat.provider_chat_id,
                 operation.correlation_id, operation.reason, operation.route_id,
-                operation.trigger_message_index::text, operation.base_version
-                , operation.attempt_count, operation.include_from_me
+                operation.trigger_message_index::text, operation.base_version,
+                operation.attempt_count, operation.include_from_me,
+                operation.time_zone, operation.summary_policy_version
          FROM conversation_context_compressions operation
          INNER JOIN conversation_context_states state
            ON state.id = operation.context_state_id
@@ -1770,6 +2001,10 @@ export class ConversationContextService {
         row.through_index,
         row.include_from_me,
       );
+      const imageSummaries =
+        (await this.imageSummaries?.listForProviderMessageIds(
+          messages.map((message) => message.providerMessageId),
+        )) ?? new Map<string, readonly MessageImageSummary[]>();
       const startedAt = Date.now();
       const claim: CompressionClaim = {
         id: row.operation_id,
@@ -1781,6 +2016,8 @@ export class ConversationContextService {
           coveredThroughIndex: row.covered_through_index,
           version: row.version,
           status: "compressing",
+          summaryPolicyVersion: row.summary_policy_version,
+          rebuilding: row.reason === "policy-rebuild",
         },
       };
       let result: Awaited<ReturnType<AiRoutingService["execute"]>>;
@@ -1792,8 +2029,10 @@ export class ConversationContextService {
           messages: this.compressionPrompt(
             row.summary,
             messages,
+            imageSummaries,
             row.time_zone,
           ),
+          agentTurn: row.attempt_count + 1,
           maxOutputTokens: 1024,
           temperature: 0,
           maxOutputCharacters: 4000,
@@ -1848,7 +2087,7 @@ export class ConversationContextService {
             // policy rebuild drains without requiring a new message.
             const settings = await policyRebuildSettings?.();
             if (settings !== undefined && settings.enabled) {
-              await this.continuePolicyRebuild({
+              const continuation = await this.continuePolicyRebuild({
                 provider: row.provider,
                 providerChatId: row.provider_chat_id,
                 routeId: settings.providerRouteId,
@@ -1859,6 +2098,13 @@ export class ConversationContextService {
                 summaryPolicyVersion: settings.policyVersion,
                 correlationId: row.correlation_id,
               });
+              if (continuation?.compressionOperationId === undefined) {
+                await this.completePolicyRebuild(
+                  row.provider,
+                  row.provider_chat_id,
+                  settings.policyVersion,
+                );
+              }
             }
           } catch {
             // A failed continuation is retried by the next worker poll or a
