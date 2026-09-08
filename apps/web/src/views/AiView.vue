@@ -942,7 +942,11 @@ onMounted(load);
             429/502/503/504。每次 HTTP 尝试都独立使用上述单次超时。
           </p>
           <div class="form-actions">
-            <button class="button" type="submit" :disabled="searchSettingsBusy">
+            <button
+              class="button secondary"
+              type="submit"
+              :disabled="searchSettingsBusy"
+            >
               <Save :size="16" />{{
                 searchSettingsBusy ? "保存中…" : "保存全局配置"
               }}
@@ -1025,7 +1029,7 @@ onMounted(load);
           </div>
           <div class="form-actions">
             <button
-              class="button"
+              class="button secondary"
               type="submit"
               :disabled="summarySettingsBusy"
             >
@@ -1163,7 +1167,7 @@ onMounted(load);
           </details>
           <div class="form-actions">
             <button
-              class="button"
+              class="button secondary"
               type="submit"
               :disabled="imageInputSettingsBusy"
             >

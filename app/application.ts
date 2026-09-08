@@ -20,6 +20,7 @@ import type {
   ConversationContextService,
   ConversationSummaryWorker,
   ConversationCompressionContentView,
+  ConversationCompressionRegenerationResult,
   ConversationCompressionView,
 } from "../modules/workflow/conversation-context-service.js";
 import { summarySettingsUpdateSchema } from "../modules/workflow/summary-settings-types.js";
@@ -379,6 +380,9 @@ export interface ApplicationOptions {
       getCompressionContent?(
         compressionId: string,
       ): Promise<ConversationCompressionContentView | null>;
+      regenerateCompression?(
+        compressionId: string,
+      ): Promise<ConversationCompressionRegenerationResult>;
     };
     conversationSummary?: ConversationContextService;
     summaryWorker?: ConversationSummaryWorker;
@@ -2853,6 +2857,45 @@ export function buildApplication(
           );
         }
         return { data: item };
+      },
+    );
+
+    application.post(
+      "/api/v1/conversation-compressions/:compressionId/regenerate",
+      {
+        preHandler: requireSensitive(
+          "conversation-summary.regenerate",
+          "conversation-compression",
+        ),
+      },
+      async (request, reply) => {
+        const parameters = z
+          .object({ compressionId: z.string().uuid() })
+          .parse(request.params);
+        const result =
+          await options.workflow?.contextState?.regenerateCompression?.(
+            parameters.compressionId,
+          );
+        if (result === undefined) {
+          throw new ApplicationError(
+            "CONVERSATION_COMPRESSION_REGENERATION_UNAVAILABLE",
+            "Conversation compression regeneration is unavailable.",
+            503,
+          );
+        }
+        if (result.status === "not-found") {
+          throw new ApplicationError(
+            "CONVERSATION_COMPRESSION_NOT_FOUND",
+            "The source conversation compression does not exist or cannot be regenerated.",
+            404,
+          );
+        }
+        if (result.status === "created") {
+          options.workflow?.summaryWorker?.trigger();
+        }
+        return reply.code(result.status === "created" ? 202 : 200).send({
+          data: { id: result.id, status: result.status },
+        });
       },
     );
 

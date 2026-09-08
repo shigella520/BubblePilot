@@ -1794,6 +1794,41 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
+  /api/v1/conversation-compressions/{compressionId}/regenerate:
+    post:
+      operationId: regenerateConversationCompression
+      description: 完成敏感操作二次验证后，使用当前摘要提示词和来源记录的固定输入重新生成一条验证预览；不会替换聊天当前生效摘要。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: compressionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 同一来源记录已有重新生成任务正在排队或运行，返回该任务。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationCompressionRegeneration"
+        "202":
+          description: 已加入重新生成队列。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationCompressionRegeneration"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /api/v1/operations/status:
     get:
       operationId: getOperationsStatus
@@ -2125,6 +2160,8 @@ components:
         - includeFromMe
         - leaseOwner
         - leaseExpiresAt
+        - preview
+        - sourceCompressionId
       properties:
         id: { type: string, format: uuid }
         chatId: { type: string, format: uuid }
@@ -2164,6 +2201,8 @@ components:
         includeFromMe: { type: boolean }
         leaseOwner: { type: [string, "null"] }
         leaseExpiresAt: { type: [string, "null"], format: date-time }
+        preview: { type: boolean }
+        sourceCompressionId: { type: [string, "null"], format: uuid }
         statusEvents:
           type: array
           items:
@@ -2224,6 +2263,8 @@ components:
         - outputVersion
         - previousSummary
         - outputSummary
+        - preview
+        - sourceCompressionId
         - messages
       properties:
         id: { type: string, format: uuid }
@@ -2239,6 +2280,8 @@ components:
         outputVersion: { type: [integer, "null"], minimum: 1 }
         previousSummary: { type: string }
         outputSummary: { type: [string, "null"] }
+        preview: { type: boolean }
+        sourceCompressionId: { type: [string, "null"], format: uuid }
         messages:
           type: array
           items:
@@ -2260,6 +2303,18 @@ components:
               body: { type: string }
               isFromMe: { type: boolean }
             additionalProperties: false
+      additionalProperties: false
+    ConversationCompressionRegeneration:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [id, status]
+          properties:
+            id: { type: string, format: uuid }
+            status: { type: string, enum: [created, active] }
+          additionalProperties: false
       additionalProperties: false
     InboundEventSummary:
       type: object

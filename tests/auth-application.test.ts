@@ -18,6 +18,7 @@ import { InMemoryWorkflowRepository } from "./support/in-memory-workflow-reposit
 const loginPassword = "fictional-login-password";
 const sensitivePassword = "fictional-sensitive-password";
 const compressionContentId = "00000000-0000-4000-8000-000000000042";
+const compressionRegenerationId = "00000000-0000-4000-8000-000000000044";
 let loginPasswordHash: string;
 let sensitiveOperationPasswordHash: string;
 
@@ -134,6 +135,8 @@ describe("Web admin authentication", () => {
                     throughMessageIndex: "12",
                     baseVersion: 3,
                     outputVersion: 4,
+                    preview: false,
+                    sourceCompressionId: null,
                     previousSummary: "Fictional previous summary",
                     outputSummary: "Fictional compressed summary",
                     messages: [
@@ -148,6 +151,12 @@ describe("Web admin authentication", () => {
                     ],
                   }
                 : null,
+            ),
+          regenerateCompression: (id) =>
+            Promise.resolve(
+              id === compressionContentId
+                ? { status: "created" as const, id: compressionRegenerationId }
+                : { status: "not-found" as const },
             ),
         },
       },
@@ -427,6 +436,44 @@ describe("Web admin authentication", () => {
     const missing = await application.inject({
       method: "GET",
       url: "/api/v1/conversation-compressions/00000000-0000-4000-8000-000000000099/content",
+      headers: { cookie },
+    });
+    expect(missing.statusCode).toBe(404);
+  });
+
+  it("protects conversation compression regeneration with the sensitive grant", async () => {
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.headers["set-cookie"];
+    const denied = await application.inject({
+      method: "POST",
+      url: `/api/v1/conversation-compressions/${compressionContentId}/regenerate`,
+      headers: { cookie },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/sensitive",
+      headers: { cookie },
+      payload: { password: sensitivePassword },
+    });
+    const created = await application.inject({
+      method: "POST",
+      url: `/api/v1/conversation-compressions/${compressionContentId}/regenerate`,
+      headers: { cookie },
+    });
+    expect(created.statusCode).toBe(202);
+    expect(created.json()).toEqual({
+      data: { id: compressionRegenerationId, status: "created" },
+    });
+
+    const missing = await application.inject({
+      method: "POST",
+      url: "/api/v1/conversation-compressions/00000000-0000-4000-8000-000000000099/regenerate",
       headers: { cookie },
     });
     expect(missing.statusCode).toBe(404);

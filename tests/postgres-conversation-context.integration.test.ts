@@ -223,6 +223,94 @@ describe.runIf(testDatabaseUrl !== undefined)(
       }
     });
 
+    it("regenerates the exact historical input without changing the committed summary", async () => {
+      const chatGuid = `iMessage;-;summary-regenerate-${randomUUID()}`;
+      const envelopes = await archiveMessages(chatGuid, 3);
+      const routeId = randomUUID();
+      const service = new ConversationContextService(testDatabaseUrl ?? "", {
+        execute,
+      } as unknown as AiRoutingService);
+      const database = new Client({ connectionString: testDatabaseUrl });
+      await database.connect();
+      try {
+        const trigger = await service.enqueueForMessage({
+          provider: "bluebubbles",
+          providerChatId: chatGuid,
+          providerMessageId:
+            envelopes.at(-1)?.message.providerMessageId ?? "missing",
+          routeId,
+          baseMessageWindow: 2,
+          redundancyMessageWindow: 1,
+          includeFromMe: true,
+          timeZone: "UTC",
+          summaryPolicyVersion: 1,
+        });
+        const sourceCompressionId = trigger.compressionOperationId;
+        expect(sourceCompressionId).toBeDefined();
+        await service.processQueued(routeId, "UTC", `source-${randomUUID()}`);
+
+        execute.mockResolvedValueOnce({
+          ...successfulResult,
+          text: "Regenerated fictional summary",
+        });
+        const regeneration = await service.regenerateCompression(
+          sourceCompressionId ?? "",
+        );
+        expect(regeneration.status).toBe("created");
+        if (regeneration.status !== "created") return;
+        await expect(
+          service.regenerateCompression(sourceCompressionId ?? ""),
+        ).resolves.toEqual({ status: "active", id: regeneration.id });
+
+        await service.processQueued(routeId, "UTC", `preview-${randomUUID()}`);
+        const lastCall = execute.mock.calls.at(-1)?.[0] as
+          { messages: Array<{ content: string }> } | undefined;
+        const prompt = lastCall?.messages;
+        expect(prompt?.[1]?.content).toContain(
+          "<previous_summary>\n\n</previous_summary>",
+        );
+        expect(prompt?.[1]?.content).toContain("Fictional message 1");
+
+        const result = await database.query<{
+          preview_status: string;
+          output_summary: string;
+          source_compression_id: string;
+          state_summary: string;
+          state_version: number;
+          covered_through_index: string;
+          state_status: string;
+          succeeded_events: string;
+        }>(
+          `SELECT preview.status AS preview_status, preview.output_summary,
+                  preview.source_compression_id,
+                  state.summary AS state_summary, state.version AS state_version,
+                  state.covered_through_index::text, state.status AS state_status,
+                  (SELECT COUNT(*)::text
+                   FROM conversation_context_compression_events event
+                   WHERE event.compression_id = preview.id
+                     AND event.status = 'succeeded') AS succeeded_events
+           FROM conversation_context_compressions preview
+           INNER JOIN conversation_context_states state
+             ON state.id = preview.context_state_id
+           WHERE preview.id = $1`,
+          [regeneration.id],
+        );
+        expect(result.rows[0]).toMatchObject({
+          preview_status: "succeeded",
+          output_summary: "Regenerated fictional summary",
+          source_compression_id: sourceCompressionId,
+          state_summary: "Merged fictional summary",
+          state_version: 2,
+          covered_through_index: "1",
+          state_status: "idle",
+          succeeded_events: "1",
+        });
+      } finally {
+        await database.end();
+        await service.close();
+      }
+    });
+
     it("never reads a legacy workflow summary as the current chat summary", async () => {
       const chatGuid = `iMessage;-;summary-legacy-${randomUUID()}`;
       const envelopes = await archiveMessages(chatGuid, 1);

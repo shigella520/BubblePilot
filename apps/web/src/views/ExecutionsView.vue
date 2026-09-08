@@ -62,6 +62,8 @@ interface ConversationCompression {
   triggerMessageIndex: string | null;
   baseVersion: number;
   outputVersion: number | null;
+  preview: boolean;
+  sourceCompressionId: string | null;
   summaryPolicyVersion: number;
   durationMs: number | null;
   promptTokens: number | null;
@@ -108,6 +110,8 @@ interface ConversationCompressionContent {
   throughMessageIndex: string;
   baseVersion: number;
   outputVersion: number | null;
+  preview: boolean;
+  sourceCompressionId: string | null;
   previousSummary: string;
   outputSummary: string | null;
   messages: Array<{
@@ -302,6 +306,7 @@ const detailLoadingId = ref<string | null>(null);
 const compressionDetail = ref<ConversationCompression | null>(null);
 const compressionContent = ref<ConversationCompressionContent | null>(null);
 const compressionDetailLoadingId = ref<string | null>(null);
+const compressionRegenerateLoadingId = ref<string | null>(null);
 const compressionContentLoading = ref(false);
 let compressionInspectRequestId = 0;
 let compressionContentRequestId = 0;
@@ -663,6 +668,42 @@ async function inspectCompression(id: string) {
     if (requestId === compressionInspectRequestId) {
       compressionDetailLoadingId.value = null;
     }
+  }
+}
+
+async function regenerateCompression(id: string) {
+  if (
+    !session.authenticated ||
+    !session.sensitiveActive ||
+    compressionRegenerateLoadingId.value !== null
+  )
+    return;
+  if (
+    !window.confirm(
+      "确认使用当前摘要提示词重新生成一条验证记录？原摘要不会被替换。",
+    )
+  )
+    return;
+  compressionRegenerateLoadingId.value = id;
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    const result = await apiRequest<{
+      id: string;
+      status: "created" | "active";
+    }>(`/api/v1/conversation-compressions/${id}/regenerate`, {
+      method: "POST",
+    });
+    message.value =
+      result.status === "created"
+        ? "已加入重新生成队列，原摘要不会被替换。"
+        : "该记录已有一条重新生成任务正在排队或运行。";
+    await compressionPager.refresh();
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    compressionRegenerateLoadingId.value = null;
   }
 }
 
@@ -1336,7 +1377,10 @@ function contextSnapshotValue(
                     compressionStatusLabel(item.status)
                   }}</span>
                 </td>
-                <td>{{ compressionReasonLabel(item.reason) }}</td>
+                <td>
+                  {{ compressionReasonLabel(item.reason) }}
+                  <span v-if="item.preview" class="state-badge">验证预览</span>
+                </td>
                 <td class="mono">
                   {{ item.fromMessageIndex }}–{{ item.throughMessageIndex
                   }}<br />
@@ -1356,17 +1400,39 @@ function contextSnapshotValue(
                   <span class="keyline">{{ item.errorCode || "—" }}</span>
                 </td>
                 <td>
-                  <button
-                    class="button tiny secondary"
-                    :disabled="compressionDetailLoadingId === item.id"
-                    @click="inspectCompression(item.id)"
-                  >
-                    <Search :size="14" />{{
-                      compressionDetailLoadingId === item.id
-                        ? "加载中…"
-                        : "详情"
-                    }}
-                  </button>
+                  <div class="row-actions">
+                    <button
+                      class="button tiny secondary"
+                      :disabled="compressionDetailLoadingId === item.id"
+                      @click="inspectCompression(item.id)"
+                    >
+                      <Search :size="14" />{{
+                        compressionDetailLoadingId === item.id
+                          ? "加载中…"
+                          : "详情"
+                      }}
+                    </button>
+                    <button
+                      v-if="!item.preview"
+                      class="button tiny secondary"
+                      :disabled="
+                        compressionRegenerateLoadingId === item.id ||
+                        !session.sensitiveActive
+                      "
+                      :title="
+                        session.sensitiveActive
+                          ? '使用当前提示词生成验证预览，不替换正式摘要'
+                          : '完成敏感操作二次验证后才能重新生成'
+                      "
+                      @click="regenerateCompression(item.id)"
+                    >
+                      {{
+                        compressionRegenerateLoadingId === item.id
+                          ? "排队中…"
+                          : "重新生成"
+                      }}
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -2033,7 +2099,8 @@ function contextSnapshotValue(
           <div class="execution-detail-heading">
             <p class="card-kicker">{{ compressionDetail.id }}</p>
             <h2 id="compression-detail-title">
-              对话压缩 ·
+              {{ compressionDetail.preview ? "摘要重新生成预览" : "对话压缩" }}
+              ·
               {{ compressionStatusLabel(compressionDetail.status) }}
             </h2>
             <p class="keyline">
@@ -2049,6 +2116,27 @@ function contextSnapshotValue(
             </p>
           </div>
           <div class="row-actions execution-detail-actions">
+            <button
+              v-if="!compressionDetail.preview"
+              class="button secondary"
+              type="button"
+              :disabled="
+                compressionRegenerateLoadingId === compressionDetail.id ||
+                !session.sensitiveActive
+              "
+              :title="
+                session.sensitiveActive
+                  ? '使用当前提示词生成验证预览，不替换正式摘要'
+                  : '完成敏感操作二次验证后才能重新生成'
+              "
+              @click="regenerateCompression(compressionDetail.id)"
+            >
+              {{
+                compressionRegenerateLoadingId === compressionDetail.id
+                  ? "排队中…"
+                  : "重新生成"
+              }}
+            </button>
             <button
               class="button secondary"
               type="button"
@@ -2086,6 +2174,12 @@ function contextSnapshotValue(
                   <dt>压缩原因</dt>
                   <dd>
                     {{ compressionReasonLabel(compressionDetail.reason) }}
+                  </dd>
+                </div>
+                <div v-if="compressionDetail.preview">
+                  <dt>来源压缩记录</dt>
+                  <dd class="mono">
+                    {{ compressionDetail.sourceCompressionId || "—" }}
                   </dd>
                 </div>
                 <div>

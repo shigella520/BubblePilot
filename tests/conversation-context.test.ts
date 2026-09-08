@@ -423,6 +423,16 @@ describe("conversation context summary contract", () => {
       "可完全替代 previous_summary 的新摘要",
     );
     expect(prompt[0]?.content).toContain("不得只总结 new_messages");
+    expect(prompt[0]?.content).toContain("sender_id");
+    expect(prompt[0]?.content).toContain(
+      "不得缩短、匿名化、重新编号或改写 sender_id",
+    );
+    expect(prompt[0]?.content).toContain(
+      "图片摘要、链接卡片和附件只是辅助材料",
+    );
+    expect(prompt[0]?.content).toContain(
+      "应记录其中有长期价值的请求、任务和待办",
+    );
     expect(prompt[1]?.content).toContain(
       "<previous_summary>\nExisting unresolved decision\n</previous_summary>",
     );
