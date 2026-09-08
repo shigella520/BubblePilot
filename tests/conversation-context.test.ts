@@ -7,8 +7,8 @@ import {
   conversationContextProfileHash,
   contextCompressionPlan,
   contextFastForwardPlan,
+  ConversationContextService,
   ConversationSummaryWorker,
-  type ConversationContextService,
   conversationCompressionPrompt,
   conversationCompressionTranscript,
   fitContextMessages,
@@ -437,6 +437,106 @@ describe("conversation context summary contract", () => {
       "<previous_summary>\nExisting unresolved decision\n</previous_summary>",
     );
     expect(prompt[1]?.content).toContain("message-2");
+  });
+
+  it("returns the complete ordered Provider fallback path for compression records", async () => {
+    const operationId = "10000000-0000-4000-8000-000000000001";
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: operationId,
+            chat_id: "20000000-0000-4000-8000-000000000001",
+            provider_chat_id: "iMessage;-;fictional-summary-chat",
+            chat_display_name: "Fictional summary chat",
+            status: "succeeded",
+            from_index: "1",
+            through_index: "30",
+            trigger_message_index: "60",
+            base_version: 1,
+            output_version: 2,
+            summary_policy_version: 1,
+            duration_ms: 194_000,
+            prompt_tokens: 600,
+            completion_tokens: 120,
+            error_code: null,
+            started_at: new Date("2026-08-10T00:00:00.000Z"),
+            completed_at: new Date("2026-08-10T00:03:14.000Z"),
+            reason: "message-threshold",
+            provider_name: "Fallback Provider",
+            model: "fallback-model",
+            correlation_id: "30000000-0000-4000-8000-000000000001",
+            include_from_me: true,
+            lease_owner: null,
+            lease_expires_at: null,
+            preview: false,
+            source_compression_id: null,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: "40000000-0000-4000-8000-000000000001",
+            background_operation_id: operationId,
+            provider_name: "Primary Provider",
+            model: "primary-model",
+            agent_turn: 1,
+            round: 1,
+            sequence: 1,
+            status: "failed",
+            duration_ms: 125_000,
+            error_category: "timeout",
+            error_code: "PROVIDER_TIMEOUT",
+            retryable: true,
+            fallback_allowed: true,
+            prompt_tokens: null,
+            completion_tokens: null,
+            created_at: new Date("2026-08-10T00:00:00.000Z"),
+          },
+          {
+            id: "40000000-0000-4000-8000-000000000002",
+            background_operation_id: operationId,
+            provider_name: "Fallback Provider",
+            model: "fallback-model",
+            agent_turn: 1,
+            round: 1,
+            sequence: 2,
+            status: "succeeded",
+            duration_ms: 69_000,
+            error_category: null,
+            error_code: null,
+            retryable: null,
+            fallback_allowed: null,
+            prompt_tokens: 600,
+            completion_tokens: 120,
+            created_at: new Date("2026-08-10T00:02:05.000Z"),
+          },
+        ],
+      });
+    const service = Object.create(
+      ConversationContextService.prototype,
+    ) as ConversationContextService;
+    Object.defineProperty(service, "pool", { value: { query } });
+
+    const result = await service.listCompressions({ limit: 20 });
+
+    expect(result[0]?.providerAttempts).toEqual([
+      expect.objectContaining({
+        providerName: "Primary Provider",
+        sequence: 1,
+        status: "failed",
+        errorCode: "PROVIDER_TIMEOUT",
+        fallbackAllowed: true,
+      }),
+      expect.objectContaining({
+        providerName: "Fallback Provider",
+        sequence: 2,
+        status: "succeeded",
+      }),
+    ]);
+    expect(query.mock.calls[1]?.[1]).toEqual([[operationId]]);
   });
 
   it("serializes history as exact append-only provider message blocks", () => {

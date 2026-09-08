@@ -2162,6 +2162,7 @@ components:
         - leaseExpiresAt
         - preview
         - sourceCompressionId
+        - providerAttempts
       properties:
         id: { type: string, format: uuid }
         chatId: { type: string, format: uuid }
@@ -2215,25 +2216,47 @@ components:
               errorCode: { type: [string, "null"] }
               createdAt: { type: string, format: date-time }
             additionalProperties: false
-        providerAttempt:
-          oneOf:
-            - type: "null"
-            - type: object
-              required:
-                - id
-                - status
-                - durationMs
-                - errorCode
-                - promptTokens
-                - completionTokens
-              properties:
-                id: { type: string, format: uuid }
-                status: { type: string }
-                durationMs: { type: integer, minimum: 0 }
-                errorCode: { type: [string, "null"] }
-                promptTokens: { type: [integer, "null"], minimum: 0 }
-                completionTokens: { type: [integer, "null"], minimum: 0 }
-              additionalProperties: false
+        providerAttempts:
+          type: array
+          description: >-
+            此次压缩的完整 AI 调用路径，按 agentTurn、round、sequence、
+            createdAt 和 id 升序排列，包含同一 Provider 的重试和跨 Provider
+            的 fallback。
+          items:
+            type: object
+            required:
+              - id
+              - providerName
+              - model
+              - agentTurn
+              - round
+              - sequence
+              - status
+              - durationMs
+              - errorCategory
+              - errorCode
+              - retryable
+              - fallbackAllowed
+              - promptTokens
+              - completionTokens
+              - createdAt
+            properties:
+              id: { type: string, format: uuid }
+              providerName: { type: string }
+              model: { type: string }
+              agentTurn: { type: integer, minimum: 1 }
+              round: { type: integer, minimum: 1 }
+              sequence: { type: integer, minimum: 1 }
+              status: { type: string, enum: [succeeded, failed] }
+              durationMs: { type: integer, minimum: 0 }
+              errorCategory: { type: [string, "null"] }
+              errorCode: { type: [string, "null"] }
+              retryable: { type: [boolean, "null"] }
+              fallbackAllowed: { type: [boolean, "null"] }
+              promptTokens: { type: [integer, "null"], minimum: 0 }
+              completionTokens: { type: [integer, "null"], minimum: 0 }
+              createdAt: { type: string, format: date-time }
+            additionalProperties: false
         workflowExecutions:
           type: array
           items:

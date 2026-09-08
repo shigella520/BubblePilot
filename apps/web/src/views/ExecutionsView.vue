@@ -83,14 +83,23 @@ interface ConversationCompression {
     errorCode: string | null;
     createdAt: string;
   }>;
-  providerAttempt?: {
+  providerAttempts: Array<{
     id: string;
+    providerName: string;
+    model: string;
+    agentTurn: number;
+    round: number;
+    sequence: number;
     status: string;
     durationMs: number;
+    errorCategory: string | null;
     errorCode: string | null;
+    retryable: boolean | null;
+    fallbackAllowed: boolean | null;
     promptTokens: number | null;
     completionTokens: number | null;
-  } | null;
+    createdAt: string;
+  }>;
   workflowExecutions?: Array<{
     id: string;
     workflowId: string;
@@ -680,7 +689,7 @@ async function regenerateCompression(id: string) {
     return;
   if (
     !window.confirm(
-      "确认使用当前摘要提示词重新生成一条验证记录？原摘要不会被替换。",
+      "确认手动重新生成一条验证预览？系统会使用当前摘要提示词和原记录的固定输入，且不会替换正式摘要。",
     )
   )
     return;
@@ -696,8 +705,8 @@ async function regenerateCompression(id: string) {
     });
     message.value =
       result.status === "created"
-        ? "已加入重新生成队列，原摘要不会被替换。"
-        : "该记录已有一条重新生成任务正在排队或运行。";
+        ? "手动重新生成已加入队列；结果将作为验证预览，原摘要不会被替换。"
+        : "该记录已有一条手动重新生成任务正在排队或运行。";
     await compressionPager.refresh();
   } catch (cause) {
     message.value = errorMessage(cause);
@@ -1010,6 +1019,54 @@ function compressionReasonLabel(reason: string): string {
       } as Record<string, string>
     )[reason] ?? reason
   );
+}
+
+function compressionOperationTypeLabel(item: ConversationCompression): string {
+  return item.preview ? "手动重新生成" : "正式压缩";
+}
+
+function compressionAttemptStatusLabel(status: string): string {
+  return (
+    (
+      {
+        succeeded: "成功",
+        failed: "失败",
+      } as Record<string, string>
+    )[status] ?? status
+  );
+}
+
+function compressionRetryabilityLabel(value: boolean | null): string {
+  if (value === null) return "重试策略未标记";
+  return value ? "可重试" : "不可重试";
+}
+
+function compressionFallbackLabel(value: boolean | null): string {
+  if (value === null) return "切换策略未标记";
+  return value ? "允许切换 Provider" : "停止切换 Provider";
+}
+
+function compressionProviderSwitchCount(item: ConversationCompression): number {
+  return item.providerAttempts.reduce((count, attempt, index, attempts) => {
+    const previous = attempts[index - 1];
+    return previous !== undefined &&
+      previous.providerName !== attempt.providerName
+      ? count + 1
+      : count;
+  }, 0);
+}
+
+function compressionAttemptTitle(
+  attempt: ConversationCompression["providerAttempts"][number],
+): string {
+  const details = [
+    `Agent 第 ${attempt.agentTurn} 轮`,
+    `路由第 ${attempt.round} 轮 / 顺序 ${attempt.sequence}`,
+    `${attempt.durationMs} ms`,
+  ];
+  if (attempt.errorCategory) details.push(attempt.errorCategory);
+  if (attempt.errorCode) details.push(attempt.errorCode);
+  return details.join(" · ");
 }
 
 function contextSnapshotValue(
@@ -1335,7 +1392,9 @@ function contextSnapshotValue(
           <div>
             <p class="card-kicker">CHAT SUMMARY TRACE</p>
             <h2>对话压缩</h2>
-            <p class="keyline">聊天级后台摘要操作，不属于任何工作流执行。</p>
+            <p class="keyline">
+              正式压缩由消息阈值自动触发；“手动重新生成”仅生成验证预览，不替换正式摘要。
+            </p>
           </div>
           <button
             class="button secondary"
@@ -1352,11 +1411,11 @@ function contextSnapshotValue(
                 <th>时间</th>
                 <th>聊天</th>
                 <th>状态</th>
-                <th>原因</th>
+                <th>类型 / 原因</th>
                 <th>消息范围 / 触发消息</th>
                 <th>版本</th>
                 <th>耗时</th>
-                <th>Provider / 错误</th>
+                <th>AI 调用路径 / 错误</th>
                 <th></th>
               </tr>
             </thead>
@@ -1378,8 +1437,12 @@ function contextSnapshotValue(
                   }}</span>
                 </td>
                 <td>
-                  {{ compressionReasonLabel(item.reason) }}
-                  <span v-if="item.preview" class="state-badge">验证预览</span>
+                  <span class="state-badge" :class="{ preview: item.preview }">
+                    {{ compressionOperationTypeLabel(item) }}
+                  </span>
+                  <span class="keyline compression-reason-line">
+                    {{ compressionReasonLabel(item.reason) }}
+                  </span>
                 </td>
                 <td class="mono">
                   {{ item.fromMessageIndex }}–{{ item.throughMessageIndex
@@ -1396,8 +1459,41 @@ function contextSnapshotValue(
                   {{ item.durationMs === null ? "—" : `${item.durationMs} ms` }}
                 </td>
                 <td>
-                  {{ item.providerName || "—" }} · {{ item.model || "—" }}<br />
-                  <span class="keyline">{{ item.errorCode || "—" }}</span>
+                  <div
+                    v-if="item.providerAttempts.length"
+                    class="compression-provider-path"
+                  >
+                    <template
+                      v-for="(attempt, index) in item.providerAttempts"
+                      :key="attempt.id"
+                    >
+                      <span v-if="index > 0" class="compression-path-arrow"
+                        >→</span
+                      >
+                      <span
+                        class="compression-path-step"
+                        :class="attempt.status"
+                        :title="compressionAttemptTitle(attempt)"
+                      >
+                        {{ attempt.providerName }} ·
+                        {{ compressionAttemptStatusLabel(attempt.status) }}
+                      </span>
+                    </template>
+                  </div>
+                  <span v-else class="keyline">
+                    {{
+                      item.status === "queued" || item.status === "running"
+                        ? "尚未发起 AI 调用"
+                        : "无 AI 调用记录"
+                    }}
+                  </span>
+                  <span v-if="item.providerAttempts.length" class="keyline">
+                    {{ item.providerAttempts.length }} 次调用 ·
+                    {{ compressionProviderSwitchCount(item) }} 次切换
+                  </span>
+                  <span v-if="item.errorCode" class="keyline danger-text">
+                    操作错误：{{ item.errorCode }}
+                  </span>
                 </td>
                 <td>
                   <div class="row-actions">
@@ -1429,7 +1525,7 @@ function contextSnapshotValue(
                       {{
                         compressionRegenerateLoadingId === item.id
                           ? "排队中…"
-                          : "重新生成"
+                          : "手动重新生成"
                       }}
                     </button>
                   </div>
@@ -2099,7 +2195,11 @@ function contextSnapshotValue(
           <div class="execution-detail-heading">
             <p class="card-kicker">{{ compressionDetail.id }}</p>
             <h2 id="compression-detail-title">
-              {{ compressionDetail.preview ? "摘要重新生成预览" : "对话压缩" }}
+              {{
+                compressionDetail.preview
+                  ? "手动重新生成摘要（验证预览）"
+                  : "正式对话压缩"
+              }}
               ·
               {{ compressionStatusLabel(compressionDetail.status) }}
             </h2>
@@ -2134,7 +2234,7 @@ function contextSnapshotValue(
               {{
                 compressionRegenerateLoadingId === compressionDetail.id
                   ? "排队中…"
-                  : "重新生成"
+                  : "手动重新生成"
               }}
             </button>
             <button
@@ -2166,6 +2266,17 @@ function contextSnapshotValue(
             <section class="compression-detail-card">
               <h3>压缩操作</h3>
               <dl class="compression-detail-list">
+                <div>
+                  <dt>操作类型</dt>
+                  <dd>
+                    <span
+                      class="state-badge"
+                      :class="{ preview: compressionDetail.preview }"
+                    >
+                      {{ compressionOperationTypeLabel(compressionDetail) }}
+                    </span>
+                  </dd>
+                </div>
                 <div>
                   <dt>触发消息</dt>
                   <dd>{{ compressionDetail.triggerMessageIndex || "—" }}</dd>
@@ -2210,7 +2321,7 @@ function contextSnapshotValue(
               </dl>
             </section>
             <section class="compression-detail-card">
-              <h3>Provider 与关联</h3>
+              <h3>最终结果与关联</h3>
               <dl class="compression-detail-list">
                 <div>
                   <dt>Provider / 模型</dt>
@@ -2253,6 +2364,78 @@ function contextSnapshotValue(
             </section>
           </div>
 
+          <section class="compression-detail-card compression-attempts-card">
+            <div class="compression-attempts-heading">
+              <div>
+                <h3>AI 调用路径</h3>
+                <p class="keyline">
+                  按 Agent 轮次、路由轮次和候选顺序排列，包含重试与 Provider
+                  切换。
+                </p>
+              </div>
+              <span
+                v-if="compressionDetail.providerAttempts.length"
+                class="state-badge"
+              >
+                {{ compressionDetail.providerAttempts.length }} 次调用 ·
+                {{ compressionProviderSwitchCount(compressionDetail) }} 次切换
+              </span>
+            </div>
+            <div
+              v-if="compressionDetail.providerAttempts.length"
+              class="compression-attempt-timeline"
+            >
+              <article
+                v-for="(attempt, index) in compressionDetail.providerAttempts"
+                :key="attempt.id"
+                class="compression-attempt-item"
+              >
+                <span class="trace-dot" :class="attempt.status"></span>
+                <div>
+                  <div class="provider-attempt-heading">
+                    <strong>
+                      {{ index + 1 }}. {{ attempt.providerName }} ·
+                      {{ attempt.model }}
+                    </strong>
+                    <span class="table-status" :class="attempt.status">
+                      {{ compressionAttemptStatusLabel(attempt.status) }}
+                    </span>
+                  </div>
+                  <p>
+                    Agent 第 {{ attempt.agentTurn }} 轮 · 路由第
+                    {{ attempt.round }} 轮 / 顺序 {{ attempt.sequence }} ·
+                    {{ attempt.durationMs }} ms · 输入
+                    {{ attempt.promptTokens ?? "—" }} / 输出
+                    {{ attempt.completionTokens ?? "—" }} Token
+                  </p>
+                  <p v-if="attempt.status === 'failed'" class="keyline">
+                    {{ compressionRetryabilityLabel(attempt.retryable) }} ·
+                    {{ compressionFallbackLabel(attempt.fallbackAllowed) }}
+                    <span v-if="attempt.errorCategory || attempt.errorCode">
+                      · 错误：{{
+                        [attempt.errorCategory, attempt.errorCode]
+                          .filter(Boolean)
+                          .join(" · ")
+                      }}
+                    </span>
+                  </p>
+                  <p class="keyline mono">
+                    {{ attempt.id }} ·
+                    {{ new Date(attempt.createdAt).toLocaleString() }}
+                  </p>
+                </div>
+              </article>
+            </div>
+            <p v-else class="keyline">
+              {{
+                compressionDetail.status === "queued" ||
+                compressionDetail.status === "running"
+                  ? "任务尚未发起 AI 调用。"
+                  : "该任务没有 AI 调用记录。"
+              }}
+            </p>
+          </section>
+
           <section class="compression-detail-card compression-status-card">
             <h3>状态变化</h3>
             <div
@@ -2272,16 +2455,6 @@ function contextSnapshotValue(
               </div>
             </div>
             <p v-else class="keyline">暂无状态变化记录。</p>
-            <p v-if="compressionDetail.providerAttempt" class="keyline">
-              Provider Attempt {{ compressionDetail.providerAttempt.id }} ·
-              {{ compressionDetail.providerAttempt.status }} ·
-              {{ compressionDetail.providerAttempt.durationMs }} ms · 输入
-              {{ compressionDetail.providerAttempt.promptTokens ?? "—" }} · 输出
-              {{ compressionDetail.providerAttempt.completionTokens ?? "—" }}
-              <span v-if="compressionDetail.providerAttempt.errorCode">
-                · {{ compressionDetail.providerAttempt.errorCode }}
-              </span>
-            </p>
           </section>
 
           <section class="compression-detail-card compression-content-section">

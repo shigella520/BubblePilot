@@ -251,14 +251,23 @@ export interface ConversationCompressionView {
     errorCode: string | null;
     createdAt: string;
   }[];
-  providerAttempt?: Readonly<{
+  providerAttempts: readonly Readonly<{
     id: string;
+    providerName: string;
+    model: string;
+    agentTurn: number;
+    round: number;
+    sequence: number;
     status: string;
     durationMs: number;
+    errorCategory: string | null;
     errorCode: string | null;
+    retryable: boolean | null;
+    fallbackAllowed: boolean | null;
     promptTokens: number | null;
     completionTokens: number | null;
-  }> | null;
+    createdAt: string;
+  }>[];
   workflowExecutions?: readonly {
     id: string;
     workflowId: string;
@@ -1033,6 +1042,63 @@ export class ConversationContextService {
         input.startedTo ?? null,
       ],
     );
+    if (result.rows.length === 0) return [];
+    const attempts = await this.pool.query<{
+      id: string;
+      background_operation_id: string;
+      provider_name: string;
+      model: string;
+      agent_turn: number;
+      round: number;
+      sequence: number;
+      status: string;
+      duration_ms: number;
+      error_category: string | null;
+      error_code: string | null;
+      retryable: boolean | null;
+      fallback_allowed: boolean | null;
+      prompt_tokens: number | null;
+      completion_tokens: number | null;
+      created_at: Date;
+    }>(
+      `SELECT id, background_operation_id, provider_name, model, agent_turn,
+              round, sequence, status, duration_ms, error_category, error_code,
+              retryable, fallback_allowed, prompt_tokens, completion_tokens,
+              created_at
+       FROM ai_provider_attempts
+       WHERE background_operation_id = ANY($1::uuid[])
+       ORDER BY background_operation_id, agent_turn, round, sequence,
+                created_at, id`,
+      [result.rows.map((row) => row.id)],
+    );
+    const attemptsByOperation = new Map<
+      string,
+      ConversationCompressionView["providerAttempts"]
+    >();
+    for (const attempt of attempts.rows) {
+      const items =
+        attemptsByOperation.get(attempt.background_operation_id) ?? [];
+      attemptsByOperation.set(attempt.background_operation_id, [
+        ...items,
+        {
+          id: attempt.id,
+          providerName: attempt.provider_name,
+          model: attempt.model,
+          agentTurn: attempt.agent_turn,
+          round: attempt.round,
+          sequence: attempt.sequence,
+          status: attempt.status,
+          durationMs: attempt.duration_ms,
+          errorCategory: attempt.error_category,
+          errorCode: attempt.error_code,
+          retryable: attempt.retryable,
+          fallbackAllowed: attempt.fallback_allowed,
+          promptTokens: attempt.prompt_tokens,
+          completionTokens: attempt.completion_tokens,
+          createdAt: attempt.created_at.toISOString(),
+        },
+      ]);
+    }
     const items = result.rows.map((row) => ({
       id: row.id,
       chatId: row.chat_id,
@@ -1060,11 +1126,12 @@ export class ConversationContextService {
       leaseExpiresAt: row.lease_expires_at?.toISOString() ?? null,
       preview: row.preview,
       sourceCompressionId: row.source_compression_id,
+      providerAttempts: attemptsByOperation.get(row.id) ?? [],
     }));
     if (input.id === undefined) return items;
     const item = items[0];
     if (item === undefined) return items;
-    const [events, executions, attempt] = await Promise.all([
+    const [events, executions] = await Promise.all([
       this.pool.query<{
         status: ConversationCompressionView["status"];
         error_code: string | null;
@@ -1094,20 +1161,6 @@ export class ConversationContextService {
          ORDER BY e.created_at DESC, e.id DESC`,
         [item.id],
       ),
-      this.pool.query<{
-        id: string;
-        status: string;
-        duration_ms: number;
-        error_code: string | null;
-        prompt_tokens: number | null;
-        completion_tokens: number | null;
-      }>(
-        `SELECT id, status, duration_ms, error_code, prompt_tokens, completion_tokens
-         FROM ai_provider_attempts
-         WHERE background_operation_id = $1
-         ORDER BY created_at DESC LIMIT 1`,
-        [item.id],
-      ),
     ]);
     return [
       {
@@ -1117,17 +1170,6 @@ export class ConversationContextService {
           errorCode: event.error_code,
           createdAt: event.created_at.toISOString(),
         })),
-        providerAttempt:
-          attempt.rows[0] === undefined
-            ? null
-            : {
-                id: attempt.rows[0].id,
-                status: attempt.rows[0].status,
-                durationMs: attempt.rows[0].duration_ms,
-                errorCode: attempt.rows[0].error_code,
-                promptTokens: attempt.rows[0].prompt_tokens,
-                completionTokens: attempt.rows[0].completion_tokens,
-              },
         workflowExecutions: executions.rows.map((execution) => ({
           id: execution.id,
           workflowId: execution.workflow_id,
