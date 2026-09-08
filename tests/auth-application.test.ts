@@ -9,6 +9,8 @@ import type { AiClient } from "../modules/ai/openai-compatible-client.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import type { AiCallResult, AiProviderRecord } from "../modules/ai/ai-types.js";
 import { AuthService } from "../modules/auth/auth-service.js";
+import type { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
+import { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
 import type { MessageAutomation } from "../modules/workflow/workflow-engine.js";
 import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
@@ -19,6 +21,8 @@ const loginPassword = "fictional-login-password";
 const sensitivePassword = "fictional-sensitive-password";
 const compressionContentId = "00000000-0000-4000-8000-000000000042";
 const compressionRegenerationId = "00000000-0000-4000-8000-000000000044";
+const summaryResetChatId = "00000000-0000-4000-8000-000000000045";
+const summaryResetOperationId = "00000000-0000-4000-8000-000000000046";
 let loginPasswordHash: string;
 let sensitiveOperationPasswordHash: string;
 
@@ -116,6 +120,34 @@ describe("Web admin authentication", () => {
           new SuccessfulAiClient(),
           secrets,
         ),
+        summarySettings: new SummarySettingsService(
+          {
+            isReady: () => Promise.resolve(true),
+            find: () =>
+              Promise.resolve({
+                enabled: true,
+                includeFromMe: true,
+                baseMessageWindow: 30,
+                characterLimit: 6_000,
+                redundancyMessageWindow: 10,
+                providerRouteId: "00000000-0000-4000-8000-000000000047",
+                timeZone: "UTC",
+                version: 1,
+                policyVersion: 1,
+                updatedAt: "2026-09-08T00:00:00.000Z",
+              }),
+            save: () => Promise.resolve({ status: "conflict" as const }),
+          },
+          {
+            enabled: false,
+            includeFromMe: true,
+            baseMessageWindow: 30,
+            characterLimit: 6_000,
+            redundancyMessageWindow: 10,
+            providerRouteId: "",
+            timeZone: "UTC",
+          },
+        ),
       },
       workflow: {
         repository: workflowRepository,
@@ -159,6 +191,18 @@ describe("Web admin authentication", () => {
                 : { status: "not-found" as const },
             ),
         },
+        conversationSummary: {
+          resetChatSummary: (chatId: string) =>
+            Promise.resolve(
+              chatId === summaryResetChatId
+                ? {
+                    status: "created" as const,
+                    id: summaryResetOperationId,
+                    messageCount: 10,
+                  }
+                : { status: "not-found" as const },
+            ),
+        } as unknown as ConversationContextService,
       },
     });
   });
@@ -474,6 +518,49 @@ describe("Web admin authentication", () => {
     const missing = await application.inject({
       method: "POST",
       url: "/api/v1/conversation-compressions/00000000-0000-4000-8000-000000000099/regenerate",
+      headers: { cookie },
+    });
+    expect(missing.statusCode).toBe(404);
+  });
+
+  it("protects chat summary reset with the sensitive grant", async () => {
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.headers["set-cookie"];
+    const denied = await application.inject({
+      method: "POST",
+      url: `/api/v1/chats/${summaryResetChatId}/summary/reset`,
+      headers: { cookie },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/sensitive",
+      headers: { cookie },
+      payload: { password: sensitivePassword },
+    });
+    const created = await application.inject({
+      method: "POST",
+      url: `/api/v1/chats/${summaryResetChatId}/summary/reset`,
+      headers: { cookie },
+    });
+    expect(created.statusCode).toBe(202);
+    expect(created.json()).toEqual({
+      data: {
+        chatId: summaryResetChatId,
+        status: "created",
+        id: summaryResetOperationId,
+        messageCount: 10,
+      },
+    });
+
+    const missing = await application.inject({
+      method: "POST",
+      url: "/api/v1/chats/00000000-0000-4000-8000-000000000099/summary/reset",
       headers: { cookie },
     });
     expect(missing.statusCode).toBe(404);

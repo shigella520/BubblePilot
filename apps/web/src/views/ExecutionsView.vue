@@ -1056,13 +1056,15 @@ function compressionReasonLabel(reason: string): string {
         "message-threshold": "消息阈值",
         "policy-rebuild": "历史策略重建",
         "backlog-fast-forward": "积压自动追赶",
+        "manual-reset": "手动重置摘要",
       } as Record<string, string>
     )[reason] ?? reason
   );
 }
 
 function compressionOperationTypeLabel(item: ConversationCompression): string {
-  return item.preview ? "手动重新生成" : "正式压缩";
+  if (item.preview) return "手动重新生成";
+  return item.reason === "manual-reset" ? "手动重置" : "正式压缩";
 }
 
 function compressionAttemptStatusLabel(status: string): string {

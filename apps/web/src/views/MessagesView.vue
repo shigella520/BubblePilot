@@ -5,6 +5,7 @@ import {
   Images,
   MessageCircle,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
   SlidersHorizontal,
@@ -37,6 +38,18 @@ interface Chat {
   messageCount: number;
   version: number;
   updatedAt: string;
+}
+
+interface SummarySettings {
+  enabled: boolean;
+  providerRouteId: string;
+}
+
+interface SummaryResetResult {
+  chatId: string;
+  status: "created" | "not-needed";
+  id?: string;
+  messageCount: number;
 }
 
 interface MessageResult {
@@ -192,6 +205,8 @@ const exportPreviewBusy = ref(false);
 const exportConfirmBusy = ref(false);
 const chatToggleBusyIds = reactive(new Set<string>());
 const chatDeleteBusyIds = reactive(new Set<string>());
+const chatSummaryResetBusyIds = reactive(new Set<string>());
+const summaryResetAvailable = ref(false);
 const participantChat = ref<Chat | null>(null);
 const participantVersion = ref(0);
 const participantDrafts = ref<ChatParticipantDraft[]>([]);
@@ -385,12 +400,54 @@ async function loadChats(reset = false) {
     await Promise.all([
       reset ? chatPager.first() : chatPager.refresh(),
       loadChatOptions(),
+      apiRequest<SummarySettings>("/api/v1/ai/summary/settings").then(
+        (settings) => {
+          summaryResetAvailable.value =
+            settings.enabled && settings.providerRouteId.length > 0;
+        },
+      ),
     ]);
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
   } finally {
     busy.value = false;
+  }
+}
+
+async function resetChatSummary(chat: Chat) {
+  if (
+    !session.sensitiveActive ||
+    !summaryResetAvailable.value ||
+    chatSummaryResetBusyIds.has(chat.id)
+  ) {
+    return;
+  }
+  const label = chat.displayName || chat.providerChatId;
+  if (
+    !window.confirm(
+      `确认重置聊天「${label}」的对话摘要？\n\n已有摘要会被忽略；系统只用最近一个压缩周期生成新摘要，更早历史不会进入新摘要。`,
+    )
+  ) {
+    return;
+  }
+  chatSummaryResetBusyIds.add(chat.id);
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    const result = await apiRequest<SummaryResetResult>(
+      `/api/v1/chats/${chat.id}/summary/reset`,
+      { method: "POST" },
+    );
+    message.value =
+      result.status === "created"
+        ? `聊天「${label}」的摘要已重置，正在用最近 ${result.messageCount} 条窗口消息生成新摘要。`
+        : `聊天「${label}」的摘要已清空；当前消息未超过基础窗口，无需生成压缩摘要。`;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    chatSummaryResetBusyIds.delete(chat.id);
   }
 }
 
@@ -867,25 +924,50 @@ onBeforeUnmount(() =>
                   </button>
                 </td>
                 <td>
-                  <button
-                    class="button tiny secondary"
-                    type="button"
-                    :disabled="
-                      chat.enabled ||
-                      !session.sensitiveActive ||
-                      chatDeleteBusyIds.has(chat.id)
-                    "
-                    :aria-busy="chatDeleteBusyIds.has(chat.id)"
-                    :title="
-                      chat.enabled
-                        ? '请先停用监听后再删除'
-                        : '删除该聊天（历史记录仍会保留）'
-                    "
-                    @click="deleteChat(chat)"
-                  >
-                    <Trash2 :size="14" />
-                    {{ chatDeleteBusyIds.has(chat.id) ? "删除中…" : "删除" }}
-                  </button>
+                  <div class="row-actions">
+                    <button
+                      class="button tiny secondary"
+                      type="button"
+                      :disabled="
+                        !session.sensitiveActive ||
+                        !summaryResetAvailable ||
+                        chatSummaryResetBusyIds.has(chat.id)
+                      "
+                      :aria-busy="chatSummaryResetBusyIds.has(chat.id)"
+                      :title="
+                        !summaryResetAvailable
+                          ? '请先启用对话摘要并配置 Provider Route'
+                          : '忽略已有摘要，用最近一个压缩周期建立新摘要'
+                      "
+                      @click="resetChatSummary(chat)"
+                    >
+                      <RotateCcw :size="14" />
+                      {{
+                        chatSummaryResetBusyIds.has(chat.id)
+                          ? "重置中…"
+                          : "重置摘要"
+                      }}
+                    </button>
+                    <button
+                      class="button tiny secondary"
+                      type="button"
+                      :disabled="
+                        chat.enabled ||
+                        !session.sensitiveActive ||
+                        chatDeleteBusyIds.has(chat.id)
+                      "
+                      :aria-busy="chatDeleteBusyIds.has(chat.id)"
+                      :title="
+                        chat.enabled
+                          ? '请先停用监听后再删除'
+                          : '删除该聊天（历史记录仍会保留）'
+                      "
+                      @click="deleteChat(chat)"
+                    >
+                      <Trash2 :size="14" />
+                      {{ chatDeleteBusyIds.has(chat.id) ? "删除中…" : "删除" }}
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>

@@ -122,6 +122,7 @@ const compressionListQuerySchema = pageQuerySchema.extend({
       "message-threshold",
       "policy-rebuild",
       "backlog-fast-forward",
+      "manual-reset",
     ])
     .optional(),
   provider: z.string().max(100).optional(),
@@ -372,7 +373,8 @@ export interface ApplicationOptions {
           | "initial-catchup"
           | "message-threshold"
           | "policy-rebuild"
-          | "backlog-fast-forward";
+          | "backlog-fast-forward"
+          | "manual-reset";
         provider?: string;
         startedFrom?: Date;
         startedTo?: Date;
@@ -3207,6 +3209,61 @@ export function buildApplication(
         );
       }
       return { data: { chatId: parameters.chatId, ...result } };
+    },
+  );
+
+  application.post(
+    "/api/v1/chats/:chatId/summary/reset",
+    {
+      preHandler: requireSensitive(
+        "conversation-summary.reset",
+        "conversation-summary",
+      ),
+    },
+    async (request, reply) => {
+      const parameters = chatParametersSchema.parse(request.params);
+      const conversationSummary = options.workflow?.conversationSummary;
+      const summarySettings = options.ai?.summarySettings;
+      if (conversationSummary === undefined || summarySettings === undefined) {
+        throw new ApplicationError(
+          "AI_SUMMARY_SETTINGS_UNAVAILABLE",
+          "Summary state or settings are unavailable.",
+          503,
+        );
+      }
+      const settings = await summarySettings.resolve();
+      if (!settings.enabled || settings.providerRouteId === "") {
+        throw new ApplicationError(
+          "CONVERSATION_SUMMARY_DISABLED",
+          "Conversation summary must be enabled with a Provider route before it can be reset.",
+          409,
+        );
+      }
+      const result = await conversationSummary.resetChatSummary(
+        parameters.chatId,
+        {
+          enabled: true,
+          providerRouteId: settings.providerRouteId,
+          baseMessageWindow: settings.baseMessageWindow,
+          redundancyMessageWindow: settings.redundancyMessageWindow,
+          includeFromMe: settings.includeFromMe,
+          timeZone: settings.timeZone,
+          policyVersion: settings.policyVersion ?? 1,
+        },
+      );
+      if (result.status === "not-found") {
+        throw new ApplicationError(
+          "CHAT_NOT_FOUND",
+          "The chat does not exist.",
+          404,
+        );
+      }
+      if (result.status === "created") {
+        options.workflow?.summaryWorker?.trigger();
+      }
+      return reply.code(result.status === "created" ? 202 : 200).send({
+        data: { chatId: parameters.chatId, ...result },
+      });
     },
   );
 

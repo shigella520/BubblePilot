@@ -287,6 +287,43 @@ paths:
           $ref: "#/components/responses/Error"
         "503":
           $ref: "#/components/responses/Error"
+  /api/v1/chats/{chatId}/summary/reset:
+    post:
+      operationId: resetChatSummary
+      description: 二次验证后忽略该聊天当前摘要，只用最近一个压缩周期建立新的正式摘要基线；最新基础窗口仍保留为原始上下文，更早历史不会重新摘要。若当前消息未超过基础窗口，则只清空摘要而不调用 AI。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - in: path
+          name: chatId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 摘要已重置，但当前没有需要压缩的窗口消息。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSummaryReset"
+        "202":
+          description: 摘要已重置，最近一个压缩周期已加入正式摘要队列。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationSummaryReset"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /api/v1/chats/{chatId}/participants:
     get:
       operationId: getChatParticipants
@@ -1695,6 +1732,7 @@ paths:
                   message-threshold,
                   policy-rebuild,
                   backlog-fast-forward,
+                  manual-reset,
                 ],
             }
         - in: query
@@ -2281,6 +2319,7 @@ components:
               message-threshold,
               policy-rebuild,
               backlog-fast-forward,
+              manual-reset,
             ]
         providerName: { type: [string, "null"] }
         model: { type: [string, "null"] }
@@ -2434,6 +2473,20 @@ components:
           properties:
             id: { type: string, format: uuid }
             status: { type: string, enum: [created, active] }
+          additionalProperties: false
+      additionalProperties: false
+    ConversationSummaryReset:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [chatId, status, messageCount]
+          properties:
+            chatId: { type: string, format: uuid }
+            status: { type: string, enum: [created, not-needed] }
+            id: { type: string, format: uuid }
+            messageCount: { type: integer, minimum: 0 }
           additionalProperties: false
       additionalProperties: false
     InboundEventSummary:

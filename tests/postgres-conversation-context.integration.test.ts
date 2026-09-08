@@ -169,6 +169,109 @@ describe.runIf(testDatabaseUrl !== undefined)(
       }
     });
 
+    it("resets a summary from only the newest rolling window", async () => {
+      const chatGuid = `iMessage;-;summary-manual-reset-${randomUUID()}`;
+      const envelopes = await archiveMessages(chatGuid, 8);
+      const routeId = randomUUID();
+      const service = new ConversationContextService(testDatabaseUrl ?? "", {
+        execute,
+      } as unknown as AiRoutingService);
+      const database = new Client({ connectionString: testDatabaseUrl });
+      await database.connect();
+      try {
+        await service.enqueueForMessage({
+          provider: "bluebubbles",
+          providerChatId: chatGuid,
+          providerMessageId:
+            envelopes.at(-1)?.message.providerMessageId ?? "missing",
+          routeId,
+          baseMessageWindow: 2,
+          redundancyMessageWindow: 2,
+          includeFromMe: true,
+          timeZone: "UTC",
+          summaryPolicyVersion: 1,
+        });
+        await service.processQueued(routeId, "UTC", `initial-${randomUUID()}`);
+        const chat = await database.query<{ id: string }>(
+          "SELECT id FROM chats WHERE provider_chat_id = $1",
+          [chatGuid],
+        );
+        execute.mockResolvedValueOnce({
+          ...successfulResult,
+          text: "Reset fictional summary",
+        });
+        const reset = await service.resetChatSummary(chat.rows[0]?.id ?? "", {
+          enabled: true,
+          providerRouteId: routeId,
+          baseMessageWindow: 2,
+          redundancyMessageWindow: 2,
+          includeFromMe: true,
+          timeZone: "UTC",
+          policyVersion: 1,
+        });
+        expect(reset).toMatchObject({ status: "created", messageCount: 2 });
+        if (reset.status !== "created") return;
+
+        const queued = await database.query<{
+          reason: string;
+          from_index: string;
+          through_index: string;
+          summary: string;
+          covered_through_index: string;
+        }>(
+          `SELECT operation.reason, operation.from_index::text,
+                  operation.through_index::text, state.summary,
+                  state.covered_through_index::text
+           FROM conversation_context_compressions operation
+           INNER JOIN conversation_context_states state
+             ON state.id = operation.context_state_id
+           WHERE operation.id = $1`,
+          [reset.id],
+        );
+        expect(queued.rows[0]).toMatchObject({
+          reason: "manual-reset",
+          from_index: "5",
+          through_index: "6",
+          summary: "",
+          covered_through_index: "4",
+        });
+
+        await service.processQueued(routeId, "UTC", `reset-${randomUUID()}`);
+        const lastCall = execute.mock.calls.at(-1)?.[0] as
+          { messages: Array<{ content: string }> } | undefined;
+        const prompt = lastCall?.messages;
+        expect(prompt?.[1]?.content).toContain(
+          "<previous_summary>\n\n</previous_summary>",
+        );
+        expect(prompt?.[1]?.content).toContain("Fictional message 5");
+        expect(prompt?.[1]?.content).toContain("Fictional message 6");
+        expect(prompt?.[1]?.content).not.toContain("Fictional message 4");
+        expect(prompt?.[1]?.content).not.toContain("Fictional message 7");
+
+        const completed = await database.query<{
+          status: string;
+          summary: string;
+          covered_through_index: string;
+        }>(
+          `SELECT operation.status, state.summary,
+                  state.covered_through_index::text
+           FROM conversation_context_compressions operation
+           INNER JOIN conversation_context_states state
+             ON state.id = operation.context_state_id
+           WHERE operation.id = $1`,
+          [reset.id],
+        );
+        expect(completed.rows[0]).toMatchObject({
+          status: "succeeded",
+          summary: "Reset fictional summary",
+          covered_through_index: "6",
+        });
+      } finally {
+        await database.end();
+        await service.close();
+      }
+    });
+
     it("finishes a fixed queued range after monitoring is disabled", async () => {
       const chatGuid = `iMessage;-;summary-disable-${randomUUID()}`;
       const envelopes = await archiveMessages(chatGuid, 3);
