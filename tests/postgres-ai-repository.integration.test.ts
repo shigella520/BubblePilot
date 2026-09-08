@@ -191,9 +191,51 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         randomUUID(),
       ],
     );
+    const routeTraceId = randomUUID();
+    await repository.recordRouteTrace({
+      id: routeTraceId,
+      purpose: "workflow-reply",
+      backgroundOperationId: null,
+      executionId: diagnosticExecutionId,
+      nodeId: "ai-node",
+      routeId: route.value.id,
+      routeName: route.value.name,
+      routeVersion: route.value.version,
+      agentTurn: 1,
+      phase: "image-original",
+      requestRequirements: {
+        hasImages: true,
+        allowImageDegrade: true,
+        requiresTools: false,
+        webSearch: null,
+      },
+      fallbackEnabled: true,
+      maxRounds: 2,
+      candidateDecisions: [
+        {
+          providerId: primary.value.id,
+          providerName: primary.value.name,
+          providerVersion: primary.value.version,
+          model: primary.value.model,
+          configuredPosition: 1,
+          round: 1,
+          sequence: 1,
+          decision: "attempted",
+          reason: "attempted",
+          healthState: "healthy",
+          imageInputConfigured: true,
+          imageInputProbe: "verified",
+        },
+      ],
+      terminalStatus: "succeeded",
+      terminalCode: null,
+      durationMs: 123,
+    });
     await repository.recordAttempt({
       purpose: "workflow-reply",
       backgroundOperationId: null,
+      routeTraceId,
+      routePhase: "image-original",
       executionId: diagnosticExecutionId,
       nodeId: "ai-node",
       routeId: route.value.id,
@@ -289,6 +331,22 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         },
       },
     ]);
+    const storedRouteTraces = await repository.listRouteTraces({
+      executionId: diagnosticExecutionId,
+    });
+    expect(storedRouteTraces).toHaveLength(1);
+    expect(storedRouteTraces[0]).toMatchObject({
+      id: routeTraceId,
+      routeName: route.value.name,
+      phase: "image-original",
+      requestRequirements: { hasImages: true },
+      candidateDecisions: [
+        {
+          providerId: primary.value.id,
+          reason: "attempted",
+        },
+      ],
+    });
     await repository.recordAttempt({
       purpose: "workflow-reply",
       backgroundOperationId: null,

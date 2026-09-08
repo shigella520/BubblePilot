@@ -2133,6 +2133,91 @@ components:
           description: 兼容已有摘要状态的固定代次标识；保存配置时不再递增，也不会触发重建。
         updatedAt: { type: [string, "null"], format: date-time }
       additionalProperties: false
+    AiRouteTrace:
+      type: object
+      required:
+        - id
+        - executionId
+        - backgroundOperationId
+        - purpose
+        - nodeId
+        - routeId
+        - routeName
+        - routeVersion
+        - agentTurn
+        - phase
+        - requestRequirements
+        - fallbackEnabled
+        - maxRounds
+        - candidateDecisions
+        - terminalStatus
+        - terminalCode
+        - durationMs
+        - createdAt
+      properties:
+        id: { type: string, format: uuid }
+        executionId: { type: [string, "null"], format: uuid }
+        backgroundOperationId: { type: [string, "null"], format: uuid }
+        purpose:
+          type: string
+          enum: [workflow-reply, context-summary, image-summary]
+        nodeId: { type: string }
+        routeId: { type: string, format: uuid }
+        routeName: { type: [string, "null"] }
+        routeVersion: { type: [integer, "null"], minimum: 1 }
+        agentTurn: { type: integer, minimum: 1 }
+        phase:
+          type: string
+          enum: [standard, image-original, image-degraded]
+        requestRequirements:
+          type: object
+          required: [hasImages, allowImageDegrade, requiresTools, webSearch]
+          properties:
+            hasImages: { type: boolean }
+            allowImageDegrade: { type: boolean }
+            requiresTools: { type: boolean }
+            webSearch: { type: [string, "null"] }
+          additionalProperties: false
+        fallbackEnabled: { type: [boolean, "null"] }
+        maxRounds: { type: [integer, "null"], minimum: 1 }
+        candidateDecisions:
+          type: array
+          items:
+            type: object
+            required:
+              - providerId
+              - providerName
+              - providerVersion
+              - model
+              - configuredPosition
+              - round
+              - sequence
+              - decision
+              - reason
+              - healthState
+              - imageInputConfigured
+              - imageInputProbe
+            properties:
+              providerId: { type: string, format: uuid }
+              providerName: { type: [string, "null"] }
+              providerVersion: { type: [integer, "null"], minimum: 1 }
+              model: { type: [string, "null"] }
+              configuredPosition: { type: integer, minimum: 1 }
+              round: { type: [integer, "null"], minimum: 1 }
+              sequence: { type: [integer, "null"], minimum: 1 }
+              decision:
+                type: string
+                enum: [eligible, excluded, skipped, attempted]
+              reason: { type: string }
+              healthState: { type: [string, "null"] }
+              imageInputConfigured: { type: [boolean, "null"] }
+              imageInputProbe: { type: [string, "null"] }
+            additionalProperties: false
+        terminalStatus: { type: string, enum: [succeeded, failed] }
+        terminalCode: { type: [string, "null"] }
+        durationMs: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+      additionalProperties: false
     ConversationCompression:
       type: object
       required:
@@ -2163,6 +2248,7 @@ components:
         - preview
         - sourceCompressionId
         - providerAttempts
+        - routeTraces
       properties:
         id: { type: string, format: uuid }
         chatId: { type: string, format: uuid }
@@ -2226,6 +2312,8 @@ components:
             type: object
             required:
               - id
+              - routeTraceId
+              - routePhase
               - providerName
               - model
               - agentTurn
@@ -2242,6 +2330,10 @@ components:
               - createdAt
             properties:
               id: { type: string, format: uuid }
+              routeTraceId: { type: [string, "null"], format: uuid }
+              routePhase:
+                type: string
+                enum: [standard, image-original, image-degraded]
               providerName: { type: string }
               model: { type: string }
               agentTurn: { type: integer, minimum: 1 }
@@ -2257,6 +2349,11 @@ components:
               completionTokens: { type: [integer, "null"], minimum: 0 }
               createdAt: { type: string, format: date-time }
             additionalProperties: false
+        routeTraces:
+          type: array
+          description: 执行时保存的路由版本、请求能力和候选选择诊断；历史记录可能为空。
+          items:
+            $ref: "#/components/schemas/AiRouteTrace"
         workflowExecutions:
           type: array
           items:

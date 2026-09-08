@@ -120,6 +120,23 @@ interface MessageMediaDetail {
     durationMs: number | null;
     generatedAt: string | null;
     imageContentHash: string | null;
+    routeTraces: Array<{
+      id: string;
+      routeId: string;
+      routeName: string | null;
+      routeVersion: number | null;
+      phase: "standard" | "image-original" | "image-degraded";
+      terminalStatus: "succeeded" | "failed";
+      terminalCode: string | null;
+      candidateDecisions: Array<{
+        providerId: string;
+        providerName: string | null;
+        configuredPosition: number;
+        reason: string;
+        imageInputConfigured: boolean | null;
+        imageInputProbe: string | null;
+      }>;
+    }>;
     previewUrl: string;
   }>;
 }
@@ -282,6 +299,38 @@ function formatMediaBytes(value: number | null): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KiB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function mediaRoutePhaseLabel(
+  phase: MessageMediaDetail["items"][number]["routeTraces"][number]["phase"],
+): string {
+  return (
+    {
+      standard: "标准调用",
+      "image-original": "原生图片调用",
+      "image-degraded": "降级为纯文本",
+    }[phase] ?? phase
+  );
+}
+
+function mediaRouteReasonLabel(reason: string): string {
+  return (
+    {
+      eligible: "符合调用条件",
+      "provider-unavailable": "Provider 不可用",
+      "provider-disabled": "Provider 已停用",
+      "secret-missing": "缺少密钥",
+      "image-capability-disabled": "未启用图片能力",
+      "image-capability-unverified": "图片能力未验证",
+      "web-search-unsupported": "能力不匹配",
+      "health-cooldown": "Provider 冷却中",
+      "health-unavailable": "健康状态暂不可用",
+      "retry-not-eligible": "未进入本轮重试",
+      "fallback-stopped": "Fallback 已停止",
+      "probe-busy": "恢复探测占用",
+      attempted: "已实际调用",
+    }[reason] ?? reason
+  );
 }
 
 function closeMessageMedia() {
@@ -1453,6 +1502,37 @@ onBeforeUnmount(() =>
                     <dd>{{ item.attemptCount || "—" }}</dd>
                   </div>
                 </dl>
+                <div
+                  v-if="item.routeTraces.length"
+                  class="message-media-route-traces"
+                >
+                  <strong>路由决策</strong>
+                  <article v-for="trace in item.routeTraces" :key="trace.id">
+                    <p>
+                      {{ trace.routeName || "路由不可用" }} · v{{
+                        trace.routeVersion ?? "—"
+                      }}
+                      · {{ mediaRoutePhaseLabel(trace.phase) }}
+                    </p>
+                    <span
+                      v-for="(candidate, index) in trace.candidateDecisions"
+                      :key="candidate.providerId + ':' + index"
+                      class="message-media-route-candidate"
+                    >
+                      #{{ candidate.configuredPosition }}
+                      {{ candidate.providerName || candidate.providerId }}：
+                      {{ mediaRouteReasonLabel(candidate.reason) }}
+                      <template v-if="candidate.imageInputConfigured !== null">
+                        · 图片配置
+                        {{ candidate.imageInputConfigured ? "开启" : "关闭" }}
+                        / 探测 {{ candidate.imageInputProbe || "unknown" }}
+                      </template>
+                    </span>
+                  </article>
+                </div>
+                <p v-else class="message-media-status-copy">
+                  历史任务未记录路由决策，不使用当前配置反推。
+                </p>
                 <code v-if="item.errorCode" class="message-media-error">{{
                   item.errorCode
                 }}</code>

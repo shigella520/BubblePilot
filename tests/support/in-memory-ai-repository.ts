@@ -18,6 +18,8 @@ import type {
   AiProviderRouteRecord,
   AiRouteConfiguration,
   AiRouteSnapshot,
+  AiRouteTraceRecordInput,
+  AiRouteTraceView,
   AiToolExecutionRecordInput,
   AiToolExecutionView,
   AiUsageHours,
@@ -34,6 +36,7 @@ export class InMemoryAiRepository implements AiRepository {
   readonly health = new Map<string, AiProviderHealth>();
   readonly routes = new Map<string, AiProviderRouteRecord>();
   readonly attempts: AiProviderAttemptView[] = [];
+  readonly routeTraces: AiRouteTraceView[] = [];
   readonly toolExecutions: AiToolExecutionView[] = [];
   readonly imageInputs: AiImageInputView[] = [];
   usageReport: AiUsageReport | null = null;
@@ -424,6 +427,25 @@ export class InMemoryAiRepository implements AiRepository {
           ]
         : [];
     });
+    const selectedIds = new Set(
+      candidates.map((candidate) => candidate.provider.id),
+    );
+    const unavailable = snapshot.providers.flatMap((provider) => {
+      if (selectedIds.has(provider.id)) return [];
+      const health = this.health.get(provider.id);
+      if (health === undefined) return [];
+      return [
+        {
+          candidate: { provider, healthState: health.state },
+          reason:
+            health.state === "degraded" &&
+            health.degradedUntil !== null &&
+            Date.parse(health.degradedUntil) > now
+              ? ("health-cooldown" as const)
+              : ("probe-busy" as const),
+        },
+      ];
+    });
     const nextAvailable = snapshot.providers
       .flatMap((provider) => {
         const health = this.health.get(provider.id);
@@ -439,7 +461,7 @@ export class InMemoryAiRepository implements AiRepository {
         return [];
       })
       .sort()[0];
-    return { candidates, nextAvailableAt: nextAvailable ?? null };
+    return { candidates, unavailable, nextAvailableAt: nextAvailable ?? null };
   }
 
   claimProviderProbe(
@@ -480,6 +502,33 @@ export class InMemoryAiRepository implements AiRepository {
     return Promise.resolve();
   }
 
+  recordRouteTrace(input: AiRouteTraceRecordInput): Promise<void> {
+    this.routeTraces.push({
+      ...cloned(input),
+      createdAt: this.timestamp(),
+    });
+    return Promise.resolve();
+  }
+
+  listRouteTraces(input: {
+    executionId?: string;
+    backgroundOperationIds?: readonly string[];
+  }): Promise<readonly AiRouteTraceView[]> {
+    return Promise.resolve(
+      this.routeTraces
+        .filter(
+          (trace) =>
+            (input.executionId !== undefined &&
+              trace.executionId === input.executionId) ||
+            (input.backgroundOperationIds?.includes(
+              trace.backgroundOperationId ?? "",
+            ) ??
+              false),
+        )
+        .map(cloned),
+    );
+  }
+
   listAttempts(
     executionId: string,
     nodeId?: string,
@@ -494,6 +543,10 @@ export class InMemoryAiRepository implements AiRepository {
         .sort(
           (left, right) =>
             left.agentTurn - right.agentTurn ||
+            left.createdAt.localeCompare(right.createdAt) ||
+            (left.routePhase ?? "standard").localeCompare(
+              right.routePhase ?? "standard",
+            ) ||
             left.round - right.round ||
             left.sequence - right.sequence,
         )

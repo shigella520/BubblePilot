@@ -244,6 +244,29 @@ describe("AiRoutingService", () => {
       }),
     ).resolves.toMatchObject({ status: "succeeded", providerId: vision.id });
     expect(client.calls).toEqual([vision.id]);
+    expect(repository.routeTraces).toHaveLength(1);
+    expect(repository.routeTraces[0]).toMatchObject({
+      routeName: configuredRoute.name,
+      routeVersion: configuredRoute.version,
+      phase: "image-original",
+      requestRequirements: { hasImages: true },
+      candidateDecisions: [
+        expect.objectContaining({
+          providerId: textOnly.id,
+          decision: "excluded",
+          reason: "image-capability-disabled",
+        }),
+        expect.objectContaining({
+          providerId: vision.id,
+          decision: "eligible",
+          imageInputProbe: "verified",
+        }),
+        expect.objectContaining({
+          providerId: vision.id,
+          decision: "attempted",
+        }),
+      ],
+    });
   });
 
   it("falls back to text with an explicit limitation when no vision provider is available", async () => {
@@ -295,6 +318,24 @@ describe("AiRoutingService", () => {
           message.content.some((part) => part.type === "image"),
       ),
     ).toBe(false);
+    expect(repository.routeTraces.map((trace) => trace.phase)).toEqual([
+      "image-original",
+      "image-degraded",
+    ]);
+    expect(repository.routeTraces[0]).toMatchObject({
+      terminalStatus: "failed",
+      terminalCode: "AI_ROUTE_UNAVAILABLE",
+      candidateDecisions: [
+        expect.objectContaining({
+          providerId: textOnly.id,
+          reason: "image-capability-disabled",
+        }),
+      ],
+    });
+    expect(repository.routeTraces[1]).toMatchObject({
+      terminalStatus: "succeeded",
+      requestRequirements: { hasImages: false },
+    });
   });
 
   it("does not strip images when a background image summary forbids degradation", async () => {
@@ -491,7 +532,8 @@ describe("AiRoutingService", () => {
   it("keeps retrying one provider when fallback switching is disabled", async () => {
     const repository = new InMemoryAiRepository();
     const primary = await provider(repository, "primary");
-    const configuredRoute = await route(repository, [primary.id], {
+    const backup = await provider(repository, "backup");
+    const configuredRoute = await route(repository, [primary.id, backup.id], {
       rounds: 2,
       fallbackEnabled: false,
       threshold: 10,
@@ -520,6 +562,13 @@ describe("AiRoutingService", () => {
       attemptCount: 2,
     });
     expect(client.calls).toEqual([primary.id, primary.id]);
+    expect(
+      repository.routeTraces[0]?.candidateDecisions.filter(
+        (decision) =>
+          decision.providerId === backup.id &&
+          decision.reason === "fallback-stopped",
+      ),
+    ).toHaveLength(1);
   });
 
   it("keeps the locked route and provider snapshot while an attempt is running", async () => {

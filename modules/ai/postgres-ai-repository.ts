@@ -24,6 +24,8 @@ import {
   type AiProviderRouteRecord,
   type AiRouteConfiguration,
   type AiRouteSnapshot,
+  type AiRouteTraceRecordInput,
+  type AiRouteTraceView,
   type AiToolExecutionRecordInput,
   type AiToolExecutionView,
   type AiUsageHours,
@@ -101,6 +103,8 @@ interface AttemptRow {
   execution_id: string | null;
   purpose: AiAttemptRecordInput["purpose"];
   background_operation_id: string | null;
+  route_trace_id: string | null;
+  route_phase: AiAttemptRecordInput["routePhase"];
   node_id: string;
   route_id: string;
   route_version: number;
@@ -138,6 +142,27 @@ interface AttemptRow {
   cache_write_prompt_tokens: number | null;
   cache_miss_prompt_tokens: number | null;
   request_trace: AiCallDiagnostics["requestTrace"] | null;
+  created_at: Date;
+}
+
+interface RouteTraceRow {
+  id: string;
+  execution_id: string | null;
+  background_operation_id: string | null;
+  purpose: AiRouteTraceRecordInput["purpose"];
+  node_id: string;
+  route_id: string;
+  route_name: string | null;
+  route_version: number | null;
+  agent_turn: number;
+  phase: AiRouteTraceRecordInput["phase"];
+  request_requirements: AiRouteTraceRecordInput["requestRequirements"];
+  fallback_enabled: boolean | null;
+  max_rounds: number | null;
+  candidate_decisions: AiRouteTraceRecordInput["candidateDecisions"];
+  terminal_status: AiRouteTraceRecordInput["terminalStatus"];
+  terminal_code: string | null;
+  duration_ms: number;
   created_at: Date;
 }
 
@@ -262,6 +287,8 @@ function attemptView(row: AttemptRow): AiProviderAttemptView {
     executionId: row.execution_id,
     purpose: row.purpose,
     backgroundOperationId: row.background_operation_id,
+    routeTraceId: row.route_trace_id,
+    routePhase: row.route_phase ?? "standard",
     nodeId: row.node_id,
     routeId: row.route_id,
     routeVersion: row.route_version,
@@ -304,6 +331,29 @@ function attemptView(row: AttemptRow): AiProviderAttemptView {
             cacheMissPromptTokens: row.cache_miss_prompt_tokens,
             requestTrace: row.request_trace ?? null,
           },
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+function routeTraceView(row: RouteTraceRow): AiRouteTraceView {
+  return {
+    id: row.id,
+    executionId: row.execution_id,
+    backgroundOperationId: row.background_operation_id,
+    purpose: row.purpose,
+    nodeId: row.node_id,
+    routeId: row.route_id,
+    routeName: row.route_name,
+    routeVersion: row.route_version,
+    agentTurn: row.agent_turn,
+    phase: row.phase,
+    requestRequirements: row.request_requirements,
+    fallbackEnabled: row.fallback_enabled,
+    maxRounds: row.max_rounds,
+    candidateDecisions: row.candidate_decisions,
+    terminalStatus: row.terminal_status,
+    terminalCode: row.terminal_code,
+    durationMs: row.duration_ms,
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -980,7 +1030,7 @@ export class PostgresAiRepository implements AiRepository {
     snapshot: AiRouteSnapshot,
   ): Promise<AiCandidateSelection> {
     if (snapshot.providers.length === 0) {
-      return { candidates: [], nextAvailableAt: null };
+      return { candidates: [], unavailable: [], nextAvailableAt: null };
     }
     const ids = snapshot.providers.map((provider) => provider.id);
     const health = await this.pool.query<HealthRow>(
@@ -1018,6 +1068,25 @@ export class PostgresAiRepository implements AiRepository {
         ? [{ provider, healthState: row.state }]
         : [];
     });
+    const selectedIds = new Set(
+      candidates.map((candidate) => candidate.provider.id),
+    );
+    const unavailable = snapshot.providers.flatMap((provider) => {
+      if (selectedIds.has(provider.id)) return [];
+      const row = byId.get(provider.id);
+      if (row === undefined) return [];
+      return [
+        {
+          candidate: { provider, healthState: row.state },
+          reason:
+            row.state === "degraded" &&
+            row.degraded_until !== null &&
+            row.degraded_until.getTime() > now
+              ? ("health-cooldown" as const)
+              : ("probe-busy" as const),
+        },
+      ];
+    });
     const nextAvailable = health.rows
       .flatMap((row) => {
         if (row.state === "degraded" && row.degraded_until !== null) {
@@ -1031,6 +1100,7 @@ export class PostgresAiRepository implements AiRepository {
       .sort((left, right) => left - right)[0];
     return {
       candidates,
+      unavailable,
       nextAvailableAt:
         nextAvailable === undefined || !Number.isFinite(nextAvailable)
           ? null
@@ -1113,12 +1183,12 @@ export class PostgresAiRepository implements AiRepository {
          prompt_tokens, completion_tokens, reasoning_tokens, total_tokens,
          cached_prompt_tokens, cache_write_prompt_tokens,
          cache_miss_prompt_tokens, request_trace, purpose,
-         background_operation_id
+         background_operation_id, route_trace_id, route_phase
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
          $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
          $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34,
-         $35, $36, $37, $38, $39, $40, $41
+         $35, $36, $37, $38, $39, $40, $41, $42, $43
        )`,
       [
         randomUUID(),
@@ -1164,8 +1234,70 @@ export class PostgresAiRepository implements AiRepository {
           : JSON.stringify(input.diagnostics.requestTrace),
         input.purpose,
         input.backgroundOperationId,
+        input.routeTraceId ?? null,
+        input.routePhase ?? "standard",
       ],
     );
+  }
+
+  async recordRouteTrace(input: AiRouteTraceRecordInput): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO ai_route_traces (
+         id, execution_id, background_operation_id, purpose, node_id,
+         route_id, route_name, route_version, agent_turn, phase,
+         request_requirements, fallback_enabled, max_rounds,
+         candidate_decisions, terminal_status, terminal_code, duration_ms
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12,
+         $13, $14::jsonb, $15, $16, $17
+       )`,
+      [
+        input.id,
+        input.executionId,
+        input.backgroundOperationId,
+        input.purpose,
+        input.nodeId,
+        input.routeId,
+        input.routeName,
+        input.routeVersion,
+        input.agentTurn,
+        input.phase,
+        JSON.stringify(input.requestRequirements),
+        input.fallbackEnabled,
+        input.maxRounds,
+        JSON.stringify(input.candidateDecisions),
+        input.terminalStatus,
+        input.terminalCode,
+        input.durationMs,
+      ],
+    );
+  }
+
+  async listRouteTraces(input: {
+    executionId?: string;
+    backgroundOperationIds?: readonly string[];
+  }): Promise<readonly AiRouteTraceView[]> {
+    if (
+      input.executionId === undefined &&
+      (input.backgroundOperationIds === undefined ||
+        input.backgroundOperationIds.length === 0)
+    ) {
+      return [];
+    }
+    const result = await this.pool.query<RouteTraceRow>(
+      `SELECT * FROM ai_route_traces
+       WHERE ($1::uuid IS NOT NULL AND execution_id = $1)
+          OR ($2::uuid[] IS NOT NULL AND background_operation_id = ANY($2))
+       ORDER BY created_at, id`,
+      [
+        input.executionId ?? null,
+        input.backgroundOperationIds === undefined ||
+        input.backgroundOperationIds.length === 0
+          ? null
+          : input.backgroundOperationIds,
+      ],
+    );
+    return result.rows.map(routeTraceView);
   }
 
   async listAttempts(
@@ -1175,7 +1307,7 @@ export class PostgresAiRepository implements AiRepository {
     const result = await this.pool.query<AttemptRow>(
       `SELECT * FROM ai_provider_attempts
        WHERE execution_id = $1 AND ($2::text IS NULL OR node_id = $2)
-       ORDER BY agent_turn, round, sequence`,
+       ORDER BY agent_turn, created_at, route_phase, round, sequence`,
       [executionId, nodeId ?? null],
     );
     return result.rows.map(attemptView);

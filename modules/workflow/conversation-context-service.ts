@@ -5,7 +5,7 @@ import type { Pool } from "pg";
 import { sha256 } from "../../app/canonical-json.js";
 import { formatContextTimestamp } from "./context-time.js";
 import type { AiRoutingService } from "../ai/ai-routing-service.js";
-import type { AiCallDiagnostics } from "../ai/ai-types.js";
+import type { AiCallDiagnostics, AiRouteTraceView } from "../ai/ai-types.js";
 import type { ImageSummaryRepository } from "../ai/image-summary-repository.js";
 import type { MessageImageSummary } from "../ai/image-summary-types.js";
 import type { ContextMessage } from "../archive/archive-repository.js";
@@ -253,6 +253,8 @@ export interface ConversationCompressionView {
   }[];
   providerAttempts: readonly Readonly<{
     id: string;
+    routeTraceId: string | null;
+    routePhase: AiRouteTraceView["phase"];
     providerName: string;
     model: string;
     agentTurn: number;
@@ -268,6 +270,7 @@ export interface ConversationCompressionView {
     completionTokens: number | null;
     createdAt: string;
   }>[];
+  routeTraces: readonly AiRouteTraceView[];
   workflowExecutions?: readonly {
     id: string;
     workflowId: string;
@@ -1046,6 +1049,8 @@ export class ConversationContextService {
     const attempts = await this.pool.query<{
       id: string;
       background_operation_id: string;
+      route_trace_id: string | null;
+      route_phase: AiRouteTraceView["phase"];
       provider_name: string;
       model: string;
       agent_turn: number;
@@ -1061,7 +1066,8 @@ export class ConversationContextService {
       completion_tokens: number | null;
       created_at: Date;
     }>(
-      `SELECT id, background_operation_id, provider_name, model, agent_turn,
+      `SELECT id, background_operation_id, route_trace_id, route_phase,
+              provider_name, model, agent_turn,
               round, sequence, status, duration_ms, error_category, error_code,
               retryable, fallback_allowed, prompt_tokens, completion_tokens,
               created_at
@@ -1069,6 +1075,31 @@ export class ConversationContextService {
        WHERE background_operation_id = ANY($1::uuid[])
        ORDER BY background_operation_id, agent_turn, round, sequence,
                 created_at, id`,
+      [result.rows.map((row) => row.id)],
+    );
+    const traces = await this.pool.query<{
+      id: string;
+      execution_id: string | null;
+      background_operation_id: string;
+      purpose: AiRouteTraceView["purpose"];
+      node_id: string;
+      route_id: string;
+      route_name: string | null;
+      route_version: number | null;
+      agent_turn: number;
+      phase: AiRouteTraceView["phase"];
+      request_requirements: AiRouteTraceView["requestRequirements"];
+      fallback_enabled: boolean | null;
+      max_rounds: number | null;
+      candidate_decisions: AiRouteTraceView["candidateDecisions"];
+      terminal_status: AiRouteTraceView["terminalStatus"];
+      terminal_code: string | null;
+      duration_ms: number;
+      created_at: Date;
+    }>(
+      `SELECT * FROM ai_route_traces
+       WHERE background_operation_id = ANY($1::uuid[])
+       ORDER BY background_operation_id, created_at, id`,
       [result.rows.map((row) => row.id)],
     );
     const attemptsByOperation = new Map<
@@ -1082,6 +1113,8 @@ export class ConversationContextService {
         ...items,
         {
           id: attempt.id,
+          routeTraceId: attempt.route_trace_id ?? null,
+          routePhase: attempt.route_phase ?? "standard",
           providerName: attempt.provider_name,
           model: attempt.model,
           agentTurn: attempt.agent_turn,
@@ -1098,6 +1131,31 @@ export class ConversationContextService {
           createdAt: attempt.created_at.toISOString(),
         },
       ]);
+    }
+    const tracesByOperation = new Map<string, AiRouteTraceView[]>();
+    for (const trace of traces.rows) {
+      const items = tracesByOperation.get(trace.background_operation_id) ?? [];
+      items.push({
+        id: trace.id,
+        executionId: trace.execution_id,
+        backgroundOperationId: trace.background_operation_id,
+        purpose: trace.purpose,
+        nodeId: trace.node_id,
+        routeId: trace.route_id,
+        routeName: trace.route_name,
+        routeVersion: trace.route_version,
+        agentTurn: trace.agent_turn,
+        phase: trace.phase,
+        requestRequirements: trace.request_requirements,
+        fallbackEnabled: trace.fallback_enabled,
+        maxRounds: trace.max_rounds,
+        candidateDecisions: trace.candidate_decisions,
+        terminalStatus: trace.terminal_status,
+        terminalCode: trace.terminal_code,
+        durationMs: trace.duration_ms,
+        createdAt: trace.created_at.toISOString(),
+      });
+      tracesByOperation.set(trace.background_operation_id, items);
     }
     const items = result.rows.map((row) => ({
       id: row.id,
@@ -1127,6 +1185,7 @@ export class ConversationContextService {
       preview: row.preview,
       sourceCompressionId: row.source_compression_id,
       providerAttempts: attemptsByOperation.get(row.id) ?? [],
+      routeTraces: tracesByOperation.get(row.id) ?? [],
     }));
     if (input.id === undefined) return items;
     const item = items[0];

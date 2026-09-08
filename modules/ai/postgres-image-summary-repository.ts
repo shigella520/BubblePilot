@@ -94,6 +94,7 @@ function sourceFor(row: SummaryRow): ImageSummarySource | null {
 
 function summaryView(row: SummaryRow): MessageImageSummary {
   return {
+    operationId: row.id,
     attachmentRef: row.attachment_ref,
     sourceType: row.source_type,
     sourceKeyHash: sha256(row.source_key),

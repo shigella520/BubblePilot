@@ -514,7 +514,8 @@ describe("conversation context summary contract", () => {
             created_at: new Date("2026-08-10T00:02:05.000Z"),
           },
         ],
-      });
+      })
+      .mockResolvedValueOnce({ rows: [] });
     const service = Object.create(
       ConversationContextService.prototype,
     ) as ConversationContextService;

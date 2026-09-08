@@ -19,6 +19,7 @@ export type MessageImageMediaSource = {
 };
 
 export type MessageImageMediaView = {
+  operationId: string | null;
   attachmentRef: string;
   sourceType: ImageSummarySource["sourceType"];
   label: string;
@@ -99,6 +100,7 @@ export function messageImageMediaViews(
         candidate.sourceKeyHash === sha256(item.source.sourceKey),
     );
     return {
+      operationId: summary?.operationId ?? null,
       attachmentRef: item.source.attachmentRef,
       sourceType: item.source.sourceType,
       label: item.label,

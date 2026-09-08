@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { sha256 } from "../../app/canonical-json.js";
 import type { AiRepository } from "./ai-repository.js";
 import type {
@@ -5,10 +7,12 @@ import type {
   AiCallResult,
   AiChatMessage,
   AiContentPart,
+  AiRouteCandidateDecision,
   AiProviderHealth,
   AiRouteRequest,
   AiRouteResult,
   AiRouteSnapshot,
+  AiRouteTracePhase,
 } from "./ai-types.js";
 import type { AiClient } from "./openai-compatible-client.js";
 import {
@@ -122,13 +126,6 @@ function supportsLocalTools(provider: AiRouteSnapshot["providers"][number]) {
   );
 }
 
-function supportsImageInput(provider: AiRouteSnapshot["providers"][number]) {
-  return (
-    provider.capabilities?.imageInput === true &&
-    provider.capabilityProbe?.imageInput === "verified"
-  );
-}
-
 function requestHasImages(request: AiRouteRequest): boolean {
   return request.messages.some(
     (message) =>
@@ -183,66 +180,154 @@ export class AiRoutingService {
 
   async execute(request: AiRouteRequest): Promise<AiRouteResult> {
     const withImages = requestHasImages(request);
-    const result = await this.executeOnce(request);
+    const result = await this.executeOnce(
+      request,
+      withImages ? "image-original" : "standard",
+    );
     if (
       !withImages ||
       request.allowImageDegrade === false ||
       !mayDegradeImages(result)
     )
       return result;
-    const degraded = await this.executeOnce({
-      ...request,
-      messages: withoutImages(request.messages),
-    });
+    const degraded = await this.executeOnce(
+      {
+        ...request,
+        messages: withoutImages(request.messages),
+      },
+      "image-degraded",
+    );
     return {
       ...degraded,
       attemptCount: result.attemptCount + degraded.attemptCount,
     };
   }
 
-  private async executeOnce(request: AiRouteRequest): Promise<AiRouteResult> {
+  private async executeOnce(
+    request: AiRouteRequest,
+    phase: AiRouteTracePhase,
+  ): Promise<AiRouteResult> {
+    const traceId = randomUUID();
+    const traceStartedAt = Date.now();
+    const purpose = request.purpose ?? "workflow-reply";
+    const agentTurn = request.agentTurn ?? 1;
+    const hasImages = requestHasImages(request);
+    const candidateDecisions: AiRouteCandidateDecision[] = [];
+    let routeName: string | null = null;
+    let routeVersion: number | null = null;
+    let fallbackEnabled: boolean | null = null;
+    let maxRounds: number | null = null;
+    const complete = async (result: AiRouteResult): Promise<AiRouteResult> => {
+      await this.repository.recordRouteTrace({
+        id: traceId,
+        executionId: request.executionId,
+        backgroundOperationId: request.backgroundOperationId ?? null,
+        purpose,
+        nodeId: request.nodeId,
+        routeId: request.routeId,
+        routeName,
+        routeVersion,
+        agentTurn,
+        phase,
+        requestRequirements: {
+          hasImages,
+          allowImageDegrade: request.allowImageDegrade !== false,
+          requiresTools: (request.tools?.length ?? 0) > 0,
+          webSearch: request.webSearch ?? null,
+        },
+        fallbackEnabled,
+        maxRounds,
+        candidateDecisions,
+        terminalStatus: result.status,
+        terminalCode: result.status === "failed" ? result.code : null,
+        durationMs: Math.max(0, Date.now() - traceStartedAt),
+      });
+      return result;
+    };
+    const [route, allProviders] = await Promise.all([
+      this.repository.getRoute(request.routeId),
+      this.repository.listProviders(),
+    ]);
+    routeName = route?.name ?? null;
+    routeVersion = route?.version ?? null;
+    fallbackEnabled = route?.fallbackEnabled ?? null;
+    maxRounds = route?.retryPolicy.maxRounds ?? null;
+    const providersById = new Map(
+      allProviders.map((provider) => [provider.id, provider]),
+    );
+    const configuredProviderIds =
+      route === null
+        ? []
+        : route.providerIds.length === 0
+          ? allProviders.map((provider) => provider.id)
+          : route.providerIds;
+    const eligibleProviders = configuredProviderIds.flatMap(
+      (providerId, configuredPosition) => {
+        const provider = providersById.get(providerId);
+        let reason: AiRouteCandidateDecision["reason"] = "eligible";
+        if (provider === undefined) reason = "provider-unavailable";
+        else if (!provider.enabled) reason = "provider-disabled";
+        else if (!isProviderSecretConfigured(provider, this.secrets))
+          reason = "secret-missing";
+        else if (hasImages && provider.capabilities?.imageInput !== true)
+          reason = "image-capability-disabled";
+        else if (
+          hasImages &&
+          provider.capabilityProbe?.imageInput !== "verified"
+        )
+          reason = "image-capability-unverified";
+        else if (
+          request.webSearch !== undefined &&
+          request.webSearch !== "disabled" &&
+          !supportsHostedSearch(provider) &&
+          !((request.tools?.length ?? 0) > 0 && supportsLocalTools(provider))
+        )
+          reason = "web-search-unsupported";
+        candidateDecisions.push({
+          providerId,
+          providerName: provider?.name ?? null,
+          providerVersion: provider?.version ?? null,
+          model: provider?.model ?? null,
+          configuredPosition: configuredPosition + 1,
+          round: null,
+          sequence: null,
+          decision: reason === "eligible" ? "eligible" : "excluded",
+          reason,
+          healthState: null,
+          imageInputConfigured: provider?.capabilities?.imageInput ?? null,
+          imageInputProbe: provider?.capabilityProbe?.imageInput ?? null,
+        });
+        return provider !== undefined && reason === "eligible"
+          ? [provider]
+          : [];
+      },
+    );
+    const snapshot: AiRouteSnapshot | null =
+      route === null || !route.enabled
+        ? null
+        : { route, providers: eligibleProviders };
     if (
       request.webSearch !== undefined &&
       request.webSearch !== "disabled" &&
       !this.enableWebSearch
     ) {
-      return {
+      return complete({
         status: "failed",
         code: "AI_WEB_SEARCH_DISABLED",
         summary: "Web search is disabled for this BubblePilot instance.",
         retryable: false,
         attemptCount: 0,
-      };
+      });
     }
-    const storedSnapshot = await this.repository.getRouteSnapshot(
-      request.routeId,
-    );
-    const snapshot =
-      storedSnapshot === null
-        ? null
-        : {
-            ...storedSnapshot,
-            providers: storedSnapshot.providers.filter(
-              (provider) =>
-                provider.enabled &&
-                isProviderSecretConfigured(provider, this.secrets) &&
-                (!requestHasImages(request) || supportsImageInput(provider)) &&
-                (request.webSearch === undefined ||
-                  request.webSearch === "disabled" ||
-                  supportsHostedSearch(provider) ||
-                  (request.tools !== undefined &&
-                    supportsLocalTools(provider))),
-            ),
-          };
     if (snapshot === null || snapshot.providers.length === 0) {
-      return {
+      return complete({
         status: "failed",
         code: "AI_ROUTE_UNAVAILABLE",
         summary:
           "The AI provider route is disabled or has no enabled candidates with configured credentials.",
         retryable: false,
         attemptCount: 0,
-      };
+      });
     }
 
     const startedAt = Date.now();
@@ -260,12 +345,49 @@ export class AiRoutingService {
       round += 1
     ) {
       const selection = await this.repository.selectCandidates(snapshot);
+      for (const unavailable of selection.unavailable) {
+        const provider = unavailable.candidate.provider;
+        candidateDecisions.push({
+          providerId: provider.id,
+          providerName: provider.name,
+          providerVersion: provider.version,
+          model: provider.model,
+          configuredPosition: configuredProviderIds.indexOf(provider.id) + 1,
+          round,
+          sequence: null,
+          decision: "skipped",
+          reason: unavailable.reason,
+          healthState: unavailable.candidate.healthState,
+          imageInputConfigured: provider.capabilities?.imageInput ?? null,
+          imageInputProbe: provider.capabilityProbe?.imageInput ?? null,
+        });
+      }
       const candidates = selection.candidates
-        .filter(
-          (candidate) =>
+        .filter((candidate) => {
+          const retryEligible =
             retryableProviderIds === null ||
-            retryableProviderIds.has(candidate.provider.id),
-        )
+            retryableProviderIds.has(candidate.provider.id);
+          if (!retryEligible) {
+            candidateDecisions.push({
+              providerId: candidate.provider.id,
+              providerName: candidate.provider.name,
+              providerVersion: candidate.provider.version,
+              model: candidate.provider.model,
+              configuredPosition:
+                configuredProviderIds.indexOf(candidate.provider.id) + 1,
+              round,
+              sequence: null,
+              decision: "skipped",
+              reason: "retry-not-eligible",
+              healthState: candidate.healthState,
+              imageInputConfigured:
+                candidate.provider.capabilities?.imageInput ?? null,
+              imageInputProbe:
+                candidate.provider.capabilityProbe?.imageInput ?? null,
+            });
+          }
+          return retryEligible;
+        })
         .sort((left, right) => {
           if (request.preferredProviderId === undefined) return 0;
           if (left.provider.id === request.preferredProviderId) return -1;
@@ -277,19 +399,19 @@ export class AiRoutingService {
           selection.nextAvailableAt === null
             ? null
             : Date.parse(selection.nextAvailableAt);
-        return {
+        return complete({
           status: "failed",
           code: "AI_ROUTE_DEGRADED",
           summary:
             "No AI provider candidate is currently healthy or ready to probe.",
           retryable: availableAt !== null,
           attemptCount,
-        };
+        });
       }
 
       const nextRoundProviderIds = new Set<string>();
       let sequence = 0;
-      for (const candidate of candidates) {
+      for (const [candidateIndex, candidate] of candidates.entries()) {
         let selectionHealthState = candidate.healthState;
         if (candidate.healthState !== "healthy") {
           const claimed = await this.repository.claimProviderProbe(
@@ -299,6 +421,23 @@ export class AiRoutingService {
           if (claimed === null) {
             probeBusy = true;
             nextRoundProviderIds.add(candidate.provider.id);
+            candidateDecisions.push({
+              providerId: candidate.provider.id,
+              providerName: candidate.provider.name,
+              providerVersion: candidate.provider.version,
+              model: candidate.provider.model,
+              configuredPosition:
+                configuredProviderIds.indexOf(candidate.provider.id) + 1,
+              round,
+              sequence: null,
+              decision: "skipped",
+              reason: "probe-busy",
+              healthState: candidate.healthState,
+              imageInputConfigured:
+                candidate.provider.capabilities?.imageInput ?? null,
+              imageInputProbe:
+                candidate.provider.capabilityProbe?.imageInput ?? null,
+            });
             if (!snapshot.route.fallbackEnabled) {
               break;
             }
@@ -308,6 +447,23 @@ export class AiRoutingService {
         }
         sequence += 1;
         attemptCount += 1;
+        candidateDecisions.push({
+          providerId: candidate.provider.id,
+          providerName: candidate.provider.name,
+          providerVersion: candidate.provider.version,
+          model: candidate.provider.model,
+          configuredPosition:
+            configuredProviderIds.indexOf(candidate.provider.id) + 1,
+          round,
+          sequence,
+          decision: "attempted",
+          reason: "attempted",
+          healthState: selectionHealthState,
+          imageInputConfigured:
+            candidate.provider.capabilities?.imageInput ?? null,
+          imageInputProbe:
+            candidate.provider.capabilityProbe?.imageInput ?? null,
+        });
         const useHostedSearch =
           request.webSearch !== undefined &&
           request.webSearch !== "disabled" &&
@@ -372,6 +528,8 @@ export class AiRoutingService {
             executionId: request.executionId,
             purpose: request.purpose ?? "workflow-reply",
             backgroundOperationId: request.backgroundOperationId ?? null,
+            routeTraceId: traceId,
+            routePhase: phase,
             nodeId: request.nodeId,
             routeId: snapshot.route.id,
             routeVersion: snapshot.route.version,
@@ -392,7 +550,7 @@ export class AiRoutingService {
             fallbackAllowed: null,
             diagnostics: result.diagnostics ?? null,
           });
-          return {
+          return complete({
             status: "succeeded",
             text: result.text,
             toolCalls: result.toolCalls ?? [],
@@ -405,7 +563,7 @@ export class AiRoutingService {
             attemptCount,
             durationMs: Math.max(0, Date.now() - startedAt),
             diagnostics: result.diagnostics ?? null,
-          };
+          });
         }
 
         health = await this.repository.recordProviderFailure({
@@ -419,6 +577,8 @@ export class AiRoutingService {
           executionId: request.executionId,
           purpose: request.purpose ?? "workflow-reply",
           backgroundOperationId: request.backgroundOperationId ?? null,
+          routeTraceId: traceId,
+          routePhase: phase,
           nodeId: request.nodeId,
           routeId: snapshot.route.id,
           routeVersion: snapshot.route.version,
@@ -446,18 +606,37 @@ export class AiRoutingService {
         // Fallback controls switching to another configured provider. It must
         // not disable the route's bounded retry rounds for a retryable failure
         // when the current provider is the only candidate (or fallback is off).
-        if (
-          (!snapshot.route.fallbackEnabled && !result.retryable) ||
-          !result.fallbackAllowed
-        ) {
-          return {
+        if (!snapshot.route.fallbackEnabled || !result.fallbackAllowed) {
+          for (const skipped of candidates.slice(candidateIndex + 1)) {
+            candidateDecisions.push({
+              providerId: skipped.provider.id,
+              providerName: skipped.provider.name,
+              providerVersion: skipped.provider.version,
+              model: skipped.provider.model,
+              configuredPosition:
+                configuredProviderIds.indexOf(skipped.provider.id) + 1,
+              round,
+              sequence: null,
+              decision: "skipped",
+              reason: "fallback-stopped",
+              healthState: skipped.healthState,
+              imageInputConfigured:
+                skipped.provider.capabilities?.imageInput ?? null,
+              imageInputProbe:
+                skipped.provider.capabilityProbe?.imageInput ?? null,
+            });
+          }
+        }
+        if (!result.fallbackAllowed) {
+          return complete({
             status: "failed",
             code: result.code,
             summary: result.summary,
             retryable: result.retryable,
             attemptCount,
-          };
+          });
         }
+        if (!snapshot.route.fallbackEnabled) break;
       }
 
       if (
@@ -472,7 +651,7 @@ export class AiRoutingService {
       await delay(waitMs);
     }
 
-    return {
+    return complete({
       status: "failed",
       code:
         lastFailure?.code ??
@@ -484,7 +663,7 @@ export class AiRoutingService {
           : "All AI provider candidates were exhausted."),
       retryable: lastFailure?.retryable ?? probeBusy,
       attemptCount,
-    };
+    });
   }
 
   outputSummary(result: Extract<AiRouteResult, { status: "succeeded" }>) {

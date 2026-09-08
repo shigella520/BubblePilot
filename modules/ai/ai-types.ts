@@ -264,7 +264,73 @@ export interface AiCandidate {
 
 export interface AiCandidateSelection {
   candidates: readonly AiCandidate[];
+  unavailable: readonly {
+    candidate: AiCandidate;
+    reason: "health-cooldown" | "probe-busy";
+  }[];
   nextAvailableAt: string | null;
+}
+
+export type AiRouteTracePhase =
+  "standard" | "image-original" | "image-degraded";
+
+export type AiRouteCandidateDecisionReason =
+  | "eligible"
+  | "provider-unavailable"
+  | "provider-disabled"
+  | "secret-missing"
+  | "image-capability-disabled"
+  | "image-capability-unverified"
+  | "web-search-unsupported"
+  | "health-cooldown"
+  | "health-unavailable"
+  | "retry-not-eligible"
+  | "fallback-stopped"
+  | "probe-busy"
+  | "attempted";
+
+export interface AiRouteCandidateDecision {
+  providerId: string;
+  providerName: string | null;
+  providerVersion: number | null;
+  model: string | null;
+  configuredPosition: number;
+  round: number | null;
+  sequence: number | null;
+  decision: "eligible" | "excluded" | "skipped" | "attempted";
+  reason: AiRouteCandidateDecisionReason;
+  healthState: AiProviderHealthState | null;
+  imageInputConfigured: boolean | null;
+  imageInputProbe: AiCapabilityProbeState | null;
+}
+
+export interface AiRouteTraceRecordInput {
+  id: string;
+  executionId: string | null;
+  backgroundOperationId: string | null;
+  purpose: "workflow-reply" | "context-summary" | "image-summary";
+  nodeId: string;
+  routeId: string;
+  routeName: string | null;
+  routeVersion: number | null;
+  agentTurn: number;
+  phase: AiRouteTracePhase;
+  requestRequirements: Readonly<{
+    hasImages: boolean;
+    allowImageDegrade: boolean;
+    requiresTools: boolean;
+    webSearch: WebSearchPolicy | null;
+  }>;
+  fallbackEnabled: boolean | null;
+  maxRounds: number | null;
+  candidateDecisions: readonly AiRouteCandidateDecision[];
+  terminalStatus: "succeeded" | "failed";
+  terminalCode: string | null;
+  durationMs: number;
+}
+
+export interface AiRouteTraceView extends AiRouteTraceRecordInput {
+  createdAt: string;
 }
 
 export interface AiTextContentPart {
@@ -437,6 +503,8 @@ export interface AiAttemptRecordInput {
   executionId: string | null;
   purpose: "workflow-reply" | "context-summary" | "image-summary";
   backgroundOperationId: string | null;
+  routeTraceId?: string | null;
+  routePhase?: AiRouteTracePhase;
   nodeId: string;
   routeId: string;
   routeVersion: number;

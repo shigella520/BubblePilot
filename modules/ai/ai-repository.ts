@@ -11,6 +11,8 @@ import type {
   AiProviderHealth,
   AiProviderRecord,
   AiProviderRouteRecord,
+  AiRouteTraceRecordInput,
+  AiRouteTraceView,
   AiRouteConfiguration,
   AiRouteSnapshot,
   AiToolExecutionRecordInput,
@@ -86,6 +88,11 @@ export interface AiRepository {
     candidateProviderIds: readonly string[],
   ): Promise<AiProviderHealth | null>;
   recordAttempt(input: AiAttemptRecordInput): Promise<void>;
+  recordRouteTrace(input: AiRouteTraceRecordInput): Promise<void>;
+  listRouteTraces(input: {
+    executionId?: string;
+    backgroundOperationIds?: readonly string[];
+  }): Promise<readonly AiRouteTraceView[]>;
   listAttempts(
     executionId: string,
     nodeId?: string,

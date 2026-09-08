@@ -11,6 +11,7 @@ export type ImageSummaryStatus =
   | "redacted";
 
 export interface MessageImageSummary {
+  operationId?: string;
   attachmentRef: string;
   sourceType: ImageSummarySourceType;
   sourceKeyHash: string;

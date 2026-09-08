@@ -1453,12 +1453,22 @@ export function buildApplication(
           parameters.messageId,
         ]);
       const summaries = summariesByMessage?.get(parameters.messageId) ?? [];
+      const mediaItems = messageImageMediaViews(sources, summaries);
+      const routeTraces =
+        (await options.ai?.repository.listRouteTraces({
+          backgroundOperationIds: mediaItems.flatMap((item) =>
+            item.operationId === null ? [] : [item.operationId],
+          ),
+        })) ?? [];
       return {
         data: {
           messageId: parameters.messageId,
           contentRedactedAt: archived.contentRedactedAt,
-          items: messageImageMediaViews(sources, summaries).map((item) => ({
+          items: mediaItems.map((item) => ({
             ...item,
+            routeTraces: routeTraces.filter(
+              (trace) => trace.backgroundOperationId === item.operationId,
+            ),
             previewUrl: `/api/v1/messages/${encodeURIComponent(parameters.messageId)}/image?${new URLSearchParams({ attachmentRef: item.attachmentRef }).toString()}`,
           })),
         },
@@ -2395,6 +2405,10 @@ export function buildApplication(
                 attempt.diagnostics?.requestHash ?? "",
               ) ?? { status: "unavailable" as const },
             })),
+            aiRouteTraces:
+              (await options.ai?.repository.listRouteTraces({
+                executionId,
+              })) ?? [],
             aiToolExecutions:
               (await options.ai?.repository.listToolExecutions(executionId)) ??
               [],

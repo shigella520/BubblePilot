@@ -51,6 +51,40 @@ interface Execution {
   cacheHitRate: number | null;
   contextSnapshot: Record<string, unknown> | null;
 }
+interface AiRouteTrace {
+  id: string;
+  routeId: string;
+  routeName: string | null;
+  routeVersion: number | null;
+  agentTurn: number;
+  phase: "standard" | "image-original" | "image-degraded";
+  requestRequirements: {
+    hasImages: boolean;
+    allowImageDegrade: boolean;
+    requiresTools: boolean;
+    webSearch: string | null;
+  };
+  fallbackEnabled: boolean | null;
+  maxRounds: number | null;
+  candidateDecisions: Array<{
+    providerId: string;
+    providerName: string | null;
+    providerVersion: number | null;
+    model: string | null;
+    configuredPosition: number;
+    round: number | null;
+    sequence: number | null;
+    decision: "eligible" | "excluded" | "skipped" | "attempted";
+    reason: string;
+    healthState: string | null;
+    imageInputConfigured: boolean | null;
+    imageInputProbe: string | null;
+  }>;
+  terminalStatus: "succeeded" | "failed";
+  terminalCode: string | null;
+  durationMs: number;
+  createdAt: string;
+}
 interface ConversationCompression {
   id: string;
   chatId: string;
@@ -85,6 +119,8 @@ interface ConversationCompression {
   }>;
   providerAttempts: Array<{
     id: string;
+    routeTraceId: string | null;
+    routePhase: AiRouteTrace["phase"];
     providerName: string;
     model: string;
     agentTurn: number;
@@ -100,6 +136,7 @@ interface ConversationCompression {
     completionTokens: number | null;
     createdAt: string;
   }>;
+  routeTraces: AiRouteTrace[];
   workflowExecutions?: Array<{
     id: string;
     workflowId: string;
@@ -155,6 +192,8 @@ interface ExecutionDetail extends Execution {
   aiProviderAttempts: Array<{
     id: string;
     purpose: "workflow-reply" | "context-summary" | "image-summary";
+    routeTraceId: string | null;
+    routePhase: AiRouteTrace["phase"];
     nodeId: string;
     routeId: string;
     routeVersion: number;
@@ -226,6 +265,7 @@ interface ExecutionDetail extends Execution {
       } | null;
     } | null;
   }>;
+  aiRouteTraces: AiRouteTrace[];
   aiToolExecutions: Array<{
     id: string;
     nodeId: string;
@@ -1069,6 +1109,45 @@ function compressionAttemptTitle(
   return details.join(" · ");
 }
 
+function routeTracePhaseLabel(phase: AiRouteTrace["phase"]): string {
+  return (
+    {
+      standard: "标准调用",
+      "image-original": "原生图片调用",
+      "image-degraded": "降级为纯文本",
+    }[phase] ?? phase
+  );
+}
+
+function routeDecisionLabel(
+  decision: AiRouteTrace["candidateDecisions"][number],
+): string {
+  const labels: Record<string, string> = {
+    eligible: "符合调用条件",
+    "provider-unavailable": "Provider 不可用",
+    "provider-disabled": "Provider 已停用",
+    "secret-missing": "缺少密钥",
+    "image-capability-disabled": "未启用图片能力",
+    "image-capability-unverified": "图片能力未验证",
+    "web-search-unsupported": "不满足搜索/工具能力",
+    "health-cooldown": "Provider 冷却中",
+    "health-unavailable": "健康状态暂不可用",
+    "retry-not-eligible": "不在本轮重试范围",
+    "fallback-stopped": "Fallback 已停止",
+    "probe-busy": "恢复探测已被占用",
+    attempted: "已实际调用",
+  };
+  return labels[decision.reason] ?? decision.reason;
+}
+
+function routeDecisionStatusClass(
+  decision: AiRouteTrace["candidateDecisions"][number],
+): string {
+  if (decision.decision === "attempted") return "published";
+  if (decision.decision === "eligible") return "ready";
+  return "warning";
+}
+
 function contextSnapshotValue(
   snapshot: Record<string, unknown>,
   key: string,
@@ -1459,6 +1538,11 @@ function contextSnapshotValue(
                   {{ item.durationMs === null ? "—" : `${item.durationMs} ms` }}
                 </td>
                 <td>
+                  <span v-if="item.routeTraces[0]" class="keyline">
+                    路由 {{ item.routeTraces[0].routeName || "未命名" }} · v{{
+                      item.routeTraces[0].routeVersion ?? "—"
+                    }}
+                  </span>
                   <div
                     v-if="item.providerAttempts.length"
                     class="compression-provider-path"
@@ -1813,6 +1897,85 @@ function contextSnapshotValue(
               </article>
             </section>
             <section>
+              <h3>AI 路由决策</h3>
+              <article
+                v-for="trace in detail.aiRouteTraces"
+                :key="trace.id"
+                class="trace-item"
+              >
+                <Route :size="17" />
+                <div>
+                  <div class="provider-attempt-heading">
+                    <strong>
+                      {{ trace.routeName || "路由不可用" }} · v{{
+                        trace.routeVersion ?? "—"
+                      }}
+                    </strong>
+                    <span class="table-status" :class="trace.terminalStatus">
+                      {{ routeTracePhaseLabel(trace.phase) }}
+                    </span>
+                  </div>
+                  <p>
+                    {{
+                      trace.requestRequirements.hasImages
+                        ? "携带图片"
+                        : "纯文本"
+                    }}
+                    ·
+                    {{
+                      trace.requestRequirements.requiresTools
+                        ? "需要工具"
+                        : "无需工具"
+                    }}
+                    · 搜索
+                    {{ trace.requestRequirements.webSearch || "未请求" }} ·
+                    {{ trace.candidateDecisions.length }} 条候选决策 ·
+                    {{ trace.durationMs }} ms
+                  </p>
+                  <details>
+                    <summary>候选选择与跳过原因</summary>
+                    <div class="route-candidate-grid">
+                      <div
+                        v-for="(candidate, index) in trace.candidateDecisions"
+                        :key="candidate.providerId + ':' + index"
+                        class="route-candidate-item"
+                      >
+                        <span>
+                          #{{ candidate.configuredPosition }}
+                          {{ candidate.providerName || candidate.providerId }}
+                          <template v-if="candidate.model">
+                            · {{ candidate.model }}
+                          </template>
+                          ·
+                          {{
+                            candidate.round === null
+                              ? "预检"
+                              : `第 ${candidate.round} 轮`
+                          }}
+                          <template
+                            v-if="candidate.imageInputConfigured !== null"
+                          >
+                            · 图片
+                            {{
+                              candidate.imageInputConfigured ? "开启" : "关闭"
+                            }}
+                            / {{ candidate.imageInputProbe || "unknown" }}
+                          </template>
+                        </span>
+                        <span
+                          class="table-status"
+                          :class="routeDecisionStatusClass(candidate)"
+                        >
+                          {{ routeDecisionLabel(candidate) }}
+                        </span>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </article>
+              <p v-if="!detail.aiRouteTraces.length" class="keyline">
+                历史执行未记录路由决策，不使用当前配置反推。
+              </p>
               <h3>AI Provider Attempt</h3>
               <article
                 v-for="item in detail.aiProviderAttempts"
@@ -1835,6 +1998,7 @@ function contextSnapshotValue(
                   <p>
                     Agent 第 {{ item.agentTurn }} 轮 · 路由第
                     {{ item.round }} 轮 / 顺序 {{ item.sequence }} ·
+                    {{ routeTracePhaseLabel(item.routePhase) }} ·
                     {{ item.durationMs }} ms · 选择时
                     {{ providerHealthLabel(item.selectionHealthState) }} → 结果
                     {{ providerHealthLabel(item.healthState) }}
@@ -2367,6 +2531,108 @@ function contextSnapshotValue(
           <section class="compression-detail-card compression-attempts-card">
             <div class="compression-attempts-heading">
               <div>
+                <h3>路由决策</h3>
+                <p class="keyline">
+                  展示执行当时的路由版本、请求能力以及候选过滤和跳过原因。
+                </p>
+              </div>
+            </div>
+            <div
+              v-if="compressionDetail.routeTraces.length"
+              class="route-trace-list"
+            >
+              <article
+                v-for="trace in compressionDetail.routeTraces"
+                :key="trace.id"
+                class="route-trace-card"
+              >
+                <div class="provider-attempt-heading">
+                  <strong>
+                    {{ trace.routeName || "路由不可用" }} · v{{
+                      trace.routeVersion ?? "—"
+                    }}
+                  </strong>
+                  <span class="table-status" :class="trace.terminalStatus">
+                    {{ routeTracePhaseLabel(trace.phase) }}
+                  </span>
+                </div>
+                <p class="keyline mono">{{ trace.routeId }}</p>
+                <p>
+                  {{
+                    trace.requestRequirements.hasImages ? "携带图片" : "纯文本"
+                  }}
+                  ·
+                  {{
+                    trace.requestRequirements.requiresTools
+                      ? "需要工具能力"
+                      : "无需工具能力"
+                  }}
+                  · 搜索 {{ trace.requestRequirements.webSearch || "未请求" }}
+                  · Fallback
+                  {{
+                    trace.fallbackEnabled === null
+                      ? "—"
+                      : trace.fallbackEnabled
+                        ? "开启"
+                        : "关闭"
+                  }}
+                  · 最多
+                  {{ trace.maxRounds ?? "—" }} 轮
+                </p>
+                <div class="route-candidate-grid">
+                  <div
+                    v-for="(candidate, index) in trace.candidateDecisions"
+                    :key="
+                      candidate.providerId +
+                      ':' +
+                      (candidate.round ?? 'preflight') +
+                      ':' +
+                      candidate.reason +
+                      ':' +
+                      index
+                    "
+                    class="route-candidate-item"
+                  >
+                    <span class="mono">
+                      #{{ candidate.configuredPosition }}
+                      {{ candidate.providerName || candidate.providerId }}
+                      <template v-if="candidate.model">
+                        · {{ candidate.model }}
+                      </template>
+                    </span>
+                    <span
+                      class="table-status"
+                      :class="routeDecisionStatusClass(candidate)"
+                    >
+                      {{ routeDecisionLabel(candidate) }}
+                    </span>
+                    <span class="keyline">
+                      {{
+                        candidate.round === null
+                          ? "预检"
+                          : `第 ${candidate.round} 轮`
+                      }}
+                      <template v-if="candidate.imageInputConfigured !== null">
+                        · 图片配置
+                        {{ candidate.imageInputConfigured ? "开启" : "关闭" }}
+                        / 探测 {{ candidate.imageInputProbe || "unknown" }}
+                      </template>
+                    </span>
+                  </div>
+                </div>
+                <p v-if="trace.terminalCode" class="danger-text">
+                  结束原因：{{ trace.terminalCode }}
+                </p>
+              </article>
+            </div>
+            <p v-else class="keyline">
+              该记录创建时尚未启用路由决策追踪；不会使用当前配置反推历史结果。
+            </p>
+          </section>
+
+          <section class="compression-detail-card compression-attempts-card">
+            <div class="compression-attempts-heading">
+              <div>
                 <h3>AI 调用路径</h3>
                 <p class="keyline">
                   按 Agent 轮次、路由轮次和候选顺序排列，包含重试与 Provider
@@ -2404,6 +2670,7 @@ function contextSnapshotValue(
                   <p>
                     Agent 第 {{ attempt.agentTurn }} 轮 · 路由第
                     {{ attempt.round }} 轮 / 顺序 {{ attempt.sequence }} ·
+                    {{ routeTracePhaseLabel(attempt.routePhase) }} ·
                     {{ attempt.durationMs }} ms · 输入
                     {{ attempt.promptTokens ?? "—" }} / 输出
                     {{ attempt.completionTokens ?? "—" }} Token
