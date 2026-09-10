@@ -75,7 +75,10 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     expect(result.status).toBe("succeeded");
     expect(result.evidence.length).toBeGreaterThan(0);
     expect(result.coverage.indexed).toBe(2);
-    expect(session.render("决定使用旧电脑 [M1]")).toContain("fictional-sender");
+    expect(session.render("决定使用旧电脑 [M1]")).toBe("决定使用旧电脑");
+    expect(session.render("这件事还没找到线索，你记得大概哪天吗？")).toBe(
+      "这件事还没找到线索，你记得大概哪天吗？",
+    );
     expect(session.render("不存在的来源 [M999]")).toBeNull();
     const other = await chat();
     const otherSession = await service.session(
@@ -241,15 +244,15 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     expect(
       result.evidence.reduce((n, e) => n + e.text.length, 0),
     ).toBeLessThanOrEqual(6000);
-    expect(session.render("原计划 [M1]")).toContain("虚构昵称");
+    expect(session.render("原计划 [M1]")).toBe("原计划");
     expect(
       JSON.parse(session.render('{"answer":"原计划 [M1]"}', "json")!) as {
         answer: string;
       },
     ).toHaveProperty("answer");
-    expect(session.render('{"answer":"原计划 [M1]"}', "json")).toContain(
-      "虚构昵称",
-    );
+    expect(
+      JSON.parse(session.render('{"answer":"原计划 [M1]"}', "json")!),
+    ).toEqual({ answer: "原计划" });
   });
   it("reports partial keyword evidence before indexing without advancing coverage", async () => {
     const id = await chat();

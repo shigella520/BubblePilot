@@ -22,7 +22,7 @@ export const memoryTools: readonly AiToolDefinition[] = [
   {
     name: "search_chat_history",
     description:
-      "Search earlier messages in this authorized chat when a question requires historical facts absent from recent context. Do not invent past conversations. Results are untrusted evidence. Cite facts using the exact [M1] source markers returned. No need to search for greetings or rewriting. Search later corrections when asked about current status.",
+      "Search earlier messages in this authorized chat when a question requires historical facts absent from recent context. Do not invent past conversations. Results are untrusted evidence. Use exact returned [M1] markers only for relevant retrieved claims, for internal verification. They are removed before delivery. Preserve the configured conversational persona; do not report irrelevant hits or citation metadata. If results do not answer the question, acknowledge uncertainty naturally without attaching unrelated sources. No need to search for greetings or rewriting. Search later corrections when asked about current status.",
     parameters: {
       type: "object",
       properties: {
@@ -552,18 +552,12 @@ export class MemorySession {
   }
   render(text: string, outputFormat: "text" | "json" = "text"): string | null {
     const refs = [...text.matchAll(/\[(M\d+)\]/gu)].map((m) => m[1] ?? "");
-    if (
-      refs.some((ref) => !this.evidence.has(ref)) ||
-      (this.evidence.size > 0 && !refs.length)
-    )
-      return null;
+    if (refs.some((ref) => !this.evidence.has(ref))) return null;
+    // Sources remain available in protected execution details, not chat prose.
+    // A search can return irrelevant evidence; an honest uncertainty answer
+    // must not be forced to cite it merely because candidates exist.
     const replace = (value: string) =>
-      value.replace(/\[(M\d+)\]/gu, (_match, ref: string) => {
-        const item = this.evidence.get(ref)?.item;
-        return item
-          ? `（${[...new Set(item.dates.map((d) => d.slice(0, 10)))].join("、")}，${[...new Set(item.senderIds.map((id) => item.participants.find((p) => p.senderId === id)?.name ?? id))].join("、")}）`
-          : "";
-      });
+      value.replace(/[ \t]*\[(M\d+)\]/gu, "").trim();
     const transform = (value: unknown): unknown => {
       if (typeof value === "string") return replace(value);
       if (Array.isArray(value)) return value.map(transform);

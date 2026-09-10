@@ -595,7 +595,7 @@ describe("AgentRunner", () => {
         id: "fictional-retrieval",
         execute,
         validate: vi.fn().mockResolvedValue(true),
-        render: (text: string) => text.replace("[M1]", "(2026-01-01)"),
+        render: (text: string) => text.replace(" [M1]", ""),
       }),
     } as unknown as MemoryService;
     vi.spyOn(client, "call").mockImplementation((_provider, input) => {
@@ -637,12 +637,15 @@ describe("AgentRunner", () => {
     });
     expect(result).toMatchObject({
       status: "succeeded",
-      text: "Earlier decision (2026-01-01)",
+      text: "Earlier decision",
     });
     expect(client.requests[0]?.tools?.map((t) => t.name)).toEqual([
       "search_chat_history",
       "read_chat_excerpt",
     ]);
+    const policyText = JSON.stringify(client.requests[0]?.messages);
+    expect(policyText).toContain("Preserve the configured persona");
+    expect(policyText).toContain("Do not list irrelevant hits");
     expect(execute).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(repository.toolExecutions)).not.toContain(
       "fictional private",
@@ -746,7 +749,7 @@ describe("AgentRunner", () => {
     expect(call).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({
       status: "succeeded",
-      text: "无法根据可用的聊天记录核实该回答。",
+      text: "这件事我还没找到能确认的线索，你记得大概是哪次聊的吗？",
     });
   });
 });
