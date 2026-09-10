@@ -1,3 +1,5 @@
+import { MemoryRepository } from "../modules/memory/memory-repository.js";
+import { MemoryService } from "../modules/memory/memory-service.js";
 import { buildApplication } from "./application.js";
 import { loadConfig } from "./config.js";
 import { AiManagementService } from "../modules/ai/ai-management-service.js";
@@ -152,11 +154,16 @@ const aiManagement = new AiManagementService(
   undefined,
   imageInputSettings,
 );
+const memoryService = new MemoryService(
+  new MemoryRepository(config.databaseUrl, config.settingsEncryptionKey),
+);
 const aiAgent = new AgentRunner(
   aiRouting,
   webSearchTool,
   aiRepository,
   webSearchSettings,
+  undefined,
+  memoryService,
 );
 const imageSummaryRepository = new PostgresImageSummaryRepository(
   config.databaseUrl,
@@ -250,6 +257,7 @@ const workflowDispatcher = new InProcessWorkflowExecutionDispatcher(
 );
 const application = buildApplication(config, repository, {
   auth: authService,
+  memory: memoryService,
   ai: {
     repository: aiRepository,
     management: aiManagement,

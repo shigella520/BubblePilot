@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MemoryPanel from "../components/MemoryPanel.vue";
 import {
   Download,
   FileJson2,
@@ -794,6 +795,7 @@ onBeforeUnmount(() =>
 
 <template>
   <main class="page-container split-admin-page reveal">
+    <MemoryPanel mode="chat" :chats="chats" />
     <aside class="admin-sidebar">
       <div>
         <p class="eyebrow">MESSAGES</p>

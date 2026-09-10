@@ -1,6 +1,7 @@
+import type { MemoryService } from "../modules/memory/memory-service.js";
 import { randomUUID } from "node:crypto";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AgentRunner } from "../modules/ai/agent-runner.js";
 import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
@@ -579,5 +580,173 @@ describe("AgentRunner", () => {
         },
       },
     ]);
+  });
+  it("offers historical tools without web search and redacts their diagnostics", async () => {
+    const { repository, client, routing, search, request } = await setup();
+    const execute = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        status: "succeeded",
+        evidence: [{ ref: "M1", text: "fictional private history" }],
+      }),
+    );
+    const memory = {
+      repository: { scopeForEvent: vi.fn().mockResolvedValue({}) },
+      session: vi.fn().mockResolvedValue({
+        id: "fictional-retrieval",
+        execute,
+        validate: vi.fn().mockResolvedValue(true),
+        render: (text: string) => text.replace("[M1]", "(2026-01-01)"),
+      }),
+    } as unknown as MemoryService;
+    vi.spyOn(client, "call").mockImplementation((_provider, input) => {
+      client.requests.push(input);
+      return Promise.resolve(
+        input.messages.some((m) => m.role === "tool")
+          ? {
+              status: "succeeded",
+              text: "Earlier decision [M1]",
+              durationMs: 1,
+            }
+          : {
+              status: "succeeded",
+              text: "",
+              durationMs: 1,
+              toolCalls: [
+                {
+                  id: "memory-call",
+                  name: "search_chat_history",
+                  arguments: JSON.stringify({
+                    query: "fictional private query",
+                  }),
+                },
+              ],
+            },
+      );
+    });
+    const result = await new AgentRunner(
+      routing,
+      search,
+      repository,
+      undefined,
+      undefined,
+      memory,
+    ).run({
+      ...request,
+      webSearch: "disabled",
+      memoryEvent: { provider: "bluebubbles", messageId: "fictional" },
+    });
+    expect(result).toMatchObject({
+      status: "succeeded",
+      text: "Earlier decision (2026-01-01)",
+    });
+    expect(client.requests[0]?.tools?.map((t) => t.name)).toEqual([
+      "search_chat_history",
+      "read_chat_excerpt",
+    ]);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(repository.toolExecutions)).not.toContain(
+      "fictional private",
+    );
+  });
+  it("does not force history calls for a greeting and does not grant tools without runtime context", async () => {
+    const { repository, client, routing, request } = await setup();
+    vi.spyOn(client, "call").mockResolvedValue({
+      status: "succeeded",
+      text: "Hello",
+      durationMs: 1,
+    });
+    const open = vi.fn();
+    const memory = {
+      repository: { scopeForEvent: open },
+    } as unknown as MemoryService;
+    const result = await new AgentRunner(
+      routing,
+      undefined,
+      repository,
+      undefined,
+      undefined,
+      memory,
+    ).run({ ...request, webSearch: "disabled" });
+    expect(result.status).toBe("succeeded");
+    expect(open).not.toHaveBeenCalled();
+  });
+  it("does not count historical retrieval as a required web search", async () => {
+    const { repository, client, routing, search, request } = await setup();
+    const memory = {
+      repository: { scopeForEvent: vi.fn().mockResolvedValue({}) },
+      session: vi.fn().mockResolvedValue({
+        id: "fixture",
+        execute: vi.fn().mockResolvedValue("{}"),
+        validate: vi.fn().mockResolvedValue(true),
+        render: (v: string) => v,
+      }),
+    } as unknown as MemoryService;
+    let calls = 0;
+    vi.spyOn(client, "call").mockImplementation(() =>
+      Promise.resolve(
+        ++calls === 1
+          ? {
+              status: "succeeded",
+              text: "",
+              durationMs: 1,
+              toolCalls: [
+                {
+                  id: "m",
+                  name: "search_chat_history",
+                  arguments: '{"query":"fixture"}',
+                },
+              ],
+            }
+          : { status: "succeeded", text: "Answer", durationMs: 1 },
+      ),
+    );
+    const result = await new AgentRunner(
+      routing,
+      search,
+      repository,
+      undefined,
+      undefined,
+      memory,
+    ).run({
+      ...request,
+      memoryEvent: { provider: "bluebubbles", messageId: "fixture" },
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      code: "AI_WEB_SEARCH_REQUIRED_NOT_USED",
+    });
+  });
+  it("bounds invalid historical citation correction to one request", async () => {
+    const { repository, client, routing, request } = await setup();
+    const memory = {
+      repository: { scopeForEvent: vi.fn().mockResolvedValue({}) },
+      session: vi.fn().mockResolvedValue({
+        id: "fixture",
+        validate: vi.fn().mockResolvedValue(true),
+        render: () => null,
+      }),
+    } as unknown as MemoryService;
+    const call = vi.spyOn(client, "call").mockResolvedValue({
+      status: "succeeded",
+      text: "Bad [M999]",
+      durationMs: 1,
+    });
+    const result = await new AgentRunner(
+      routing,
+      undefined,
+      repository,
+      undefined,
+      undefined,
+      memory,
+    ).run({
+      ...request,
+      webSearch: "disabled",
+      memoryEvent: { provider: "bluebubbles", messageId: "fixture" },
+    });
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      status: "succeeded",
+      text: "无法根据可用的聊天记录核实该回答。",
+    });
   });
 });

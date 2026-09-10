@@ -282,6 +282,7 @@ export type AiRouteCandidateDecisionReason =
   | "image-capability-disabled"
   | "image-capability-unverified"
   | "web-search-unsupported"
+  | "local-tools-unsupported"
   | "health-cooldown"
   | "health-unavailable"
   | "retry-not-eligible"
@@ -369,6 +370,7 @@ export interface AiToolCall {
 }
 
 export interface AiChatRequest {
+  sensitiveHistory?: boolean;
   messages: readonly AiChatMessage[];
   maxOutputTokens: number;
   temperature: number | null;
@@ -608,8 +610,10 @@ export interface AiRouteFailure {
 export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 
 export interface AiRouteRequest {
+  sensitiveHistory?: boolean;
   executionId: string | null;
   nodeId: string;
+  memoryEvent?: { provider: string; messageId: string };
   routeId: string;
   messages: readonly AiChatMessage[];
   maxOutputTokens: number;

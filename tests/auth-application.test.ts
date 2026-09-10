@@ -621,4 +621,33 @@ describe("Web admin authentication", () => {
     });
     expect(session.statusCode).toBe(401);
   });
+  it("requires sensitive verification on every memory content and mutation entry", async () => {
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.headers["set-cookie"];
+    const id = "00000000-0000-4000-8000-000000000001";
+    const cases = [
+      ["PUT", "/api/v1/ai/memory/settings"],
+      ["POST", "/api/v1/ai/memory/probe"],
+      ["PUT", `/api/v1/chats/${id}/memory`],
+      ["POST", `/api/v1/chats/${id}/memory/search`],
+      ["POST", `/api/v1/chats/${id}/memory/jobs`],
+      ["POST", `/api/v1/memory/jobs/${id}/actions`],
+      ["GET", `/api/v1/memory/retrievals/${id}/sources/M1`],
+    ] as const;
+    for (const [method, url] of cases) {
+      const response = await application.inject({
+        method,
+        url,
+        headers: { cookie },
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({
+        error: { code: "SENSITIVE_AUTH_REQUIRED" },
+      });
+    }
+  });
 });

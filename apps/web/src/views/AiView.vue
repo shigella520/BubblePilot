@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MemoryPanel from "../components/MemoryPanel.vue";
 import {
   Activity,
   Bot,
@@ -820,6 +821,9 @@ onMounted(load);
         <h2>Provider 管理</h2>
       </div>
       <nav>
+        <button type="button" @click="scrollToSection('memory-settings')">
+          <Search :size="18" />长期聊天检索
+        </button>
         <button
           class="active"
           type="button"
@@ -845,6 +849,7 @@ onMounted(load);
       </div>
     </aside>
     <div class="admin-workspace">
+      <MemoryPanel id="memory-settings" mode="settings" />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"

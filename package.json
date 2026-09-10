@@ -31,7 +31,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm ops:check && pnpm contracts:check && pnpm docs:check && pnpm build"
+    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm ops:check && pnpm contracts:check && pnpm docs:check && pnpm build",
+    "db:prepare-memory": "tsx app/prepare-memory.ts",
+    "memory:evaluate": "tsx app/evaluate-memory.ts",
+    "memory:benchmark": "tsx app/benchmark-memory.ts"
   },
   "dependencies": {
     "@fastify/static": "10.1.2",

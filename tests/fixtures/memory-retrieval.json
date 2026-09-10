@@ -1,0 +1,483 @@
+{
+  "description": "全部为虚构对话。split=holdout 的10题仅用于独立验证；无答案题需单独评估回答支持性，不能用向量相似度判定。",
+  "sources": [
+    {
+      "id": "backup",
+      "date": "2026-01-12",
+      "sender": "林晓",
+      "text": "先用旧电脑做备份，等存储空间不足再买 NAS。"
+    },
+    {
+      "id": "launch1",
+      "date": "2026-02-02",
+      "sender": "周宁",
+      "text": "演示系统原计划周五上线，但支付测试尚未完成，所以延期到下周。"
+    },
+    {
+      "id": "launch2",
+      "date": "2026-02-09",
+      "sender": "周宁",
+      "text": "演示系统上线取消，客户决定暂停该项目。"
+    },
+    {
+      "id": "order",
+      "date": "2026-03-12",
+      "sender": "林晓",
+      "text": "订单 DEMO-2026-0312 地址填写错误，已联系虚构物流修改收货地址。"
+    },
+    {
+      "id": "meeting",
+      "date": "2026-03-14",
+      "sender": "方禾",
+      "text": "虚构读书会改到周六下午两点，在松树会议室举行。"
+    },
+    {
+      "id": "budget",
+      "date": "2026-03-20",
+      "sender": "周宁",
+      "text": "测试服务器预算为每月三百元，超过预算先申请审批。"
+    },
+    {
+      "id": "diet",
+      "date": "2026-04-01",
+      "sender": "林晓",
+      "text": "聚餐请帮我选不含花生的菜，我对花生过敏。"
+    },
+    {
+      "id": "trip",
+      "date": "2026-04-03",
+      "sender": "方禾",
+      "text": "春游选择高铁，因为周末高速拥堵，返程票还没有买。"
+    },
+    {
+      "id": "book",
+      "date": "2026-04-09",
+      "sender": "周宁",
+      "text": "周宁借了方禾的《虚构海边手记》，说好月底归还。"
+    },
+    {
+      "id": "password",
+      "date": "2026-04-12",
+      "sender": "林晓",
+      "text": "演示账户的密码重置邮件一直没到，需要方禾明天联系测试管理员。"
+    },
+    {
+      "id": "database",
+      "date": "2026-04-19",
+      "sender": "周宁",
+      "text": "虚构项目选择 PostgreSQL，因为需要事务和关联查询，不采用纯文件存储。"
+    },
+    {
+      "id": "design",
+      "date": "2026-05-01",
+      "sender": "方禾",
+      "text": "首页采用蓝色方案，灰色按钮仅表示不可用状态。"
+    },
+    {
+      "id": "demo",
+      "date": "2026-05-03",
+      "sender": "林晓",
+      "text": "客户演示使用完全虚构的数据，不能带入真实用户对话。"
+    },
+    {
+      "id": "route",
+      "date": "2026-05-07",
+      "sender": "方禾",
+      "text": "周末去博物馆走东门，西门因为维修暂停开放。"
+    },
+    {
+      "id": "invoice",
+      "date": "2026-05-09",
+      "sender": "周宁",
+      "text": "虚构供应商发票抬头错误，已申请重开，还在等新发票。"
+    },
+    {
+      "id": "restore",
+      "date": "2026-05-15",
+      "sender": "林晓",
+      "text": "备份恢复演练安排周三上午，方禾负责核对消息数量。"
+    },
+    {
+      "id": "device",
+      "date": "2026-05-21",
+      "sender": "方禾",
+      "text": "演示设备选择型号 DEMO-M4-16，原因是内存足够且耗电较低。"
+    },
+    {
+      "id": "release",
+      "date": "2026-06-01",
+      "sender": "周宁",
+      "text": "本轮先发布历史检索，结构化偏好记忆留到后续版本。"
+    },
+    {
+      "id": "test",
+      "date": "2026-06-04",
+      "sender": "林晓",
+      "text": "验收至少四十个虚构问题，其中十个保留用于独立验证。"
+    },
+    {
+      "id": "cancel",
+      "date": "2026-06-08",
+      "sender": "方禾",
+      "text": "原定周日的团建取消，不是改期，后续时间尚未确定。"
+    }
+  ],
+  "cases": [
+    {
+      "id": "q01",
+      "split": "development",
+      "query": "为什么暂时没买网络存储设备？",
+      "expectedSourceIds": ["backup"],
+      "expectedFact": "旧电脑还能备份",
+      "category": "semantic"
+    },
+    {
+      "id": "q02",
+      "split": "development",
+      "query": "当时推迟上线是因为哪项测试没做完？",
+      "expectedSourceIds": ["launch1"],
+      "expectedFact": "支付测试未完成",
+      "category": "semantic"
+    },
+    {
+      "id": "q03",
+      "split": "holdout",
+      "query": "后来演示系统还上线了吗？",
+      "expectedSourceIds": ["launch2"],
+      "expectedFact": "客户暂停项目",
+      "category": "semantic"
+    },
+    {
+      "id": "q04",
+      "split": "development",
+      "query": "那笔三月订单的地址问题怎么处理的？",
+      "expectedSourceIds": ["order"],
+      "expectedFact": "修改收货地址",
+      "category": "semantic"
+    },
+    {
+      "id": "q05",
+      "split": "development",
+      "query": "读书会调整后什么时候开始？",
+      "expectedSourceIds": ["meeting"],
+      "expectedFact": "周六下午两点",
+      "category": "semantic"
+    },
+    {
+      "id": "q06",
+      "split": "holdout",
+      "query": "测试机器每个月最多花多少钱？",
+      "expectedSourceIds": ["budget"],
+      "expectedFact": "每月三百元",
+      "category": "semantic"
+    },
+    {
+      "id": "q07",
+      "split": "development",
+      "query": "安排聚餐时林晓有什么明确的饮食要求？",
+      "expectedSourceIds": ["diet"],
+      "expectedFact": "不含花生",
+      "category": "semantic"
+    },
+    {
+      "id": "q08",
+      "split": "development",
+      "query": "那次出游为什么没有开车？",
+      "expectedSourceIds": ["trip"],
+      "expectedFact": "高速拥堵",
+      "category": "semantic"
+    },
+    {
+      "id": "q09",
+      "split": "development",
+      "query": "海边手记是谁借的，约定什么时候还？",
+      "expectedSourceIds": ["book"],
+      "expectedFact": "月底归还",
+      "category": "semantic"
+    },
+    {
+      "id": "q10",
+      "split": "holdout",
+      "query": "测试账户收不到重置邮件后，谁负责处理？",
+      "expectedSourceIds": ["password"],
+      "expectedFact": "联系测试管理员",
+      "category": "semantic"
+    },
+    {
+      "id": "q11",
+      "split": "development",
+      "query": "为什么没有用文件保存业务数据？",
+      "expectedSourceIds": ["database"],
+      "expectedFact": "事务和关联查询",
+      "category": "semantic"
+    },
+    {
+      "id": "q12",
+      "split": "development",
+      "query": "首页最后选了什么配色？",
+      "expectedSourceIds": ["design"],
+      "expectedFact": "蓝色方案",
+      "category": "semantic"
+    },
+    {
+      "id": "q13",
+      "split": "development",
+      "query": "给客户演示时能用真实聊天吗？",
+      "expectedSourceIds": ["demo"],
+      "expectedFact": "完全虚构数据",
+      "category": "semantic"
+    },
+    {
+      "id": "q14",
+      "split": "development",
+      "query": "我们去博物馆为什么约在东门？",
+      "expectedSourceIds": ["route"],
+      "expectedFact": "西门维修",
+      "category": "semantic"
+    },
+    {
+      "id": "q15",
+      "split": "holdout",
+      "query": "供应商发票的问题解决到哪一步了？",
+      "expectedSourceIds": ["invoice"],
+      "expectedFact": "等待重开发票",
+      "category": "semantic"
+    },
+    {
+      "id": "q16",
+      "split": "development",
+      "query": "恢复演练中谁检查消息有没有少？",
+      "expectedSourceIds": ["restore"],
+      "expectedFact": "方禾核对消息数量",
+      "category": "semantic"
+    },
+    {
+      "id": "q17",
+      "split": "development",
+      "query": "演示机为什么选了那个 M4 型号？",
+      "expectedSourceIds": ["device"],
+      "expectedFact": "内存足够耗电低",
+      "category": "semantic"
+    },
+    {
+      "id": "q18",
+      "split": "development",
+      "query": "这轮会一起做偏好记忆吗？",
+      "expectedSourceIds": ["release"],
+      "expectedFact": "结构化记忆后续实现",
+      "category": "semantic"
+    },
+    {
+      "id": "q19",
+      "split": "holdout",
+      "query": "检索测试集数量是怎么约定的？",
+      "expectedSourceIds": ["test"],
+      "expectedFact": "四十个问题十个保留",
+      "category": "semantic"
+    },
+    {
+      "id": "q20",
+      "split": "development",
+      "query": "周日团建是不是改到下周了？",
+      "expectedSourceIds": ["cancel"],
+      "expectedFact": "取消且未确定后续时间",
+      "category": "semantic"
+    },
+    {
+      "id": "q21",
+      "split": "development",
+      "query": "2026-01-12 林晓 提到的备份安排",
+      "expectedSourceIds": ["backup"],
+      "expectedFact": "旧电脑还能备份",
+      "category": "exact-time-member",
+      "from": "2026-01-12T00:00:00Z",
+      "to": "2026-01-12T23:59:59Z",
+      "sender": "林晓"
+    },
+    {
+      "id": "q22",
+      "split": "development",
+      "query": "2026-02-02 周宁 提到的演示系统延期原因",
+      "expectedSourceIds": ["launch1"],
+      "expectedFact": "支付测试未完成",
+      "category": "exact-time-member",
+      "from": "2026-02-02T00:00:00Z",
+      "to": "2026-02-02T23:59:59Z",
+      "sender": "周宁"
+    },
+    {
+      "id": "q23",
+      "split": "holdout",
+      "query": "2026-02-09 周宁 提到的演示系统上线结果",
+      "expectedSourceIds": ["launch2"],
+      "expectedFact": "客户暂停项目",
+      "category": "exact-time-member",
+      "from": "2026-02-09T00:00:00Z",
+      "to": "2026-02-09T23:59:59Z",
+      "sender": "周宁"
+    },
+    {
+      "id": "q24",
+      "split": "development",
+      "query": "2026-03-12 林晓 提到的DEMO-2026-0312",
+      "expectedSourceIds": ["order"],
+      "expectedFact": "修改收货地址",
+      "category": "exact-time-member",
+      "from": "2026-03-12T00:00:00Z",
+      "to": "2026-03-12T23:59:59Z",
+      "sender": "林晓"
+    },
+    {
+      "id": "q25",
+      "split": "development",
+      "query": "2026-03-14 方禾 提到的读书会",
+      "expectedSourceIds": ["meeting"],
+      "expectedFact": "周六下午两点",
+      "category": "exact-time-member",
+      "from": "2026-03-14T00:00:00Z",
+      "to": "2026-03-14T23:59:59Z",
+      "sender": "方禾"
+    },
+    {
+      "id": "q26",
+      "split": "development",
+      "query": "2026-03-20 周宁 提到的服务器预算",
+      "expectedSourceIds": ["budget"],
+      "expectedFact": "每月三百元",
+      "category": "exact-time-member",
+      "from": "2026-03-20T00:00:00Z",
+      "to": "2026-03-20T23:59:59Z",
+      "sender": "周宁"
+    },
+    {
+      "id": "q27",
+      "split": "development",
+      "query": "2026-04-01 林晓 提到的聚餐要求",
+      "expectedSourceIds": ["diet"],
+      "expectedFact": "不含花生",
+      "category": "exact-time-member",
+      "from": "2026-04-01T00:00:00Z",
+      "to": "2026-04-01T23:59:59Z",
+      "sender": "林晓"
+    },
+    {
+      "id": "q28",
+      "split": "holdout",
+      "query": "2026-04-03 方禾 提到的春游交通",
+      "expectedSourceIds": ["trip"],
+      "expectedFact": "高速拥堵",
+      "category": "exact-time-member",
+      "from": "2026-04-03T00:00:00Z",
+      "to": "2026-04-03T23:59:59Z",
+      "sender": "方禾"
+    },
+    {
+      "id": "q29",
+      "split": "development",
+      "query": "2026-04-09 周宁 提到的借书约定",
+      "expectedSourceIds": ["book"],
+      "expectedFact": "月底归还",
+      "category": "exact-time-member",
+      "from": "2026-04-09T00:00:00Z",
+      "to": "2026-04-09T23:59:59Z",
+      "sender": "周宁"
+    },
+    {
+      "id": "q30",
+      "split": "development",
+      "query": "2026-04-12 林晓 提到的密码邮件",
+      "expectedSourceIds": ["password"],
+      "expectedFact": "联系测试管理员",
+      "category": "exact-time-member",
+      "from": "2026-04-12T00:00:00Z",
+      "to": "2026-04-12T23:59:59Z",
+      "sender": "林晓"
+    },
+    {
+      "id": "q31",
+      "split": "development",
+      "query": "2026-04-19 周宁 提到的PostgreSQL",
+      "expectedSourceIds": ["database"],
+      "expectedFact": "事务和关联查询",
+      "category": "exact-time-member",
+      "from": "2026-04-19T00:00:00Z",
+      "to": "2026-04-19T23:59:59Z",
+      "sender": "周宁"
+    },
+    {
+      "id": "q32",
+      "split": "holdout",
+      "query": "2026-05-01 方禾 提到的首页颜色",
+      "expectedSourceIds": ["design"],
+      "expectedFact": "蓝色方案",
+      "category": "exact-time-member",
+      "from": "2026-05-01T00:00:00Z",
+      "to": "2026-05-01T23:59:59Z",
+      "sender": "方禾"
+    },
+    {
+      "id": "q33",
+      "split": "development",
+      "query": "林晓的银行账户号码是多少？",
+      "expectedSourceIds": [],
+      "expectedFact": "无足够依据，不能编造答案",
+      "category": "unanswerable"
+    },
+    {
+      "id": "q34",
+      "split": "development",
+      "query": "八月份购买了哪台 NAS？",
+      "expectedSourceIds": [],
+      "expectedFact": "无足够依据，不能编造答案",
+      "category": "unanswerable"
+    },
+    {
+      "id": "q35",
+      "split": "development",
+      "query": "方禾去年的体检结果是什么？",
+      "expectedSourceIds": [],
+      "expectedFact": "无足够依据，不能编造答案",
+      "category": "unanswerable"
+    },
+    {
+      "id": "q36",
+      "split": "development",
+      "query": "周宁家里的门牌号是多少？",
+      "expectedSourceIds": [],
+      "expectedFact": "无足够依据，不能编造答案",
+      "category": "unanswerable"
+    },
+    {
+      "id": "q37",
+      "split": "holdout",
+      "query": "春游返程票最终买了几点？",
+      "expectedSourceIds": [],
+      "expectedFact": "无足够依据，不能编造答案",
+      "category": "unanswerable"
+    },
+    {
+      "id": "q38",
+      "split": "development",
+      "query": "读书会最后有多少人参加？",
+      "expectedSourceIds": [],
+      "expectedFact": "无足够依据，不能编造答案",
+      "category": "unanswerable"
+    },
+    {
+      "id": "q39",
+      "split": "development",
+      "query": "服务器真实登录密码是多少？",
+      "expectedSourceIds": [],
+      "expectedFact": "无足够依据，不能编造答案",
+      "category": "unanswerable"
+    },
+    {
+      "id": "q40",
+      "split": "holdout",
+      "query": "下一次团建确定在哪天？",
+      "expectedSourceIds": [],
+      "expectedFact": "无足够依据，不能编造答案",
+      "category": "unanswerable"
+    }
+  ]
+}

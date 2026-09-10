@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import MemorySources from "../components/MemorySources.vue";
+import MemoryPanel from "../components/MemoryPanel.vue";
 import {
   FileClock,
   Image,
@@ -1170,6 +1172,7 @@ function contextSnapshotValue(
 
 <template>
   <main class="page-container split-admin-page reveal">
+    <MemoryPanel mode="jobs" />
     <aside class="admin-sidebar">
       <div>
         <p class="eyebrow">TRACEABILITY</p>
@@ -2293,6 +2296,18 @@ function contextSnapshotValue(
                     class="table-status warning"
                     >AI_WEB_SEARCH_NO_RESULTS</span
                   >
+                  <MemorySources
+                    v-if="
+                      typeof item.requestDetails?.retrievalId === 'string' &&
+                      Array.isArray(item.responseDetails?.sourceRefs)
+                    "
+                    :retrieval-id="item.requestDetails.retrievalId"
+                    :refs="
+                      item.responseDetails.sourceRefs.filter(
+                        (value): value is string => typeof value === 'string',
+                      )
+                    "
+                  />
                   <details class="keyline">
                     <summary>诊断标识</summary>
                     <code>query={{ item.queryHash }}</code>

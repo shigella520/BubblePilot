@@ -1184,6 +1184,14 @@ class AiChatNodeHandler extends BaseNodeHandler {
     let result;
     try {
       result = await this.agent.run({
+        ...(node.config.includeLoadedContext
+          ? {
+              memoryEvent: {
+                provider: context.envelope.provider,
+                messageId: context.envelope.message.providerMessageId,
+              },
+            }
+          : {}),
         executionId: context.executionId,
         nodeId: node.id,
         routeId: node.config.providerRouteId,

@@ -892,7 +892,7 @@ export class OpenAiCompatibleClient implements AiClient {
         diagnostics: initialDiagnostics,
       });
     }
-    if (request.executionId !== undefined) {
+    if (request.executionId !== undefined && !request.sensitiveHistory) {
       this.rawRequestStore?.record(
         request.executionId,
         requestHash,
