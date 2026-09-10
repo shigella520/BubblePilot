@@ -433,6 +433,14 @@ describe("conversation context summary contract", () => {
     expect(prompt[0]?.content).toContain(
       "应记录其中有长期价值的请求、任务和待办",
     );
+    expect(prompt[0]?.content).toContain("不超过 3500 个字符为目标");
+    expect(prompt[0]?.content).toContain("绝对不得超过 4000 个字符");
+    expect(prompt[0]?.content).toContain(
+      "不得通过省略仍有效的决定、未解决问题、请求、待办及其说话人来缩短",
+    );
+    expect(prompt[0]?.content).toContain(
+      "不要输出前言、解释、字符统计、Markdown 代码块或 XML 标签",
+    );
     expect(prompt[1]?.content).toContain(
       "<previous_summary>\nExisting unresolved decision\n</previous_summary>",
     );
