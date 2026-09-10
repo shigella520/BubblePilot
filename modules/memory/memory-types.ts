@@ -40,6 +40,7 @@ export interface Evidence {
   participants: { senderId: string; name: string }[];
 }
 export interface MemoryCoverage {
+  failed?: number;
   total: number;
   indexed: number;
   pending: number;

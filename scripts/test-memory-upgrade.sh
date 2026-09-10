@@ -3,13 +3,15 @@
 set -eu
 old_name="bubblepilot-memory-old-$$"
 new_name="bubblepilot-memory-new-$$"
+dump_path=$(mktemp "${TMPDIR:-/tmp}/bubblepilot-memory-upgrade.XXXXXX")
 cleanup() {
   docker rm -f -v "$old_name" "$new_name" >/dev/null 2>&1 || true
+  rm -f "$dump_path"
 }
 trap cleanup EXIT HUP INT TERM
 wait_database() {
   counter=0
-  until docker exec "$1" pg_isready -U fixture -d fixture >/dev/null 2>&1; do
+  until docker exec "$1" pg_isready -h 127.0.0.1 -U fixture -d fixture >/dev/null 2>&1; do
     counter=$((counter + 1))
     if [ "$counter" -ge 60 ]; then return 1; fi
     sleep 1
@@ -24,6 +26,7 @@ docker exec "$old_name" psql -v ON_ERROR_STOP=1 -U fixture -d fixture -c "INSERT
 docker run -d --name "$new_name" -e POSTGRES_USER=fixture -e POSTGRES_DB=fixture -e POSTGRES_PASSWORD=fictional-ci-only pgvector/pgvector:0.8.0-pg16 >/dev/null
 wait_database "$new_name"
 # Custom-format dump makes pg_restore check corruption and schema errors explicitly.
-docker exec "$old_name" pg_dump -Fc -U fixture fixture | docker exec -i "$new_name" pg_restore --exit-on-error -U fixture -d fixture
+docker exec "$old_name" pg_dump -Fc -U fixture fixture > "$dump_path"
+docker exec -i "$new_name" pg_restore --exit-on-error -U fixture -d fixture < "$dump_path"
 docker exec "$new_name" psql -v ON_ERROR_STOP=1 -U fixture -d fixture -c "CREATE EXTENSION vector; SELECT '[1,0]'::vector <=> '[1,0]'::vector; DO \$\$ BEGIN IF NOT EXISTS(SELECT 1 FROM chats WHERE provider_chat_id='fictional-upgrade-chat') THEN RAISE EXCEPTION 'fixture missing after restore'; END IF; END \$\$;" >/dev/null
 printf '%s\n' 'PostgreSQL 16 Alpine dump restored on pgvector PostgreSQL 16; fixture and vector distance verified.'

@@ -64,7 +64,12 @@ const source = ref("");
 const chat = reactive({
   enabled: false,
   version: 0,
-  coverage: null as { total: number; indexed: number; pending: number } | null,
+  coverage: null as {
+    total: number;
+    indexed: number;
+    pending: number;
+    failed?: number;
+  } | null,
 });
 let epoch = 0;
 let alive = true;
@@ -334,7 +339,9 @@ onBeforeUnmount(() => {
                 ? "检索已启用"
                 : "聊天检索未启用"
           }}；已索引 {{ chat.coverage?.indexed ?? 0 }} /
-          {{ chat.coverage?.total ?? 0 }} 条保留消息。
+          {{ chat.coverage?.total ?? 0 }} 条保留消息。尚未完成
+          {{ chat.coverage?.pending ?? 0 }} 条，其中失败缺口
+          {{ chat.coverage?.failed ?? 0 }} 条。
         </p>
         <button
           class="button"

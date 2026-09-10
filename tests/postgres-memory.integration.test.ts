@@ -176,6 +176,38 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     await repo.action(job!.id, "resume", 2);
     await repo.action(job!.id, "cancel", 3);
   });
+  it("recovers expired leases and rejects source changes before publication", async () => {
+    await drain();
+    const id = await chat();
+    const messageId = await message(id, "虚构租约测试");
+    await repo.pool.query(
+      "UPDATE memory_jobs SET next_attempt_at=now() WHERE chat_id=$1",
+      [id],
+    );
+    const first = (await repo.claim())!;
+    expect(first.chat_id).toBe(id);
+    const originals = await repo.messages(id, 1, 10);
+    await repo.pool.query(
+      "UPDATE memory_jobs SET lease_until=now()-interval '1 second' WHERE id=$1",
+      [first.id],
+    );
+    const recovered = (await repo.claim())!;
+    expect(recovered.id).toBe(first.id);
+    expect(recovered.lease_owner).not.toBe(first.lease_owner);
+    await repo.publish(first, [], [], []);
+    expect((await repo.jobs(id)).find((j) => j.id === first.id)?.status).toBe(
+      "running",
+    );
+    await repo.pool.query(
+      "UPDATE messages SET body='虚构内容已更正' WHERE id=$1",
+      [messageId],
+    );
+    await expect(repo.publish(recovered, originals, [], [])).rejects.toThrow(
+      "MEMORY_SOURCE_CHANGED",
+    );
+    await repo.fail(recovered, "MEMORY_SOURCE_CHANGED");
+    await drain();
+  });
   it("does not publish after a source change or a cancelled lease", async () => {
     const id = await chat();
     await message(id, "虚构原始备份");

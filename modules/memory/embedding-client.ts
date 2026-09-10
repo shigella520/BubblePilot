@@ -55,7 +55,7 @@ export class HttpEmbeddingClient implements EmbeddingClient {
     const url = `${config.baseUrl.replace(/\/+$/u, "")}/${path}`;
     try {
       const response = await this.fetcher(url, {
-        method: "POST",
+        method: body === undefined ? "GET" : "POST",
         redirect: "error",
         signal: AbortSignal.timeout(Math.max(1, timeoutMs)),
         headers: {
@@ -143,8 +143,27 @@ export class HttpEmbeddingClient implements EmbeddingClient {
     timeoutMs = 5000,
   ): Promise<string> {
     if (config.protocol !== "ollama") return config.modelVersion;
-    // /api/show has no stable digest on all Ollama versions. Hash the model
-    // metadata as an additional change detector; administrators retain a version.
+    // Prefer Ollama's model digest; older/proxied services may only expose /api/show.
+    try {
+      const tags = z
+        .object({
+          models: z.array(
+            z.object({ name: z.string(), digest: z.string().min(1) }),
+          ),
+        })
+        .parse(
+          await this.request(config, secret, "api/tags", undefined, timeoutMs),
+        );
+      const normalized = config.model.includes(":")
+        ? config.model
+        : `${config.model}:latest`;
+      const model = tags.models.find(
+        (m) => m.name === config.model || m.name === normalized,
+      );
+      if (model) return `digest:${model.digest}`;
+    } catch {
+      // The metadata fingerprint below still prevents transparent model fallback.
+    }
     const value = await this.request(
       config,
       secret,

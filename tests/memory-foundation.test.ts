@@ -35,6 +35,24 @@ describe("memory foundations", () => {
       truncate: false,
     });
   });
+  it("records an available Ollama digest", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          models: [
+            { name: defaultMemoryConfig.model, digest: "fictional-digest" },
+          ],
+        }),
+      ),
+    );
+    expect(
+      await new HttpEmbeddingClient(fetcher).identity(
+        defaultMemoryConfig,
+        null,
+      ),
+    ).toBe("digest:fictional-digest");
+    expect(fetcher.mock.calls[0]?.[1]?.method).toBe("GET");
+  });
   it("orders OpenAI batch indexes and preserves a /v1 base", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

@@ -295,8 +295,13 @@ export class MemoryRepository {
   }
   async coverage(scope: MemoryScope) {
     const row = (
-      await this.pool.query<{ total: string; indexed: string }>(
-        `SELECT count(*) total,count(i.message_id) indexed FROM messages m
+      await this.pool.query<{ total: string; indexed: string; failed: string }>(
+        `SELECT count(*) total,count(i.message_id) indexed,
+        count(*) FILTER (WHERE i.message_id IS NULL AND EXISTS (
+          SELECT 1 FROM memory_jobs j WHERE j.chat_id=m.chat_id AND j.generation_id=$2 AND j.status='failed'
+          AND m.message_index BETWEEN j.from_index AND j.through_index
+          AND (j.range_from IS NULL OR m.sent_at>=j.range_from) AND (j.range_to IS NULL OR m.sent_at<=j.range_to)
+        )) failed FROM messages m
       LEFT JOIN memory_indexed_messages i ON i.message_id=m.id AND i.generation_id=$2
       WHERE m.chat_id=$1 AND m.message_index<$3 AND m.content_redacted_at IS NULL`,
         [scope.chatId, scope.generation.id, scope.upperIndex],
@@ -304,7 +309,12 @@ export class MemoryRepository {
     ).rows[0];
     const total = Number(row?.total ?? 0),
       indexed = Number(row?.indexed ?? 0);
-    return { total, indexed, pending: total - indexed };
+    return {
+      total,
+      indexed,
+      pending: total - indexed,
+      failed: Number(row?.failed ?? 0),
+    };
   }
   async messages(
     chatId: string,
