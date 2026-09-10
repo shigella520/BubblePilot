@@ -16,7 +16,13 @@ import {
   type MemorySearch,
 } from "./memory-types.js";
 import type { EmbeddingConfig } from "./embedding-client.js";
+import { estimateProgress, type ProgressSample } from "./job-progress.js";
 export interface MemoryJob {
+  request_key: string | null;
+  progress_scope: string | null;
+  progress_samples: ProgressSample[];
+  progress_started_at: Date | null;
+  progress_last_at: Date | null;
   id: string;
   chat_id: string;
   generation_id: string;
@@ -68,6 +74,7 @@ export function memoryMessage(row: MessageRow): MemoryMessage {
 const messageColumns = `m.id,m.message_index,m.sent_at,m.sender_id,m.is_from_me,m.body,m.attachments,m.link_previews,
  (SELECT string_agg(s.summary,E'\n' ORDER BY s.id) FROM message_image_summaries s WHERE s.message_id=m.id AND s.status='succeeded') images`;
 export class MemoryRepository {
+  readonly workerId = randomUUID();
   readonly pool: Pool;
   readonly cipher: SettingsCipher;
   constructor(databaseUrl: string, key: string) {
@@ -406,6 +413,8 @@ export class MemoryRepository {
           to ?? null,
         ],
       );
+      if (result.rows[0])
+        await this.initializeProgress(db, result.rows[0].id, "full");
       return (
         result.rows[0] ??
         (
@@ -417,13 +426,133 @@ export class MemoryRepository {
       );
     });
   }
-  async jobs(chatId?: string) {
-    return (
-      await this.pool.query<Record<string, unknown>>(
-        `SELECT id,chat_id,generation_id,reason,from_index,through_index,cursor_index,status,attempts,error_code,version,created_at,updated_at FROM memory_jobs WHERE ($1::uuid IS NULL OR chat_id=$1) ORDER BY created_at DESC LIMIT 100`,
-        [chatId ?? null],
+  private async initializeProgress(db: PoolClient, id: string, scope: string) {
+    const job = (
+      await db.query<MemoryJob>("SELECT * FROM memory_jobs WHERE id=$1", [id])
+    ).rows[0]!;
+    let cursor = Number(job.cursor_index);
+    while (cursor < Number(job.through_index)) {
+      const rows = await this.messages(
+        job.chat_id,
+        cursor + 1,
+        Number(job.through_index),
+        db,
+      );
+      if (!rows.length) break;
+      const included = rows.filter(
+        (m) =>
+          (!job.range_from ||
+            Date.parse(m.sentAt) >= job.range_from.getTime()) &&
+          (!job.range_to || Date.parse(m.sentAt) <= job.range_to.getTime()),
+      );
+      if (included.length)
+        await db.query(
+          `INSERT INTO memory_job_items(job_id,message_id,message_index,characters)
+        SELECT $1,x.id,x.idx,x.chars FROM unnest($2::uuid[],$3::bigint[],$4::int[]) AS x(id,idx,chars) ON CONFLICT DO NOTHING`,
+          [
+            id,
+            included.map((m) => m.id),
+            included.map((m) => m.index),
+            included.map((m) => m.text.length),
+          ],
+        );
+      cursor = rows.at(-1)!.index;
+    }
+    await db.query("UPDATE memory_jobs SET progress_scope=$2 WHERE id=$1", [
+      id,
+      scope,
+    ]);
+  }
+  async jobs(
+    chatId?: string,
+    options?: {
+      limit: number;
+      cursor?: { timestamp: Date; id: string } | null;
+      id?: string;
+    },
+  ) {
+    const rows = (
+      await this.pool.query<
+        MemoryJob & {
+          status: string;
+          version: number;
+          chat_name: string | null;
+          model: string;
+          reason: string;
+          error_code: string | null;
+          created_at: Date;
+          updated_at: Date;
+          current: boolean;
+          total: number;
+          processed: number;
+          removed: number;
+          remaining: number;
+          characters: number;
+        }
+      >(
+        `SELECT j.id,j.chat_id,j.generation_id,j.reason,j.from_index,j.through_index,j.cursor_index,j.status,j.request_key,j.attempts,j.error_code,j.version,j.created_at,j.updated_at,j.range_from,j.range_to,j.progress_scope,j.progress_samples,j.progress_started_at,j.progress_last_at,
+      c.display_name AS chat_name,g.config->>'model' AS model,
+      (j.progress_worker=$2 AND j.progress_started_at IS NOT NULL AND c.enabled AND c.deleted_at IS NULL AND EXISTS(SELECT 1 FROM memory_settings WHERE enabled) AND EXISTS(SELECT 1 FROM memory_chats mc WHERE mc.chat_id=j.chat_id AND mc.enabled) AND g.status!='retired' AND NOT EXISTS(SELECT 1 FROM memory_jobs other WHERE other.id<>j.id AND other.status='running' AND other.lease_until>now())) AS current,
+      p.total,p.processed,p.removed,p.remaining,p.characters
+      FROM (SELECT * FROM memory_jobs WHERE ($1::uuid IS NULL OR chat_id=$1) AND ($7::uuid IS NULL OR id=$7) AND ($3::timestamptz IS NULL OR (date_trunc('milliseconds',created_at),id)<($3,$4::uuid)) ORDER BY CASE WHEN $5 THEN 0 WHEN status='running' OR (status='queued' AND progress_worker=$2) THEN 0 WHEN status IN ('queued','paused') THEN 1 ELSE 2 END,date_trunc('milliseconds',created_at) DESC,id DESC LIMIT $6) j JOIN chats c ON c.id=j.chat_id JOIN memory_generations g ON g.id=j.generation_id
+      LEFT JOIN LATERAL (SELECT count(*)::int total,count(*) FILTER(WHERE state='processed')::int processed,
+        count(*) FILTER(WHERE state='removed')::int removed,count(*) FILTER(WHERE state='pending')::int remaining,
+        coalesce(sum(characters) FILTER(WHERE state='pending'),0)::float8 characters
+        FROM memory_job_items WHERE job_id=j.id) p ON TRUE
+      WHERE ($1::uuid IS NULL OR j.chat_id=$1) ORDER BY CASE WHEN $5 THEN 0 WHEN j.status='running' OR (j.status='queued' AND j.progress_worker=$2) THEN 0 WHEN j.status IN ('queued','paused') THEN 1 ELSE 2 END,date_trunc('milliseconds',j.created_at) DESC,j.id DESC LIMIT $6`,
+        [
+          chatId ?? null,
+          this.workerId,
+          options?.cursor?.timestamp ?? null,
+          options?.cursor?.id ?? null,
+          !!options,
+          options?.limit ?? 100,
+          options?.id ?? null,
+        ],
       )
     ).rows;
+    return rows.map(
+      ({
+        progress_samples,
+        progress_started_at,
+        progress_last_at,
+        progress_scope,
+        current,
+        total,
+        processed,
+        removed,
+        remaining,
+        characters,
+        ...job
+      }) => ({
+        ...job,
+        progress: {
+          scope: progress_scope,
+          total,
+          processed,
+          removed,
+          remaining,
+          percent: progress_scope
+            ? total
+              ? ((processed + removed) / total) * 100
+              : job.status === "succeeded"
+                ? 100
+                : 0
+            : null,
+          lastProgressAt: progress_last_at,
+          generatedAt: new Date().toISOString(),
+          estimate: estimateProgress(
+            progress_samples,
+            characters,
+            job.status,
+            progress_last_at?.getTime() ??
+              progress_started_at?.getTime() ??
+              null,
+            current,
+          ),
+        },
+      }),
+    );
   }
   async action(id: string, action: string, version: number) {
     return this.transaction(async (db) => {
@@ -514,7 +643,7 @@ export class MemoryRepository {
             409,
           );
         await db.query(
-          "UPDATE memory_jobs SET status=$2,reason=CASE WHEN $2='queued' THEN 'backfill' ELSE reason END,version=version+1,lease_owner=NULL,lease_until=NULL,attempts=0,next_attempt_at=now(),updated_at=now() WHERE id=$1",
+          "UPDATE memory_jobs SET status=$2,reason=CASE WHEN $2='queued' THEN 'backfill' ELSE reason END,version=version+1,lease_owner=NULL,lease_until=NULL,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,attempts=0,next_attempt_at=now(),updated_at=now() WHERE id=$1",
           [id, next],
         );
       }
@@ -532,6 +661,17 @@ export class MemoryRepository {
         ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`)
       ).rows[0];
       if (!row) return null;
+      if (!row.progress_scope && row.request_key)
+        await this.initializeProgress(db, row.id, "remaining");
+      await db.query(
+        `UPDATE memory_jobs SET progress_samples='[]',progress_started_at=NULL,progress_worker=NULL WHERE id<>$1 AND progress_worker IS NOT NULL`,
+        [row.id],
+      );
+      await db.query(
+        `UPDATE memory_jobs SET progress_samples=CASE WHEN progress_worker=$2 AND progress_last_at>now()-interval '60 seconds' THEN progress_samples ELSE '[]'::jsonb END,
+        progress_last_at=CASE WHEN progress_worker=$2 AND progress_last_at>now()-interval '60 seconds' THEN progress_last_at ELSE NULL END,progress_started_at=CASE WHEN progress_worker=$2 AND progress_last_at>now()-interval '60 seconds' THEN progress_started_at ELSE now() END,progress_worker=$2 WHERE id=$1`,
+        [row.id, this.workerId],
+      );
       const owner = randomUUID();
       return (
         (
@@ -618,6 +758,39 @@ export class MemoryRepository {
       const cursor =
         scannedThrough ?? messages.at(-1)?.index ?? Number(job.through_index);
       await db.query(
+        `UPDATE memory_job_items i SET state='removed' WHERE job_id=$1 AND state='pending' AND message_index<=$2 AND NOT EXISTS(SELECT 1 FROM messages m WHERE m.id=i.message_id AND m.content_redacted_at IS NULL)`,
+        [job.id, cursor],
+      );
+      const completed = await db.query<{ characters: number }>(
+        `UPDATE memory_job_items SET state='processed' WHERE job_id=$1 AND state='pending' AND message_id=ANY($2::uuid[]) RETURNING characters`,
+        [job.id, messages.map((m) => m.id)],
+      );
+      const timing = (
+        await db.query<MemoryJob>("SELECT * FROM memory_jobs WHERE id=$1", [
+          job.id,
+        ])
+      ).rows[0]!;
+      const now = Date.now();
+      const sample: ProgressSample = {
+        at: now,
+        milliseconds: Math.max(
+          1,
+          now -
+            (
+              timing.progress_last_at ??
+              timing.progress_started_at ??
+              new Date(now)
+            ).getTime(),
+        ),
+        characters: messages.reduce((n, m) => n + m.text.length, 0),
+        messages: completed.rowCount ?? 0,
+      };
+      const samples = [...timing.progress_samples, sample].slice(-10);
+      await db.query(
+        "UPDATE memory_jobs SET progress_samples=$2::jsonb,progress_last_at=now() WHERE id=$1",
+        [job.id, JSON.stringify(samples)],
+      );
+      await db.query(
         `UPDATE memory_jobs SET cursor_index=$2,status=CASE WHEN $2>=through_index THEN 'succeeded' ELSE 'queued' END,
         reason=CASE WHEN $2<through_index THEN 'backfill' ELSE reason END,attempts=0,lease_owner=NULL,lease_until=NULL,version=version+1,updated_at=now() WHERE id=$1`,
         [job.id, cursor],
@@ -626,7 +799,7 @@ export class MemoryRepository {
   }
   async fail(job: MemoryJob, code: string) {
     await this.pool.query(
-      "UPDATE memory_jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,reason='backfill',error_code=$3,lease_owner=NULL,lease_until=NULL,next_attempt_at=now()+interval '10 seconds'*attempts,version=version+1 WHERE id=$1 AND lease_owner=$2 AND status='running'",
+      "UPDATE memory_jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,reason='backfill',error_code=$3,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,lease_owner=NULL,lease_until=NULL,next_attempt_at=now()+interval '10 seconds'*attempts,version=version+1 WHERE id=$1 AND lease_owner=$2 AND status='running'",
       [job.id, job.lease_owner, code],
     );
   }

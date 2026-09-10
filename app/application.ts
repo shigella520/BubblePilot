@@ -1063,7 +1063,15 @@ export function buildApplication(
     { preHandler: requireAdmin },
     async (request) => {
       const { chatId } = chatParametersSchema.parse(request.params);
-      return { data: await memory().repository.jobs(chatId) };
+      const query = pageQuerySchema.parse(request.query);
+      const rows = await memory().repository.jobs(chatId, {
+        limit: query.limit + 1,
+        cursor: decodeCursor(query.cursor),
+      });
+      return cursorPage(rows, query.limit, (row) => ({
+        timestamp: row.created_at.toISOString(),
+        id: row.id,
+      }));
     },
   );
   application.post(
@@ -1096,7 +1104,36 @@ export function buildApplication(
   application.get(
     "/api/v1/memory/jobs",
     { preHandler: requireAdmin },
-    async () => ({ data: await memory().repository.jobs() }),
+    async (request) => {
+      const query = pageQuerySchema.parse(request.query);
+      const rows = await memory().repository.jobs(undefined, {
+        limit: query.limit + 1,
+        cursor: decodeCursor(query.cursor),
+      });
+      return cursorPage(rows, query.limit, (row) => ({
+        timestamp: row.created_at.toISOString(),
+        id: row.id,
+      }));
+    },
+  );
+  application.get(
+    "/api/v1/memory/jobs/:jobId",
+    { preHandler: requireAdmin },
+    async (request) => {
+      const { jobId } = z
+        .object({ jobId: z.string().uuid() })
+        .parse(request.params);
+      const job = (
+        await memory().repository.jobs(undefined, { limit: 1, id: jobId })
+      )[0];
+      if (!job)
+        throw new ApplicationError(
+          "MEMORY_JOB_NOT_FOUND",
+          "Index job unavailable.",
+          404,
+        );
+      return { data: job };
+    },
   );
   application.post(
     "/api/v1/memory/jobs/:jobId/actions",

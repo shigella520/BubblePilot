@@ -1,10 +1,21 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { apiRequest, errorMessage, jsonBody } from "../services/api";
+import {
+  apiRequest,
+  apiPageRequest,
+  errorMessage,
+  jsonBody,
+} from "../services/api";
 import { useSessionStore } from "../stores/session";
+import { ProgressPoller } from "../services/progress-poller";
+import AdminDetailDialog from "./AdminDetailDialog.vue";
+import CursorPagination from "./CursorPagination.vue";
+import DismissibleMessage from "./DismissibleMessage.vue";
+import { RefreshCw } from "@lucide/vue";
 import SensitiveUnlock from "./SensitiveUnlock.vue";
 const props = defineProps<{
   mode: "settings" | "chat" | "jobs";
+  embedded?: boolean;
   chats?: readonly {
     id: string;
     displayName?: string | null;
@@ -19,6 +30,8 @@ const chatId = ref("");
 const query = ref("");
 const from = ref("");
 const to = ref("");
+const searchFrom = ref("");
+const searchTo = ref("");
 interface Generation {
   id: string;
   model: string;
@@ -40,6 +53,9 @@ interface Settings {
 }
 interface Job {
   id: string;
+  created_at: string;
+  updated_at: string;
+  attempts: number;
   chat_id: string;
   generation_id: string;
   status: string;
@@ -47,6 +63,27 @@ interface Job {
   cursor_index: string;
   through_index: string;
   error_code: string | null;
+  request_key: string | null;
+  chat_name: string | null;
+  model: string;
+  range_from: string | null;
+  range_to: string | null;
+  progress?: {
+    scope: string | null;
+    total: number;
+    processed: number;
+    removed: number;
+    remaining: number;
+    percent: number | null;
+    lastProgressAt: string | null;
+    generatedAt: string;
+    estimate: {
+      status: string;
+      messagesPerMinute: number | null;
+      remainingSeconds: number | null;
+      estimatedCompletionAt: string | null;
+    };
+  };
 }
 interface SearchResult {
   status: string;
@@ -59,6 +96,71 @@ const settings = ref<Settings | null>(null);
 const secret = ref("");
 const generationId = ref("");
 const jobs = ref<Job[]>([]);
+const selectedJob = ref<Job | null>(null);
+const jobTrigger = ref<HTMLElement | null>(null);
+const jobPage = ref(1);
+const jobCursors = ref<Array<string | null>>([null]);
+const nextJobCursor = ref<string | null>(null);
+function resetJobPage() {
+  jobPage.value = 1;
+  jobCursors.value = [null];
+  nextJobCursor.value = null;
+  selectedJob.value = null;
+}
+function jobsPath() {
+  const base =
+    props.mode === "chat"
+      ? `/api/v1/chats/${chatId.value}/memory/jobs`
+      : "/api/v1/memory/jobs";
+  const params = new URLSearchParams({ limit: "25" });
+  const cursor = jobCursors.value[jobPage.value - 1];
+  if (cursor) params.set("cursor", cursor);
+  return `${base}?${params}`;
+}
+async function loadJobPage() {
+  const token = epoch;
+  const page = await apiPageRequest<Job[]>(jobsPath());
+  const detail = selectedJob.value
+    ? await apiRequest<Job>(`/api/v1/memory/jobs/${selectedJob.value.id}`)
+    : null;
+  if (alive && token === epoch) {
+    jobs.value = page.data;
+    nextJobCursor.value = page.page.nextCursor;
+    selectedJob.value = detail;
+    progressError.value = false;
+  }
+}
+async function turnJobPage(direction: number) {
+  const previousPage = jobPage.value;
+  const previousCursors = [...jobCursors.value];
+  const token = epoch;
+  if (direction > 0 && nextJobCursor.value) {
+    jobCursors.value = jobCursors.value.slice(0, jobPage.value);
+    jobCursors.value.push(nextJobCursor.value);
+    jobPage.value++;
+  } else if (direction < 0 && jobPage.value > 1) jobPage.value--;
+  selectedJob.value = null;
+  try {
+    await loadJobPage();
+  } catch (error) {
+    if (alive && token === epoch) {
+      jobPage.value = previousPage;
+      jobCursors.value = previousCursors;
+    }
+    throw error;
+  }
+}
+async function showJob(job: Job, trigger: EventTarget | null) {
+  jobTrigger.value = trigger instanceof HTMLElement ? trigger : null;
+  const token = epoch;
+  const detail = await apiRequest<Job>(`/api/v1/memory/jobs/${job.id}`);
+  if (alive && token === epoch) selectedJob.value = detail;
+}
+function closeJob() {
+  epoch++;
+  selectedJob.value = null;
+  poller.invalidate();
+}
 const result = ref<SearchResult | null>(null);
 const source = ref("");
 const chat = reactive({
@@ -71,11 +173,91 @@ const chat = reactive({
     failed?: number;
   } | null,
 });
+const progressError = ref(false);
+let panelOpen = !!props.embedded;
+
+const stateNames: Record<string, string> = {
+  queued: "等待处理",
+  running: "处理中",
+  paused: "已暂停",
+  succeeded: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+  superseded: "已替代",
+  waiting: "等待处理",
+  warming: "估算中",
+  stalled: "暂未取得新进度",
+  active: "可用",
+  building: "构建中",
+  retired: "已退役",
+};
+function resultLabel(value: string) {
+  const names: Record<string, string> = {
+    succeeded: "检索成功",
+    partial: "部分覆盖",
+    unavailable: "暂不可用",
+    empty: "没有结果",
+    hybrid: "混合检索",
+    keyword: "关键词检索",
+  };
+  return names[value] ?? value;
+}
+function stateName(value: string) {
+  return stateNames[value] ?? value;
+}
+function localTime(value: string | null) {
+  return value ? new Date(value).toLocaleString() : "不限";
+}
+function remainingTime(seconds: number) {
+  const minutes = Math.ceil(seconds / 60);
+  return minutes < 60
+    ? `${minutes} 分钟`
+    : `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
+}
+const poller = new ProgressPoller({
+  enabled: () =>
+    alive &&
+    panelOpen &&
+    !document.hidden &&
+    !busy.value &&
+    props.mode !== "settings" &&
+    (props.mode !== "chat" || !!chatId.value) &&
+    jobs.value.some((j) => ["queued", "running"].includes(j.status)),
+  load: async () => {
+    const path =
+      props.mode === "chat"
+        ? `/api/v1/chats/${chatId.value}/memory`
+        : "/api/v1/memory";
+    const [page, state, detail] = await Promise.all([
+      apiPageRequest<Job[]>(jobsPath()),
+      props.mode === "chat"
+        ? apiRequest<typeof chat>(path)
+        : Promise.resolve(null),
+      selectedJob.value
+        ? apiRequest<Job>(`/api/v1/memory/jobs/${selectedJob.value.id}`)
+        : Promise.resolve(null),
+    ]);
+    return { page, state, detail };
+  },
+  apply: ({ page, state, detail }) => {
+    jobs.value = page.data;
+    nextJobCursor.value = page.page.nextCursor;
+    selectedJob.value = detail;
+    if (state) Object.assign(chat, state);
+    progressError.value = false;
+  },
+  failed: () => {
+    progressError.value = true;
+  },
+});
 let epoch = 0;
 let alive = true;
+let pendingChatRefresh = false;
 let requestKey = crypto.randomUUID();
 async function run(action: () => Promise<void>) {
   if (busy.value) return;
+  epoch++;
+  poller.invalidate();
   busy.value = true;
   error.value = "";
   const token = epoch;
@@ -84,11 +266,17 @@ async function run(action: () => Promise<void>) {
   } catch (e) {
     if (alive && token === epoch) error.value = errorMessage(e);
   } finally {
-    if (alive) busy.value = false;
+    if (alive) {
+      busy.value = false;
+      if (pendingChatRefresh) {
+        pendingChatRefresh = false;
+        void run(refresh);
+      }
+    }
   }
 }
 async function refresh() {
-  const token = ++epoch;
+  const token = epoch;
   const value = await apiRequest<Settings>("/api/v1/ai/memory/settings");
   if (!alive || token !== epoch) return;
   settings.value = value;
@@ -96,19 +284,13 @@ async function refresh() {
     value.generations.find((g) => g.status === "building")?.id ??
     value.generations.find((g) => g.status === "active")?.id ??
     "";
-  if (props.mode === "jobs") {
-    const rows = await apiRequest<Job[]>("/api/v1/memory/jobs");
-    if (alive && token === epoch) jobs.value = rows;
-  }
-  if (props.mode === "chat" && chatId.value) {
-    const path = `/api/v1/chats/${chatId.value}/memory`;
-    const [state, rows] = await Promise.all([
-      apiRequest<typeof chat>(path),
-      apiRequest<Job[]>(`${path}/jobs`),
-    ]);
-    if (alive && token === epoch) {
-      Object.assign(chat, state);
-      jobs.value = rows;
+  if (props.mode === "jobs" || (props.mode === "chat" && chatId.value)) {
+    await loadJobPage();
+    if (props.mode === "chat") {
+      const state = await apiRequest<typeof chat>(
+        `/api/v1/chats/${chatId.value}/memory`,
+      );
+      if (alive && token === epoch) Object.assign(chat, state);
     }
   }
 }
@@ -171,8 +353,12 @@ async function search() {
       method: "POST",
       body: jsonBody({
         query: query.value,
-        ...(from.value ? { from: new Date(from.value).toISOString() } : {}),
-        ...(to.value ? { to: new Date(to.value).toISOString() } : {}),
+        ...(searchFrom.value
+          ? { from: new Date(searchFrom.value).toISOString() }
+          : {}),
+        ...(searchTo.value
+          ? { to: new Date(searchTo.value).toISOString() }
+          : {}),
       }),
     },
   );
@@ -190,6 +376,8 @@ async function backfill() {
     }),
   });
   requestKey = crypto.randomUUID();
+  resetJobPage();
+  notice.value = "补建任务已创建，可在下方任务列表查看进度。";
   await refresh();
 }
 async function action(job: Job, name: string) {
@@ -198,6 +386,7 @@ async function action(job: Job, name: string) {
     method: "POST",
     body: jsonBody({ action: name, expectedVersion: job.version }),
   });
+  notice.value = "任务操作已完成。";
   await refresh();
 }
 async function viewSource(ref: string) {
@@ -212,18 +401,28 @@ async function viewSource(ref: string) {
       .join("\n\n");
 }
 watch(chatId, () => {
+  resetJobPage();
+  jobs.value = [];
+  chat.coverage = null;
+  chat.enabled = false;
+  chat.version = 0;
   epoch++;
+  poller.invalidate();
   result.value = null;
   source.value = "";
   query.value = "";
+  searchFrom.value = "";
+  searchTo.value = "";
   requestKey = crypto.randomUUID();
-  void run(refresh);
+  if (busy.value) pendingChatRefresh = true;
+  else void run(refresh);
 });
 watch(
   () => session.sensitiveActive,
   (active) => {
     if (!active) {
       epoch++;
+      poller.invalidate();
       result.value = null;
       source.value = "";
       query.value = "";
@@ -232,26 +431,64 @@ watch(
   },
 );
 function onToggle(event: Event) {
+  panelOpen = event.target instanceof HTMLDetailsElement && event.target.open;
+  if (panelOpen) void poller.tick();
   if (event.target instanceof HTMLDetailsElement && !event.target.open) {
     epoch++;
+    poller.invalidate();
     result.value = null;
     source.value = "";
     query.value = "";
     secret.value = "";
   }
 }
-onMounted(() => void run(refresh));
+onMounted(() => {
+  void run(refresh);
+  poller.start();
+});
 onBeforeUnmount(() => {
   alive = false;
+  poller.stop();
   epoch++;
+  poller.invalidate();
   result.value = null;
   source.value = "";
   secret.value = "";
 });
 </script>
 <template>
-  <details class="memory-panel" :open="mode === 'settings'" @toggle="onToggle">
-    <summary>
+  <component
+    :is="embedded ? 'section' : 'details'"
+    class="memory-panel"
+    :class="{ 'admin-panel': embedded }"
+    :open="!embedded && mode === 'settings'"
+    @toggle="onToggle"
+  >
+    <div v-if="embedded" class="panel-head">
+      <div>
+        <p class="card-kicker">
+          {{ mode === "jobs" ? "HISTORY INDEX" : "CHAT MEMORY" }}
+        </p>
+        <h2>
+          {{
+            mode === "settings"
+              ? "长期聊天检索设置"
+              : mode === "chat"
+                ? "聊天长期记忆"
+                : "历史索引任务"
+          }}
+        </h2>
+      </div>
+      <button
+        class="button secondary"
+        type="button"
+        :disabled="busy"
+        @click="run(refresh)"
+      >
+        <RefreshCw :size="18" />{{ busy ? "刷新中…" : "刷新" }}
+      </button>
+    </div>
+    <summary v-if="!embedded">
       {{
         mode === "settings"
           ? "长期聊天检索设置"
@@ -264,10 +501,24 @@ onBeforeUnmount(() => {
       AI
       根据问题自行查找已授权聊天中的历史记录，无需添加工作流节点。可检索范围受消息保留期限限制。
     </p>
-    <SensitiveUnlock />
-    <p v-if="error" role="alert">{{ error }}</p>
-    <p v-if="notice" role="status">{{ notice }}</p>
-    <button class="button" :disabled="busy" @click="run(refresh)">
+    <SensitiveUnlock v-if="!embedded || mode === 'settings'" />
+    <DismissibleMessage
+      v-if="error && !selectedJob"
+      error
+      @close="error = ''"
+      >{{ error }}</DismissibleMessage
+    >
+    <DismissibleMessage
+      v-else-if="notice && !selectedJob"
+      @close="notice = ''"
+      >{{ notice }}</DismissibleMessage
+    >
+    <button
+      v-if="!embedded"
+      class="button secondary"
+      :disabled="busy"
+      @click="run(refresh)"
+    >
       {{ busy ? "处理中…" : "刷新状态" }}
     </button>
     <form v-if="mode === 'settings' && settings" @submit.prevent="run(save)">
@@ -350,6 +601,7 @@ onBeforeUnmount(() => {
         >
           {{ chat.enabled ? "停用检索" : "授权此聊天检索" }}
         </button>
+        <h3>历史补建</h3>
         <fieldset
           :disabled="
             busy ||
@@ -372,7 +624,7 @@ onBeforeUnmount(() => {
                 :key="g.id"
                 :value="g.id"
               >
-                {{ g.model }} · {{ g.status }}
+                {{ g.model }} · {{ stateName(g.status) }}
               </option>
             </select></label
           >
@@ -383,6 +635,26 @@ onBeforeUnmount(() => {
           >
             补建所选范围（留空表示全部保留记录）
           </button>
+        </fieldset>
+        <h3>检索测试</h3>
+        <fieldset
+          :disabled="
+            busy ||
+            !session.sensitiveActive ||
+            !chat.enabled ||
+            !settings?.enabled
+          "
+        >
+          <label
+            >检索开始时间（可选）<input
+              v-model="searchFrom"
+              type="datetime-local"
+          /></label>
+          <label
+            >检索结束时间（可选）<input
+              v-model="searchTo"
+              type="datetime-local"
+          /></label>
           <label>测试问题<input v-model="query" maxlength="500" /></label
           ><button
             class="button"
@@ -393,7 +665,12 @@ onBeforeUnmount(() => {
           </button>
         </fieldset>
         <div v-if="result && session.sensitiveActive">
-          <p>{{ result.status }} · {{ result.retrievalMode }}</p>
+          <h3>检索测试结果</h3>
+          <p>
+            {{ resultLabel(result.status) }} ·
+            {{ resultLabel(result.retrievalMode) }}
+          </p>
+          <p v-if="!result.evidence.length">没有找到匹配的历史来源。</p>
           <article v-for="item in result.evidence" :key="item.ref">
             <button
               class="button"
@@ -402,61 +679,246 @@ onBeforeUnmount(() => {
             >
               查看来源 {{ item.ref }}
             </button>
-            <pre>{{ item.text }}</pre>
+            <p>
+              {{ item.text.slice(0, 200)
+              }}{{ item.text.length > 200 ? "…" : "" }}
+            </p>
           </article>
         </div>
-        <pre v-if="source && session.sensitiveActive">{{ source }}</pre>
+        <AdminDetailDialog
+          v-if="source && session.sensitiveActive"
+          title="历史来源原文"
+          @close="source = ''"
+        >
+          <pre>{{ source }}</pre>
+        </AdminDetailDialog>
       </template>
     </div>
     <div v-if="mode !== 'settings'" class="memory-jobs">
-      <article v-for="job in jobs" :key="job.id">
-        <p>
-          {{ job.status }} · {{ job.cursor_index }} / {{ job.through_index }}
-          <span v-if="job.error_code">{{ job.error_code }}</span>
-        </p>
-        <button
-          v-if="['queued', 'running'].includes(job.status)"
-          class="button"
-          :disabled="busy || !session.sensitiveActive"
-          @click="run(() => action(job, 'pause'))"
-        >
-          暂停
-        </button>
-        <button
-          v-if="['paused', 'failed'].includes(job.status)"
-          class="button"
-          :disabled="busy || !session.sensitiveActive"
-          @click="run(() => action(job, 'resume'))"
-        >
-          恢复
-        </button>
-        <button
-          v-if="['queued', 'running', 'paused', 'failed'].includes(job.status)"
-          class="button"
-          :disabled="busy || !session.sensitiveActive"
-          @click="run(() => action(job, 'cancel'))"
-        >
-          取消
-        </button>
-        <button
-          v-if="
-            job.status === 'succeeded' &&
-            settings?.generations.some(
-              (g) => g.id === job.generation_id && g.status === 'building',
-            )
-          "
-          class="button"
-          :disabled="busy || !session.sensitiveActive"
-          @click="run(() => action(job, 'activate'))"
-        >
-          验证覆盖并启用此代次
-        </button>
-      </article>
+      <p v-if="progressError" role="status">
+        连接异常，显示最后一次获取的进度，将自动重试。
+      </p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>聊天 / 任务</th>
+              <th>状态</th>
+              <th>处理进度</th>
+              <th>预计完成</th>
+              <th>创建时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="job in jobs" :key="job.id">
+              <td>
+                {{ job.chat_name || job.chat_id
+                }}<small
+                  >{{ job.request_key ? "历史补建" : "新增消息索引" }} ·
+                  {{ job.model }}</small
+                >
+              </td>
+              <td>
+                <span class="state-badge">{{
+                  stateName(
+                    job.status === "queued" &&
+                      ["available", "warming", "stalled"].includes(
+                        job.progress?.estimate.status ?? "",
+                      )
+                      ? "running"
+                      : job.status,
+                  )
+                }}</span>
+              </td>
+              <td v-if="job.progress?.scope">
+                {{ job.progress.processed }} / {{ job.progress.total }} 条 ·
+                {{ job.progress.percent?.toFixed(1) }}%<small
+                  v-if="job.progress.removed"
+                  >已移除 {{ job.progress.removed }} 条</small
+                >
+              </td>
+              <td v-else>统计不完整</td>
+              <td>
+                {{
+                  !progressError &&
+                  job.progress?.estimate.status === "available"
+                    ? localTime(job.progress.estimate.estimatedCompletionAt)
+                    : stateName(job.progress?.estimate.status ?? job.status)
+                }}
+              </td>
+              <td>{{ localTime(job.created_at) }}</td>
+              <td>
+                <button
+                  class="button tiny secondary"
+                  :disabled="busy"
+                  @click="
+                    ((event) => {
+                      const trigger = event.currentTarget;
+                      run(() => showJob(job, trigger));
+                    })($event)
+                  "
+                >
+                  详情
+                </button>
+              </td>
+            </tr>
+            <tr v-if="!jobs.length">
+              <td colspan="6">{{ busy ? "正在加载任务…" : "暂无索引任务" }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <CursorPagination
+        :page="jobPage"
+        :item-count="jobs.length"
+        :busy="busy"
+        :has-previous="jobPage > 1"
+        :has-next="!!nextJobCursor"
+        @previous="run(() => turnJobPage(-1))"
+        @next="run(() => turnJobPage(1))"
+      />
+      <AdminDetailDialog
+        v-if="selectedJob"
+        title="历史索引任务详情"
+        :return-focus="jobTrigger"
+        @close="closeJob"
+      >
+        <DismissibleMessage v-if="error" error inline @close="error = ''">{{
+          error
+        }}</DismissibleMessage>
+        <DismissibleMessage v-else-if="notice" inline @close="notice = ''">{{
+          notice
+        }}</DismissibleMessage>
+        <article v-for="job in selectedJob ? [selectedJob] : []" :key="job.id">
+          <h4>
+            {{ job.chat_name || "聊天" }} ·
+            {{ job.request_key ? "历史补建" : "新增消息索引" }} ·
+            {{
+              stateName(
+                job.status === "queued" &&
+                  ["available", "warming", "stalled"].includes(
+                    job.progress?.estimate.status ?? "",
+                  )
+                  ? "running"
+                  : job.status,
+              )
+            }}
+          </h4>
+          <p>
+            {{ job.model }} · {{ localTime(job.range_from) }} —
+            {{ localTime(job.range_to) }}
+          </p>
+          <template v-if="job.progress?.scope">
+            <p v-if="job.progress.scope === 'remaining'">升级后剩余任务进度</p>
+            <progress
+              :value="job.progress.percent ?? 0"
+              max="100"
+              aria-label="任务处理进度"
+            ></progress>
+            <p>
+              已处理 {{ job.progress.processed }} / {{ job.progress.total }} 条
+              · {{ (job.progress.percent ?? 0).toFixed(1) }}%
+            </p>
+            <p>
+              剩余 {{ job.progress.remaining }} 条<span
+                v-if="job.progress.removed"
+              >
+                · 已移除 {{ job.progress.removed }} 条（不计为索引成功）</span
+              >
+            </p>
+            <template
+              v-if="
+                job.progress.estimate.status === 'available' && !progressError
+              "
+            >
+              <p>
+                最近速度约
+                {{ job.progress.estimate.messagesPerMinute?.toFixed(1) }}
+                条/分钟
+              </p>
+              <p>
+                预计剩余约
+                {{ remainingTime(job.progress.estimate.remainingSeconds ?? 0) }}
+                · 预计完成
+                {{ localTime(job.progress.estimate.estimatedCompletionAt) }}
+              </p>
+              <small>根据近期速度估算，会随模型负载变化。</small>
+            </template>
+            <p v-else>
+              {{
+                progressError
+                  ? "连接异常，预估暂不可用"
+                  : stateName(job.progress.estimate.status)
+              }}
+            </p>
+            <small>更新于 {{ localTime(job.progress.generatedAt) }}</small>
+          </template>
+          <p v-else>
+            {{
+              job.request_key
+                ? "历史任务，统计不完整"
+                : "新增消息索引，范围可能继续增长"
+            }}
+          </p>
+          <p>任务 ID：{{ job.id }}</p>
+          <p>
+            创建于 {{ localTime(job.created_at) }} · 更新于
+            {{ localTime(job.updated_at) }} · 当前批次尝试 {{ job.attempts }} 次
+          </p>
+          <p>索引代次：{{ job.generation_id }}</p>
+          <p v-if="job.error_code">{{ job.error_code }}</p>
+          <details>
+            <summary>诊断信息</summary>
+            处理游标 {{ job.cursor_index }} /
+            {{ job.through_index }}（不是消息数量）
+          </details>
+          <button
+            v-if="['queued', 'running'].includes(job.status)"
+            class="button"
+            :disabled="busy || !session.sensitiveActive"
+            @click="run(() => action(job, 'pause'))"
+          >
+            暂停
+          </button>
+          <button
+            v-if="['paused', 'failed'].includes(job.status)"
+            class="button"
+            :disabled="busy || !session.sensitiveActive"
+            @click="run(() => action(job, 'resume'))"
+          >
+            恢复
+          </button>
+          <button
+            v-if="
+              ['queued', 'running', 'paused', 'failed'].includes(job.status)
+            "
+            class="button"
+            :disabled="busy || !session.sensitiveActive"
+            @click="run(() => action(job, 'cancel'))"
+          >
+            取消
+          </button>
+          <button
+            v-if="
+              job.status === 'succeeded' &&
+              settings?.generations.some(
+                (g) => g.id === job.generation_id && g.status === 'building',
+              )
+            "
+            class="button"
+            :disabled="busy || !session.sensitiveActive"
+            @click="run(() => action(job, 'activate'))"
+          >
+            验证覆盖并启用此代次
+          </button>
+        </article>
+      </AdminDetailDialog>
     </div>
-  </details>
+  </component>
 </template>
 <style scoped>
-.memory-panel {
+.memory-panel:not(.admin-panel) {
   background: rgba(255, 255, 255, 0.72);
   padding: 1rem;
   border: 1px solid var(--border-color, #ddd);
@@ -484,8 +946,20 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 .memory-jobs {
-  max-height: 24rem;
-  overflow: auto;
+  min-width: 0;
+}
+.memory-jobs td small {
+  display: block;
+  color: #64748b;
+  margin-top: 0.35rem;
+}
+.memory-jobs .table-scroll {
+  overflow-x: auto;
+}
+.memory-jobs progress {
+  width: min(100%, 36rem);
+  height: 0.75rem;
+  accent-color: #3279c4;
 }
 .memory-jobs article {
   border-top: 1px solid #ddd;

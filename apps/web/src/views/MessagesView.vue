@@ -795,7 +795,6 @@ onBeforeUnmount(() =>
 
 <template>
   <main class="page-container split-admin-page reveal">
-    <MemoryPanel mode="chat" :chats="chats" />
     <aside class="admin-sidebar">
       <div>
         <p class="eyebrow">MESSAGES</p>
@@ -814,6 +813,9 @@ onBeforeUnmount(() =>
         </button>
         <button type="button" @click="scrollToSection('export')">
           <FileJson2 :size="18" />数据导出
+        </button>
+        <button type="button" @click="scrollToSection('chat-memory')">
+          <MessageCircle :size="18" />长期记忆
         </button>
       </nav>
       <div class="sidebar-note">
@@ -1081,6 +1083,7 @@ onBeforeUnmount(() =>
           @next="changePage(chatPager.next)"
         />
       </section>
+      <MemoryPanel id="chat-memory" mode="chat" :chats="chatOptions" embedded />
       <section id="search" class="admin-panel">
         <div class="panel-head">
           <div>

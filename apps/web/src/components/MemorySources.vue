@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AdminDetailDialog from "./AdminDetailDialog.vue";
+import DismissibleMessage from "./DismissibleMessage.vue";
 import { onBeforeUnmount, ref, watch } from "vue";
 import { apiRequest, errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
@@ -10,6 +12,7 @@ const busy = ref(false);
 let version = 0;
 async function show(ref: string) {
   if (!session.sensitiveActive || busy.value) return;
+  error.value = "";
   const token = ++version;
   busy.value = true;
   try {
@@ -52,11 +55,16 @@ onBeforeUnmount(clear);
       查看历史来源 {{ sourceRef }}
     </button>
     <p v-if="!session.sensitiveActive">解锁敏感操作后可查看来源正文。</p>
-    <p v-if="error" role="alert">{{ error }}</p>
-    <template v-if="text && session.sensitiveActive"
-      ><button class="button" @click="clear">收起正文</button>
+    <DismissibleMessage v-if="error" error @close="error = ''">{{
+      error
+    }}</DismissibleMessage>
+    <AdminDetailDialog
+      v-if="text && session.sensitiveActive"
+      title="历史来源原文"
+      @close="clear"
+    >
       <pre>{{ text }}</pre>
-    </template>
+    </AdminDetailDialog>
   </div>
 </template>
 <style scoped>

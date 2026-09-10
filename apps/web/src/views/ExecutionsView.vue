@@ -938,6 +938,7 @@ watch(
   },
 );
 function onKeydown(event: KeyboardEvent) {
+  if (document.querySelector("dialog[open]")) return;
   const dialog =
     detail.value === null
       ? compressionDetail.value === null
@@ -1172,7 +1173,6 @@ function contextSnapshotValue(
 
 <template>
   <main class="page-container split-admin-page reveal">
-    <MemoryPanel mode="jobs" />
     <aside class="admin-sidebar">
       <div>
         <p class="eyebrow">TRACEABILITY</p>
@@ -1191,6 +1191,9 @@ function contextSnapshotValue(
         </button>
         <button type="button" @click="scrollToSection('audit')">
           <ShieldCheck :size="18" />审计事件
+        </button>
+        <button type="button" @click="scrollToSection('memory-jobs')">
+          <FileClock :size="18" />历史索引
         </button>
       </nav>
       <div class="sidebar-note">
@@ -1633,6 +1636,7 @@ function contextSnapshotValue(
           @next="changePage(compressionPager.next)"
         />
       </section>
+      <MemoryPanel id="memory-jobs" mode="jobs" embedded />
       <section id="audit" class="admin-panel">
         <div class="panel-head">
           <div>

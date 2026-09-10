@@ -849,7 +849,7 @@ onMounted(load);
       </div>
     </aside>
     <div class="admin-workspace">
-      <MemoryPanel id="memory-settings" mode="settings" />
+      <MemoryPanel id="memory-settings" mode="settings" embedded />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"

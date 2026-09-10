@@ -302,4 +302,133 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       ).rowCount,
     ).toBe(2);
   });
+  it("counts fixed task membership and cleanup without cursor arithmetic", async () => {
+    await drain();
+    const id = await chat();
+    const first = await message(id, "虚构短消息");
+    const removed = await message(id, "虚构待清理消息");
+    await message(id, "虚构长消息".repeat(500));
+    await repo.pool.query(
+      "UPDATE memory_jobs SET status='cancelled' WHERE chat_id=$1",
+      [id],
+    );
+    const task = await repo.createJob(
+      id,
+      generationId,
+      undefined,
+      undefined,
+      randomUUID(),
+    );
+    if (!task) throw new Error("Expected fixture task");
+    const before = (await repo.jobs(id)).find((j) => j.id === task.id)!;
+    expect(before.progress).toMatchObject({
+      scope: "full",
+      total: 3,
+      processed: 0,
+      percent: 0,
+    });
+    await repo.pool.query(
+      "UPDATE messages SET body=NULL,content_redacted_at=now() WHERE id=$1",
+      [removed],
+    );
+    await drain();
+    const after = (await repo.jobs(id)).find((j) => j.id === task.id)!;
+    expect(after.status).toBe("succeeded");
+    expect(after.progress).toMatchObject({
+      total: 3,
+      processed: 2,
+      removed: 1,
+      remaining: 0,
+      percent: 100,
+    });
+    expect(after.progress.estimate.status).toBe("succeeded");
+    // A later retention change cannot rewrite historical completed work.
+    await repo.pool.query(
+      "UPDATE messages SET body=NULL,content_redacted_at=now() WHERE id=$1",
+      [first],
+    );
+    expect(
+      (await repo.jobs(id)).find((j) => j.id === task.id)!.progress.processed,
+    ).toBe(2);
+  });
+  it("initializes old tasks from their remaining range and rejects stale lease progress", async () => {
+    await drain();
+    const id = await chat();
+    await message(id, "虚构升级前消息");
+    await message(id, "虚构升级后消息");
+    await repo.pool.query(
+      "UPDATE memory_jobs SET status='cancelled' WHERE chat_id=$1",
+      [id],
+    );
+    const task = await repo.createJob(
+      id,
+      generationId,
+      undefined,
+      undefined,
+      randomUUID(),
+    );
+    if (!task) throw new Error("Expected fixture task");
+    await repo.pool.query("DELETE FROM memory_job_items WHERE job_id=$1", [
+      task.id,
+    ]);
+    await repo.pool.query(
+      "UPDATE memory_jobs SET progress_scope=NULL,cursor_index=from_index WHERE id=$1",
+      [task.id],
+    );
+    const claimed = await repo.claim();
+    expect(claimed?.id).toBe(task.id);
+    let state = (await repo.jobs(id)).find((j) => j.id === task.id)!;
+    expect(state.progress).toMatchObject({
+      scope: "remaining",
+      total: 1,
+      processed: 0,
+    });
+    const messages = await repo.messages(
+      id,
+      Number(claimed!.cursor_index) + 1,
+      Number(claimed!.through_index),
+    );
+    await repo.action(task.id, "pause", state.version);
+    await repo.publish(
+      claimed!,
+      messages,
+      [],
+      [],
+      Number(claimed!.through_index),
+    );
+    state = (await repo.jobs(id)).find((j) => j.id === task.id)!;
+    expect(state.progress.processed).toBe(0);
+    expect(state.progress.estimate.status).toBe("paused");
+    await repo.action(task.id, "resume", state.version);
+    await drain();
+    expect(
+      (await repo.jobs(id)).find((j) => j.id === task.id)!.progress,
+    ).toMatchObject({ total: 1, processed: 1, percent: 100 });
+  });
+  it("paginates all historical tasks with stable tied timestamps and reads off-page details", async () => {
+    const id = await chat();
+    await repo.pool.query(
+      `INSERT INTO memory_jobs(chat_id,generation_id,reason,from_index,through_index,cursor_index,status,created_at)
+      SELECT $1,$2,'backfill',1,1,1,'succeeded','2026-01-01T00:00:00.123456Z'::timestamptz FROM generate_series(1,125)`,
+      [id, generationId],
+    );
+    const ids: string[] = [];
+    let cursor: { timestamp: Date; id: string } | null = null;
+    while (true) {
+      const rows = await repo.jobs(id, { limit: 26, cursor });
+      const page = rows.slice(0, 25);
+      ids.push(...page.map((j) => j.id));
+      if (rows.length <= 25) break;
+      const last = page.at(-1)!;
+      cursor = { timestamp: last.created_at, id: last.id };
+    }
+    expect(ids.length).toBe(125);
+    expect(new Set(ids).size).toBe(125);
+    expect(
+      (await repo.jobs(undefined, { limit: 1, id: ids[124]! }))[0]?.id,
+    ).toBe(ids[124]);
+    expect(await repo.jobs(await chat(), { limit: 1, id: ids[124]! })).toEqual(
+      [],
+    );
+  });
 });
