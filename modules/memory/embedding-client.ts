@@ -105,7 +105,7 @@ export class HttpEmbeddingClient implements EmbeddingClient {
       secret,
       config.protocol === "ollama" ? "api/embed" : "embeddings",
       config.protocol === "ollama"
-        ? { model: config.model, input, truncate: false, keep_alive: "5m" }
+        ? { model: config.model, input, truncate: false, keep_alive: -1 }
         : { model: config.model, input, encoding_format: "float" },
       timeoutMs,
     );

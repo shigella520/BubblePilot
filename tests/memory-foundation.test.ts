@@ -33,6 +33,7 @@ describe("memory foundations", () => {
       JSON.parse(fetcher.mock.calls[0]?.[1]?.body as string),
     ).toMatchObject({
       truncate: false,
+      keep_alive: -1,
     });
   });
   it("records an available Ollama digest", async () => {
