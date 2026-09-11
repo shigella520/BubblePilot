@@ -2801,12 +2801,9 @@ legend {
   font-size: 12px;
   font-weight: 700;
 }
-.context-snapshot-warning {
+.context-snapshot-note {
   margin: 12px 0 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  color: #9d2d26;
-  background: rgba(227, 75, 67, 0.08);
+  color: var(--bubblepilot-muted);
   font-size: 11px;
 }
 @keyframes execution-detail-backdrop-in {

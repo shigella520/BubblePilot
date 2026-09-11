@@ -1956,7 +1956,7 @@ function contextSnapshotValue(
             </p>
             <p
               v-if="detail.contextSnapshot.contextIncomplete === true"
-              class="context-snapshot-warning"
+              class="context-snapshot-note"
             >
               本次上下文不完整。
               <span
