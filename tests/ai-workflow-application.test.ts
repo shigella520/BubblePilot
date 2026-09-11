@@ -581,6 +581,34 @@ describe("AI workflow", () => {
     expect(rawRequestBody.data.attemptId).toBe(firstAttemptId);
     expect(rawRequestBody.data.body).toContain("Earlier fictional context");
     expect(rawRequest.body).not.toContain("fictional-server-secret");
+    const responseUrl = `/api/v1/executions/${executionId}/ai-attempts/${firstAttemptId}/raw-response`;
+    expect(
+      (await application.inject({ method: "GET", url: responseUrl }))
+        .statusCode,
+    ).toBe(401);
+    const rawResponse = await application.inject({
+      method: "GET",
+      url: responseUrl,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(rawResponse.statusCode).toBe(200);
+    const responseBody = rawResponse.json<{
+      data: { httpStatus: number; truncated: boolean; body: string };
+    }>();
+    expect(responseBody.data).toMatchObject({
+      httpStatus: 200,
+      truncated: false,
+    });
+    expect(responseBody.data.body).toContain("Fictional AI answer");
+    const unrelatedAttempt = await application.inject({
+      method: "GET",
+      url: `/api/v1/executions/${executionId}/ai-attempts/00000000-0000-4000-8000-000000000000/raw-response`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(unrelatedAttempt.statusCode).toBe(404);
+    expect(unrelatedAttempt.body).not.toContain("Fictional AI answer");
+
+    expect(detail.body).not.toContain("Fictional AI answer");
   });
 
   it("keeps each complete text-turn prompt as the next turn's exact prefix", async () => {

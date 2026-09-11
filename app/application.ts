@@ -2645,6 +2645,14 @@ export function buildApplication(
               (await options.ai?.repository.listAttempts(executionId)) ?? []
             ).map((attempt) => ({
               ...attempt,
+              rawResponse: {
+                status: options.ai?.rawRequestStore?.getResponse(
+                  executionId,
+                  attempt.diagnostics?.clientRequestId ?? "",
+                )
+                  ? "available"
+                  : "unavailable",
+              },
               rawRequest: options.ai?.rawRequestStore?.reference(
                 executionId,
                 attempt.diagnostics?.requestHash ?? "",
@@ -3339,6 +3347,59 @@ export function buildApplication(
             attemptId: attempt.id,
             requestHash: attempt.diagnostics?.requestHash ?? null,
             body: requestBody,
+          },
+        };
+      },
+    );
+
+    application.get(
+      "/api/v1/executions/:executionId/ai-attempts/:attemptId/raw-response",
+      {
+        preHandler: requireSensitive(
+          "execution.ai-response.view",
+          "workflow-execution",
+        ),
+      },
+      async (request) => {
+        const parameters = executionAttemptParametersSchema.parse(
+          request.params,
+        );
+        const execution = await workflowRepository.getExecution(
+          parameters.executionId,
+        );
+        if (execution === null) {
+          throw new ApplicationError(
+            "EXECUTION_NOT_FOUND",
+            "The workflow execution does not exist.",
+            404,
+          );
+        }
+        const attempt = (
+          (await options.ai?.repository.listAttempts(parameters.executionId)) ??
+          []
+        ).find((candidate) => candidate.id === parameters.attemptId);
+        if (attempt === undefined) {
+          throw new ApplicationError(
+            "AI_PROVIDER_ATTEMPT_NOT_FOUND",
+            "The AI provider attempt does not exist in this execution.",
+            404,
+          );
+        }
+        const responseBody = options.ai?.rawRequestStore?.getResponse(
+          parameters.executionId,
+          attempt.diagnostics?.clientRequestId ?? "",
+        );
+        if (responseBody === undefined || responseBody === null) {
+          throw new ApplicationError(
+            "AI_RAW_RESPONSE_UNAVAILABLE",
+            "No raw AI response is retained in this process; it may not have been received or may have expired.",
+            404,
+          );
+        }
+        return {
+          data: {
+            attemptId: attempt.id,
+            ...responseBody,
           },
         };
       },

@@ -1990,6 +1990,28 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
+  /api/v1/executions/{executionId}/ai-attempts/{attemptId}/raw-response:
+    get:
+      operationId: getExecutionAiAttemptRawResponse
+      description: 读取本次 Attempt 的原始响应、error 的 message/code/type/param 及精选请求 ID；需敏感验证并审计。按 clientRequestId 关联，与请求共用最近 20 个执行内存缓存。正文最多 64 KiB，返回 body、bytes、truncated、httpStatus、error、requestIds 和 attemptId；未收到完整响应或缓存过期返回 404。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+        - in: path
+          name: attemptId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 返回受保护的响应诊断，截断时明确标记；普通执行详情仅返回 rawResponse.status。
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/retry:
     post:
       operationId: retryExecution

@@ -214,6 +214,7 @@ interface ExecutionDetail extends Execution {
     errorCode: string | null;
     retryable: boolean | null;
     fallbackAllowed: boolean | null;
+    rawResponse?: { status: "available" | "unavailable" };
     rawRequest: { status: "available" | "unavailable" };
     diagnostics: {
       clientRequestId: string | null;
@@ -347,6 +348,16 @@ interface AiUsageReport {
 }
 
 const detail = ref<ExecutionDetail | null>(null);
+interface RawResponse {
+  body: string;
+  bytes: number;
+  truncated: boolean;
+  httpStatus: number;
+  error: Record<string, string>;
+  requestIds: Record<string, string>;
+}
+const rawResponses = ref<Record<string, RawResponse>>({});
+const responseLoadingId = ref<string | null>(null);
 const rawRequests = ref<Record<string, string>>({});
 const rawRequestLoadingId = ref<string | null>(null);
 const message = ref("");
@@ -681,6 +692,7 @@ async function inspect(id: string) {
     if (requestId !== inspectRequestId) return;
     detail.value = loaded;
     rawRequests.value = {};
+    rawResponses.value = {};
   } catch (cause) {
     if (requestId !== inspectRequestId) return;
     message.value = errorMessage(cause);
@@ -799,6 +811,7 @@ function clearDetail() {
   detailLoadingId.value = null;
   detail.value = null;
   rawRequests.value = {};
+  rawResponses.value = {};
 }
 
 async function loadRawRequest(attemptId: string) {
@@ -845,6 +858,46 @@ async function copyRawRequest(attemptId: string) {
   try {
     await navigator.clipboard.writeText(body);
     message.value = "AI 请求原始报文已复制。";
+    messageIsError.value = false;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  }
+}
+async function loadRawResponse(attemptId: string) {
+  if (!detail.value || !session.sensitiveActive || responseLoadingId.value)
+    return;
+  const epoch = rawRequestEpoch;
+  const executionId = detail.value.id;
+  responseLoadingId.value = attemptId;
+  try {
+    const result = await apiRequest<RawResponse>(
+      `/api/v1/executions/${executionId}/ai-attempts/${attemptId}/raw-response`,
+    );
+    if (
+      epoch !== rawRequestEpoch ||
+      !session.sensitiveActive ||
+      detail.value?.id !== executionId
+    )
+      return;
+    rawResponses.value = { ...rawResponses.value, [attemptId]: result };
+  } catch (cause) {
+    if (epoch === rawRequestEpoch && session.sensitiveActive) {
+      message.value = errorMessage(cause);
+      messageIsError.value = true;
+    }
+  } finally {
+    responseLoadingId.value = null;
+  }
+}
+async function copyRawResponse(attemptId: string) {
+  const response = rawResponses.value[attemptId];
+  if (!session.sensitiveActive || !response) return;
+  try {
+    await navigator.clipboard.writeText(response.body);
+    message.value = response.truncated
+      ? "已复制保留的响应片段（已截断）。"
+      : "原始响应已复制。";
     messageIsError.value = false;
   } catch (cause) {
     message.value = errorMessage(cause);
@@ -1031,6 +1084,7 @@ watch(
       auditPager.clear();
       rawRequestEpoch += 1;
       rawRequests.value = {};
+      rawResponses.value = {};
       compressionContent.value = null;
     }
   },
@@ -1997,7 +2051,9 @@ function contextSnapshotValue(
               <p v-if="!detail.aiRouteTraces.length" class="keyline">
                 历史执行未记录路由决策，不使用当前配置反推。
               </p>
-              <h3>AI Provider Attempt</h3>
+            </section>
+            <section class="provider-attempt-section">
+              <h3>AI 请求详情</h3>
               <article
                 v-for="item in detail.aiProviderAttempts"
                 :key="item.id"
@@ -2079,42 +2135,111 @@ function contextSnapshotValue(
                       >response={{ item.diagnostics.responseBodyHash }}</code
                     >
                   </details>
-                  <details
-                    v-if="item.rawRequest.status === 'available'"
-                    class="raw-request-diagnostic"
-                    @toggle="
-                      ($event.currentTarget as HTMLDetailsElement).open &&
-                      rawRequests[item.id] === undefined &&
-                      loadRawRequest(item.id)
-                    "
-                  >
-                    <summary>
-                      <span><FileJson :size="14" /> 原始请求报文</span>
-                      <button
-                        v-if="rawRequests[item.id] !== undefined"
-                        class="icon-button raw-request-copy"
-                        type="button"
-                        title="复制原始请求报文"
-                        aria-label="复制原始请求报文"
-                        @click.prevent.stop="copyRawRequest(item.id)"
-                      >
-                        <ClipboardCopy :size="14" />
-                      </button>
-                    </summary>
-                    <div
-                      v-if="rawRequestLoadingId === item.id"
-                      class="raw-request-loading"
+                  <div class="attempt-payloads">
+                    <details
+                      v-if="item.rawResponse?.status === 'available'"
+                      class="raw-request-diagnostic response-diagnostic"
+                      @toggle="
+                        ($event.currentTarget as HTMLDetailsElement).open &&
+                        !rawResponses[item.id] &&
+                        loadRawResponse(item.id)
+                      "
                     >
-                      <LoaderCircle :size="14" class="spin" /> 正在读取…
-                    </div>
-                    <pre v-else-if="rawRequests[item.id] !== undefined">{{
-                      rawRequests[item.id]
-                    }}</pre>
-                  </details>
-                  <p v-else class="keyline raw-request-unavailable">
-                    当前实例未保留此原始请求报文。可能未曾保存、应用已重启、超出最近
-                    20 个执行，或由其他实例处理。
-                  </p>
+                      <summary>
+                        <span><FileJson :size="14" /> 响应与错误详情</span>
+                      </summary>
+                      <p
+                        v-if="responseLoadingId === item.id"
+                        class="raw-request-loading"
+                      >
+                        正在读取…
+                      </p>
+                      <template v-if="rawResponses[item.id]">
+                        <dl class="response-error-fields">
+                          <div>
+                            <dt>HTTP 状态</dt>
+                            <dd>{{ rawResponses[item.id]!.httpStatus }}</dd>
+                          </div>
+                          <div
+                            v-for="(value, key) in rawResponses[item.id]!.error"
+                            :key="key"
+                          >
+                            <dt>{{ key }}</dt>
+                            <dd>{{ value }}</dd>
+                          </div>
+                          <div
+                            v-for="(value, key) in rawResponses[item.id]!
+                              .requestIds"
+                            :key="key"
+                          >
+                            <dt>{{ key }}</dt>
+                            <dd>{{ value }}</dd>
+                          </div>
+                        </dl>
+                        <div class="response-body-heading">
+                          <strong>原始响应正文</strong
+                          ><button
+                            class="button tiny secondary"
+                            @click="copyRawResponse(item.id)"
+                          >
+                            <ClipboardCopy :size="14" />复制{{
+                              rawResponses[item.id]!.truncated ? "片段" : "正文"
+                            }}
+                          </button>
+                        </div>
+                        <p
+                          v-if="rawResponses[item.id]!.truncated"
+                          class="keyline"
+                        >
+                          响应共
+                          {{ rawResponses[item.id]!.bytes }} 字节，仅保留前 64
+                          KiB 以内内容，复制结果也已截断。
+                        </p>
+                        <pre>{{
+                          rawResponses[item.id]!.body || "（空响应正文）"
+                        }}</pre>
+                      </template>
+                    </details>
+                    <p v-else class="keyline raw-request-unavailable">
+                      当前实例无可用原始响应：可能尚未收到完整响应、未曾保存或缓存已过期。
+                    </p>
+                    <details
+                      v-if="item.rawRequest.status === 'available'"
+                      class="raw-request-diagnostic"
+                      @toggle="
+                        ($event.currentTarget as HTMLDetailsElement).open &&
+                        rawRequests[item.id] === undefined &&
+                        loadRawRequest(item.id)
+                      "
+                    >
+                      <summary>
+                        <span><FileJson :size="14" /> 原始请求报文</span>
+                        <button
+                          v-if="rawRequests[item.id] !== undefined"
+                          class="icon-button raw-request-copy"
+                          type="button"
+                          title="复制原始请求报文"
+                          aria-label="复制原始请求报文"
+                          @click.prevent.stop="copyRawRequest(item.id)"
+                        >
+                          <ClipboardCopy :size="14" />
+                        </button>
+                      </summary>
+                      <div
+                        v-if="rawRequestLoadingId === item.id"
+                        class="raw-request-loading"
+                      >
+                        <LoaderCircle :size="14" class="spin" /> 正在读取…
+                      </div>
+                      <pre v-else-if="rawRequests[item.id] !== undefined">{{
+                        rawRequests[item.id]
+                      }}</pre>
+                    </details>
+                    <p v-else class="keyline raw-request-unavailable">
+                      当前实例未保留此原始请求报文。可能未曾保存、应用已重启、超出最近
+                      20 个执行，或由其他实例处理。
+                    </p>
+                  </div>
                   <details
                     v-if="item.diagnostics?.requestTrace"
                     class="cache-diagnostic"
@@ -2255,6 +2380,8 @@ function contextSnapshotValue(
               >
                 本次执行没有 AI 调用。
               </div>
+            </section>
+            <section>
               <h3>AI 图片输入</h3>
               <article
                 v-for="item in detail.aiImageInputs"
@@ -2292,6 +2419,8 @@ function contextSnapshotValue(
               >
                 本次执行没有图片输入。
               </div>
+            </section>
+            <section>
               <h3>AI 工具调用</h3>
               <article
                 v-for="item in detail.aiToolExecutions"
@@ -2354,6 +2483,8 @@ function contextSnapshotValue(
               >
                 本次执行没有工具调用。
               </div>
+            </section>
+            <section>
               <h3>出站发送</h3>
               <article
                 v-for="item in detail.deliveries"

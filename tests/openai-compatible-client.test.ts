@@ -41,6 +41,7 @@ describe("OpenAiCompatibleClient", () => {
     const result = await client.call(provider, {
       ...request,
       executionId: "fictional-history-execution",
+      clientRequestId: "fixture-call",
       messages: [
         ...request.messages,
         {
@@ -62,6 +63,9 @@ describe("OpenAiCompatibleClient", () => {
       ],
     });
     expect(result.status).toBe("failed");
+    expect(
+      store.getResponse("fictional-history-execution", "fixture-call"),
+    ).toMatchObject({ body: "unavailable", httpStatus: 503, truncated: false });
     const hash = result.diagnostics?.requestHash ?? "";
     const body = store.get("fictional-history-execution", hash);
     expect(body).toContain("fictional archived evidence");

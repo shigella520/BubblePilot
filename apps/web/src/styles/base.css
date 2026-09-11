@@ -3337,3 +3337,52 @@ legend {
     justify-content: flex-start;
   }
 }
+
+.attempt-payloads {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.6);
+}
+.attempt-payloads pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.response-error-fields {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.response-error-fields > div {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(0, 3fr);
+  gap: 12px;
+}
+.response-error-fields dt {
+  color: var(--bubblepilot-muted);
+}
+.response-error-fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.response-body-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.provider-attempt-section {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.response-diagnostic > .response-error-fields,
+.response-diagnostic > .response-body-heading,
+.response-diagnostic > .keyline {
+  margin-left: 12px;
+  margin-right: 12px;
+}
