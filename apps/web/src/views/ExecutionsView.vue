@@ -1219,6 +1219,18 @@ function routeDecisionStatusClass(
   return "warning";
 }
 
+function coverageRangeText(
+  snapshot: Record<string, unknown>,
+  key: "retained" | "omitted",
+): string {
+  const coverage = snapshot.historyCoverage;
+  if (!coverage || typeof coverage !== "object") return "未记录覆盖范围";
+  const range = (coverage as Record<string, unknown>)[key];
+  if (!range || typeof range !== "object") return "无";
+  const value = range as Record<string, unknown>;
+  return `${contextSnapshotValue(value, "count")} 条 · M${contextSnapshotValue(value, "firstMessageIndex")}–M${contextSnapshotValue(value, "lastMessageIndex")} · ${contextSnapshotValue(value, "earliestSentAt")} 至 ${contextSnapshotValue(value, "latestSentAt")}`;
+}
+
 function contextSnapshotValue(
   snapshot: Record<string, unknown>,
   key: string,
@@ -1932,11 +1944,38 @@ function contextSnapshotValue(
                 </dd>
               </div>
             </dl>
+            <p>
+              保留原文：{{
+                coverageRangeText(detail.contextSnapshot, "retained")
+              }}
+            </p>
+            <p>
+              裁剪范围：{{
+                coverageRangeText(detail.contextSnapshot, "omitted")
+              }}
+            </p>
             <p
               v-if="detail.contextSnapshot.contextIncomplete === true"
               class="context-snapshot-warning"
             >
-              本次上下文超过保护边界，内容可能不完整。
+              本次上下文不完整。
+              <span
+                v-if="
+                  Array.isArray(detail.contextSnapshot.contextIncompleteReasons)
+                "
+              >
+                {{
+                  detail.contextSnapshot.contextIncompleteReasons
+                    .map((reason: string) =>
+                      reason === "history-trimmed"
+                        ? "历史原文因字符预算被裁剪"
+                        : reason === "character-overflow"
+                          ? "内容超过字符保护边界"
+                          : reason,
+                    )
+                    .join("；")
+                }}
+              </span>
             </p>
           </section>
           <div class="trace-columns">

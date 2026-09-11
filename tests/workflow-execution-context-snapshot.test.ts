@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
+import { NodeRegistry } from "../modules/workflow/node-registry.js";
+import type { HistoryCoverage } from "../modules/workflow/conversation-context-service.js";
+import { describe, expect, it, vi } from "vitest";
 
 import type { MessageEnvelope } from "../modules/ingestion/message-envelope.js";
 import type { TriggerBinding } from "../modules/workflow/workflow-repository.js";
@@ -97,4 +100,90 @@ describe("workflow execution context snapshot", () => {
       scheduledCompressionOperationId: "scheduled-operation",
     });
   });
+});
+
+it("shares coverage across node contexts and records the same execution snapshot", async () => {
+  const snapshot = vi.fn().mockResolvedValue(undefined);
+  const repository = Object.assign(new InMemoryWorkflowRepository(), {
+    recordContextSnapshot: snapshot,
+  });
+  const binding: TriggerBinding = {
+    ...trigger,
+    definition: {
+      ...trigger.definition,
+      startNodeId: "load",
+      maxSteps: 2,
+      nodes: [
+        {
+          id: "load",
+          type: "load-context",
+          version: 1,
+          config: {},
+          onSuccess: "done",
+        },
+        ...trigger.definition.nodes,
+      ],
+    },
+  };
+  vi.spyOn(repository, "listActiveTriggerBindings").mockResolvedValue([
+    binding,
+  ]);
+  const coverage: HistoryCoverage = {
+    summaryCoveredThroughIndex: "2",
+    retained: null,
+    omitted: {
+      count: 1,
+      firstMessageIndex: "4",
+      lastMessageIndex: "4",
+      earliestSentAt: "2026-09-01T00:00:00Z",
+      latestSentAt: "2026-09-01T00:00:00Z",
+    },
+  };
+  const registry = new NodeRegistry();
+  registry.register({
+    type: "load-context",
+    version: 1,
+    retryPolicy: () => ({ maxAttempts: 1, initialDelayMs: 0 }),
+    failureTarget: () => null,
+    execute: (_node, context) => {
+      context.historyCoverage = coverage;
+      context.contextIncompleteReasons = ["history-trimmed"];
+      return Promise.resolve({
+        status: "succeeded",
+        nextNodeId: "done",
+        outputSummary: {
+          historyCoverage: coverage,
+          contextIncomplete: true,
+          contextIncompleteReasons: ["history-trimmed"],
+        },
+      });
+    },
+  });
+  let observed: HistoryCoverage | undefined;
+  registry.register({
+    type: "end",
+    version: 1,
+    retryPolicy: () => ({ maxAttempts: 1, initialDelayMs: 0 }),
+    failureTarget: () => null,
+    execute: (_node, context) => {
+      observed = context.historyCoverage;
+      return Promise.resolve({
+        status: "succeeded",
+        nextNodeId: null,
+        outputSummary: {},
+      });
+    },
+  });
+  const result = await new WorkflowEngine(repository, registry).handleMessage(
+    envelope,
+  );
+  expect(observed).toEqual(coverage);
+  expect(snapshot).toHaveBeenCalledWith(
+    result.executionIds[0],
+    expect.objectContaining({
+      historyCoverage: coverage,
+      contextIncomplete: true,
+      contextIncompleteReasons: ["history-trimmed"],
+    }),
+  );
 });

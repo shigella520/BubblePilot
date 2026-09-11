@@ -14,6 +14,7 @@ import {
   type Generation,
   type MemoryScope,
   type MemorySearch,
+  type LatestChatMessages,
 } from "./memory-types.js";
 import type { EmbeddingConfig } from "./embedding-client.js";
 import { estimateProgress, type ProgressSample } from "./job-progress.js";
@@ -878,6 +879,28 @@ export class MemoryRepository {
         [chatId, senderIds],
       )
     ).rows;
+  }
+  async latest(
+    scope: MemoryScope,
+    query: LatestChatMessages,
+  ): Promise<MemoryMessage[]> {
+    const result = await this.pool.query<MessageRow>(
+      `SELECT ${messageColumns} FROM messages m
+       WHERE m.chat_id=$1 AND m.message_index<$2 AND m.content_redacted_at IS NULL
+       AND ($3::text IS NULL OR m.sender_id=$3)
+       AND ($4::timestamptz IS NULL OR m.sent_at >= $4)
+       AND ($5::timestamptz IS NULL OR m.sent_at <= $5)
+       ORDER BY m.sent_at DESC,m.message_index DESC LIMIT $6`,
+      [
+        scope.chatId,
+        scope.upperIndex,
+        query.senderId ?? null,
+        query.from ?? null,
+        query.to ?? null,
+        query.limit,
+      ],
+    );
+    return result.rows.map(memoryMessage);
   }
   async candidates(
     scope: MemoryScope,

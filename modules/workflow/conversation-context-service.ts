@@ -169,6 +169,54 @@ export function contextCompressionBatchRange(input: {
   return { start: 0, end: input.count };
 }
 
+export interface HistoryMessageRange {
+  count: number;
+  firstMessageIndex: string;
+  lastMessageIndex: string;
+  earliestSentAt: string;
+  latestSentAt: string;
+}
+export interface HistoryCoverage {
+  summaryCoveredThroughIndex: string;
+  retained: HistoryMessageRange | null;
+  omitted: HistoryMessageRange | null;
+}
+export function historyCoverage(
+  summaryCoveredThroughIndex: string,
+  candidates: readonly IndexedContextMessage[],
+  retained: readonly ContextMessage[],
+): HistoryCoverage {
+  const retainedIds = new Set(retained.map((m) => m.providerMessageId));
+  const range = (
+    messages: readonly IndexedContextMessage[],
+  ): HistoryMessageRange | null => {
+    const first = messages[0],
+      last = messages.at(-1);
+    if (!first || !last) return null;
+    const timestamps = messages.map((m) => Date.parse(m.sentAt));
+    return {
+      count: messages.length,
+      firstMessageIndex: first.messageIndex,
+      lastMessageIndex: last.messageIndex,
+      earliestSentAt: new Date(
+        timestamps.reduce((a, b) => Math.min(a, b), Infinity),
+      ).toISOString(),
+      latestSentAt: new Date(
+        timestamps.reduce((a, b) => Math.max(a, b), -Infinity),
+      ).toISOString(),
+    };
+  };
+  return {
+    summaryCoveredThroughIndex,
+    retained: range(
+      candidates.filter((m) => retainedIds.has(m.providerMessageId)),
+    ),
+    omitted: range(
+      candidates.filter((m) => !retainedIds.has(m.providerMessageId)),
+    ),
+  };
+}
+
 export interface ConversationContextResult {
   summary: string;
   messages: readonly ContextMessage[];
@@ -181,6 +229,8 @@ export interface ConversationContextResult {
   temporaryOverflowCharacters: number;
   truncatedMessageCount: number;
   contextIncomplete: boolean;
+  historyCoverage?: HistoryCoverage;
+  contextIncompleteReasons?: string[];
   usedPreviousSummary: boolean;
   compressionOperationId: string | null;
   scheduledCompressionOperationId: string | null;
@@ -1649,7 +1699,17 @@ export class ConversationContextService {
       contextCharacters,
       temporaryOverflowCharacters: overflow,
       truncatedMessageCount: Math.max(0, candidates.length - messages.length),
-      contextIncomplete: summaryOverflow || overflow > 0,
+      historyCoverage: historyCoverage(
+        state.coveredThroughIndex,
+        candidates,
+        messages,
+      ),
+      contextIncompleteReasons: [
+        ...(candidates.length > messages.length ? ["history-trimmed"] : []),
+        ...(summaryOverflow || overflow > 0 ? ["character-overflow"] : []),
+      ],
+      contextIncomplete:
+        candidates.length > messages.length || summaryOverflow || overflow > 0,
       usedPreviousSummary:
         scheduledCompressionOperationId !== null ||
         (input.summaryPolicyVersion !== undefined &&

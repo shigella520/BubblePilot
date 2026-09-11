@@ -581,76 +581,80 @@ describe("AgentRunner", () => {
       },
     ]);
   });
-  it("offers historical tools without web search and redacts their diagnostics", async () => {
-    const { repository, client, routing, search, request } = await setup();
-    const execute = vi.fn().mockResolvedValue(
-      JSON.stringify({
-        status: "succeeded",
-        evidence: [{ ref: "M1", text: "fictional private history" }],
-      }),
-    );
-    const memory = {
-      repository: { scopeForEvent: vi.fn().mockResolvedValue({}) },
-      session: vi.fn().mockResolvedValue({
-        id: "fictional-retrieval",
-        execute,
-        validate: vi.fn().mockResolvedValue(true),
-        render: (text: string) => text.replace(" [M1]", ""),
-      }),
-    } as unknown as MemoryService;
-    vi.spyOn(client, "call").mockImplementation((_provider, input) => {
-      client.requests.push(input);
-      return Promise.resolve(
-        input.messages.some((m) => m.role === "tool")
-          ? {
-              status: "succeeded",
-              text: "Earlier decision [M1]",
-              durationMs: 1,
-            }
-          : {
-              status: "succeeded",
-              text: "",
-              durationMs: 1,
-              toolCalls: [
-                {
-                  id: "memory-call",
-                  name: "search_chat_history",
-                  arguments: JSON.stringify({
-                    query: "fictional private query",
-                  }),
-                },
-              ],
-            },
+  it.each(["search_chat_history", "get_latest_chat_messages"])(
+    "offers %s without web search and redacts diagnostics",
+    async (toolName) => {
+      const { repository, client, routing, search, request } = await setup();
+      const execute = vi.fn().mockResolvedValue(
+        JSON.stringify({
+          status: "succeeded",
+          evidence: [{ ref: "M1", text: "fictional private history" }],
+        }),
       );
-    });
-    const result = await new AgentRunner(
-      routing,
-      search,
-      repository,
-      undefined,
-      undefined,
-      memory,
-    ).run({
-      ...request,
-      webSearch: "disabled",
-      memoryEvent: { provider: "bluebubbles", messageId: "fictional" },
-    });
-    expect(result).toMatchObject({
-      status: "succeeded",
-      text: "Earlier decision",
-    });
-    expect(client.requests[0]?.tools?.map((t) => t.name)).toEqual([
-      "search_chat_history",
-      "read_chat_excerpt",
-    ]);
-    const policyText = JSON.stringify(client.requests[0]?.messages);
-    expect(policyText).toContain("Preserve the configured persona");
-    expect(policyText).toContain("Do not list irrelevant hits");
-    expect(execute).toHaveBeenCalledTimes(1);
-    expect(JSON.stringify(repository.toolExecutions)).not.toContain(
-      "fictional private",
-    );
-  });
+      const memory = {
+        repository: { scopeForEvent: vi.fn().mockResolvedValue({}) },
+        session: vi.fn().mockResolvedValue({
+          id: "fictional-retrieval",
+          execute,
+          validate: vi.fn().mockResolvedValue(true),
+          render: (text: string) => text.replace(" [M1]", ""),
+        }),
+      } as unknown as MemoryService;
+      vi.spyOn(client, "call").mockImplementation((_provider, input) => {
+        client.requests.push(input);
+        return Promise.resolve(
+          input.messages.some((m) => m.role === "tool")
+            ? {
+                status: "succeeded",
+                text: "Earlier decision [M1]",
+                durationMs: 1,
+              }
+            : {
+                status: "succeeded",
+                text: "",
+                durationMs: 1,
+                toolCalls: [
+                  {
+                    id: "memory-call",
+                    name: toolName,
+                    arguments: JSON.stringify({
+                      query: "fictional private query",
+                    }),
+                  },
+                ],
+              },
+        );
+      });
+      const result = await new AgentRunner(
+        routing,
+        search,
+        repository,
+        undefined,
+        undefined,
+        memory,
+      ).run({
+        ...request,
+        webSearch: "disabled",
+        memoryEvent: { provider: "bluebubbles", messageId: "fictional" },
+      });
+      expect(result).toMatchObject({
+        status: "succeeded",
+        text: "Earlier decision",
+      });
+      expect(client.requests[0]?.tools?.map((t) => t.name)).toEqual([
+        "get_latest_chat_messages",
+        "search_chat_history",
+        "read_chat_excerpt",
+      ]);
+      const policyText = JSON.stringify(client.requests[0]?.messages);
+      expect(policyText).toContain("Preserve the configured persona");
+      expect(policyText).toContain("Do not list irrelevant hits");
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(repository.toolExecutions)).not.toContain(
+        "fictional private",
+      );
+    },
+  );
   it("does not force history calls for a greeting and does not grant tools without runtime context", async () => {
     const { repository, client, routing, request } = await setup();
     vi.spyOn(client, "call").mockResolvedValue({

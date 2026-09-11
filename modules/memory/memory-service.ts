@@ -11,6 +11,8 @@ import type { MemoryRepository } from "./memory-repository.js";
 import {
   memorySettingsSchema,
   memorySearchSchema,
+  latestChatMessagesSchema,
+  type LatestChatMessages,
   type MemoryScope,
   type MemorySearch,
   type Evidence,
@@ -19,6 +21,27 @@ import {
 import type { AiToolDefinition } from "../ai/ai-types.js";
 
 export const memoryTools: readonly AiToolDefinition[] = [
+  {
+    name: "get_latest_chat_messages",
+    description:
+      "Get the latest archived messages in this authorized chat, ordered by sent_at descending then message index descending, before the triggering message. Use for last speaking time or messages in a time interval; this is not topic search. Use exact known sender_id; never guess an ambiguous identity. Results may be limited or truncated, not an exhaustive transcript. No results do not establish that someone never spoke. Uses the same internal [M1] evidence markers as search_chat_history.",
+    parameters: {
+      type: "object",
+      properties: {
+        senderId: { type: "string", description: "Exact known sender_id" },
+        from: {
+          type: "string",
+          description: "Inclusive ISO timestamp with timezone",
+        },
+        to: {
+          type: "string",
+          description: "Inclusive ISO timestamp with timezone",
+        },
+        limit: { type: "integer", minimum: 1, maximum: 20, default: 1 },
+      },
+      additionalProperties: false,
+    },
+  },
   {
     name: "search_chat_history",
     description:
@@ -250,10 +273,14 @@ export class MemorySession {
       ],
     );
   }
-  private async add(messages: MemoryMessage[]): Promise<Evidence | null> {
+  private async add(
+    messages: MemoryMessage[],
+    allowOverlap = false,
+  ): Promise<Evidence | null> {
     if (Date.now() >= this.deadline) return null;
     const unique = messages.filter(
       (m) =>
+        allowOverlap ||
         ![...this.evidence.values()].some((e) =>
           e.messages.some(
             (old) =>
@@ -443,9 +470,84 @@ export class MemorySession {
     }
     return result;
   }
+  private async latest(query: LatestChatMessages): Promise<string> {
+    const started = Date.now();
+    const remaining = Math.max(0, 5000 - this.elapsed);
+    const unavailable = JSON.stringify({
+      status: "unavailable",
+      order: "sent_at_desc,message_index_desc",
+      truncated: true,
+      evidence: [],
+    });
+    if (!remaining) return unavailable;
+    this.deadline = started + remaining;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        (async () => {
+          if (!(await this.validate())) return unavailable;
+          const messages = await this.service.repository.latest(
+            this.scope,
+            query,
+          );
+          const evidence: (Evidence & {
+            messageId: string;
+            sentAt: string;
+            senderId: string;
+          })[] = [];
+          for (const message of messages) {
+            // Reuse only an exact, complete single-message source, not a search excerpt.
+            const existing = [...this.evidence.values()].find(
+              (entry) =>
+                entry.messages.length === 1 &&
+                entry.messages[0]?.id === message.id &&
+                entry.messages[0]?.hash === message.hash &&
+                entry.messages[0]?.text === message.text,
+            );
+            const item = existing?.item ?? (await this.add([message], true));
+            if (!item) break;
+            evidence.push({
+              ...item,
+              messageId: message.id,
+              sentAt: message.sentAt,
+              senderId: message.senderId,
+            });
+          }
+          if (!(await this.validate()) || Date.now() >= this.deadline)
+            return unavailable;
+          return JSON.stringify({
+            status:
+              messages.length && !evidence.length
+                ? "unavailable"
+                : messages.length
+                  ? "succeeded"
+                  : "no-results",
+            order: "sent_at_desc,message_index_desc",
+            limit: query.limit,
+            limitReached: messages.length === query.limit,
+            truncated: evidence.length < messages.length,
+            evidence,
+          });
+        })(),
+        new Promise<string>((resolve) => {
+          timer = setTimeout(() => {
+            this.deadline = 0;
+            resolve(unavailable);
+          }, remaining);
+        }),
+      ]);
+    } catch {
+      return unavailable;
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.elapsed += Date.now() - started;
+    }
+  }
   async execute(name: string, args: string): Promise<string> {
     try {
       const parsed = JSON.parse(args) as unknown;
+      if (name === "get_latest_chat_messages")
+        return this.latest(latestChatMessagesSchema.parse(parsed));
       if (name === "search_chat_history") {
         const result = await this.search(memorySearchSchema.parse(parsed));
         return JSON.stringify({

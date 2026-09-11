@@ -57,6 +57,52 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     );
     return id;
   }
+  it("queries event-time order with sender, time and trigger boundaries without indexing", async () => {
+    const id = await chat();
+    const old = await message(id, "虚构旧话题：备份备份");
+    const latest = await message(id, "虚构最新发言");
+    const delayed = await message(id, "虚构延迟归档");
+    const trigger = await message(id, "虚构触发");
+    await message(id, "虚构未来消息");
+    await message(await chat(), "虚构其他聊天");
+    await repo.pool.query(
+      "UPDATE messages SET sent_at='2026-09-10T16:00:00Z' WHERE id=ANY($1::uuid[])",
+      [[old, latest]],
+    );
+    await repo.pool.query(
+      "UPDATE messages SET sent_at='2026-09-09T00:00:00Z' WHERE id=$1",
+      [delayed],
+    );
+    const boundary = await repo.pool.query<{ message_index: string }>(
+      "SELECT message_index FROM messages WHERE id=$1",
+      [trigger],
+    );
+    const scope = (await repo.scope(
+      id,
+      Number(boundary.rows[0]!.message_index),
+      null,
+    ))!;
+    const rows = await repo.latest(scope, {
+      limit: 20,
+      senderId: "fictional-sender",
+      from: "2026-09-11T00:00:00+08:00",
+      to: "2026-09-11T00:00:00+08:00",
+    });
+    expect(rows.map((m) => m.id)).toEqual([latest, old]);
+    expect((await repo.latest(scope, { limit: 20 })).map((m) => m.id)).toEqual([
+      latest,
+      old,
+      delayed,
+    ]);
+    expect(
+      await repo.latest(scope, { limit: 20, senderId: "other@example.test" }),
+    ).toEqual([]);
+    await repo.pool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
+      [latest],
+    );
+    expect((await repo.latest(scope, { limit: 1 }))[0]?.id).toBe(old);
+  });
   async function drain() {
     await repo.pool.query(
       "UPDATE memory_jobs SET next_attempt_at=now() WHERE status='queued'",

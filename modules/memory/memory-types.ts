@@ -17,6 +17,16 @@ export const memorySearchSchema = z
   })
   .strict()
   .refine((v) => !v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to));
+export const latestChatMessagesSchema = z
+  .object({
+    senderId: z.string().trim().min(1).max(255).optional(),
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
+    limit: z.number().int().min(1).max(20).default(1),
+  })
+  .strict()
+  .refine((v) => !v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to));
+export type LatestChatMessages = z.infer<typeof latestChatMessagesSchema>;
 export type MemorySearch = z.infer<typeof memorySearchSchema>;
 export interface Generation {
   id: string;
