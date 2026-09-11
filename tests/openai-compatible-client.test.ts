@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { AiRawRequestStore } from "../modules/ai/ai-raw-request-store.js";
 import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
 import type { AiProviderRecord } from "../modules/ai/ai-types.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
@@ -30,6 +31,48 @@ const request = {
 };
 
 describe("OpenAiCompatibleClient", () => {
+  it("retains historical tool request bodies in transient diagnostics even on HTTP failure", async () => {
+    const store = new AiRawRequestStore();
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional-secret" }),
+      () => Promise.resolve(new Response("unavailable", { status: 503 })),
+      store,
+    );
+    const result = await client.call(provider, {
+      ...request,
+      executionId: "fictional-history-execution",
+      messages: [
+        ...request.messages,
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "history-call",
+              name: "search_chat_history",
+              arguments: '{"query":"fictional"}',
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: '{"evidence":"fictional archived evidence"}',
+          toolCallId: "history-call",
+        },
+      ],
+    });
+    expect(result.status).toBe("failed");
+    const hash = result.diagnostics?.requestHash ?? "";
+    const body = store.get("fictional-history-execution", hash);
+    expect(body).toContain("fictional archived evidence");
+    expect(body).not.toContain("fictional-secret");
+    expect(JSON.stringify(result.diagnostics)).not.toContain(
+      "fictional archived evidence",
+    );
+    expect(
+      new AiRawRequestStore().get("fictional-history-execution", hash),
+    ).toBeNull();
+  });
   it("traces the exact multimodal divergence without storing prompt content", async () => {
     const responsesProvider: AiProviderRecord = {
       ...provider,

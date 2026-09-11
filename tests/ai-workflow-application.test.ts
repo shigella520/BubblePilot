@@ -561,6 +561,14 @@ describe("AI workflow", () => {
     const firstAttemptId = detail.json<{
       data: { aiProviderAttempts: Array<{ id: string }> };
     }>().data.aiProviderAttempts[0]?.id;
+    const unauthenticatedRawRequest = await application.inject({
+      method: "GET",
+      url: `/api/v1/executions/${executionId}/ai-attempts/${firstAttemptId}/raw-request`,
+    });
+    expect(unauthenticatedRawRequest.statusCode).toBe(401);
+    expect(unauthenticatedRawRequest.body).not.toContain(
+      "Earlier fictional context",
+    );
     const rawRequest = await application.inject({
       method: "GET",
       url: `/api/v1/executions/${executionId}/ai-attempts/${firstAttemptId}/raw-request`,

@@ -480,7 +480,6 @@ export class AiRoutingService {
           !(request.tools?.some((tool) => tool.name !== "web_search") ?? false);
         let result: AiCallResult = await this.client.call(candidate.provider, {
           messages: request.messages,
-          ...(request.sensitiveHistory ? { sensitiveHistory: true } : {}),
           maxOutputTokens: request.maxOutputTokens,
           temperature: request.temperature,
           ...(request.executionId === null

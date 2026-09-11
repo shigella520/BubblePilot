@@ -2239,33 +2239,24 @@ legend {
 .provider-reset-action {
   width: 90px;
 }
-.route-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+.route-table {
   margin-top: 20px;
 }
-.route-grid article {
-  min-width: 0;
-  padding: 18px;
-  border: 1px solid var(--bubblepilot-line);
-  border-radius: 19px;
-  background: rgba(255, 255, 255, 0.58);
+.route-table th,
+.route-table td:first-child,
+.route-table td:nth-child(6) {
+  white-space: nowrap;
 }
-.route-grid article > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.route-table td:nth-child(5) {
+  min-width: 150px;
 }
-.route-grid header strong,
-.route-grid header span {
-  display: block;
+.route-table .row-actions {
+  min-width: 120px;
+  flex-wrap: nowrap;
 }
-.route-grid header span,
-.route-grid article > p {
-  color: var(--bubblepilot-muted);
-  font-size: 10px;
+.route-table .route-flow {
+  min-width: 160px;
+  margin: 0;
 }
 .route-flow {
   display: flex;
@@ -3217,7 +3208,6 @@ legend {
     white-space: nowrap;
   }
   .two-column-forms,
-  .route-grid,
   .trace-columns,
   .context-snapshot-grid,
   .compression-content-grid,

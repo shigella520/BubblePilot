@@ -863,7 +863,7 @@ export class PostgresAiRepository implements AiRepository {
       `${routeSelect}
        WHERE r.deleted_at IS NULL
        GROUP BY r.id, rv.id
-       ORDER BY r.updated_at DESC, r.id`,
+       ORDER BY r.created_at DESC, r.id`,
     );
     return result.rows.map(routeRecord);
   }

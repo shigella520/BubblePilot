@@ -792,7 +792,9 @@ function clearCompressionDetail() {
   compressionContent.value = null;
 }
 
+let rawRequestEpoch = 0;
 function clearDetail() {
+  rawRequestEpoch += 1;
   inspectRequestId += 1;
   detailLoadingId.value = null;
   detail.value = null;
@@ -806,6 +808,8 @@ async function loadRawRequest(attemptId: string) {
     rawRequestLoadingId.value !== null
   )
     return;
+  const epoch = rawRequestEpoch;
+  const executionId = detail.value.id;
   rawRequestLoadingId.value = attemptId;
   message.value = "";
   messageIsError.value = false;
@@ -815,8 +819,14 @@ async function loadRawRequest(attemptId: string) {
       requestHash: string | null;
       body: string;
     }>(
-      `/api/v1/executions/${detail.value.id}/ai-attempts/${attemptId}/raw-request`,
+      `/api/v1/executions/${executionId}/ai-attempts/${attemptId}/raw-request`,
     );
+    if (
+      epoch !== rawRequestEpoch ||
+      !session.sensitiveActive ||
+      detail.value?.id !== executionId
+    )
+      return;
     rawRequests.value = {
       ...rawRequests.value,
       [attemptId]: JSON.stringify(JSON.parse(result.body), null, 2),
@@ -831,7 +841,7 @@ async function loadRawRequest(attemptId: string) {
 
 async function copyRawRequest(attemptId: string) {
   const body = rawRequests.value[attemptId];
-  if (body === undefined) return;
+  if (!session.sensitiveActive || body === undefined) return;
   try {
     await navigator.clipboard.writeText(body);
     message.value = "AI 请求原始报文已复制。";
@@ -1019,6 +1029,8 @@ watch(
       }
     } else {
       auditPager.clear();
+      rawRequestEpoch += 1;
+      rawRequests.value = {};
       compressionContent.value = null;
     }
   },
@@ -2100,7 +2112,8 @@ function contextSnapshotValue(
                     }}</pre>
                   </details>
                   <p v-else class="keyline raw-request-unavailable">
-                    原始请求报文已因应用重启或超过最近 20 个执行而不可用。
+                    当前实例未保留此原始请求报文。可能未曾保存、应用已重启、超出最近
+                    20 个执行，或由其他实例处理。
                   </p>
                   <details
                     v-if="item.diagnostics?.requestTrace"

@@ -334,7 +334,6 @@ export class AgentRunner {
         (turn === maxTurns && (searchAttempted || memory !== null));
       const routeRequest: AiRouteRequest = {
         ...request,
-        ...(memory ? { sensitiveHistory: true } : {}),
         messages,
         agentTurn: turn,
         ...(preferredProviderId === undefined ? {} : { preferredProviderId }),
