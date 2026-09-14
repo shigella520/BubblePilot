@@ -35,6 +35,7 @@
     "db:prepare-memory": "tsx app/prepare-memory.ts",
     "memory:evaluate": "tsx app/evaluate-memory.ts",
     "memory:benchmark": "tsx app/benchmark-memory.ts",
+    "bot:evaluate": "tsx app/evaluate-bot-identity.ts",
     "agent:evaluate": "tsx app/evaluate-agent.ts",
     "chat:benchmark": "tsx app/benchmark-chat-queries.ts"
   },
