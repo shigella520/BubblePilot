@@ -1,3 +1,8 @@
+import {
+  authorLabel,
+  messageAuthor,
+  type MessageAuthor,
+} from "../identity/bot-identity.js";
 import { randomUUID } from "node:crypto";
 
 import type { Pool } from "pg";
@@ -44,6 +49,7 @@ interface MessageRow {
   sent_at: Date;
   body: string;
   is_from_me: boolean;
+  author?: MessageAuthor;
   attachments: unknown;
   link_preview_status: string;
   link_previews: unknown;
@@ -82,6 +88,7 @@ export interface ConversationSummaryRuntimeSettings {
 export type ContextCompressionReason =
   | "initial-catchup"
   | "message-threshold"
+  | "bot-identity-rebuild"
   | "policy-rebuild"
   | "backlog-fast-forward"
   | "manual-reset";
@@ -266,6 +273,7 @@ interface MessageQueryInput {
 }
 
 export interface ConversationContextSnapshot {
+  botIdentityRevision?: number;
   stateId: string;
   chatId?: string;
   summaryVersion: number;
@@ -488,6 +496,7 @@ function contextMessage(row: MessageRow): IndexedContextMessage {
     sentAt: row.sent_at.toISOString(),
     body: row.body,
     isFromMe: row.is_from_me,
+    ...(row.author ? { author: row.author } : {}),
     attachments: attachments(row.attachments),
     linkPreview: linkPreview(row),
   };
@@ -606,9 +615,9 @@ export function conversationCompressionTranscript(
           `<image_summaries>${JSON.stringify(summaries)}</image_summaries>`,
         );
       }
-      return `[${formatContextTimestamp(message.sentAt, timeZone)}] [sender=${
-        message.isFromMe ? "Bot" : (message.senderId ?? "unknown")
-      }] ${material.join("\n")}`;
+      return `[${formatContextTimestamp(message.sentAt, timeZone)}] [sender=${authorLabel(
+        messageAuthor(message),
+      )}] ${material.join("\n")}`;
     })
     .join("\n");
 }
@@ -692,6 +701,17 @@ export class ConversationContextService {
       input.providerChatId,
       input.providerMessageId,
     );
+    const identityGate = (
+      await this.pool.query<{ blocked: boolean }>(
+        "SELECT (bot_summary_rebuild_required OR bot_summary_rebuild_through IS NOT NULL) AS blocked FROM chats WHERE id=$1",
+        [state.chatId],
+      )
+    ).rows[0];
+    if (identityGate?.blocked)
+      return {
+        triggerMessageIndex,
+        summarySnapshot: await this.summarySnapshotForState(state),
+      };
     const eligibleCount = await this.countMessages(
       {
         provider: input.provider,
@@ -1163,6 +1183,7 @@ export class ConversationContextService {
            ON revision.context_state_id = original.context_state_id
           AND revision.version = original.base_version
          WHERE original.id = $1
+           AND EXISTS(SELECT 1 FROM conversation_context_states s JOIN chats c ON c.id=s.chat_id WHERE s.id=original.context_state_id AND NOT c.bot_summary_rebuild_required AND original.bot_identity_revision=c.bot_identity_revision)
            AND original.preview = FALSE
            AND original.status IN ('succeeded', 'failed', 'superseded')
          FOR UPDATE OF original`,
@@ -1586,6 +1607,7 @@ export class ConversationContextService {
         sentAt: message.sentAt,
         body: message.body,
         isFromMe: message.isFromMe,
+        author: messageAuthor(message),
       })),
     };
   }
@@ -1652,6 +1674,24 @@ export class ConversationContextService {
         };
       }
     }
+    const identityState = (
+      await this.pool.query<{
+        revision: number;
+        blocked: boolean;
+        state_revision: number;
+      }>(
+        `SELECT c.bot_identity_revision AS revision,c.bot_summary_rebuild_required AS blocked,s.bot_identity_revision AS state_revision FROM chats c LEFT JOIN conversation_context_states s ON s.id=$3 WHERE c.provider=$1 AND c.provider_chat_id=$2`,
+        [input.provider, input.providerChatId, state.id],
+      )
+    ).rows[0];
+    const identityIncomplete =
+      !!identityState &&
+      (identityState.blocked ||
+        (input.summarySnapshot
+          ? (input.summarySnapshot.botIdentityRevision ?? 0)
+          : identityState.state_revision) !== identityState.revision);
+    if (identityIncomplete)
+      state = { ...state, summary: "", coveredThroughIndex: "0" };
     const cacheHit = this.cache.get(cacheKey)?.version === state.version;
     this.cache.set(cacheKey, state);
     const summary = state.summary;
@@ -1705,11 +1745,15 @@ export class ConversationContextService {
         messages,
       ),
       contextIncompleteReasons: [
+        ...(identityIncomplete ? ["bot-identity-rebuild-required"] : []),
         ...(candidates.length > messages.length ? ["history-trimmed"] : []),
         ...(summaryOverflow || overflow > 0 ? ["character-overflow"] : []),
       ],
       contextIncomplete:
-        candidates.length > messages.length || summaryOverflow || overflow > 0,
+        identityIncomplete ||
+        candidates.length > messages.length ||
+        summaryOverflow ||
+        overflow > 0,
       usedPreviousSummary:
         scheduledCompressionOperationId !== null ||
         (input.summaryPolicyVersion !== undefined &&
@@ -1837,7 +1881,14 @@ export class ConversationContextService {
        LIMIT 1`,
       [state.id, state.version],
     );
+    const identityRevision = (
+      await this.pool.query<{ bot_identity_revision: number }>(
+        "SELECT bot_identity_revision FROM conversation_context_states WHERE id=$1",
+        [state.id],
+      )
+    ).rows[0]?.bot_identity_revision;
     return {
+      botIdentityRevision: identityRevision ?? 0,
       stateId: state.id,
       chatId: state.chatId,
       summary: state.summary,
@@ -1932,7 +1983,7 @@ export class ConversationContextService {
   private messageSelect(includeDisabledChat = false): string {
     return `SELECT m.message_index, m.provider_message_id, m.sender_id,
                    m.sent_at, COALESCE(m.body, '') AS body,
-                   m.is_from_me, m.attachments, m.link_preview_status,
+                   m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.link_preview_status,
                    m.link_previews, m.link_preview_error_code
             FROM messages m
             INNER JOIN chats c ON c.id = m.chat_id
@@ -2165,6 +2216,9 @@ export class ConversationContextService {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      await client.query("SELECT id FROM chats WHERE id=$1 FOR SHARE", [
+        claim.state.chatId,
+      ]);
       // Re-check ownership and lease validity before changing the summary.
       // A provider call may outlive its lease; in that case a recovered worker
       // owns the operation and the stale caller must not advance the cursor.
@@ -2199,7 +2253,7 @@ export class ConversationContextService {
              status = 'idle', last_compression_reason = $5,
              last_error_code = NULL, last_compression_at = NOW(),
              updated_at = NOW()
-         WHERE id = $1 AND version = $2 AND status = 'compressing'`,
+         WHERE id = $1 AND version = $2 AND status = 'compressing' AND bot_identity_revision=(SELECT bot_identity_revision FROM chats WHERE id=conversation_context_states.chat_id) AND NOT (SELECT bot_summary_rebuild_required FROM chats WHERE id=conversation_context_states.chat_id)`,
         [
           claim.state.id,
           claim.state.version,
@@ -2434,7 +2488,7 @@ export class ConversationContextService {
            ON revision.context_state_id = state.id
           AND revision.version = operation.base_version
          INNER JOIN chats chat ON chat.id = state.chat_id
-         WHERE operation.status = 'queued'
+         WHERE operation.status = 'queued' AND NOT EXISTS(SELECT 1 FROM bot_attribution_jobs b JOIN messages bm ON bm.id=b.message_id WHERE b.status IN ('queued','running') AND bm.chat_id=chat.id AND bm.message_index BETWEEN operation.from_index AND operation.through_index) AND NOT chat.bot_summary_rebuild_required AND operation.bot_identity_revision=chat.bot_identity_revision
            AND (operation.preview = TRUE OR state.version = operation.base_version)
          ORDER BY operation.preview, operation.started_at, operation.id
          FOR UPDATE OF operation SKIP LOCKED

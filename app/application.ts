@@ -1,3 +1,7 @@
+import {
+  type BotIdentityService,
+  botIdentityUpdateSchema,
+} from "../modules/identity/bot-identity-service.js";
 import type { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
 import { agentSettingsUpdateSchema } from "../modules/ai/agent-settings-types.js";
 import type { MemoryService } from "../modules/memory/memory-service.js";
@@ -125,6 +129,7 @@ const compressionListQuerySchema = pageQuerySchema.extend({
       "initial-catchup",
       "message-threshold",
       "policy-rebuild",
+      "bot-identity-rebuild",
       "backlog-fast-forward",
       "manual-reset",
     ])
@@ -349,6 +354,7 @@ const triggerPreviewBodySchema = z.object({
 });
 
 export interface ApplicationOptions {
+  botIdentity?: BotIdentityService;
   memory?: MemoryService;
   logger?: boolean;
   webRoot?: string | false;
@@ -378,6 +384,7 @@ export interface ApplicationOptions {
         reason?:
           | "initial-catchup"
           | "message-threshold"
+          | "bot-identity-rebuild"
           | "policy-rebuild"
           | "backlog-fast-forward"
           | "manual-reset";
@@ -2343,6 +2350,78 @@ export function buildApplication(
     );
   }
 
+  if (options.botIdentity) {
+    const identity = options.botIdentity;
+    application.get(
+      "/api/v1/workflows/:workflowId/bot-identity",
+      { preHandler: requireAdmin },
+      async (request) => ({
+        data: await identity.view(
+          workflowParametersSchema.parse(request.params).workflowId,
+        ),
+      }),
+    );
+    application.put(
+      "/api/v1/workflows/:workflowId/bot-identity",
+      {
+        preHandler: requireAuditedAdmin(
+          "workflow.bot-identity.update",
+          "workflow",
+        ),
+      },
+      async (request) => ({
+        data: await identity.update(
+          workflowParametersSchema.parse(request.params).workflowId,
+          botIdentityUpdateSchema.parse(request.body),
+        ),
+      }),
+    );
+    application.get(
+      "/api/v1/bot-attributions",
+      { preHandler: requireAdmin },
+      async () => ({ data: await identity.status() }),
+    );
+    application.post(
+      "/api/v1/bot-attributions/backfill",
+      {
+        preHandler: requireAuditedAdmin(
+          "bot-attribution.backfill",
+          "bot-attribution",
+        ),
+      },
+      async () => ({ data: await identity.startBackfill() }),
+    );
+    application.post(
+      "/api/v1/bot-attributions/:jobId/retry",
+      {
+        preHandler: requireAuditedAdmin(
+          "bot-attribution.retry",
+          "bot-attribution",
+        ),
+      },
+      async (request) => ({
+        data: await identity.retry(
+          z.object({ jobId: z.string().uuid() }).parse(request.params).jobId,
+        ),
+      }),
+    );
+    application.post(
+      "/api/v1/chats/:chatId/bot-identity/rebuild",
+      { preHandler: requireAuditedAdmin("bot-identity.rebuild", "chat") },
+      async (request) => ({
+        data: await identity.rebuild(
+          z.object({ chatId: z.string().uuid() }).parse(request.params).chatId,
+          (await options.ai?.summarySettings?.resolve()) ?? {
+            enabled: false,
+            providerRouteId: "",
+            policyVersion: 1,
+            includeFromMe: true,
+            timeZone: "UTC",
+          },
+        ),
+      }),
+    );
+  }
   if (options.workflow !== undefined) {
     const workflowRepository = options.workflow.repository;
     const manifestSigner = new WorkflowManifestPreviewSigner(
@@ -2524,6 +2603,13 @@ export function buildApplication(
         }
         const manifest = exportWorkflowManifest({
           definition: version.definition,
+          ...(options.botIdentity
+            ? {
+                botNickname:
+                  (await options.botIdentity.view(version.workflowId))
+                    .nickname ?? undefined,
+              }
+            : {}),
           mode: query.mode,
           catalog: await workflowBindingCatalog(),
           schemaUrl: "/api/v1/workflows/schema",
@@ -2577,6 +2663,7 @@ export function buildApplication(
                 : {
                     name: result.manifest.metadata.name,
                     description: result.manifest.metadata.description,
+                    botNickname: result.manifest.metadata.botNickname ?? null,
                     nodeCount: result.manifest.spec.nodes.length,
                   },
           },
@@ -2647,6 +2734,8 @@ export function buildApplication(
         return reply.status(201).send({
           data: {
             workflowId: version.workflowId,
+            suggestedBotNickname:
+              parsedManifest.data.metadata.botNickname ?? null,
             workflowVersion: version.version,
             status: version.status,
             definition: version.definition,
@@ -3627,6 +3716,7 @@ export function buildApplication(
     await options.messageRetention?.stop();
     await Promise.all([
       repository.close(),
+      options.botIdentity?.close() ?? Promise.resolve(),
       options.auth?.close() ?? Promise.resolve(),
       options.workflow?.repository.close() ?? Promise.resolve(),
       options.workflow?.contextState?.close() ?? Promise.resolve(),

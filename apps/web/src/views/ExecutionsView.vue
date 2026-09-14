@@ -53,6 +53,11 @@ interface Execution {
   cacheEligiblePromptTokens: number;
   cacheHitRate: number | null;
   contextSnapshot: Record<string, unknown> | null;
+  botIdentity?: {
+    workflowId: string;
+    nickname: string | null;
+    version: number;
+  } | null;
 }
 interface AiRouteTrace {
   id: string;
@@ -1124,6 +1129,7 @@ function compressionReasonLabel(reason: string): string {
       {
         "initial-catchup": "初始追赶",
         "message-threshold": "消息阈值",
+        "bot-identity-rebuild": "Bot 身份重建",
         "policy-rebuild": "历史策略重建",
         "backlog-fast-forward": "积压自动追赶",
         "manual-reset": "手动重置摘要",
@@ -1835,6 +1841,15 @@ function contextSnapshotValue(
           </div>
         </header>
         <div class="execution-detail-body">
+          <section class="context-snapshot-card">
+            <h3>本次 Bot 角色</h3>
+            <p v-if="detail.botIdentity">
+              {{ detail.botIdentity.nickname ?? "未命名 Bot" }} · 工作流
+              {{ detail.botIdentity.workflowId }} · 配置版本
+              {{ detail.botIdentity.version }}
+            </p>
+            <p v-else>未记录角色身份</p>
+          </section>
           <section v-if="detail.contextSnapshot" class="context-snapshot-card">
             <div class="context-snapshot-heading">
               <div>
@@ -1945,6 +1960,20 @@ function contextSnapshotValue(
                 </dd>
               </div>
             </dl>
+            <details v-if="detail.contextSnapshot.authorAttributions">
+              <summary>
+                消息作者归属（未知
+                {{ detail.contextSnapshot.unknownSelfCount ?? 0 }} 条，归属冲突
+                {{ detail.contextSnapshot.attributionConflictCount ?? 0 }} 条）
+              </summary>
+              <pre>{{
+                JSON.stringify(
+                  detail.contextSnapshot.authorAttributions,
+                  null,
+                  2,
+                )
+              }}</pre>
+            </details>
             <p>
               保留原文：{{
                 coverageRangeText(detail.contextSnapshot, "retained")

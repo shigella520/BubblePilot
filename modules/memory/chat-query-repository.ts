@@ -1,3 +1,4 @@
+import type { MessageAuthor } from "../identity/bot-identity.js";
 import { AgentToolTimeout, type AgentToolContext } from "../ai/agent-budget.js";
 import type { Pool } from "pg";
 import {
@@ -33,6 +34,10 @@ export function chatFilterSql(
     `m.message_index<${parameter(scope.upperIndex)}::bigint`,
     "m.content_redacted_at IS NULL",
   ];
+  if (query.botWorkflowId)
+    predicates.push(
+      `EXISTS(SELECT 1 FROM message_bot_attributions a WHERE a.message_id=m.id AND a.workflow_id=${parameter(query.botWorkflowId)}::uuid)`,
+    );
   if (query.senderId !== undefined)
     predicates.push(`m.sender_id=${parameter(query.senderId)}::text`);
   if (query.from)
@@ -62,6 +67,7 @@ interface GroupRow extends QueryMessageRow {
   group_key: string;
   count: string;
   group_sender: string | null;
+  group_author: MessageAuthor | null;
 }
 export interface ArchiveQueryMessage {
   senderId: string | null;
@@ -69,6 +75,7 @@ export interface ArchiveQueryMessage {
   position: MessagePosition;
 }
 export interface ArchiveQueryGroup {
+  author: MessageAuthor | null;
   key: string;
   senderId: string | null;
   count: number;
@@ -173,7 +180,7 @@ export class ChatQueryRepository {
       query.groupBy === "day"
         ? `to_char(m.sent_at AT TIME ZONE ${f.zone}::text,'YYYY-MM-DD')`
         : query.groupBy === "sender"
-          ? `CASE WHEN m.sender_id IS NULL THEN '0' ELSE '1'||m.sender_id END`
+          ? `CASE WHEN EXISTS(SELECT 1 FROM message_bot_attributions a WHERE a.message_id=m.id) THEN '2'||(SELECT a.workflow_id::text FROM message_bot_attributions a WHERE a.message_id=m.id) WHEN m.is_from_me THEN '0self' WHEN m.sender_id IS NULL THEN '0' ELSE '1'||m.sender_id END`
           : `'all'::text`;
     const keys = bounds
       ? `SELECT to_char(d,'YYYY-MM-DD') AS group_key FROM generate_series(${f.parameter(bounds[0])}::timestamp,${f.parameter(bounds[1])}::timestamp,interval '1 day') d`
@@ -191,7 +198,8 @@ export class ChatQueryRepository {
         : `k.group_key COLLATE "C">${f.parameter(after)}::text COLLATE "C"`;
     const page = await this.page<GroupRow>(
       `WITH filtered AS (SELECT m.id,m.sent_at,m.message_index,${key} AS group_key FROM messages m WHERE ${f.where} AND ${f.zone}::text IS NOT NULL), keys AS (${keys}), aggregated AS (${aggregated})
-      SELECT k.group_key, ${query.groupBy === "sender" ? "CASE WHEN k.group_key='0' THEN NULL ELSE substr(k.group_key,2) END" : "NULL::text"} AS group_sender,
+      SELECT k.group_key, ${query.groupBy === "sender" ? "CASE WHEN left(k.group_key,1)='1' THEN substr(k.group_key,2) ELSE NULL END" : "NULL::text"} AS group_sender,
+      ${query.groupBy === "sender" ? "(SELECT bot_message_author(f.id) FROM filtered f WHERE f.group_key=k.group_key ORDER BY f.message_index LIMIT 1)" : "NULL::jsonb"} AS group_author,
       ${extrema ? `NULL::text AS count,${messageColumns.replace("m.message_index", "m.message_index::text AS message_index")},${exactTime} AS sort_time` : "coalesce(a.count,'0') AS count"}
       FROM keys k LEFT JOIN aggregated a ON a.group_key=k.group_key ${extrema ? "LEFT JOIN messages m ON m.id=a.id" : ""}
       WHERE ${condition} ORDER BY k.group_key COLLATE "C" LIMIT ${f.parameter(query.groupBy === "none" ? 1 : query.limit + 1)}`,
@@ -206,6 +214,7 @@ export class ChatQueryRepository {
           throw new ChatQueryError("count-out-of-range");
         return {
           key: row.group_key,
+          author: row.group_author,
           senderId: row.group_sender,
           count,
           message: extrema && row.id ? archived(row) : null,

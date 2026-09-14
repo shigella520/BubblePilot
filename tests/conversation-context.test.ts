@@ -565,11 +565,7 @@ describe("conversation context summary contract", () => {
       {},
     );
     expect(next.slice(0, previous.length)).toEqual(previous);
-    expect(previous.map((item) => item.role)).toEqual([
-      "user",
-      "user",
-      "assistant",
-    ]);
+    expect(previous.map((item) => item.role)).toEqual(["user", "user", "user"]);
   });
 
   it("binds historical images to their owning chat message", () => {

@@ -6,6 +6,181 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/workflows/{workflowId}/bot-identity:
+    get:
+      operationId: getapiv1workflowsworkflowIdbotidentity
+      description: 工作流 Bot 昵称与版本；首次昵称用于历史映射。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，data 返回配置或任务状态。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putapiv1workflowsworkflowIdbotidentity
+      description: 工作流 Bot 昵称与版本；首次昵称用于历史映射。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [nickname, expectedVersion]
+              properties:
+                nickname:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                expectedVersion:
+                  type: integer
+                  minimum: 0
+      responses:
+        "200":
+          description: 操作成功，data 返回配置或任务状态。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /api/v1/bot-attributions:
+    get:
+      operationId: getapiv1botattributions
+      description: 归属预览、任务与待重建聊天。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 操作成功，data 返回配置或任务状态。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /api/v1/bot-attributions/backfill:
+    post:
+      operationId: postapiv1botattributionsbackfill
+      description: 启动幂等历史归属回填，不调用模型。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 操作成功，data 返回配置或任务状态。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /api/v1/bot-attributions/{jobId}/retry:
+    post:
+      operationId: postapiv1botattributionsjobIdretry
+      description: 重试失败归属任务。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，data 返回配置或任务状态。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /api/v1/chats/{chatId}/bot-identity/rebuild:
+    post:
+      operationId: postapiv1chatschatIdbotidentityrebuild
+      description: 管理员手动启动身份兼容摘要和索引重建，沿用启用状态和聊天授权。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: chatId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，data 返回配置或任务状态。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /api/v1/ai/memory/settings:
     get:
       operationId: getapiv1aimemorysettings

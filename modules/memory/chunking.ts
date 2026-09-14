@@ -1,3 +1,4 @@
+import { authorLabel, type MessageAuthor } from "../identity/bot-identity.js";
 import { createHash } from "node:crypto";
 export interface MemoryMessage {
   id: string;
@@ -5,6 +6,7 @@ export interface MemoryMessage {
   sentAt: string;
   senderId: string;
   role: "user" | "assistant";
+  author?: MessageAuthor;
   text: string;
   hash: string;
   excerptStart?: number;
@@ -38,7 +40,7 @@ export function chunkMessages(
   let lastTime = 0;
   for (const message of messages) {
     const time = Date.parse(message.sentAt);
-    const header = `${message.sentAt} sender_id=${message.senderId} role=${message.role}\n`;
+    const header = `${message.sentAt} sender_id=${message.senderId} role=${message.role} author=${message.author ? authorLabel(message.author) : "unknown"}\n`;
     const size = Math.max(1, 1600 - header.length);
     for (let offset = 0; offset < message.text.length; offset += size) {
       const part = header + message.text.slice(offset, offset + size);

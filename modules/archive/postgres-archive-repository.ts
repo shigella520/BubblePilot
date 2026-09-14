@@ -1,3 +1,4 @@
+import type { MessageAuthor } from "../identity/bot-identity.js";
 import { randomUUID } from "node:crypto";
 
 import type { Pool, PoolClient, QueryResult } from "pg";
@@ -74,6 +75,7 @@ interface MessageRow {
   body: string | null;
   content_type: "text" | "attachment" | "mixed" | "unknown";
   is_from_me: boolean;
+  author?: MessageAuthor;
   attachments: unknown[];
   link_preview_status: string;
   link_previews: unknown;
@@ -97,6 +99,7 @@ interface ContextMessageRow {
   sent_at: Date;
   body: string;
   is_from_me: boolean;
+  author?: MessageAuthor;
   attachments: unknown;
   link_preview_status: string;
   link_previews: unknown;
@@ -139,6 +142,7 @@ function archivedMessage(row: MessageRow): ArchivedMessage {
     body: row.body,
     contentType: row.content_type,
     isFromMe: row.is_from_me,
+    ...(row.author ? { author: row.author } : {}),
     attachments: messageAttachments(row.attachments),
     linkPreview: linkPreviewBundle(row),
     linkPreviewDiagnostics: Array.isArray(row.link_preview_diagnostics)
@@ -759,7 +763,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body, m.content_type,
-         m.is_from_me, m.attachments, m.link_preview_status, m.link_previews,
+         m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.link_preview_status, m.link_previews,
          m.link_preview_error_code, m.link_preview_diagnostics,
          m.link_preview_fetched_at, m.content_redacted_at, m.created_at
        FROM messages m
@@ -789,7 +793,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageSearchRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
-         m.content_type, m.is_from_me, m.attachments, m.content_redacted_at,
+         m.content_type, m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.content_redacted_at,
          m.created_at, m.link_preview_status, m.link_previews,
          m.link_preview_error_code, m.link_preview_diagnostics,
          m.link_preview_fetched_at,
@@ -835,7 +839,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
-         m.content_type, m.is_from_me, m.attachments, m.link_preview_status,
+         m.content_type, m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.link_preview_status,
          m.link_previews, m.link_preview_error_code,
          m.link_preview_diagnostics, m.link_preview_fetched_at,
          m.content_redacted_at, m.created_at
@@ -853,12 +857,12 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     options: ContextWindowOptions,
   ): Promise<readonly ContextMessage[]> {
     const result = await this.pool.query<ContextMessageRow>(
-      `SELECT message_index::text, provider_message_id, sender_id, sent_at, body, is_from_me, attachments,
+      `SELECT message_index::text, provider_message_id, sender_id, sent_at, body, is_from_me, author, attachments,
               link_preview_status, link_previews, link_preview_error_code
        FROM (
          SELECT m.message_index, m.provider_message_id, m.sender_id, m.sent_at,
                 LEFT(COALESCE(m.body, ''), $5) AS body,
-                m.is_from_me, m.id, m.attachments, m.link_preview_status, m.link_previews,
+                m.is_from_me, bot_message_author(m.id) AS author, m.id, m.attachments, m.link_preview_status, m.link_previews,
                 m.link_preview_error_code
          FROM messages m
          INNER JOIN chats c ON c.id = m.chat_id
@@ -912,6 +916,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
         sentAt: row.sent_at.toISOString(),
         body: row.body,
         isFromMe: row.is_from_me,
+        ...(row.author ? { author: row.author } : {}),
         attachments: messageAttachments(row.attachments),
         linkPreview,
       });

@@ -1,3 +1,9 @@
+import {
+  authorLabel,
+  botIdentityPrompt,
+  messageAuthor,
+  type BotIdentity,
+} from "../identity/bot-identity.js";
 import { sha256 } from "../../app/canonical-json.js";
 import type { AiRoutingService } from "../ai/ai-routing-service.js";
 import { AgentRunner } from "../ai/agent-runner.js";
@@ -32,6 +38,7 @@ import type { SummarySettingsService } from "./summary-settings-service.js";
 import { formatContextTimestamp } from "./context-time.js";
 
 export interface NodeExecutionContext {
+  botIdentity?: BotIdentity | null | undefined;
   executionId: string;
   workflowId: string;
   correlationId: string;
@@ -579,6 +586,18 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             (total, message) => total + message.body.length,
             0,
           ),
+          authorAttributions: messages.map((m) => ({
+            providerMessageId: m.providerMessageId,
+            author: messageAuthor(m),
+          })),
+          attributionConflictCount: messages.filter(
+            (m) =>
+              m.author?.kind === "unknown-self" &&
+              m.author.reason === "ambiguous",
+          ).length,
+          unknownSelfCount: messages.filter(
+            (m) => messageAuthor(m).kind === "unknown-self",
+          ).length,
           includesSentMessages: messages.some((message) => message.isFromMe),
           participantIdentityCount: participants.length,
           summaryCharacters: summarized?.summary.length ?? 0,
@@ -653,7 +672,7 @@ function conversationMessageContent(
   section: "chat_history" | "current_message" = "chat_history",
   attachmentXml: readonly string[] = [],
 ): string {
-  const sender = message.isFromMe ? "self" : (message.senderId ?? "unknown");
+  const sender = authorLabel(messageAuthor(message));
   return [
     `<${section}>`,
     `[${formatContextTimestamp(message.sentAt, timeZone)}] [sender_id="${promptIdentityValue(sender)}"] ${message.body}`,
@@ -766,6 +785,7 @@ export function conversationHistoryMessages(
   timeZone = "UTC",
   coverage?: HistoryCoverage,
   incompleteReasons: readonly string[] = [],
+  botIdentity?: BotIdentity | null,
 ): readonly AiChatMessage[] {
   return [
     ...(summary === null
@@ -798,7 +818,11 @@ export function conversationHistoryMessages(
       const content =
         parts.length > 0 ? [{ type: "text" as const, text }, ...parts] : text;
       return {
-        role: message.isFromMe ? ("assistant" as const) : ("user" as const),
+        role:
+          message.author?.kind === "bot" &&
+          message.author.workflowId === botIdentity?.workflowId
+            ? ("assistant" as const)
+            : ("user" as const),
         content,
         traceMessageId: message.providerMessageId,
       };
@@ -1146,6 +1170,16 @@ class AiChatNodeHandler extends BaseNodeHandler {
         : null;
     const messages = assemblePromptZones({
       system: [
+        {
+          role: "system",
+          content: botIdentityPrompt(
+            context.botIdentity ?? {
+              workflowId: context.workflowId,
+              nickname: null,
+              version: 0,
+            },
+          ),
+        },
         ...(node.config.outputFormat === "text"
           ? [{ role: "system" as const, content: imessageOutputInstruction }]
           : []),
@@ -1177,11 +1211,12 @@ class AiChatNodeHandler extends BaseNodeHandler {
             context.timeZone,
             context.historyCoverage,
             context.contextIncompleteReasons,
+            context.botIdentity,
           )
         : [],
       currentMessage: directCurrentInput
         ? {
-            role: current.isFromMe ? "assistant" : "user",
+            role: "user",
             content: conversationMessageContent(
               current,
               context.timeZone,

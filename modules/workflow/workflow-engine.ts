@@ -259,6 +259,7 @@ export class WorkflowEngine implements MessageAutomation {
           const result = await handler.execute(node, {
             executionId: execution.id,
             workflowId: execution.workflowId,
+            botIdentity: execution.botIdentity,
             correlationId: execution.correlationId,
             timeZone,
             envelope,
@@ -297,6 +298,11 @@ export class WorkflowEngine implements MessageAutomation {
               providerChatId: envelope.chat.providerChatId,
               triggerMessageIndex:
                 execution.contextSnapshot?.triggerMessageIndex ?? null,
+              authorAttributions:
+                result.outputSummary.authorAttributions ?? null,
+              attributionConflictCount:
+                result.outputSummary.attributionConflictCount ?? 0,
+              unknownSelfCount: result.outputSummary.unknownSelfCount ?? 0,
               summaryVersion: result.outputSummary.summaryVersion ?? null,
               summaryPolicyVersion:
                 result.outputSummary.summaryPolicyVersion ?? null,

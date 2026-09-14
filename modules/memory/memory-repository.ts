@@ -633,7 +633,8 @@ export class MemoryRepository {
       );
       const row = (
         await db.query<MemoryJob>(`SELECT j.* FROM memory_jobs j JOIN chats c ON c.id=j.chat_id JOIN memory_chats mc ON mc.chat_id=c.id JOIN memory_generations g ON g.id=j.generation_id
-        WHERE c.enabled AND mc.enabled AND c.deleted_at IS NULL AND g.status!='retired' AND EXISTS(SELECT 1 FROM memory_settings WHERE enabled)
+        WHERE c.enabled AND NOT c.bot_memory_rebuild_required AND j.bot_identity_revision=c.bot_identity_revision AND mc.enabled AND c.deleted_at IS NULL AND g.status!='retired' AND EXISTS(SELECT 1 FROM memory_settings WHERE enabled)
+        AND NOT EXISTS(SELECT 1 FROM bot_attribution_jobs b JOIN messages bm ON bm.id=b.message_id WHERE b.status IN ('queued','running') AND bm.chat_id=c.id AND bm.message_index BETWEEN j.from_index AND j.through_index)
         AND (j.status='queued' OR (j.status='running' AND j.lease_until<now())) AND j.attempts<3 AND j.next_attempt_at<=now()
         ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`)
       ).rows[0];
@@ -668,8 +669,11 @@ export class MemoryRepository {
     scannedThrough?: number,
   ) {
     await this.transaction(async (db) => {
+      await db.query("SELECT id FROM chats WHERE id=$1 FOR SHARE", [
+        job.chat_id,
+      ]);
       const row = await db.query(
-        "SELECT 1 FROM memory_jobs WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_until>now() FOR UPDATE",
+        "SELECT 1 FROM memory_jobs WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_until>now() AND bot_identity_revision=(SELECT bot_identity_revision FROM chats WHERE id=memory_jobs.chat_id) AND NOT (SELECT bot_memory_rebuild_required FROM chats WHERE id=memory_jobs.chat_id) FOR UPDATE",
         [job.id, job.lease_owner],
       );
       if (!row.rowCount) return;
@@ -787,7 +791,7 @@ export class MemoryRepository {
       start_offset: number;
       end_offset: number;
     }>(
-      `SELECT m.message_index,s.source_hash,s.start_offset,s.end_offset FROM memory_chunks c JOIN memory_chunk_sources s ON s.chunk_id=c.id JOIN messages m ON m.id=s.message_id WHERE c.id=$1 AND c.chat_id=$2 AND c.generation_id=$3 AND c.valid AND c.through_index<$4 AND m.content_redacted_at IS NULL ORDER BY m.message_index,s.start_offset`,
+      `SELECT m.message_index,s.source_hash,s.start_offset,s.end_offset FROM memory_chunks c JOIN memory_chunk_sources s ON s.chunk_id=c.id JOIN messages m ON m.id=s.message_id WHERE c.id=$1 AND c.chat_id=$2 AND c.generation_id=$3 AND c.valid AND c.bot_identity_revision=(SELECT bot_identity_revision FROM chats WHERE id=c.chat_id) AND NOT (SELECT bot_memory_rebuild_required FROM chats WHERE id=c.chat_id) AND c.through_index<$4 AND m.content_redacted_at IS NULL ORDER BY m.message_index,s.start_offset`,
       [chunkId, scope.chatId, scope.generation.id, scope.upperIndex],
     );
     const result: MemoryMessage[] = [];
@@ -828,7 +832,7 @@ export class MemoryRepository {
       WHERE m.chat_id=$1 AND m.message_index<$2 AND m.content_redacted_at IS NULL
       AND NOT EXISTS(SELECT 1 FROM memory_indexed_messages i WHERE i.message_id=m.id AND i.generation_id=$3)
       AND ($4::timestamptz IS NULL OR m.sent_at >= $4) AND ($5::timestamptz IS NULL OR m.sent_at <= $5)
-      AND ($6::text IS NULL OR m.sender_id=$6) ORDER BY m.message_index DESC LIMIT 100`,
+      AND ($6::text IS NULL OR m.sender_id=$6) AND ($7::uuid IS NULL OR EXISTS(SELECT 1 FROM message_bot_attributions a WHERE a.message_id=m.id AND a.workflow_id=$7)) ORDER BY m.message_index DESC LIMIT 100`,
       [
         scope.chatId,
         scope.upperIndex,
@@ -836,6 +840,7 @@ export class MemoryRepository {
         query.from ?? null,
         query.to ?? null,
         query.senderId ?? null,
+        query.botWorkflowId ?? null,
       ],
     );
     const tokens = keywordTokens(query.query);
@@ -885,9 +890,9 @@ export class MemoryRepository {
   ): Promise<Candidate[]> {
     const tokens = keywordTokens(query.query).slice(0, 40);
     if (!vector && !tokens.length) return [];
-    const filter = `c.chat_id=$1 AND c.generation_id=$2 AND c.through_index<$3 AND c.valid
+    const filter = `c.chat_id=$1 AND c.generation_id=$2 AND c.through_index<$3 AND c.valid AND c.bot_identity_revision=(SELECT bot_identity_revision FROM chats WHERE id=c.chat_id) AND NOT (SELECT bot_memory_rebuild_required FROM chats WHERE id=c.chat_id)
       AND NOT EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN messages m ON m.id=s.message_id WHERE s.chunk_id=c.id AND (m.content_redacted_at IS NOT NULL OR ($4::timestamptz IS NOT NULL AND m.sent_at<$4) OR ($5::timestamptz IS NOT NULL AND m.sent_at>$5)))
-      AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN messages m ON m.id=s.message_id WHERE s.chunk_id=c.id AND m.sender_id=$6))`;
+      AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN messages m ON m.id=s.message_id WHERE s.chunk_id=c.id AND m.sender_id=$6)) AND ($8::uuid IS NULL OR EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN message_bot_attributions a ON a.message_id=s.message_id WHERE s.chunk_id=c.id AND a.workflow_id=$8))`;
     return (
       await this.pool.query<Candidate>(
         vector
@@ -903,6 +908,7 @@ export class MemoryRepository {
           vector
             ? JSON.stringify(vector)
             : tokens.map((t) => `'${t.replaceAll("'", "''")}'`).join(" | "),
+          query.botWorkflowId ?? null,
         ],
       )
     ).rows;

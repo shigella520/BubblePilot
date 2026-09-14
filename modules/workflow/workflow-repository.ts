@@ -1,3 +1,4 @@
+import type { BotIdentity } from "../identity/bot-identity.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
 import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
 import type { TriggerConditions } from "./trigger-matcher.js";
@@ -57,6 +58,7 @@ export interface TriggerBinding extends TriggerRecord {
 }
 
 export interface WorkflowExecutionRecord {
+  botIdentity?: BotIdentity | null;
   id: string;
   provider: string;
   externalEventId: string;

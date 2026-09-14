@@ -1,3 +1,4 @@
+import type { MessageAuthor } from "../identity/bot-identity.js";
 import { z } from "zod";
 import {
   embeddingConfigSchema,
@@ -10,13 +11,18 @@ export const memorySettingsSchema = embeddingConfigSchema.extend({
 });
 export const memorySearchSchema = z
   .object({
+    botWorkflowId: z.string().uuid().optional(),
     query: z.string().trim().min(1).max(500),
     from: z.string().datetime({ offset: true }).optional(),
     to: z.string().datetime({ offset: true }).optional(),
     senderId: z.string().max(255).optional(),
   })
   .strict()
-  .refine((v) => !v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to));
+  .refine(
+    (v) =>
+      !(v.senderId && v.botWorkflowId) &&
+      (!v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to)),
+  );
 export const latestChatMessagesSchema = z
   .object({
     senderId: z.string().trim().min(1).max(255).optional(),
@@ -43,6 +49,7 @@ export interface MemoryScope {
   generation: Generation;
 }
 export interface Evidence {
+  authors?: MessageAuthor[];
   ref: string;
   text: string;
   messageIds: string[];

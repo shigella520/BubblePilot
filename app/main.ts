@@ -1,3 +1,4 @@
+import { BotIdentityService } from "../modules/identity/bot-identity-service.js";
 import { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
 import { PostgresAgentSettingsRepository } from "../modules/ai/postgres-agent-settings-repository.js";
 import { MemoryRepository } from "../modules/memory/memory-repository.js";
@@ -48,6 +49,10 @@ import { PostgresSummarySettingsRepository } from "../modules/workflow/postgres-
 import { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
 
 const config = loadConfig();
+const botIdentity = new BotIdentityService(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
 const repository = new PostgresArchiveRepository(
   config.databaseUrl,
   config.databaseQueryTimeoutMs,
@@ -266,6 +271,7 @@ const workflowDispatcher = new InProcessWorkflowExecutionDispatcher(
 const application = buildApplication(config, repository, {
   auth: authService,
   memory: memoryService,
+  botIdentity,
   ai: {
     repository: aiRepository,
     management: aiManagement,
@@ -308,6 +314,9 @@ process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 try {
+  botIdentity.start(async () =>
+    botIdentity.advanceSummaryRebuild(await summarySettings.resolve()),
+  );
   await application.listen({ host: config.host, port: config.port });
 } catch (error) {
   application.log.fatal({ err: error }, "BubblePilot failed to start");

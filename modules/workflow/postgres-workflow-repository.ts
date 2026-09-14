@@ -1,3 +1,4 @@
+import type { BotIdentity } from "../identity/bot-identity.js";
 import { randomUUID } from "node:crypto";
 
 import type { Pool } from "pg";
@@ -75,6 +76,7 @@ interface TriggerRow {
 }
 
 interface ExecutionRow {
+  bot_identity: BotIdentity | null;
   id: string;
   provider: string;
   external_event_id: string;
@@ -182,7 +184,7 @@ const triggerSelect = `SELECT
   t.created_at, t.updated_at, t.deleted_at`;
 
 const executionSelect = `SELECT
-  e.id, e.provider, e.external_event_id,
+  e.id, e.bot_identity, e.provider, e.external_event_id,
   source_message.provider_message_id AS source_provider_message_id,
   source_chat.provider_chat_id, source_chat.display_name AS chat_display_name,
   e.trigger_id,
@@ -289,6 +291,7 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
       cachedPromptTokens === null || cacheEligiblePromptTokens === 0
         ? null
         : cachedPromptTokens / cacheEligiblePromptTokens,
+    botIdentity: row.bot_identity,
     contextSnapshot:
       row.context_snapshot === null && row.trigger_message_index === null
         ? null
