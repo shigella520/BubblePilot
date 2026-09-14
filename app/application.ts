@@ -2418,6 +2418,12 @@ export function buildApplication(
             includeFromMe: true,
             timeZone: "UTC",
           },
+          z
+            .object({
+              target: z.enum(["summary", "memory", "both"]).default("both"),
+            })
+            .strict()
+            .parse(request.body ?? {}).target,
         ),
       }),
     );

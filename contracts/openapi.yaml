@@ -82,7 +82,7 @@ paths:
   /api/v1/bot-attributions:
     get:
       operationId: getapiv1botattributions
-      description: 归属预览、任务与待重建聊天。
+      description: 归属预览、任务、待重建聊天及 workflows 统计（workflowId/name/nickname/total/bound/unbound/nicknamePending）。仅唯一匹配的归档消息计入各工作流，可归属 total 等于已绑定 bound 加待绑定 unbound。
       security:
         - sessionAuth: []
         - bearerAuth: []
@@ -166,9 +166,21 @@ paths:
           schema:
             type: string
             format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                target:
+                  type: string
+                  enum: [summary, memory, both]
+                  default: both
       responses:
         "200":
-          description: 操作成功，data 返回配置或任务状态。
+          description: 操作成功，data 返回 summary/memory 是否已启动。
         "400":
           $ref: "#/components/responses/Error"
         "401":

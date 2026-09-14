@@ -48,7 +48,9 @@ describe("Bot identity administrator API", () => {
     const update = vi
       .fn()
       .mockResolvedValue({ nickname: "虚构甲", version: 1 });
+    const rebuild = vi.fn().mockResolvedValue({ summary: true, memory: false });
     const identity = {
+      rebuild,
       view,
       update,
       close: () => Promise.resolve(),
@@ -104,6 +106,58 @@ describe("Bot identity administrator API", () => {
       expect(update).toHaveBeenCalledWith(
         "11111111-1111-4111-8111-111111111111",
         { nickname: "虚构甲", expectedVersion: 0 },
+      );
+      const rebuildUrl =
+        "/api/v1/chats/22222222-2222-4222-8222-222222222222/bot-identity/rebuild";
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: rebuildUrl,
+            payload: { target: "summary" },
+          })
+        ).statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: rebuildUrl,
+            headers,
+            payload: { target: "invalid" },
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(rebuild).not.toHaveBeenCalled();
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: rebuildUrl,
+            headers,
+            payload: { target: "summary" },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(rebuild).toHaveBeenLastCalledWith(
+        "22222222-2222-4222-8222-222222222222",
+        expect.any(Object),
+        "summary",
+      );
+      expect(
+        (await app.inject({ method: "POST", url: rebuildUrl, headers }))
+          .statusCode,
+      ).toBe(200);
+      expect(rebuild).toHaveBeenLastCalledWith(
+        "22222222-2222-4222-8222-222222222222",
+        expect.any(Object),
+        "both",
+      );
+      expect(authRepository.auditEvents).toContainEqual(
+        expect.objectContaining({
+          action: "bot-identity.rebuild",
+          outcome: "succeeded",
+        }),
       );
     } finally {
       await app.close();

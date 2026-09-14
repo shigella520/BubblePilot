@@ -111,9 +111,38 @@ export class BotIdentityService {
       )
     ).rows[0];
   }
+  async workflowCoverage() {
+    return (
+      await this.pool.query<{
+        workflowId: string;
+        name: string;
+        nickname: string | null;
+        total: number;
+        bound: number;
+        unbound: number;
+        nicknamePending: number;
+      }>(`WITH candidates AS (
+      SELECT m.id, min(d.id::text)::uuid delivery_id FROM messages m JOIN chats c ON c.id=m.chat_id
+      JOIN outbound_deliveries d ON d.provider=m.provider AND d.provider_chat_id=c.provider_chat_id AND d.provider_message_id=m.provider_message_id
+      WHERE m.is_from_me GROUP BY m.id HAVING count(d.id)=1
+    ), counts AS (
+      SELECT v.workflow_id, count(*)::int total,
+        count(*) FILTER(WHERE a.delivery_id=d.id AND a.workflow_id=v.workflow_id)::int bound,
+        count(*) FILTER(WHERE a.delivery_id=d.id AND a.workflow_id=v.workflow_id AND a.nickname IS NULL AND i.nickname IS NOT NULL)::int nickname_pending
+      FROM candidates c JOIN outbound_deliveries d ON d.id=c.delivery_id
+      JOIN workflow_executions e ON e.id=d.execution_id JOIN workflow_versions v ON v.id=e.workflow_version_id
+      LEFT JOIN message_bot_attributions a ON a.message_id=c.id
+      LEFT JOIN workflow_bot_identities i ON i.workflow_id=v.workflow_id GROUP BY v.workflow_id
+    ) SELECT w.id AS "workflowId",w.name,i.nickname,coalesce(c.total,0)::int total,coalesce(c.bound,0)::int bound,
+      (coalesce(c.total,0)-coalesce(c.bound,0))::int unbound,coalesce(c.nickname_pending,0)::int AS "nicknamePending"
+      FROM workflows w LEFT JOIN counts c ON c.workflow_id=w.id LEFT JOIN workflow_bot_identities i ON i.workflow_id=w.id
+      WHERE w.deleted_at IS NULL OR c.total>0 ORDER BY w.name,w.id`)
+    ).rows;
+  }
   async status() {
     return {
       preview: await this.preview(),
+      workflows: await this.workflowCoverage(),
       jobs: (
         await this.pool.query<Record<string, unknown>>(
           `SELECT id,workflow_id,status,processed,linked,unknown_count,conflict_count,error_code,created_at,updated_at FROM bot_attribution_jobs ORDER BY created_at DESC LIMIT 50`,
@@ -121,12 +150,12 @@ export class BotIdentityService {
       ).rows,
       summaries: (
         await this.pool.query<Record<string, unknown>>(
-          `SELECT s.chat_id,s.covered_through_index,c.bot_summary_rebuild_through,p.status,p.error_code FROM conversation_context_states s JOIN chats c ON c.id=s.chat_id LEFT JOIN LATERAL(SELECT status,error_code FROM conversation_context_compressions WHERE context_state_id=s.id ORDER BY started_at DESC LIMIT 1) p ON TRUE WHERE c.bot_summary_rebuild_through IS NOT NULL AND s.instance_namespace='default' AND NOT s.legacy`,
+          `SELECT s.chat_id,c.display_name,s.covered_through_index,c.bot_summary_rebuild_through,p.status,p.error_code FROM conversation_context_states s JOIN chats c ON c.id=s.chat_id LEFT JOIN LATERAL(SELECT status,error_code FROM conversation_context_compressions WHERE context_state_id=s.id ORDER BY started_at DESC LIMIT 1) p ON TRUE WHERE c.bot_summary_rebuild_through IS NOT NULL AND s.instance_namespace='default' AND NOT s.legacy`,
         )
       ).rows,
       memoryJobs: (
         await this.pool.query<Record<string, unknown>>(
-          `SELECT id,chat_id,status,cursor_index,through_index,error_code FROM memory_jobs WHERE reason='rebuild' ORDER BY created_at DESC LIMIT 30`,
+          `SELECT j.id,j.chat_id,c.display_name,j.status,j.cursor_index,j.through_index,j.error_code FROM memory_jobs j JOIN chats c ON c.id=j.chat_id WHERE j.reason='rebuild' ORDER BY j.created_at DESC LIMIT 30`,
         )
       ).rows,
       chats: (
@@ -175,6 +204,7 @@ export class BotIdentityService {
       includeFromMe: boolean;
       timeZone: string;
     },
+    target: "summary" | "memory" | "both" = "both",
   ) {
     const db = await this.pool.connect();
     try {
@@ -201,7 +231,7 @@ export class BotIdentityService {
           409,
         );
       const result = { summary: false, memory: false };
-      if (settings.enabled && settings.providerRouteId) {
+      if (target !== "memory" && settings.enabled && settings.providerRouteId) {
         await db.query(
           "UPDATE conversation_context_compressions p SET status='superseded',lease_owner=NULL,error_code='BOT_IDENTITY_REBUILD' FROM conversation_context_states s WHERE p.context_state_id=s.id AND s.chat_id=$1 AND p.status IN ('queued','running')",
           [chatId],
@@ -230,7 +260,7 @@ export class BotIdentityService {
           [chatId],
         )
       ).rows[0];
-      if (memory) {
+      if (target !== "summary" && memory) {
         await db.query(
           "UPDATE memory_jobs SET status='superseded',lease_owner=NULL WHERE chat_id=$1 AND status IN ('queued','running','paused')",
           [chatId],

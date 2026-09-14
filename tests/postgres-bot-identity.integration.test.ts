@@ -340,6 +340,74 @@ describe.runIf(url)("Postgres Bot identity lifecycle", () => {
       ).rows,
     ).toHaveLength(0);
   });
+  it("counts exact per-workflow candidates before and after binding, excluding unknown and ambiguous records", async () => {
+    const f = await fixture(),
+      e = await f.execution(),
+      m = await f.message(1);
+    await f.message(2);
+    const ambiguous = await f.message(3);
+    await f.delivery(e, ambiguous.guid);
+    await f.delivery(e, ambiguous.guid);
+    await f.delivery(e, m.guid);
+    const coverage = async () =>
+      (await service.workflowCoverage()).find(
+        (r) => r.workflowId === f.workflow,
+      );
+    expect(await coverage()).toMatchObject({
+      total: 1,
+      bound: 0,
+      unbound: 1,
+      nicknamePending: 0,
+    });
+    await f.link(m.id);
+    await service.update(f.workflow, {
+      nickname: "虚构角色",
+      expectedVersion: 0,
+    });
+    expect(await coverage()).toMatchObject({
+      total: 1,
+      bound: 1,
+      unbound: 0,
+      nicknamePending: 1,
+    });
+    // The nickname update is asynchronous and is distinct from origin binding.
+    await db.query(
+      "UPDATE message_bot_attributions SET nickname=$2 WHERE message_id=$1",
+      [m.id, "虚构角色"],
+    );
+    expect(await coverage()).toMatchObject({
+      total: 1,
+      bound: 1,
+      unbound: 0,
+      nicknamePending: 0,
+    });
+  });
+  it("does not reset summaries when only index rebuilding is requested", async () => {
+    const f = await fixture();
+    await db.query(
+      "INSERT INTO conversation_context_states(id,chat_id,summary_policy_version,summary,covered_through_index) VALUES($1,$2,1,$3,1)",
+      [randomUUID(), f.chat, "fictional retained summary"],
+    );
+    await service.rebuild(
+      f.chat,
+      {
+        enabled: true,
+        providerRouteId: randomUUID(),
+        includeFromMe: true,
+        timeZone: "UTC",
+        policyVersion: 1,
+      },
+      "memory",
+    );
+    expect(
+      (
+        await db.query<{ summary: string }>(
+          "SELECT summary FROM conversation_context_states WHERE chat_id=$1",
+          [f.chat],
+        )
+      ).rows[0]?.summary,
+    ).toBe("fictional retained summary");
+  });
   it("groups Bot identities separately on a shared gateway sender", async () => {
     const a = await fixture(),
       b = await fixture();

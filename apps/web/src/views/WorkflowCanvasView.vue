@@ -285,6 +285,11 @@ onMounted(load);
         }}
       </span>
       <div class="workflow-canvas-actions">
+        <BotIdentityPanel
+          v-if="!isNew"
+          :key="workflowId"
+          :workflow-id="workflowId"
+        />
         <button
           class="button secondary"
           type="button"
@@ -315,11 +320,6 @@ onMounted(load);
       >{{ message }}</DismissibleMessage
     >
     <section v-if="!busy" class="workflow-canvas-main">
-      <BotIdentityPanel
-        v-if="!isNew"
-        :key="workflowId"
-        :workflow-id="workflowId"
-      />
       <WorkflowEditor
         :blocks="blocks"
         :workflow-name="workflowName"
