@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MemoryPanel from "../components/MemoryPanel.vue";
 import {
   Download,
   FileJson2,
@@ -813,6 +814,9 @@ onBeforeUnmount(() =>
         <button type="button" @click="scrollToSection('export')">
           <FileJson2 :size="18" />数据导出
         </button>
+        <button type="button" @click="scrollToSection('chat-memory')">
+          <MessageCircle :size="18" />长期记忆
+        </button>
       </nav>
       <div class="sidebar-note">
         监听变更只影响后续消息，不自动回填或删除历史。
@@ -1079,6 +1083,7 @@ onBeforeUnmount(() =>
           @next="changePage(chatPager.next)"
         />
       </section>
+      <MemoryPanel id="chat-memory" mode="chat" :chats="chatOptions" embedded />
       <section id="search" class="admin-panel">
         <div class="panel-head">
           <div>

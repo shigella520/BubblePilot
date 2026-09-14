@@ -20,7 +20,10 @@ import type {
 } from "./workflow-repository.js";
 import { runtimeTimeZone } from "./context-time.js";
 import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
-import type { ConversationContextSnapshot } from "./conversation-context-service.js";
+import type {
+  HistoryCoverage,
+  ConversationContextSnapshot,
+} from "./conversation-context-service.js";
 
 export interface AutomationResult {
   executionIds: readonly string[];
@@ -186,6 +189,8 @@ export class WorkflowEngine implements MessageAutomation {
     const nodes = new Map(definition.nodes.map((node) => [node.id, node]));
     const variables: Record<string, string> = {};
     const history: ContextMessage[] = [];
+    let historyCoverage: HistoryCoverage | undefined;
+    let contextIncompleteReasons: string[] | undefined;
     let historySummary: {
       text: string;
       coveredThroughIndex: string;
@@ -259,6 +264,18 @@ export class WorkflowEngine implements MessageAutomation {
             envelope,
             variables,
             history,
+            get historyCoverage() {
+              return historyCoverage;
+            },
+            set historyCoverage(value) {
+              historyCoverage = value;
+            },
+            get contextIncompleteReasons() {
+              return contextIncompleteReasons;
+            },
+            set contextIncompleteReasons(value) {
+              contextIncompleteReasons = value;
+            },
             get historySummary() {
               return historySummary;
             },
@@ -290,6 +307,9 @@ export class WorkflowEngine implements MessageAutomation {
               contextCharacters: result.outputSummary.contextCharacters ?? null,
               contextIncomplete:
                 result.outputSummary.contextIncomplete ?? false,
+              historyCoverage: result.outputSummary.historyCoverage ?? null,
+              contextIncompleteReasons:
+                result.outputSummary.contextIncompleteReasons ?? [],
               truncatedMessageCount:
                 result.outputSummary.truncatedMessageCount ?? 0,
               usedPreviousSummary:
@@ -333,6 +353,9 @@ export class WorkflowEngine implements MessageAutomation {
           await this.repository.finishNodeExecution({
             nodeExecutionId,
             status: "failed",
+            ...(workflowError.outputSummary
+              ? { outputSummary: workflowError.outputSummary }
+              : {}),
             error: {
               code: workflowError.code,
               summary: workflowError.message,

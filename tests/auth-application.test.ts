@@ -1,3 +1,5 @@
+import { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
+import { InMemoryAgentSettingsRepository } from "./support/in-memory-agent-settings-repository.js";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -115,6 +117,9 @@ describe("Web admin authentication", () => {
       }),
       ai: {
         repository: aiRepository,
+        agentSettings: new AgentSettingsService(
+          new InMemoryAgentSettingsRepository(),
+        ),
         management: new AiManagementService(
           aiRepository,
           new SuccessfulAiClient(),
@@ -211,6 +216,32 @@ describe("Web admin authentication", () => {
     await application.close();
   });
 
+  it("audits Agent settings updates without requiring a sensitive-operation unlock", async () => {
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    const saved = await application.inject({
+      method: "PUT",
+      url: "/api/v1/ai/agent/settings",
+      headers: { cookie, origin: "http://localhost" },
+      payload: {
+        maxToolCalls: 10,
+        maxToolOutputCharacters: 24000,
+        maxToolDurationMs: 60000,
+        expectedVersion: 0,
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(authRepository.auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: "ai.agent.settings.update",
+        outcome: "succeeded",
+      }),
+    );
+  });
   it("creates an opaque server session and audits failed login attempts", async () => {
     const failed = await application.inject({
       method: "POST",
@@ -620,5 +651,34 @@ describe("Web admin authentication", () => {
       headers: { cookie },
     });
     expect(session.statusCode).toBe(401);
+  });
+  it("requires sensitive verification on every memory content and mutation entry", async () => {
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.headers["set-cookie"];
+    const id = "00000000-0000-4000-8000-000000000001";
+    const cases = [
+      ["PUT", "/api/v1/ai/memory/settings"],
+      ["POST", "/api/v1/ai/memory/probe"],
+      ["PUT", `/api/v1/chats/${id}/memory`],
+      ["POST", `/api/v1/chats/${id}/memory/search`],
+      ["POST", `/api/v1/chats/${id}/memory/jobs`],
+      ["POST", `/api/v1/memory/jobs/${id}/actions`],
+      ["GET", `/api/v1/memory/retrievals/${id}/sources/M1`],
+    ] as const;
+    for (const [method, url] of cases) {
+      const response = await application.inject({
+        method,
+        url,
+        headers: { cookie },
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({
+        error: { code: "SENSITIVE_AUTH_REQUIRED" },
+      });
+    }
   });
 });

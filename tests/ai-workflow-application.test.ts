@@ -481,6 +481,10 @@ describe("AI workflow", () => {
     expect(firstMessages[0]?.role).toBe("system");
     expect(firstMessages[0]?.content).toContain("BubblePilot 输入协议");
     expect(firstMessages[0]?.content).toContain("<ai_system>");
+    expect(firstMessages[0]?.content).toContain("iMessage 纯文本");
+    expect(firstMessages[0]?.content).toContain(
+      "保留必要的原始符号、标签、缩进和换行",
+    );
     const serializedFirstMessages = JSON.stringify(firstMessages);
     expect(serializedFirstMessages).toContain(
       'sender_id=\\"fictional-user@example.test\\"',
@@ -492,7 +496,7 @@ describe("AI workflow", () => {
     expect(aiClient.requests[1]?.messages).toEqual([
       {
         role: "system",
-        content: "<ai_system>Polish the upstream draft.</ai_system>",
+        content: aiClient.requests[1]?.messages[0]?.content,
       },
       {
         role: "user",
@@ -505,6 +509,12 @@ describe("AI workflow", () => {
           '<upstream_input source="ask-ai.text">\nFictional AI answer\n</upstream_input>',
       },
     ]);
+    expect(aiClient.requests[1]?.messages[0]?.content).toContain(
+      "iMessage 纯文本",
+    );
+    expect(aiClient.requests[1]?.messages[0]?.content).toContain(
+      "<ai_system>Polish the upstream draft.</ai_system>",
+    );
     // Node-level message limits are no longer applied; the global context
     // reader owns retention and includes the complete historical increment.
     expect(JSON.stringify(aiClient.requests)).toContain(
@@ -554,6 +564,25 @@ describe("AI workflow", () => {
         ],
       },
     });
+    const nodes = detail.json<{
+      data: {
+        nodes: { nodeType: string; outputSummary: { agentBudget?: unknown } }[];
+      };
+    }>().data.nodes;
+    const aiNodes = nodes.filter((node) => node.nodeType === "ai-chat");
+    expect(aiNodes).toHaveLength(2);
+    for (const node of aiNodes)
+      expect(node.outputSummary.agentBudget).toMatchObject({
+        settings: {
+          version: 0,
+          maxToolCalls: 10,
+          maxToolOutputCharacters: 24000,
+          maxToolDurationMs: 60000,
+        },
+        modelTurns: 1,
+        toolCalls: 0,
+        outcome: "completed",
+      });
     expect(detail.body).not.toContain("fictional-server-secret");
     expect(detail.body).not.toContain("Earlier fictional context");
     expect(detail.body).not.toContain("Fictional AI answer");
@@ -561,6 +590,14 @@ describe("AI workflow", () => {
     const firstAttemptId = detail.json<{
       data: { aiProviderAttempts: Array<{ id: string }> };
     }>().data.aiProviderAttempts[0]?.id;
+    const unauthenticatedRawRequest = await application.inject({
+      method: "GET",
+      url: `/api/v1/executions/${executionId}/ai-attempts/${firstAttemptId}/raw-request`,
+    });
+    expect(unauthenticatedRawRequest.statusCode).toBe(401);
+    expect(unauthenticatedRawRequest.body).not.toContain(
+      "Earlier fictional context",
+    );
     const rawRequest = await application.inject({
       method: "GET",
       url: `/api/v1/executions/${executionId}/ai-attempts/${firstAttemptId}/raw-request`,
@@ -573,6 +610,128 @@ describe("AI workflow", () => {
     expect(rawRequestBody.data.attemptId).toBe(firstAttemptId);
     expect(rawRequestBody.data.body).toContain("Earlier fictional context");
     expect(rawRequest.body).not.toContain("fictional-server-secret");
+    const responseUrl = `/api/v1/executions/${executionId}/ai-attempts/${firstAttemptId}/raw-response`;
+    expect(
+      (await application.inject({ method: "GET", url: responseUrl }))
+        .statusCode,
+    ).toBe(401);
+    const rawResponse = await application.inject({
+      method: "GET",
+      url: responseUrl,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(rawResponse.statusCode).toBe(200);
+    const responseBody = rawResponse.json<{
+      data: { httpStatus: number; truncated: boolean; body: string };
+    }>();
+    expect(responseBody.data).toMatchObject({
+      httpStatus: 200,
+      truncated: false,
+    });
+    expect(responseBody.data.body).toContain("Fictional AI answer");
+    const unrelatedAttempt = await application.inject({
+      method: "GET",
+      url: `/api/v1/executions/${executionId}/ai-attempts/00000000-0000-4000-8000-000000000000/raw-response`,
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(unrelatedAttempt.statusCode).toBe(404);
+    expect(unrelatedAttempt.body).not.toContain("Fictional AI answer");
+
+    expect(detail.body).not.toContain("Fictional AI answer");
+  });
+
+  it("does not inject iMessage presentation rules into JSON nodes", async () => {
+    const created = await application.inject({
+      method: "POST",
+      url: "/api/v1/workflows",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+      payload: {
+        name: "Fictional JSON output",
+        definition: {
+          schemaVersion: "1",
+          name: "json-output",
+          startNodeId: "ask",
+          maxSteps: 2,
+          nodes: [
+            {
+              id: "ask",
+              type: "ai-chat",
+              version: 1,
+              config: {
+                providerRouteId: routeId,
+                systemPrompt: "Return a JSON object.",
+                promptTemplate: "Classify the fictional message.",
+                includeLoadedContext: false,
+                maxOutputTokens: 128,
+                maxOutputCharacters: 1000,
+                temperature: 0,
+                webSearchSources: "full",
+                outputFormat: "json",
+                outputVariable: "answer",
+              },
+              onSuccess: "done",
+              onFailure: "done",
+            },
+            {
+              id: "done",
+              type: "end",
+              version: 1,
+              config: { result: "succeeded" },
+            },
+          ],
+        },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const workflow = created.json<{
+      data: { workflowId: string; version: number };
+    }>().data;
+    expect(
+      (
+        await application.inject({
+          method: "POST",
+          url: `/api/v1/workflows/${workflow.workflowId}/versions/${workflow.version}/publish`,
+          headers: { authorization: `Bearer ${apiAccessToken}` },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await application.inject({
+          method: "POST",
+          url: "/api/v1/triggers",
+          headers: { authorization: `Bearer ${apiAccessToken}` },
+          payload: {
+            name: "Fictional JSON trigger",
+            workflowId: workflow.workflowId,
+            workflowVersion: workflow.version,
+            enabled: true,
+            conditions: {
+              chatIds: [monitoredChatId],
+              senderIds: [],
+              contentTypes: ["text"],
+              text: { kind: "prefix", value: "/json", caseSensitive: false },
+            },
+          },
+        })
+      ).statusCode,
+    ).toBe(201);
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({
+        messageGuid: "fictional-json-format",
+        text: "/json classify",
+      }),
+    });
+    expect(aiClient.requests).toHaveLength(1);
+    expect(JSON.stringify(aiClient.requests[0]?.messages)).not.toContain(
+      "iMessage 纯文本",
+    );
+    expect(JSON.stringify(aiClient.requests[0]?.messages)).toContain(
+      "Return a JSON object.",
+    );
   });
 
   it("keeps each complete text-turn prompt as the next turn's exact prefix", async () => {

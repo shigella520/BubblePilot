@@ -12,6 +12,7 @@ import {
   conversationCompressionPrompt,
   conversationCompressionTranscript,
   fitContextMessages,
+  historyCoverage,
 } from "../modules/workflow/conversation-context-service.js";
 import { conversationHistoryMessages } from "../modules/workflow/node-registry.js";
 import type { ContextMessage } from "../modules/archive/archive-repository.js";
@@ -702,5 +703,45 @@ describe("conversation context summary contract", () => {
     expect(sharedMessagePrefixLength(before, after)).toBe(2);
     expect(after[2]?.content).toContain("link_preview");
     expect(after[2]?.content).toContain("article.example.test");
+  });
+});
+
+describe("history coverage metadata", () => {
+  it("counts actual omissions and keeps event-time extrema for delayed arrivals", () => {
+    const candidates = [
+      {
+        ...contextMessage("1", { sentAt: "2026-09-11T00:00:00Z" }),
+        messageIndex: "11",
+      },
+      {
+        ...contextMessage("2", { sentAt: "2026-09-10T00:00:00Z" }),
+        messageIndex: "15",
+      },
+      {
+        ...contextMessage("3", { sentAt: "2026-09-12T00:00:00Z" }),
+        messageIndex: "21",
+      },
+    ];
+    const coverage = historyCoverage("9", candidates, candidates.slice(2));
+    expect(coverage.omitted).toEqual({
+      count: 2,
+      firstMessageIndex: "11",
+      lastMessageIndex: "15",
+      earliestSentAt: "2026-09-10T00:00:00.000Z",
+      latestSentAt: "2026-09-11T00:00:00.000Z",
+    });
+    const input = conversationHistoryMessages(
+      null,
+      candidates.slice(2),
+      {},
+      [],
+      "UTC",
+      coverage,
+      ["history-trimmed"],
+    );
+    expect(input.at(-1)?.content).toContain("history-trimmed");
+    expect(input.at(-1)?.content).not.toContain("message-1");
+    expect(historyCoverage("9", candidates, candidates).omitted).toBeNull();
+    expect(historyCoverage("9", [], []).retained).toBeNull();
   });
 });

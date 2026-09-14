@@ -1,3 +1,7 @@
+import { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
+import { PostgresAgentSettingsRepository } from "../modules/ai/postgres-agent-settings-repository.js";
+import { MemoryRepository } from "../modules/memory/memory-repository.js";
+import { MemoryService } from "../modules/memory/memory-service.js";
 import { buildApplication } from "./application.js";
 import { loadConfig } from "./config.js";
 import { AiManagementService } from "../modules/ai/ai-management-service.js";
@@ -57,6 +61,11 @@ const aiRepository = new PostgresAiRepository(
   config.settingsEncryptionKey,
   config.databaseQueryTimeoutMs,
 );
+const agentSettingsRepository = new PostgresAgentSettingsRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
+const agentSettings = new AgentSettingsService(agentSettingsRepository);
 const webSearchSettingsRepository = new PostgresWebSearchSettingsRepository(
   config.databaseUrl,
   config.databaseQueryTimeoutMs,
@@ -152,11 +161,17 @@ const aiManagement = new AiManagementService(
   undefined,
   imageInputSettings,
 );
+const memoryService = new MemoryService(
+  new MemoryRepository(config.databaseUrl, config.settingsEncryptionKey),
+);
 const aiAgent = new AgentRunner(
   aiRouting,
   webSearchTool,
   aiRepository,
   webSearchSettings,
+  undefined,
+  memoryService,
+  agentSettings,
 );
 const imageSummaryRepository = new PostgresImageSummaryRepository(
   config.databaseUrl,
@@ -250,11 +265,13 @@ const workflowDispatcher = new InProcessWorkflowExecutionDispatcher(
 );
 const application = buildApplication(config, repository, {
   auth: authService,
+  memory: memoryService,
   ai: {
     repository: aiRepository,
     management: aiManagement,
     searchTool: webSearchTool,
     searchSettings: webSearchSettings,
+    agentSettings,
     imageInputSettings,
     rawRequestStore: aiRawRequestStore,
     summarySettings,

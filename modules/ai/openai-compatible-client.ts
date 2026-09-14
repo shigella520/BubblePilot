@@ -681,6 +681,8 @@ function requestId(headers: Headers): string | null {
     "request-id",
     "openai-request-id",
     "cf-ray",
+    "x-amzn-requestid",
+    "x-ms-request-id",
   ]) {
     const value = headers.get(name)?.trim();
     if (value !== undefined && value.length > 0) {
@@ -926,6 +928,15 @@ export class OpenAiCompatibleClient implements AiClient {
       let body: unknown;
       try {
         responseBody = await response.text();
+        if (request.executionId && request.clientRequestId) {
+          this.rawRequestStore?.recordResponse(
+            request.executionId,
+            request.clientRequestId,
+            responseBody,
+            response.status,
+            response.headers,
+          );
+        }
         body = JSON.parse(responseBody) as unknown;
       } catch {
         body = null;

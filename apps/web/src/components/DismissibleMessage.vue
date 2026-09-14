@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { X } from "@lucide/vue";
 
-defineProps<{ error?: boolean }>();
+defineProps<{ error?: boolean; inline?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="form-message" :class="{ error }" role="alert">
+  <Teleport to="body" :disabled="inline">
+    <div
+      class="form-message"
+      :class="{ error, 'inline-message': inline }"
+      role="alert"
+    >
       <span class="form-message-content"><slot /></span>
       <button
         class="form-message-close"
@@ -21,3 +25,13 @@ const emit = defineEmits<{ close: [] }>();
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+.inline-message {
+  position: static;
+  transform: none;
+  width: auto;
+  max-width: none;
+  margin: 0 0 1rem;
+}
+</style>

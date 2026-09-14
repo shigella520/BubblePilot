@@ -2239,33 +2239,24 @@ legend {
 .provider-reset-action {
   width: 90px;
 }
-.route-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+.route-table {
   margin-top: 20px;
 }
-.route-grid article {
-  min-width: 0;
-  padding: 18px;
-  border: 1px solid var(--bubblepilot-line);
-  border-radius: 19px;
-  background: rgba(255, 255, 255, 0.58);
+.route-table th,
+.route-table td:first-child,
+.route-table td:nth-child(6) {
+  white-space: nowrap;
 }
-.route-grid article > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.route-table td:nth-child(5) {
+  min-width: 150px;
 }
-.route-grid header strong,
-.route-grid header span {
-  display: block;
+.route-table .row-actions {
+  min-width: 120px;
+  flex-wrap: nowrap;
 }
-.route-grid header span,
-.route-grid article > p {
-  color: var(--bubblepilot-muted);
-  font-size: 10px;
+.route-table .route-flow {
+  min-width: 160px;
+  margin: 0;
 }
 .route-flow {
   display: flex;
@@ -2810,12 +2801,9 @@ legend {
   font-size: 12px;
   font-weight: 700;
 }
-.context-snapshot-warning {
+.context-snapshot-note {
   margin: 12px 0 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  color: #9d2d26;
-  background: rgba(227, 75, 67, 0.08);
+  color: var(--bubblepilot-muted);
   font-size: 11px;
 }
 @keyframes execution-detail-backdrop-in {
@@ -3217,7 +3205,6 @@ legend {
     white-space: nowrap;
   }
   .two-column-forms,
-  .route-grid,
   .trace-columns,
   .context-snapshot-grid,
   .compression-content-grid,
@@ -3346,4 +3333,53 @@ legend {
     flex-wrap: wrap;
     justify-content: flex-start;
   }
+}
+
+.attempt-payloads {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.6);
+}
+.attempt-payloads pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.response-error-fields {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.response-error-fields > div {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(0, 3fr);
+  gap: 12px;
+}
+.response-error-fields dt {
+  color: var(--bubblepilot-muted);
+}
+.response-error-fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.response-body-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.provider-attempt-section {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.response-diagnostic > .response-error-fields,
+.response-diagnostic > .response-body-heading,
+.response-diagnostic > .keyline {
+  margin-left: 12px;
+  margin-right: 12px;
 }

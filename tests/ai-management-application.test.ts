@@ -1,3 +1,5 @@
+import { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
+import { InMemoryAgentSettingsRepository } from "./support/in-memory-agent-settings-repository.js";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -223,6 +225,9 @@ describe("AI management API", () => {
       ai: {
         repository,
         management: new AiManagementService(repository, client, secrets),
+        agentSettings: new AgentSettingsService(
+          new InMemoryAgentSettingsRepository(),
+        ),
         searchSettings: new WebSearchSettingsService(
           new InMemoryWebSearchSettingsRepository(
             () => new Date("2026-08-07T00:00:00.000Z"),
@@ -772,6 +777,63 @@ describe("AI management API", () => {
     });
   });
 
+  it("validates Agent settings, requires admin and rejects stale writes", async () => {
+    const url = "/api/v1/ai/agent/settings";
+    expect((await application.inject({ method: "GET", url })).statusCode).toBe(
+      401,
+    );
+    const initial = await request({ method: "GET", url });
+    expect(initial.json()).toMatchObject({
+      data: {
+        maxToolCalls: 10,
+        maxToolOutputCharacters: 24000,
+        maxToolDurationMs: 60000,
+        source: "defaults",
+        version: 0,
+      },
+    });
+    const payload = {
+      maxToolCalls: 16,
+      maxToolOutputCharacters: 40000,
+      maxToolDurationMs: 90000,
+      expectedVersion: 0,
+    };
+    expect(
+      (await application.inject({ method: "PUT", url, payload })).statusCode,
+    ).toBe(401);
+    expect(
+      (await request({ method: "PUT", url, payload })).json(),
+    ).toMatchObject({
+      data: {
+        maxToolCalls: 16,
+        maxToolOutputCharacters: 40000,
+        maxToolDurationMs: 90000,
+        version: 1,
+        source: "database",
+      },
+    });
+    expect((await request({ method: "PUT", url, payload })).statusCode).toBe(
+      409,
+    );
+    for (const invalid of [
+      { maxToolCalls: 0 },
+      { maxToolCalls: 31 },
+      { maxToolOutputCharacters: 3999 },
+      { maxToolOutputCharacters: 100001 },
+      { maxToolDurationMs: 4999 },
+      { maxToolDurationMs: 180001 },
+    ]) {
+      expect(
+        (
+          await request({
+            method: "PUT",
+            url,
+            payload: { ...payload, ...invalid, expectedVersion: 1 },
+          })
+        ).statusCode,
+      ).toBe(400);
+    }
+  });
   it("manages global web search settings with optimistic concurrency", async () => {
     const initial = await request({
       method: "GET",

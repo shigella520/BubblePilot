@@ -269,6 +269,15 @@ export class AiRoutingService {
         else if (!provider.enabled) reason = "provider-disabled";
         else if (!isProviderSecretConfigured(provider, this.secrets))
           reason = "secret-missing";
+        else if (
+          (request.tools?.length ?? 0) > 0 &&
+          !supportsLocalTools(provider) &&
+          (request.tools?.some((tool) => tool.name !== "web_search") ||
+            request.webSearch === undefined ||
+            request.webSearch === "disabled" ||
+            !supportsHostedSearch(provider))
+        )
+          reason = "local-tools-unsupported";
         else if (hasImages && provider.capabilities?.imageInput !== true)
           reason = "image-capability-disabled";
         else if (
@@ -467,7 +476,8 @@ export class AiRoutingService {
         const useHostedSearch =
           request.webSearch !== undefined &&
           request.webSearch !== "disabled" &&
-          supportsHostedSearch(candidate.provider);
+          supportsHostedSearch(candidate.provider) &&
+          !(request.tools?.some((tool) => tool.name !== "web_search") ?? false);
         let result: AiCallResult = await this.client.call(candidate.provider, {
           messages: request.messages,
           maxOutputTokens: request.maxOutputTokens,

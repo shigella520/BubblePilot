@@ -398,3 +398,33 @@ describe("SearxngWebSearchTool", () => {
     await expect(tool.isReady()).resolves.toBe(false);
   });
 });
+
+it("cancels retry backoff when the shared Agent deadline aborts", async () => {
+  vi.useFakeTimers();
+  try {
+    const controller = new AbortController();
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("busy", { status: 503 }));
+    const tool = new SearxngWebSearchTool(
+      {
+        baseUrl: "https://fictional.example.test",
+        maxAttempts: 5,
+        retryDelayMs: 1000,
+      },
+      fetcher,
+    );
+    const running = tool.search("fictional", {
+      signal: controller.signal,
+      deadline: Date.now() + 5000,
+    });
+    const assertion = expect(running).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(10);
+    controller.abort();
+    await assertion;
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});

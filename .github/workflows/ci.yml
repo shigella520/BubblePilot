@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:0.8.0-pg16
         env:
           POSTGRES_DB: bubblepilot_test
           POSTGRES_USER: bubblepilot
@@ -68,10 +68,15 @@ jobs:
         run: pnpm security:check
 
       - name: Apply database migrations
-        run: pnpm db:migrate
+        run: |
+          pnpm db:migrate
+          pnpm db:prepare-memory
 
       - name: Verify application
         run: pnpm verify
+
+      - name: Verify memory database upgrade
+        run: sh scripts/test-memory-upgrade.sh
 
       - name: Validate Docker Compose
         run: docker compose config

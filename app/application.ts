@@ -1,3 +1,7 @@
+import type { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
+import { agentSettingsUpdateSchema } from "../modules/ai/agent-settings-types.js";
+import type { MemoryService } from "../modules/memory/memory-service.js";
+import { memorySearchSchema } from "../modules/memory/memory-types.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -345,6 +349,7 @@ const triggerPreviewBodySchema = z.object({
 });
 
 export interface ApplicationOptions {
+  memory?: MemoryService;
   logger?: boolean;
   webRoot?: string | false;
   auth?: AuthService;
@@ -352,6 +357,7 @@ export interface ApplicationOptions {
     repository: AiRepository;
     management: AiManagementService;
     searchTool?: WebSearchTool;
+    agentSettings?: AgentSettingsService;
     searchSettings?: WebSearchSettingsService;
     imageInputSettings?: ImageInputSettingsService;
     rawRequestStore?: AiRawRequestStore;
@@ -682,6 +688,7 @@ export function buildApplication(
     config.rateLimitWindowSeconds * 1_000,
   );
   application.addHook("onReady", () => {
+    options.memory?.start();
     options.messageRetention?.start();
     options.imageSummary?.worker.start();
     options.workflow?.summaryWorker?.start();
@@ -776,6 +783,7 @@ export function buildApplication(
       options.auth?.isReady() ?? Promise.resolve(true),
       options.workflow?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.repository.isReady() ?? Promise.resolve(true),
+      options.ai?.agentSettings?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.searchSettings?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.imageInputSettings?.repository.isReady() ??
         Promise.resolve(true),
@@ -980,6 +988,245 @@ export function buildApplication(
       await requireAdmin(request);
       sensitiveAudits.set(request, { action, targetType });
     };
+
+  const memory = (): MemoryService => {
+    if (!options.memory)
+      throw new ApplicationError(
+        "MEMORY_UNAVAILABLE",
+        "Memory service unavailable.",
+        503,
+      );
+    return options.memory;
+  };
+  application.get(
+    "/api/v1/ai/memory/settings",
+    { preHandler: requireAdmin },
+    async () => ({ data: await memory().view() }),
+  );
+  application.put(
+    "/api/v1/ai/memory/settings",
+    { preHandler: requireSensitive("memory.settings.update", "memory") },
+    async (request) => ({ data: await memory().update(request.body) }),
+  );
+  application.post(
+    "/api/v1/ai/memory/probe",
+    { preHandler: requireSensitive("memory.probe", "memory") },
+    async (request) => ({ data: await memory().probe(request.body) }),
+  );
+  application.get(
+    "/api/v1/chats/:chatId/memory",
+    { preHandler: requireAdmin },
+    async (request) => {
+      const { chatId } = chatParametersSchema.parse(request.params);
+      return { data: await memory().repository.chatView(chatId) };
+    },
+  );
+  application.put(
+    "/api/v1/chats/:chatId/memory",
+    { preHandler: requireSensitive("memory.chat.update", "chat") },
+    async (request) => {
+      const { chatId } = chatParametersSchema.parse(request.params);
+      const body = z
+        .object({
+          enabled: z.boolean(),
+          expectedVersion: z.number().int().min(0),
+        })
+        .parse(request.body);
+      await memory().repository.authorize(
+        chatId,
+        body.enabled,
+        body.expectedVersion,
+      );
+      return { data: await memory().repository.chatView(chatId) };
+    },
+  );
+  application.post(
+    "/api/v1/chats/:chatId/memory/search",
+    { preHandler: requireSensitive("memory.search", "chat") },
+    async (request) => {
+      const { chatId } = chatParametersSchema.parse(request.params);
+      const body = memorySearchSchema.parse(request.body);
+      const view = await memory().repository.chatView(chatId);
+      const scope = await memory().repository.scope(
+        chatId,
+        view.upperIndex,
+        null,
+      );
+      if (!scope)
+        throw new ApplicationError(
+          "MEMORY_DISABLED",
+          "Enable memory for this chat.",
+          409,
+        );
+      const session = await memory().session(scope);
+      return { data: await session.search(body) };
+    },
+  );
+  application.get(
+    "/api/v1/chats/:chatId/memory/jobs",
+    { preHandler: requireAdmin },
+    async (request) => {
+      const { chatId } = chatParametersSchema.parse(request.params);
+      const query = pageQuerySchema.parse(request.query);
+      const rows = await memory().repository.jobs(chatId, {
+        limit: query.limit + 1,
+        cursor: decodeCursor(query.cursor),
+      });
+      return cursorPage(rows, query.limit, (row) => ({
+        timestamp: row.created_at.toISOString(),
+        id: row.id,
+      }));
+    },
+  );
+  application.post(
+    "/api/v1/chats/:chatId/memory/jobs",
+    { preHandler: requireSensitive("memory.job.create", "chat") },
+    async (request) => {
+      const { chatId } = chatParametersSchema.parse(request.params);
+      const body = z
+        .object({
+          generationId: z.string().uuid(),
+          from: z.string().datetime({ offset: true }).optional(),
+          to: z.string().datetime({ offset: true }).optional(),
+          requestKey: z.string().uuid(),
+        })
+        .refine(
+          (v) => !v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to),
+        )
+        .parse(request.body);
+      return {
+        data: await memory().repository.createJob(
+          chatId,
+          body.generationId,
+          body.from,
+          body.to,
+          body.requestKey,
+        ),
+      };
+    },
+  );
+  application.get(
+    "/api/v1/memory/jobs",
+    { preHandler: requireAdmin },
+    async (request) => {
+      const query = pageQuerySchema.parse(request.query);
+      const rows = await memory().repository.jobs(undefined, {
+        limit: query.limit + 1,
+        cursor: decodeCursor(query.cursor),
+      });
+      return cursorPage(rows, query.limit, (row) => ({
+        timestamp: row.created_at.toISOString(),
+        id: row.id,
+      }));
+    },
+  );
+  application.get(
+    "/api/v1/memory/jobs/:jobId",
+    { preHandler: requireAdmin },
+    async (request) => {
+      const { jobId } = z
+        .object({ jobId: z.string().uuid() })
+        .parse(request.params);
+      const job = (
+        await memory().repository.jobs(undefined, { limit: 1, id: jobId })
+      )[0];
+      if (!job)
+        throw new ApplicationError(
+          "MEMORY_JOB_NOT_FOUND",
+          "Index job unavailable.",
+          404,
+        );
+      return { data: job };
+    },
+  );
+  application.post(
+    "/api/v1/memory/jobs/:jobId/actions",
+    { preHandler: requireSensitive("memory.job.action", "memory-job") },
+    async (request) => {
+      const { jobId } = z
+        .object({ jobId: z.string().uuid() })
+        .parse(request.params);
+      const body = z
+        .object({
+          action: z.enum(["pause", "resume", "cancel", "activate"]),
+          expectedVersion: z.number().int().min(1),
+        })
+        .parse(request.body);
+      await memory().repository.action(
+        jobId,
+        body.action,
+        body.expectedVersion,
+      );
+      return { data: { updated: true } };
+    },
+  );
+  application.get(
+    "/api/v1/memory/retrievals/:id/sources/:ref",
+    { preHandler: requireSensitive("memory.source.view", "memory-source") },
+    async (request) => {
+      const { id, ref } = z
+        .object({
+          id: z.string().uuid(),
+          ref: z.string().regex(/^M[1-9][0-9]*$/u),
+        })
+        .parse(request.params);
+      const repo = memory().repository;
+      const rows = await repo.pool.query<{
+        chat_id: string;
+        upper_index: string;
+        message_index: string;
+        source_hash: string;
+        start_offset: number;
+        end_offset: number | null;
+      }>(
+        `SELECT r.chat_id,r.upper_index,m.message_index,s.source_hash,s.start_offset,s.end_offset FROM memory_retrievals r JOIN memory_retrieval_sources s ON s.retrieval_id=r.id JOIN messages m ON m.id=s.message_id WHERE r.id=$1 AND s.ref=$2 AND m.chat_id=r.chat_id AND m.message_index<r.upper_index AND m.content_redacted_at IS NULL ORDER BY m.message_index`,
+        [id, ref],
+      );
+      const expected = await repo.pool.query<{ count: string }>(
+        "SELECT count(*) FROM memory_retrieval_sources WHERE retrieval_id=$1 AND ref=$2",
+        [id, ref],
+      );
+      if (
+        !rows.rows.length ||
+        rows.rows.length !== Number(expected.rows[0]?.count)
+      )
+        throw new ApplicationError(
+          "MEMORY_SOURCE_UNAVAILABLE",
+          "Source unavailable.",
+          404,
+        );
+      const messages = [];
+      for (const row of rows.rows) {
+        if (!(await repo.scope(row.chat_id, Number(row.upper_index), null)))
+          throw new ApplicationError(
+            "MEMORY_SOURCE_UNAVAILABLE",
+            "Source unavailable.",
+            404,
+          );
+        const current = (
+          await repo.messages(
+            row.chat_id,
+            Number(row.message_index),
+            Number(row.message_index),
+          )
+        )[0];
+        if (!current || current.hash !== row.source_hash)
+          throw new ApplicationError(
+            "MEMORY_SOURCE_UNAVAILABLE",
+            "Source unavailable.",
+            404,
+          );
+        messages.push({
+          ...current,
+          text: current.text.slice(
+            row.start_offset,
+            row.end_offset ?? undefined,
+          ),
+        });
+      }
+      return { data: { messages } };
+    },
+  );
 
   const dataExportOwner = (request: FastifyRequest): DataExportOwner => {
     const principal = principals.get(request);
@@ -1651,6 +1898,51 @@ export function buildApplication(
               : false,
         },
       }),
+    );
+
+    application.get(
+      "/api/v1/ai/agent/settings",
+      { preHandler: requireAdmin },
+      async () => {
+        if (options.ai?.agentSettings === undefined) {
+          throw new ApplicationError(
+            "AI_AGENT_SETTINGS_UNAVAILABLE",
+            "Agent settings are unavailable.",
+            503,
+          );
+        }
+        return { data: await options.ai.agentSettings.view() };
+      },
+    );
+
+    application.put(
+      "/api/v1/ai/agent/settings",
+      {
+        preHandler: requireAuditedAdmin(
+          "ai.agent.settings.update",
+          "ai-agent-settings",
+        ),
+      },
+      async (request) => {
+        if (options.ai?.agentSettings === undefined) {
+          throw new ApplicationError(
+            "AI_AGENT_SETTINGS_UNAVAILABLE",
+            "Agent settings are unavailable.",
+            503,
+          );
+        }
+        const result = await options.ai.agentSettings.update(
+          agentSettingsUpdateSchema.parse(request.body),
+        );
+        if (result.status === "conflict") {
+          throw new ApplicationError(
+            "AI_AGENT_SETTINGS_CONFLICT",
+            "Agent settings changed; refresh before retrying.",
+            409,
+          );
+        }
+        return { data: result.value };
+      },
     );
 
     application.get(
@@ -2402,6 +2694,14 @@ export function buildApplication(
               (await options.ai?.repository.listAttempts(executionId)) ?? []
             ).map((attempt) => ({
               ...attempt,
+              rawResponse: {
+                status: options.ai?.rawRequestStore?.getResponse(
+                  executionId,
+                  attempt.diagnostics?.clientRequestId ?? "",
+                )
+                  ? "available"
+                  : "unavailable",
+              },
               rawRequest: options.ai?.rawRequestStore?.reference(
                 executionId,
                 attempt.diagnostics?.requestHash ?? "",
@@ -3101,6 +3401,59 @@ export function buildApplication(
       },
     );
 
+    application.get(
+      "/api/v1/executions/:executionId/ai-attempts/:attemptId/raw-response",
+      {
+        preHandler: requireSensitive(
+          "execution.ai-response.view",
+          "workflow-execution",
+        ),
+      },
+      async (request) => {
+        const parameters = executionAttemptParametersSchema.parse(
+          request.params,
+        );
+        const execution = await workflowRepository.getExecution(
+          parameters.executionId,
+        );
+        if (execution === null) {
+          throw new ApplicationError(
+            "EXECUTION_NOT_FOUND",
+            "The workflow execution does not exist.",
+            404,
+          );
+        }
+        const attempt = (
+          (await options.ai?.repository.listAttempts(parameters.executionId)) ??
+          []
+        ).find((candidate) => candidate.id === parameters.attemptId);
+        if (attempt === undefined) {
+          throw new ApplicationError(
+            "AI_PROVIDER_ATTEMPT_NOT_FOUND",
+            "The AI provider attempt does not exist in this execution.",
+            404,
+          );
+        }
+        const responseBody = options.ai?.rawRequestStore?.getResponse(
+          parameters.executionId,
+          attempt.diagnostics?.clientRequestId ?? "",
+        );
+        if (responseBody === undefined || responseBody === null) {
+          throw new ApplicationError(
+            "AI_RAW_RESPONSE_UNAVAILABLE",
+            "No raw AI response is retained in this process; it may not have been received or may have expired.",
+            404,
+          );
+        }
+        return {
+          data: {
+            attemptId: attempt.id,
+            ...responseBody,
+          },
+        };
+      },
+    );
+
     application.post(
       "/api/v1/executions/:executionId/retry",
       {
@@ -3268,6 +3621,7 @@ export function buildApplication(
   );
 
   application.addHook("onClose", async () => {
+    await options.memory?.stop();
     await options.imageSummary?.worker.stop();
     await options.workflow?.summaryWorker?.stop();
     await options.messageRetention?.stop();
@@ -3277,6 +3631,7 @@ export function buildApplication(
       options.workflow?.repository.close() ?? Promise.resolve(),
       options.workflow?.contextState?.close() ?? Promise.resolve(),
       options.ai?.repository.close() ?? Promise.resolve(),
+      options.ai?.agentSettings?.repository.close() ?? Promise.resolve(),
       options.ai?.searchSettings?.repository.close() ?? Promise.resolve(),
       options.ai?.imageInputSettings?.repository.close() ?? Promise.resolve(),
       options.ai?.summarySettings?.repository.close?.() ?? Promise.resolve(),

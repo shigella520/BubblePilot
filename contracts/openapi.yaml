@@ -6,6 +6,326 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/ai/memory/settings:
+    get:
+      operationId: getapiv1aimemorysettings
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 长期聊天检索配置或脱敏状态。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putapiv1aimemorysettings
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 需要敏感操作二次验证并记录审计；正文不进入普通日志。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemorySettingsInput"
+  /api/v1/ai/memory/probe:
+    post:
+      operationId: postapiv1aimemoryprobe
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 需要敏感操作二次验证并记录审计；正文不进入普通日志。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemorySettingsInput"
+  /api/v1/chats/{chatId}/memory:
+    parameters:
+      - name: chatId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getapiv1chatschatIdmemory
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 长期聊天检索配置或脱敏状态。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putapiv1chatschatIdmemory
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 需要敏感操作二次验证并记录审计；正文不进入普通日志。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryChatInput"
+  /api/v1/chats/{chatId}/memory/search:
+    parameters:
+      - name: chatId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: postapiv1chatschatIdmemorysearch
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 需要敏感操作二次验证并记录审计；正文不进入普通日志。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemorySearchInput"
+  /api/v1/chats/{chatId}/memory/jobs:
+    parameters:
+      - name: chatId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getapiv1chatschatIdmemoryjobs
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 长期聊天检索配置或脱敏状态。
+      responses:
+        "200":
+          description: 返回脱敏任务进度，旧任务统计可能不完整；只有当前处理任务提供动态 ETA。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryJobPage"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: postapiv1chatschatIdmemoryjobs
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 需要敏感操作二次验证并记录审计；正文不进入普通日志。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryJobInput"
+  /api/v1/memory/jobs:
+    get:
+      operationId: getapiv1memoryjobs
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 长期聊天检索配置或脱敏状态。
+      responses:
+        "200":
+          description: 返回脱敏任务进度，旧任务统计可能不完整；只有当前处理任务提供动态 ETA。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryJobPage"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /api/v1/memory/jobs/{jobId}:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getapiv1memoryjobsjobId
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 读取单个索引任务的脱敏详情，不读取消息正文。
+      responses:
+        "200":
+          description: 任务详情。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/MemoryJobStatus"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/memory/jobs/{jobId}/actions:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: postapiv1memoryjobsjobIdactions
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 需要敏感操作二次验证并记录审计；正文不进入普通日志。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryJobAction"
+  /api/v1/memory/retrievals/{id}/sources/{ref}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: ref
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^M[1-9][0-9]*$
+    get:
+      operationId: getapiv1memoryretrievalsidsourcesref
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 需要敏感操作二次验证并记录审计；正文不进入普通日志。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /health/live:
     get:
       operationId: getLiveness
@@ -1138,6 +1458,61 @@ paths:
           description: 返回实例联网搜索总开关、后端类型与即时可用状态。
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/ai/agent/settings:
+    get:
+      operationId: getAiAgentSettings
+      description: 返回所有工作流共享的Agent 执行预算运行参数；尚未保存时返回应用默认值。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 返回当前Agent 执行预算全局配置、来源和乐观锁版本。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AgentSettingsView"
+                additionalProperties: false
+        "401":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: updateAiAgentSettings
+      description: 将Agent 执行预算全局配置保存到数据库；新的 AI 执行会立即读取该版本，无需重启应用。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentSettingsUpdate"
+      responses:
+        "200":
+          description: 全局配置已保存，对后续 Agent 运行生效。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AgentSettingsView"
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /api/v1/ai/search/settings:
     get:
       operationId: getAiWebSearchSettings
@@ -1670,6 +2045,28 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
+  /api/v1/executions/{executionId}/ai-attempts/{attemptId}/raw-response:
+    get:
+      operationId: getExecutionAiAttemptRawResponse
+      description: 读取本次 Attempt 的原始响应、error 的 message/code/type/param 及精选请求 ID；需敏感验证并审计。按 clientRequestId 关联，与请求共用最近 20 个执行内存缓存。正文最多 64 KiB，返回 body、bytes、truncated、httpStatus、error、requestIds 和 attemptId；未收到完整响应或缓存过期返回 404。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+        - in: path
+          name: attemptId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 返回受保护的响应诊断，截断时明确标记；普通执行详情仅返回 rawResponse.status。
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/retry:
     post:
       operationId: retryExecution
@@ -1945,6 +2342,211 @@ components:
         type: integer
         minimum: 1
   schemas:
+    MemorySettingsInput:
+      type: object
+      required:
+        - enabled
+        - protocol
+        - baseUrl
+        - model
+        - dimensions
+        - modelVersion
+        - expectedVersion
+      properties:
+        enabled:
+          type: boolean
+        protocol:
+          enum:
+            - ollama
+            - openai-compatible
+        baseUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+        model:
+          type: string
+          maxLength: 200
+        dimensions:
+          type: integer
+          minimum: 1
+          maximum: 16000
+        modelVersion:
+          type: string
+          maxLength: 200
+        queryPrefix:
+          type: string
+          maxLength: 1000
+        expectedVersion:
+          type: integer
+          minimum: 0
+        secret:
+          type: string
+          writeOnly: true
+          maxLength: 8192
+    MemorySearchInput:
+      type: object
+      additionalProperties: false
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 500
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        senderId:
+          type: string
+          maxLength: 255
+    MemoryChatInput:
+      type: object
+      required:
+        - enabled
+        - expectedVersion
+      properties:
+        enabled:
+          type: boolean
+        expectedVersion:
+          type: integer
+          minimum: 0
+    MemoryJobPage:
+      type: object
+      required: [data, page]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryJobStatus"
+        page:
+          type: object
+          required: [nextCursor]
+          properties:
+            nextCursor: { type: [string, "null"] }
+    MemoryJobStatus:
+      type: object
+      required: [id, status, version, progress]
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          {
+            type: string,
+            enum:
+              [
+                queued,
+                running,
+                paused,
+                succeeded,
+                failed,
+                cancelled,
+                superseded,
+              ],
+          }
+        version: { type: integer }
+        chat_id: { type: string, format: uuid }
+        chat_name: { type: [string, "null"] }
+        model: { type: string }
+        generation_id: { type: string, format: uuid }
+        request_key:
+          {
+            type: [string, "null"],
+            description: "显式补建任务的幂等键；增量任务为空。",
+          }
+        range_from: { type: [string, "null"], format: date-time }
+        range_to: { type: [string, "null"], format: date-time }
+        cursor_index:
+          { type: string, description: "诊断游标，不是已处理数量。" }
+        through_index: { type: string }
+        progress:
+          $ref: "#/components/schemas/MemoryJobProgress"
+    MemoryJobProgress:
+      type: object
+      required:
+        [
+          scope,
+          total,
+          processed,
+          removed,
+          remaining,
+          percent,
+          lastProgressAt,
+          generatedAt,
+          estimate,
+        ]
+      properties:
+        scope:
+          {
+            type: [string, "null"],
+            enum: [full, remaining, null],
+            description: "full 为创建时范围，remaining 为旧任务升级后剩余范围，null 表示无可靠统计。",
+          }
+        total: { type: integer, minimum: 0 }
+        processed: { type: integer, minimum: 0 }
+        removed: { type: integer, minimum: 0 }
+        remaining: { type: integer, minimum: 0 }
+        percent: { type: [number, "null"], minimum: 0, maximum: 100 }
+        lastProgressAt: { type: [string, "null"], format: date-time }
+        generatedAt: { type: string, format: date-time }
+        estimate:
+          type: object
+          required:
+            [status, messagesPerMinute, remainingSeconds, estimatedCompletionAt]
+          properties:
+            status:
+              {
+                type: string,
+                enum:
+                  [
+                    available,
+                    warming,
+                    waiting,
+                    stalled,
+                    paused,
+                    failed,
+                    cancelled,
+                    succeeded,
+                    superseded,
+                  ],
+              }
+            messagesPerMinute: { type: [number, "null"] }
+            remainingSeconds: { type: [integer, "null"] }
+            estimatedCompletionAt: { type: [string, "null"], format: date-time }
+    MemoryJobInput:
+      type: object
+      required:
+        - generationId
+        - requestKey
+      properties:
+        generationId:
+          type: string
+          format: uuid
+        requestKey:
+          type: string
+          format: uuid
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+    MemoryJobAction:
+      type: object
+      required:
+        - action
+        - expectedVersion
+      properties:
+        action:
+          enum:
+            - pause
+            - resume
+            - cancel
+            - activate
+        expectedVersion:
+          type: integer
+          minimum: 1
     ImageInputSettingsUpdate:
       type: object
       required:
@@ -2013,6 +2615,42 @@ components:
         maxTotalBytes: { type: integer, minimum: 1024, maximum: 104857600 }
         fetchTimeoutMs: { type: integer, minimum: 1000, maximum: 60000 }
         detail: { enum: [low, high, auto] }
+        source: { enum: [defaults, database] }
+        version: { type: integer, minimum: 0 }
+        updatedAt: { type: [string, "null"], format: date-time }
+      additionalProperties: false
+    AgentSettingsUpdate:
+      type: object
+      required:
+        [
+          maxToolCalls,
+          maxToolOutputCharacters,
+          maxToolDurationMs,
+          expectedVersion,
+        ]
+      properties:
+        maxToolCalls: { type: integer, minimum: 1, maximum: 30 }
+        maxToolOutputCharacters:
+          { type: integer, minimum: 4000, maximum: 100000 }
+        maxToolDurationMs: { type: integer, minimum: 5000, maximum: 180000 }
+        expectedVersion: { type: integer, minimum: 0 }
+      additionalProperties: false
+    AgentSettingsView:
+      type: object
+      required:
+        [
+          maxToolCalls,
+          maxToolOutputCharacters,
+          maxToolDurationMs,
+          source,
+          version,
+          updatedAt,
+        ]
+      properties:
+        maxToolCalls: { type: integer, minimum: 1, maximum: 30 }
+        maxToolOutputCharacters:
+          { type: integer, minimum: 4000, maximum: 100000 }
+        maxToolDurationMs: { type: integer, minimum: 5000, maximum: 180000 }
         source: { enum: [defaults, database] }
         version: { type: integer, minimum: 0 }
         updatedAt: { type: [string, "null"], format: date-time }

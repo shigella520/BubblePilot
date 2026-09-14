@@ -1,3 +1,4 @@
+import type { AgentBudgetSnapshot } from "./agent-settings-types.js";
 import { z } from "zod";
 
 const parameterValueSchema = z.union([
@@ -131,6 +132,8 @@ export type WebSearchPolicy = "disabled" | "auto" | "required";
 export type WebSearchSourceDisplay = "full" | "compact" | "hidden";
 export type WebSearchFailurePolicy = "mode-default" | "fail" | "continue";
 export interface WebSearchExecutionOptions {
+  signal?: AbortSignal;
+  deadline?: number;
   maxAttempts?: number;
   attemptTimeoutMs?: number;
   retryDelayMs?: number;
@@ -282,6 +285,7 @@ export type AiRouteCandidateDecisionReason =
   | "image-capability-disabled"
   | "image-capability-unverified"
   | "web-search-unsupported"
+  | "local-tools-unsupported"
   | "health-cooldown"
   | "health-unavailable"
   | "retry-not-eligible"
@@ -583,6 +587,7 @@ export interface AiUsageReport {
 }
 
 export interface AiRouteSuccess {
+  agentBudget?: AgentBudgetSnapshot;
   status: "succeeded";
   text: string;
   toolCalls: readonly AiToolCall[];
@@ -598,6 +603,7 @@ export interface AiRouteSuccess {
 }
 
 export interface AiRouteFailure {
+  agentBudget?: AgentBudgetSnapshot;
   status: "failed";
   code: string;
   summary: string;
@@ -610,6 +616,7 @@ export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 export interface AiRouteRequest {
   executionId: string | null;
   nodeId: string;
+  memoryEvent?: { provider: string; messageId: string; timeZone?: string };
   routeId: string;
   messages: readonly AiChatMessage[];
   maxOutputTokens: number;

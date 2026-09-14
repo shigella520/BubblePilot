@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { WorkflowExecutionError } from "../modules/workflow/workflow-errors.js";
+import { defaultAgentSettings } from "../modules/ai/agent-settings-types.js";
+import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
+import { NodeRegistry } from "../modules/workflow/node-registry.js";
+import type { HistoryCoverage } from "../modules/workflow/conversation-context-service.js";
+import { describe, expect, it, vi } from "vitest";
 
 import type { MessageEnvelope } from "../modules/ingestion/message-envelope.js";
 import type { TriggerBinding } from "../modules/workflow/workflow-repository.js";
@@ -97,4 +102,139 @@ describe("workflow execution context snapshot", () => {
       scheduledCompressionOperationId: "scheduled-operation",
     });
   });
+});
+
+it("shares coverage across node contexts and records the same execution snapshot", async () => {
+  const snapshot = vi.fn().mockResolvedValue(undefined);
+  const repository = Object.assign(new InMemoryWorkflowRepository(), {
+    recordContextSnapshot: snapshot,
+  });
+  const binding: TriggerBinding = {
+    ...trigger,
+    definition: {
+      ...trigger.definition,
+      startNodeId: "load",
+      maxSteps: 2,
+      nodes: [
+        {
+          id: "load",
+          type: "load-context",
+          version: 1,
+          config: {},
+          onSuccess: "done",
+        },
+        ...trigger.definition.nodes,
+      ],
+    },
+  };
+  vi.spyOn(repository, "listActiveTriggerBindings").mockResolvedValue([
+    binding,
+  ]);
+  const coverage: HistoryCoverage = {
+    summaryCoveredThroughIndex: "2",
+    retained: null,
+    omitted: {
+      count: 1,
+      firstMessageIndex: "4",
+      lastMessageIndex: "4",
+      earliestSentAt: "2026-09-01T00:00:00Z",
+      latestSentAt: "2026-09-01T00:00:00Z",
+    },
+  };
+  const registry = new NodeRegistry();
+  registry.register({
+    type: "load-context",
+    version: 1,
+    retryPolicy: () => ({ maxAttempts: 1, initialDelayMs: 0 }),
+    failureTarget: () => null,
+    execute: (_node, context) => {
+      context.historyCoverage = coverage;
+      context.contextIncompleteReasons = ["history-trimmed"];
+      return Promise.resolve({
+        status: "succeeded",
+        nextNodeId: "done",
+        outputSummary: {
+          historyCoverage: coverage,
+          contextIncomplete: true,
+          contextIncompleteReasons: ["history-trimmed"],
+        },
+      });
+    },
+  });
+  let observed: HistoryCoverage | undefined;
+  registry.register({
+    type: "end",
+    version: 1,
+    retryPolicy: () => ({ maxAttempts: 1, initialDelayMs: 0 }),
+    failureTarget: () => null,
+    execute: (_node, context) => {
+      observed = context.historyCoverage;
+      return Promise.resolve({
+        status: "succeeded",
+        nextNodeId: null,
+        outputSummary: {},
+      });
+    },
+  });
+  const result = await new WorkflowEngine(repository, registry).handleMessage(
+    envelope,
+  );
+  expect(observed).toEqual(coverage);
+  expect(snapshot).toHaveBeenCalledWith(
+    result.executionIds[0],
+    expect.objectContaining({
+      historyCoverage: coverage,
+      contextIncomplete: true,
+      contextIncompleteReasons: ["history-trimmed"],
+    }),
+  );
+});
+
+it("persists failed Agent budget metadata in the node JSON snapshot", async () => {
+  const repository = new InMemoryWorkflowRepository();
+  vi.spyOn(repository, "listActiveTriggerBindings").mockResolvedValue([
+    trigger,
+  ]);
+  const finish = vi.spyOn(repository, "finishNodeExecution");
+  const budget = {
+    settings: {
+      ...defaultAgentSettings,
+      source: "defaults",
+      version: 0,
+      updatedAt: null,
+    },
+    modelTurns: 3,
+    toolCalls: 2,
+    toolOutputCharacters: 128,
+    toolDurationMs: 30,
+    finalizingDueToBudget: true,
+    reasons: ["tool-calls"],
+    outcome: "failed",
+  };
+  const registry = new NodeRegistry();
+  registry.register({
+    type: "end",
+    version: 1,
+    retryPolicy: () => ({ maxAttempts: 1, initialDelayMs: 0 }),
+    failureTarget: () => null,
+    execute: () => {
+      return Promise.reject(
+        new WorkflowExecutionError(
+          "AI_AGENT_TOOL_LIMIT_EXCEEDED",
+          "Fictional failure",
+          false,
+          false,
+          undefined,
+          { agentBudget: budget },
+        ),
+      );
+    },
+  });
+  await new WorkflowEngine(repository, registry).handleMessage(envelope);
+  expect(finish).toHaveBeenCalledWith(
+    expect.objectContaining({
+      status: "failed",
+      outputSummary: { agentBudget: budget },
+    }),
+  );
 });

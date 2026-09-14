@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AgentSettingsPanel from "../components/AgentSettingsPanel.vue";
+import MemoryPanel from "../components/MemoryPanel.vue";
 import {
   Activity,
   Bot,
@@ -58,6 +60,7 @@ interface Provider {
   };
 }
 interface AiRoute {
+  createdAt: string;
   id: string;
   name: string;
   providerIds: string[];
@@ -820,6 +823,12 @@ onMounted(load);
         <h2>Provider 管理</h2>
       </div>
       <nav>
+        <button type="button" @click="scrollToSection('agent-settings')">
+          <Bot :size="18" />Agent 执行配置
+        </button>
+        <button type="button" @click="scrollToSection('memory-settings')">
+          <Search :size="18" />长期聊天检索
+        </button>
         <button
           class="active"
           type="button"
@@ -845,6 +854,8 @@ onMounted(load);
       </div>
     </aside>
     <div class="admin-workspace">
+      <AgentSettingsPanel />
+      <MemoryPanel id="memory-settings" mode="settings" embedded />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"
@@ -1450,77 +1461,103 @@ onMounted(load);
           </div>
           <span class="state-badge">运行策略</span>
         </div>
-        <div class="route-grid">
-          <article v-for="item in routes" :key="item.id">
-            <header>
-              <div>
-                <strong>{{ item.name }}</strong>
-              </div>
-              <button
-                class="switch-button"
-                :class="{ active: item.enabled }"
-                :disabled="routeToggleBusyIds.has(item.id)"
-                :aria-busy="routeToggleBusyIds.has(item.id)"
-                @click="toggleRoute(item)"
-              >
-                <span></span>{{ routeToggleLabel(item) }}
-              </button>
-            </header>
-            <div class="route-order-block">
-              <span class="route-order-label">固定候选</span>
-              <div class="route-flow">
-                <span
-                  v-for="(id, index) in item.configuredProviderIds.length
-                    ? item.configuredProviderIds
-                    : providers.map((provider) => provider.id)"
-                  :key="id"
-                  :class="{
-                    unavailable: item.unavailableProviderIds.includes(id),
-                  }"
-                  >{{ index + 1 }} ·
-                  {{ providerNames.get(id) || id.slice(0, 8) }}</span
-                >
-              </div>
-            </div>
-            <div class="route-order-block">
-              <span class="route-order-label">当前有效</span>
-              <div class="route-flow effective">
-                <span v-for="(id, index) in item.effectiveProviderIds" :key="id"
-                  >{{ index + 1 }} ·
-                  {{ providerNames.get(id) || id.slice(0, 8) }}</span
-                ><span v-if="!item.effectiveProviderIds.length" class="empty"
-                  >暂无可用候选</span
-                >
-              </div>
-            </div>
-            <p>
-              Fallback {{ item.fallbackEnabled ? "开启" : "关闭" }} ·
-              {{ item.retryPolicy.maxRounds }} 轮 ·
-              {{ item.degradePolicy.failureThreshold }} 次失败后冷却
-              {{ item.degradePolicy.cooldownMs / 1000 }}s
-            </p>
-            <div class="row-actions">
-              <button class="button tiny secondary" @click="editRoute(item)">
-                编辑策略</button
-              ><button
-                class="icon-button danger"
-                :disabled="routeDeleteBusyIds.has(item.id)"
-                :aria-busy="routeDeleteBusyIds.has(item.id)"
-                :aria-label="
-                  routeDeleteBusyIds.has(item.id)
-                    ? `正在删除 ${item.name}`
-                    : `删除 ${item.name}`
-                "
-                @click="deleteRoute(item)"
-              >
-                <RefreshCw
-                  v-if="routeDeleteBusyIds.has(item.id)"
-                  class="button-spinner"
-                  :size="15"
-                /><Trash2 v-else :size="15" />
-              </button>
-            </div>
-          </article>
+        <div class="table-shell route-table">
+          <table>
+            <thead>
+              <tr>
+                <th>路由名称</th>
+                <th>状态</th>
+                <th>固定候选</th>
+                <th>当前有效</th>
+                <th>运行策略</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in routes" :key="item.id">
+                <td>
+                  <strong>{{ item.name }}</strong>
+                </td>
+                <td>
+                  <button
+                    class="switch-button"
+                    :class="{ active: item.enabled }"
+                    :disabled="routeToggleBusyIds.has(item.id)"
+                    :aria-busy="routeToggleBusyIds.has(item.id)"
+                    @click="toggleRoute(item)"
+                  >
+                    <span></span>{{ routeToggleLabel(item) }}
+                  </button>
+                </td>
+                <td>
+                  <div class="route-flow">
+                    <span
+                      v-for="(id, index) in item.configuredProviderIds.length
+                        ? item.configuredProviderIds
+                        : providers.map((provider) => provider.id)"
+                      :key="id"
+                      :class="{
+                        unavailable: item.unavailableProviderIds.includes(id),
+                      }"
+                      >{{ index + 1 }} ·
+                      {{ providerNames.get(id) || id.slice(0, 8) }}</span
+                    >
+                  </div>
+                </td>
+                <td>
+                  <div class="route-flow effective">
+                    <span
+                      v-for="(id, index) in item.effectiveProviderIds"
+                      :key="id"
+                      >{{ index + 1 }} ·
+                      {{ providerNames.get(id) || id.slice(0, 8) }}</span
+                    ><span
+                      v-if="!item.effectiveProviderIds.length"
+                      class="empty"
+                      >暂无可用候选</span
+                    >
+                  </div>
+                </td>
+                <td>
+                  Fallback {{ item.fallbackEnabled ? "开启" : "关闭" }} ·
+                  {{ item.retryPolicy.maxRounds }} 轮 ·
+                  {{ item.degradePolicy.failureThreshold }} 次失败后冷却
+                  {{ item.degradePolicy.cooldownMs / 1000 }}s
+                </td>
+                <td>{{ new Date(item.createdAt).toLocaleString() }}</td>
+                <td>
+                  <div class="row-actions">
+                    <button
+                      class="button tiny secondary"
+                      @click="editRoute(item)"
+                    >
+                      编辑策略</button
+                    ><button
+                      class="icon-button danger"
+                      :disabled="routeDeleteBusyIds.has(item.id)"
+                      :aria-busy="routeDeleteBusyIds.has(item.id)"
+                      :aria-label="
+                        routeDeleteBusyIds.has(item.id)
+                          ? `正在删除 ${item.name}`
+                          : `删除 ${item.name}`
+                      "
+                      @click="deleteRoute(item)"
+                    >
+                      <RefreshCw
+                        v-if="routeDeleteBusyIds.has(item.id)"
+                        class="button-spinner"
+                        :size="15"
+                      /><Trash2 v-else :size="15" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="!routes.length">
+                <td colspan="7">暂无 Provider 路由</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
         <form class="settings-form boxed-form" @submit.prevent="saveRoute">
           <h3>

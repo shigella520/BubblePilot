@@ -61,4 +61,23 @@ describe("normalizeIMessageText", () => {
       ["调用 __init__：", "# comment", "value = 2**3**4"].join("\n"),
     );
   });
+  it("preserves HTML, type syntax and Markdown-like operators inside code", () => {
+    const code = [
+      '<span class="label">示例</span>',
+      "  const values: Array<string> = [];",
+      "  if (a < b && b > 0) values.push('**literal**');",
+      "",
+      "",
+      "  // keep blank lines and indentation",
+    ].join("\n");
+    expect(normalizeIMessageText("代码：\n\n```html\n" + code + "\n```")).toBe(
+      "代码：\n\n" + code,
+    );
+    expect(
+      normalizeIMessageText("讨论 `<span>示例</span>` 和 `Array<T>`。"),
+    ).toBe("讨论 <span>示例</span> 和 Array<T>。");
+    expect(normalizeIMessageText("<span>示例</span>")).toBe(
+      "<span>示例</span>",
+    );
+  });
 });

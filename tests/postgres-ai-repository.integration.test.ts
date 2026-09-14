@@ -175,8 +175,13 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
     const diagnosticExecutionId = randomUUID();
     await inspectionPool.query(
       `INSERT INTO bot_triggers (id, name, workflow_version_id, conditions, enabled)
-       VALUES ($1, $2, $3, '{}'::jsonb, TRUE)`,
-      [triggerId, `Trigger ${suffix}`, workflowVersionId],
+       VALUES ($1, $2, $3, $4::jsonb, TRUE)`,
+      [
+        triggerId,
+        `Trigger ${suffix}`,
+        workflowVersionId,
+        JSON.stringify({ chatIds: [`fictional-diagnostic-${suffix}`] }),
+      ],
     );
     await inspectionPool.query(
       `INSERT INTO workflow_executions (
