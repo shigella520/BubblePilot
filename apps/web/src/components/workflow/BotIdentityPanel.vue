@@ -1,18 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, onBeforeUnmount } from "vue";
-import { useRouter } from "vue-router";
+import BotHistoryRebuildPanel from "../BotHistoryRebuildPanel.vue";
 import { Bot, RefreshCw } from "@lucide/vue";
 import AdminDetailDialog from "../AdminDetailDialog.vue";
 import { apiRequest, errorMessage } from "../../services/api";
 const props = defineProps<{ workflowId: string }>();
-const router = useRouter();
+
 interface Identity {
   nickname: string | null;
   version: number;
   updatedAt: string | null;
 }
 interface Status {
-  preview: { unknown: number; conflicts: number };
   workflows: Array<{
     workflowId: string;
     name: string;
@@ -37,10 +36,8 @@ const open = ref(false),
 const identity = ref<Identity | null>(null),
   status = ref<Status | null>(null);
 const workflows = computed(() =>
-  [...(status.value?.workflows ?? [])].sort(
-    (a, b) =>
-      Number(b.workflowId === props.workflowId) -
-      Number(a.workflowId === props.workflowId),
+  (status.value?.workflows ?? []).filter(
+    (w) => w.workflowId === props.workflowId,
   ),
 );
 let generation = 0;
@@ -62,7 +59,9 @@ async function refresh(includeIdentity = false) {
   loading.value = true;
   try {
     const [s, i] = await Promise.all([
-      apiRequest<Status>("/api/v1/bot-attributions"),
+      apiRequest<Status>(
+        `/api/v1/bot-attributions?workflowId=${props.workflowId}`,
+      ),
       includeIdentity
         ? apiRequest<Identity>(
             `/api/v1/workflows/${props.workflowId}/bot-identity`,
@@ -99,7 +98,7 @@ async function act(saveNickname: boolean) {
                 expectedVersion: identity.value?.version,
               }),
             }
-          : {}),
+          : { body: JSON.stringify({ workflowId: props.workflowId }) }),
       },
     );
     if (token !== generation) return;
@@ -131,10 +130,6 @@ async function retry(id: string) {
   } finally {
     busy.value = false;
   }
-}
-async function navigate(section: string) {
-  close();
-  await router.push({ path: "/ai", query: { section } });
 }
 const stateLabel = (s: string) =>
   ({
@@ -183,7 +178,7 @@ const stateLabel = (s: string) =>
     </form>
     <p v-if="notice" role="status">{{ notice }}</p>
     <div class="panel-head">
-      <h3>各自动化的历史消息</h3>
+      <h3>本自动化的历史消息</h3>
       <button
         class="button secondary"
         :disabled="busy || loading"
@@ -228,16 +223,14 @@ const stateLabel = (s: string) =>
         </table>
       </div>
       <p class="muted">
-        按归档消息条数统计，仅包含发送记录能够精确匹配的消息。账号中另有
-        {{ status.preview.unknown }} 条来源未知、{{ status.preview.conflicts }}
-        条归属冲突，无法分配到某个自动化。
+        按归档消息条数统计，仅包含能够精确匹配到本自动化的消息；来源未知及归属冲突不计入。
       </p>
       <button
         class="button secondary"
         :disabled="busy || loading"
         @click="act(false)"
       >
-        回填历史归属（全部自动化）
+        回填本自动化历史归属
       </button>
       <p class="muted">
         回填不调用模型。首次昵称会补充到已匹配历史，之后改名不改写历史昵称。
@@ -258,13 +251,11 @@ const stateLabel = (s: string) =>
         </p>
       </details>
     </template>
-    <div class="rebuild-links">
-      <button class="button secondary" @click="navigate('summary-rebuild')">
-        重建摘要 →</button
-      ><button class="button secondary" @click="navigate('index-rebuild')">
-        重建索引 →
-      </button>
-    </div>
+    <p class="muted">
+      以下仅列出本自动化有发送记录的聊天。重建会更新聊天共享的摘要或索引，并产生模型用量；请先完成昵称配置及历史归属回填。
+    </p>
+    <BotHistoryRebuildPanel :workflow-id="workflowId" target="summary" />
+    <BotHistoryRebuildPanel :workflow-id="workflowId" target="memory" />
   </AdminDetailDialog>
 </template>
 <style scoped>
@@ -314,13 +305,5 @@ td small {
 }
 .jobs {
   margin-top: 16px;
-}
-.rebuild-links {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  border-top: 1px solid #e0e4e8;
-  margin-top: 24px;
-  padding-top: 20px;
 }
 </style>

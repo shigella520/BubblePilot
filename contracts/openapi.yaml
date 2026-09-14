@@ -82,6 +82,13 @@ paths:
   /api/v1/bot-attributions:
     get:
       operationId: getapiv1botattributions
+      parameters:
+        - in: query
+          name: workflowId
+          schema:
+            type: string
+            format: uuid
+          description: 可选，仅返回该工作流统计、归属任务及有发送记录的聊天和重建状态。
       description: 归属预览、任务、待重建聊天及 workflows 统计（workflowId/name/nickname/total/bound/unbound/nicknamePending）。仅唯一匹配的归档消息计入各工作流，可归属 total 等于已绑定 bound 加待绑定 unbound。
       security:
         - sessionAuth: []
@@ -104,6 +111,18 @@ paths:
   /api/v1/bot-attributions/backfill:
     post:
       operationId: postapiv1botattributionsbackfill
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                workflowId:
+                  type: string
+                  format: uuid
+                  description: 可选，限定当前工作流；省略时保留全局回填。
       description: 启动幂等历史归属回填，不调用模型。
       security:
         - sessionAuth: []

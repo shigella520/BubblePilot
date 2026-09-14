@@ -1,7 +1,4 @@
 <script setup lang="ts">
-import BotHistoryRebuildPanel from "../components/BotHistoryRebuildPanel.vue";
-import { useRoute } from "vue-router";
-import { nextTick } from "vue";
 import AgentSettingsPanel from "../components/AgentSettingsPanel.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
 import {
@@ -20,7 +17,7 @@ import {
   TestTube2,
   Trash2,
 } from "@lucide/vue";
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 
 import {
   apiRequest,
@@ -146,17 +143,6 @@ interface ProviderForm {
 }
 type ReasoningEffort =
   "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-
-const pageRoute = useRoute();
-async function followRebuildLink() {
-  const section = pageRoute.query.section;
-  if (section !== "summary-rebuild" && section !== "index-rebuild") return;
-  await nextTick();
-  const element = document.getElementById(section);
-  element?.scrollIntoView({ behavior: "smooth" });
-  element?.focus({ preventScroll: true });
-}
-watch(() => pageRoute.query.section, followRebuildLink);
 
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
@@ -828,7 +814,6 @@ async function deleteRoute(item: AiRoute) {
 }
 onMounted(async () => {
   await load();
-  await followRebuildLink();
 });
 </script>
 
@@ -840,12 +825,6 @@ onMounted(async () => {
         <h2>Provider 管理</h2>
       </div>
       <nav>
-        <button type="button" @click="scrollToSection('summary-rebuild')">
-          <MessageCircle :size="18" />重建摘要
-        </button>
-        <button type="button" @click="scrollToSection('index-rebuild')">
-          <Search :size="18" />重建索引
-        </button>
         <button type="button" @click="scrollToSection('agent-settings')">
           <Bot :size="18" />Agent 执行配置
         </button>
@@ -879,7 +858,6 @@ onMounted(async () => {
     <div class="admin-workspace">
       <AgentSettingsPanel />
       <MemoryPanel id="memory-settings" mode="settings" embedded />
-      <BotHistoryRebuildPanel target="memory" />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"
@@ -1075,7 +1053,6 @@ onMounted(async () => {
           </div>
         </form>
       </section>
-      <BotHistoryRebuildPanel target="summary" />
       <section id="image-input-settings" class="admin-panel">
         <div class="panel-head">
           <div>

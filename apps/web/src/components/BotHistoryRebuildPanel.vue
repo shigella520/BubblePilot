@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref } from "vue";
 import { apiRequest, errorMessage } from "../services/api";
-const props = defineProps<{ target: "summary" | "memory" }>();
+const props = defineProps<{
+  target: "summary" | "memory";
+  workflowId: string;
+}>();
 interface Status {
   chats: Array<{
     id: string;
@@ -36,19 +39,15 @@ onBeforeUnmount(() => {
   alive = false;
 });
 const label = computed(() => (props.target === "summary" ? "摘要" : "索引"));
-const chats = computed(
-  () =>
-    data.value?.chats.filter((c) =>
-      props.target === "summary"
-        ? c.bot_summary_rebuild_required || c.bot_summary_rebuild_through
-        : c.bot_memory_rebuild_required,
-    ) ?? [],
+const chats = computed(() => data.value?.chats ?? []);
+const endpoint = computed(
+  () => `/api/v1/bot-attributions?workflowId=${props.workflowId}`,
 );
 async function refresh() {
   if (busy.value) return;
   busy.value = true;
   try {
-    const result = await apiRequest<Status>("/api/v1/bot-attributions");
+    const result = await apiRequest<Status>(endpoint.value);
     if (alive) data.value = result;
   } catch (e) {
     if (alive) notice.value = errorMessage(e);
@@ -68,7 +67,7 @@ async function rebuild(id: string) {
     notice.value = result[props.target]
       ? `${label.value}重建已启动，请刷新查看进度。`
       : `未启动${label.value}重建，请检查对应服务配置及聊天授权。`;
-    const updated = await apiRequest<Status>("/api/v1/bot-attributions");
+    const updated = await apiRequest<Status>(endpoint.value);
     if (alive) data.value = updated;
   } catch (e) {
     if (alive) notice.value = errorMessage(e);
@@ -91,24 +90,21 @@ onMounted(refresh);
 <template>
   <section
     :id="target === 'summary' ? 'summary-rebuild' : 'index-rebuild'"
-    class="admin-panel rebuild-panel"
+    class="rebuild-panel"
     tabindex="-1"
   >
     <div class="panel-head">
-      <h2>重建{{ label }}</h2>
+      <h3>重建{{ label }}</h3>
       <button class="button secondary" :disabled="busy" @click="refresh">
         {{ busy ? "处理中…" : "刷新状态" }}
       </button>
     </div>
-    <p>
-      角色归属调整后，在这里重建聊天的{{
-        label
-      }}。请先完成角色昵称配置与历史归属回填；重建会调用已配置模型并产生用量。
+    <p class="muted">
+      执行记录：执行与审计 →
+      {{ target === "summary" ? "对话压缩" : "历史索引" }}。
     </p>
     <p v-if="notice" role="status">{{ notice }}</p>
-    <p v-if="data && !chats.length">
-      暂无待启动的{{ label }}重建，已启动任务见下方进度。
-    </p>
+    <p v-if="data && !chats.length">本自动化暂无关联聊天。</p>
     <div v-for="chat in chats" :key="chat.id" class="rebuild-row">
       <span>{{ chat.display_name ?? chat.id }}</span
       ><button
@@ -116,7 +112,7 @@ onMounted(refresh);
         :disabled="busy"
         @click="rebuild(chat.id)"
       >
-        启动 / 重试{{ label }}重建
+        重建{{ label }}
       </button>
     </div>
     <template v-if="data && target === 'summary'"
@@ -147,7 +143,18 @@ onMounted(refresh);
 </template>
 <style scoped>
 .rebuild-panel {
-  scroll-margin-top: 120px;
+  border-top: 1px solid #e0e4e8;
+  padding-top: 16px;
+  margin-top: 16px;
+}
+.rebuild-panel h3 {
+  margin: 0;
+  font-size: 17px;
+}
+.muted {
+  color: #667085;
+  font-size: 13px;
+  margin: 8px 0;
 }
 .rebuild-row {
   display: flex;

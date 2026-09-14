@@ -95,8 +95,9 @@ export class BotIdentityService {
     ).rows[0];
     return row;
   }
-  async startBackfill() {
-    return this.queue(this.pool, null);
+  async startBackfill(workflowId?: string) {
+    if (workflowId) await this.view(workflowId);
+    return this.queue(this.pool, workflowId ?? null);
   }
   async preview() {
     return (
@@ -139,13 +140,23 @@ export class BotIdentityService {
       WHERE w.deleted_at IS NULL OR c.total>0 ORDER BY w.name,w.id`)
     ).rows;
   }
-  async status() {
-    return {
+  async status(workflowId?: string) {
+    if (workflowId) await this.view(workflowId);
+    const relatedChats = workflowId
+      ? (
+          await this.pool.query<{ id: string }>(
+            `SELECT DISTINCT c.id FROM chats c JOIN outbound_deliveries d ON d.provider=c.provider AND d.provider_chat_id=c.provider_chat_id JOIN workflow_executions e ON e.id=d.execution_id JOIN workflow_versions v ON v.id=e.workflow_version_id WHERE v.workflow_id=$1 AND c.deleted_at IS NULL`,
+            [workflowId],
+          )
+        ).rows.map((c) => c.id)
+      : null;
+    const result = {
       preview: await this.preview(),
       workflows: await this.workflowCoverage(),
       jobs: (
         await this.pool.query<Record<string, unknown>>(
-          `SELECT id,workflow_id,status,processed,linked,unknown_count,conflict_count,error_code,created_at,updated_at FROM bot_attribution_jobs ORDER BY created_at DESC LIMIT 50`,
+          `SELECT id,workflow_id,status,processed,linked,unknown_count,conflict_count,error_code,created_at,updated_at FROM bot_attribution_jobs WHERE ($1::uuid IS NULL OR workflow_id=$1) ORDER BY created_at DESC LIMIT 50`,
+          [workflowId ?? null],
         )
       ).rows,
       summaries: (
@@ -155,14 +166,28 @@ export class BotIdentityService {
       ).rows,
       memoryJobs: (
         await this.pool.query<Record<string, unknown>>(
-          `SELECT j.id,j.chat_id,c.display_name,j.status,j.cursor_index,j.through_index,j.error_code FROM memory_jobs j JOIN chats c ON c.id=j.chat_id WHERE j.reason='rebuild' ORDER BY j.created_at DESC LIMIT 30`,
+          `SELECT j.id,j.chat_id,c.display_name,j.status,j.cursor_index,j.through_index,j.error_code FROM memory_jobs j JOIN chats c ON c.id=j.chat_id WHERE j.reason='rebuild' AND ($1::uuid[] IS NULL OR j.chat_id=ANY($1)) ORDER BY j.created_at DESC LIMIT 30`,
+          [relatedChats],
         )
       ).rows,
       chats: (
         await this.pool.query<Record<string, unknown>>(
-          `SELECT id,display_name,bot_identity_revision,bot_summary_rebuild_required,bot_memory_rebuild_required,bot_summary_rebuild_through FROM chats WHERE deleted_at IS NULL AND (bot_summary_rebuild_required OR bot_memory_rebuild_required OR bot_summary_rebuild_through IS NOT NULL)`,
+          `SELECT id,display_name,bot_identity_revision,bot_summary_rebuild_required,bot_memory_rebuild_required,bot_summary_rebuild_through FROM chats WHERE deleted_at IS NULL AND (($1::uuid[] IS NOT NULL AND id=ANY($1)) OR ($1::uuid[] IS NULL AND (bot_summary_rebuild_required OR bot_memory_rebuild_required OR bot_summary_rebuild_through IS NOT NULL)))`,
+          [relatedChats],
         )
       ).rows,
+    };
+    if (!relatedChats) return result;
+    return {
+      ...result,
+      preview: undefined,
+      workflows: result.workflows.filter((w) => w.workflowId === workflowId),
+      summaries: result.summaries.filter((s) =>
+        relatedChats.includes(String(s.chat_id)),
+      ),
+      memoryJobs: result.memoryJobs.filter((j) =>
+        relatedChats.includes(String(j.chat_id)),
+      ),
     };
   }
   async retry(id: string) {
@@ -348,8 +373,13 @@ export class BotIdentityService {
       }
       const rows = (
         await db.query<{ id: string; chat_id: string; message_index: string }>(
-          `SELECT m.id,m.chat_id,m.message_index FROM messages m WHERE m.is_from_me AND m.message_index<=$1 AND ($2::uuid IS NULL OR m.id=$2) AND ($3::uuid IS NULL OR m.id>$3) ORDER BY m.id LIMIT 200`,
-          [job.through_index, job.message_id, job.cursor_message],
+          `SELECT m.id,m.chat_id,m.message_index FROM messages m WHERE m.is_from_me AND m.message_index<=$1 AND ($2::uuid IS NULL OR m.id=$2) AND ($3::uuid IS NULL OR m.id>$3) AND ($4::uuid IS NULL OR EXISTS(SELECT 1 FROM chats c JOIN outbound_deliveries d ON d.provider=c.provider AND d.provider_chat_id=c.provider_chat_id JOIN workflow_executions e ON e.id=d.execution_id JOIN workflow_versions v ON v.id=e.workflow_version_id WHERE c.id=m.chat_id AND d.provider_message_id=m.provider_message_id AND v.workflow_id=$4)) ORDER BY m.id LIMIT 200`,
+          [
+            job.through_index,
+            job.message_id,
+            job.cursor_message,
+            job.workflow_id,
+          ],
         )
       ).rows;
       if (rows.length)

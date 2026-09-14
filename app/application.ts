@@ -2379,7 +2379,14 @@ export function buildApplication(
     application.get(
       "/api/v1/bot-attributions",
       { preHandler: requireAdmin },
-      async () => ({ data: await identity.status() }),
+      async (request) => ({
+        data: await identity.status(
+          z
+            .object({ workflowId: z.string().uuid().optional() })
+            .strict()
+            .parse(request.query).workflowId,
+        ),
+      }),
     );
     application.post(
       "/api/v1/bot-attributions/backfill",
@@ -2389,7 +2396,14 @@ export function buildApplication(
           "bot-attribution",
         ),
       },
-      async () => ({ data: await identity.startBackfill() }),
+      async (request) => ({
+        data: await identity.startBackfill(
+          z
+            .object({ workflowId: z.string().uuid().optional() })
+            .strict()
+            .parse(request.body ?? {}).workflowId,
+        ),
+      }),
     );
     application.post(
       "/api/v1/bot-attributions/:jobId/retry",

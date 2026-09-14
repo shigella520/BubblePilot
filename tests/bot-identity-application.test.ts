@@ -49,7 +49,11 @@ describe("Bot identity administrator API", () => {
       .fn()
       .mockResolvedValue({ nickname: "虚构甲", version: 1 });
     const rebuild = vi.fn().mockResolvedValue({ summary: true, memory: false });
+    const status = vi.fn().mockResolvedValue({});
+    const startBackfill = vi.fn().mockResolvedValue({});
     const identity = {
+      status,
+      startBackfill,
       rebuild,
       view,
       update,
@@ -107,6 +111,37 @@ describe("Bot identity administrator API", () => {
         "11111111-1111-4111-8111-111111111111",
         { nickname: "虚构甲", expectedVersion: 0 },
       );
+      const workflowId = "11111111-1111-4111-8111-111111111111";
+      expect(
+        (
+          await app.inject({
+            method: "GET",
+            url: `/api/v1/bot-attributions?workflowId=${workflowId}`,
+            headers,
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(status).toHaveBeenCalledWith(workflowId);
+      expect(
+        (
+          await app.inject({
+            method: "GET",
+            url: "/api/v1/bot-attributions?workflowId=invalid",
+            headers,
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/v1/bot-attributions/backfill",
+            headers,
+            payload: { workflowId },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(startBackfill).toHaveBeenCalledWith(workflowId);
       const rebuildUrl =
         "/api/v1/chats/22222222-2222-4222-8222-222222222222/bot-identity/rebuild";
       expect(

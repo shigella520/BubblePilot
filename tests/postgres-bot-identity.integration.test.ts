@@ -382,6 +382,28 @@ describe.runIf(url)("Postgres Bot identity lifecycle", () => {
       nicknamePending: 0,
     });
   });
+  it("scopes role status and backfill to the requested workflow", async () => {
+    const f = await fixture(),
+      other = await fixture();
+    const own = await f.message(1),
+      foreign = await other.message(1);
+    await f.delivery(await f.execution(), own.guid);
+    await other.delivery(await other.execution(), foreign.guid);
+    const job = await service.startBackfill(f.workflow);
+    const result = await service.status(f.workflow);
+    expect(result.workflows.map((w) => w.workflowId)).toEqual([f.workflow]);
+    expect(result.chats.map((c) => c.id)).toEqual([f.chat]);
+    expect(result.preview).toBeUndefined();
+    expect(result.jobs).toContainEqual(
+      expect.objectContaining({ id: job?.id, workflow_id: f.workflow }),
+    );
+    expect(result.jobs.every((j) => j.workflow_id === f.workflow)).toBe(true);
+    expect(result.summaries.every((s) => s.chat_id === f.chat)).toBe(true);
+    expect(result.memoryJobs.every((j) => j.chat_id === f.chat)).toBe(true);
+    await expect(service.status(randomUUID())).rejects.toMatchObject({
+      code: "WORKFLOW_NOT_FOUND",
+    });
+  });
   it("does not reset summaries when only index rebuilding is requested", async () => {
     const f = await fixture();
     await db.query(
