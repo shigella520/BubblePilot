@@ -41,6 +41,60 @@ interface Chat {
   updatedAt: string;
 }
 
+interface RebuildStatus {
+  chats: Array<{
+    id: string;
+    bot_summary_rebuild_required: boolean;
+    bot_memory_rebuild_required: boolean;
+    bot_summary_rebuild_through: string | null;
+  }>;
+}
+const rebuildStatus = ref<RebuildStatus | null>(null);
+const rebuildBusyIds = reactive(new Set<string>());
+function needsRebuild(id: string, target: "summary" | "memory") {
+  const chat = rebuildStatus.value?.chats.find((c) => c.id === id);
+  return target === "summary"
+    ? chat?.bot_summary_rebuild_required === true
+    : chat?.bot_memory_rebuild_required === true;
+}
+function summaryRebuilding(id: string) {
+  return !!rebuildStatus.value?.chats.find((c) => c.id === id)
+    ?.bot_summary_rebuild_through;
+}
+async function loadRebuildStatus() {
+  rebuildStatus.value = null;
+  rebuildStatus.value = await apiRequest<RebuildStatus>(
+    "/api/v1/bot-attributions",
+  );
+}
+async function rebuildChat(chat: Chat, target: "summary" | "memory") {
+  if (
+    !needsRebuild(chat.id, target) ||
+    rebuildBusyIds.has(chat.id) ||
+    !chat.enabled
+  )
+    return;
+  rebuildBusyIds.add(chat.id);
+  message.value = "";
+  messageIsError.value = false;
+  const label = target === "summary" ? "摘要" : "索引";
+  try {
+    const result = await apiRequest<{ summary: boolean; memory: boolean }>(
+      `/api/v1/chats/${chat.id}/bot-identity/rebuild`,
+      { method: "POST", body: JSON.stringify({ target }) },
+    );
+    message.value = result[target]
+      ? `「${chat.displayName || chat.providerChatId}」${label}重建已启动，请到执行与审计的${target === "summary" ? "对话压缩" : "历史索引"}查看进度。`
+      : `未启动${label}重建，请检查对应服务配置及聊天授权。`;
+    await loadRebuildStatus();
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    rebuildBusyIds.delete(chat.id);
+  }
+}
+
 interface SummarySettings {
   enabled: boolean;
   providerRouteId: string;
@@ -401,6 +455,7 @@ async function loadChats(reset = false) {
     await Promise.all([
       reset ? chatPager.first() : chatPager.refresh(),
       loadChatOptions(),
+      loadRebuildStatus(),
       apiRequest<SummarySettings>("/api/v1/ai/summary/settings").then(
         (settings) => {
           summaryResetAvailable.value =
@@ -420,6 +475,9 @@ async function resetChatSummary(chat: Chat) {
   if (
     !session.sensitiveActive ||
     !summaryResetAvailable.value ||
+    !rebuildStatus.value ||
+    needsRebuild(chat.id, "summary") ||
+    summaryRebuilding(chat.id) ||
     chatSummaryResetBusyIds.has(chat.id)
   ) {
     return;
@@ -847,6 +905,8 @@ onBeforeUnmount(() =>
         <p class="panel-description">
           这里列出 Webhook
           已发现的聊天。启停操作需要二次验证，并使用版本号防止并发覆盖。
+          角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建更新聊天共享历史并产生模型用量；摘要记录在“执行与审计
+          → 对话压缩”，索引记录在“历史索引”。
         </p>
         <div class="table-shell">
           <table>
@@ -930,10 +990,43 @@ onBeforeUnmount(() =>
                 <td>
                   <div class="row-actions">
                     <button
+                      v-if="needsRebuild(chat.id, 'summary')"
+                      class="button tiny secondary"
+                      :disabled="
+                        !chat.enabled || rebuildBusyIds.has(chat.id) || busy
+                      "
+                      @click="rebuildChat(chat, 'summary')"
+                    >
+                      {{ rebuildBusyIds.has(chat.id) ? "处理中…" : "重建摘要" }}
+                    </button>
+                    <button
+                      v-if="needsRebuild(chat.id, 'memory')"
+                      class="button tiny secondary"
+                      :disabled="
+                        !chat.enabled || rebuildBusyIds.has(chat.id) || busy
+                      "
+                      @click="rebuildChat(chat, 'memory')"
+                    >
+                      {{ rebuildBusyIds.has(chat.id) ? "处理中…" : "重建索引" }}
+                    </button>
+                    <span
+                      v-if="
+                        !needsRebuild(chat.id, 'summary') &&
+                        summaryRebuilding(chat.id)
+                      "
+                      class="muted"
+                      >摘要重建已提交</span
+                    >
+                    <button
+                      v-if="
+                        !needsRebuild(chat.id, 'summary') &&
+                        !summaryRebuilding(chat.id)
+                      "
                       class="button tiny secondary"
                       type="button"
                       :disabled="
                         !session.sensitiveActive ||
+                        !rebuildStatus ||
                         !summaryResetAvailable ||
                         chatSummaryResetBusyIds.has(chat.id)
                       "

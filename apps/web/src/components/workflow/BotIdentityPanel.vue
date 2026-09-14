@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, onBeforeUnmount } from "vue";
-import BotHistoryRebuildPanel from "../BotHistoryRebuildPanel.vue";
+import { useRouter } from "vue-router";
 import { Bot, RefreshCw } from "@lucide/vue";
 import AdminDetailDialog from "../AdminDetailDialog.vue";
 import { apiRequest, errorMessage } from "../../services/api";
 const props = defineProps<{ workflowId: string }>();
+const router = useRouter();
+async function openChatManagement() {
+  close();
+  await router.push("/messages");
+}
 
 interface Identity {
   nickname: string | null;
@@ -252,10 +257,11 @@ const stateLabel = (s: string) =>
       </details>
     </template>
     <p class="muted">
-      以下仅列出本自动化有发送记录的聊天。重建会更新聊天共享的摘要或索引，并产生模型用量；请先完成昵称配置及历史归属回填。
+      摘要和索引由同一聊天中的各角色共享。请到聊天管理，按聊天查看待重建状态并操作；无需在每个角色中重复重建。
     </p>
-    <BotHistoryRebuildPanel :workflow-id="workflowId" target="summary" />
-    <BotHistoryRebuildPanel :workflow-id="workflowId" target="memory" />
+    <button class="button secondary" @click="openChatManagement">
+      前往聊天管理
+    </button>
   </AdminDetailDialog>
 </template>
 <style scoped>
