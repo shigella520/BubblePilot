@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  executeSummaryWithRecovery,
   contextRetentionThreshold,
   contextCompressionBatchRange,
   conversationContextCacheKey,
@@ -434,11 +435,8 @@ describe("conversation context summary contract", () => {
     expect(prompt[0]?.content).toContain(
       "应记录其中有长期价值的请求、任务和待办",
     );
-    expect(prompt[0]?.content).toContain("不超过 3500 个字符为目标");
-    expect(prompt[0]?.content).toContain("绝对不得超过 4000 个字符");
-    expect(prompt[0]?.content).toContain(
-      "不得通过省略仍有效的决定、未解决问题、请求、待办及其说话人来缩短",
-    );
+    expect(prompt[0]?.content).toContain("不设目标字数");
+    expect(prompt[0]?.content).toContain("12000 个字符仅为异常保护上限");
     expect(prompt[0]?.content).toContain(
       "不要输出前言、解释、字符统计、Markdown 代码块或 XML 标签",
     );
@@ -740,4 +738,71 @@ describe("history coverage metadata", () => {
     expect(historyCoverage("9", candidates, candidates).omitted).toBeNull();
     expect(historyCoverage("9", [], []).retained).toBeNull();
   });
+});
+
+describe("summary length recovery", () => {
+  const request = {
+    executionId: null,
+    nodeId: "conversation-summary",
+    routeId: "fictional",
+    messages: [
+      { role: "system" as const, content: "fictional summary instruction" },
+      {
+        role: "user" as const,
+        content: "fictional previous summary and messages",
+      },
+    ],
+    maxOutputTokens: 8192,
+    temperature: 0,
+    maxOutputCharacters: 12000,
+    outputFormat: "text" as const,
+    protectedPrompt: null,
+    agentTurn: 3,
+  };
+  it("retries an oversized output once using unchanged source materials", async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "failed", code: "AI_OUTPUT_TOO_LONG" })
+      .mockResolvedValueOnce({
+        status: "succeeded",
+        text: "compact fictional summary",
+      });
+    const result = await executeSummaryWithRecovery({ execute }, request);
+    expect(result.status).toBe("succeeded");
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[1]?.[0]).toMatchObject({
+      agentTurn: 4,
+      maxOutputCharacters: 12000,
+      maxOutputTokens: 8192,
+    });
+    expect(execute.mock.calls[1]?.[0]).toMatchObject({
+      messages: [
+        ...request.messages,
+        expect.objectContaining({ role: "system" }),
+      ],
+    });
+    expect(request.messages).toHaveLength(2);
+  });
+  it("stops after the compact retry also fails", async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValue({ status: "failed", code: "AI_OUTPUT_TOO_LONG" });
+    expect(
+      await executeSummaryWithRecovery({ execute }, request),
+    ).toMatchObject({ status: "failed", code: "AI_OUTPUT_TOO_LONG" });
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    { status: "succeeded", text: "fictional" },
+    { status: "failed", code: "AI_PROVIDER_EMPTY_OUTPUT" },
+  ])(
+    "does not repeat normal or unrelated outcomes: $status",
+    async (result) => {
+      const execute = vi.fn().mockResolvedValue(result);
+      expect(await executeSummaryWithRecovery({ execute }, request)).toEqual(
+        result,
+      );
+      expect(execute).toHaveBeenCalledTimes(1);
+    },
+  );
 });

@@ -95,6 +95,69 @@ describe.runIf(url)("Postgres Bot identity lifecycle", () => {
       link,
     };
   }
+  it("resumes a failed role summary batch without resetting committed progress or duplicating work", async () => {
+    const f = await fixture();
+    const sid = randomUUID(),
+      operation = randomUUID();
+    const settings = {
+      enabled: true,
+      providerRouteId: randomUUID(),
+      policyVersion: 1,
+      includeFromMe: true,
+      timeZone: "UTC",
+    };
+    await db.query(
+      "UPDATE chats SET bot_summary_rebuild_required=FALSE,bot_summary_rebuild_through=99 WHERE id=$1",
+      [f.chat],
+    );
+    await db.query(
+      `INSERT INTO conversation_context_states(id,chat_id,summary_policy_version,summary,covered_through_index,version,status,bot_identity_revision) VALUES($1,$2,1,'fictional committed summary',1,1,'idle',1)`,
+      [sid, f.chat],
+    );
+    await db.query(
+      `INSERT INTO conversation_context_compressions(id,context_state_id,base_version,from_index,through_index,status,reason,error_code,lease_expires_at) VALUES($1,$2,1,2,3,'failed','bot-identity-rebuild','AI_OUTPUT_TOO_LONG',now())`,
+      [operation, sid],
+    );
+    expect(
+      await service.rebuild(f.chat, { ...settings, enabled: false }, "summary"),
+    ).toEqual({ summary: false, memory: false });
+    await Promise.all([
+      service.rebuild(f.chat, settings, "summary"),
+      service.rebuild(f.chat, settings, "summary"),
+    ]);
+    expect(
+      (
+        await db.query(
+          "SELECT summary,covered_through_index,version FROM conversation_context_states WHERE id=$1",
+          [sid],
+        )
+      ).rows[0],
+    ).toEqual({
+      summary: "fictional committed summary",
+      covered_through_index: "1",
+      version: 1,
+    });
+    expect(
+      (
+        await db.query(
+          "SELECT id,status,error_code FROM conversation_context_compressions WHERE context_state_id=$1",
+          [sid],
+        )
+      ).rows,
+    ).toEqual([{ id: operation, status: "queued", error_code: null }]);
+    expect(
+      (
+        await db.query<{ count: number }>(
+          "SELECT count(*)::int count FROM conversation_context_compression_events WHERE compression_id=$1 AND metadata->>'manualRetry'='true'",
+          [operation],
+        )
+      ).rows[0]?.count,
+    ).toBe(1);
+    await db.query(
+      "UPDATE conversation_context_compressions SET status='superseded' WHERE id=$1",
+      [operation],
+    );
+  });
   it("matches both arrival orders, preserves execution snapshots and first historical nickname", async () => {
     const f = await fixture(),
       e = await f.execution(),

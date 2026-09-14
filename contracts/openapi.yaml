@@ -174,7 +174,7 @@ paths:
   /api/v1/chats/{chatId}/bot-identity/rebuild:
     post:
       operationId: postapiv1chatschatIdbotidentityrebuild
-      description: 管理员手动启动身份兼容摘要和索引重建，沿用启用状态和聊天授权。
+      description: 管理员手动启动身份兼容摘要和索引重建，沿用启用状态和聊天授权。target=summary 且已有未结束的当前身份重建时，仅重新入队当前版本的失败正式批次；保留已提交摘要与游标，重复请求不会重新开始。
       security:
         - sessionAuth: []
         - bearerAuth: []

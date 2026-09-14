@@ -42,6 +42,12 @@ interface Chat {
 }
 
 interface RebuildStatus {
+  summaries?: Array<{
+    chat_id: string;
+    covered_through_index: string;
+    status: string | null;
+    error_code: string | null;
+  }>;
   chats: Array<{
     id: string;
     bot_summary_rebuild_required: boolean;
@@ -61,6 +67,18 @@ function summaryRebuilding(id: string) {
   return !!rebuildStatus.value?.chats.find((c) => c.id === id)
     ?.bot_summary_rebuild_through;
 }
+function summaryRebuildState(id: string) {
+  return rebuildStatus.value?.summaries?.find((item) => item.chat_id === id);
+}
+function summaryRebuildLabel(id: string) {
+  const state = summaryRebuildState(id);
+  const progress = state
+    ? `已摘要至第 ${state.covered_through_index} 条`
+    : "进度待刷新";
+  if (state?.status === "failed")
+    return `摘要重建失败 · ${progress} · ${state.error_code ?? "未知错误"}`;
+  return `摘要重建${state?.status === "running" ? "处理中" : "排队中"} · ${progress}`;
+}
 async function loadRebuildStatus() {
   rebuildStatus.value = null;
   rebuildStatus.value = await apiRequest<RebuildStatus>(
@@ -69,7 +87,11 @@ async function loadRebuildStatus() {
 }
 async function rebuildChat(chat: Chat, target: "summary" | "memory") {
   if (
-    !needsRebuild(chat.id, target) ||
+    (!needsRebuild(chat.id, target) &&
+      !(
+        target === "summary" &&
+        summaryRebuildState(chat.id)?.status === "failed"
+      )) ||
     rebuildBusyIds.has(chat.id) ||
     !chat.enabled
   )
@@ -1015,8 +1037,24 @@ onBeforeUnmount(() =>
                         summaryRebuilding(chat.id)
                       "
                       class="muted"
-                      >摘要重建已提交</span
+                      >{{ summaryRebuildLabel(chat.id) }}</span
                     >
+                    <button
+                      v-if="
+                        !needsRebuild(chat.id, 'summary') &&
+                        summaryRebuildState(chat.id)?.status === 'failed'
+                      "
+                      class="button tiny secondary"
+                      :disabled="
+                        !session.sensitiveActive ||
+                        !chat.enabled ||
+                        rebuildBusyIds.has(chat.id)
+                      "
+                      title="保留已提交摘要，从失败批次继续"
+                      @click="rebuildChat(chat, 'summary')"
+                    >
+                      {{ rebuildBusyIds.has(chat.id) ? "处理中…" : "重试摘要" }}
+                    </button>
                     <button
                       v-if="
                         !needsRebuild(chat.id, 'summary') &&

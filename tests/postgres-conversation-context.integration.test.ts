@@ -326,6 +326,76 @@ describe.runIf(testDatabaseUrl !== undefined)(
       }
     });
 
+    it("keeps the committed summary and cursor when both length attempts fail", async () => {
+      const chatGuid = `iMessage;-;summary-protection-${randomUUID()}`;
+      const routeId = randomUUID();
+      const service = new ConversationContextService(testDatabaseUrl ?? "", {
+        execute,
+      } as unknown as AiRoutingService);
+      const database = new Client({ connectionString: testDatabaseUrl });
+      await database.connect();
+      const enqueue = async (count: number) => {
+        const messages = await archiveMessages(chatGuid, count);
+        return service.enqueueForMessage({
+          provider: "bluebubbles",
+          providerChatId: chatGuid,
+          providerMessageId: messages.at(-1)!.message.providerMessageId,
+          routeId,
+          baseMessageWindow: 2,
+          redundancyMessageWindow: 1,
+          includeFromMe: true,
+          timeZone: "UTC",
+          summaryPolicyVersion: 1,
+        });
+      };
+      try {
+        await enqueue(3);
+        await service.processQueued(routeId, "UTC", `first-${randomUUID()}`);
+        const trigger = await enqueue(5);
+        const before = (
+          await database.query<{
+            summary: string;
+            covered_through_index: string;
+            version: number;
+          }>(
+            "SELECT s.summary,s.covered_through_index,s.version FROM conversation_context_states s JOIN conversation_context_compressions p ON p.context_state_id=s.id WHERE p.id=$1",
+            [trigger.compressionOperationId],
+          )
+        ).rows[0];
+        expect(before?.summary).toBe(successfulResult.text);
+        execute
+          .mockResolvedValueOnce({
+            status: "failed",
+            code: "AI_OUTPUT_TOO_LONG",
+          })
+          .mockResolvedValueOnce({
+            status: "failed",
+            code: "AI_OUTPUT_TOO_LONG",
+          });
+        await service.processQueued(routeId, "UTC", `retry-${randomUUID()}`);
+        const after = (
+          await database.query<{
+            summary: string;
+            covered_through_index: string;
+            version: number;
+            status: string;
+            error_code: string;
+          }>(
+            "SELECT s.summary,s.covered_through_index,s.version,p.status,p.error_code FROM conversation_context_states s JOIN conversation_context_compressions p ON p.context_state_id=s.id WHERE p.id=$1",
+            [trigger.compressionOperationId],
+          )
+        ).rows[0];
+        expect(after).toEqual({
+          ...before,
+          status: "failed",
+          error_code: "AI_OUTPUT_TOO_LONG",
+        });
+      } finally {
+        await database.end();
+        await service.close();
+      }
+    });
+
     it("regenerates the exact historical input without changing the committed summary", async () => {
       const chatGuid = `iMessage;-;summary-regenerate-${randomUUID()}`;
       const envelopes = await archiveMessages(chatGuid, 3);
@@ -351,6 +421,12 @@ describe.runIf(testDatabaseUrl !== undefined)(
         const sourceCompressionId = trigger.compressionOperationId;
         expect(sourceCompressionId).toBeDefined();
         await service.processQueued(routeId, "UTC", `source-${randomUUID()}`);
+        expect(execute).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            maxOutputTokens: 8192,
+            maxOutputCharacters: 12000,
+          }),
+        );
 
         execute.mockResolvedValueOnce({
           ...successfulResult,

@@ -161,7 +161,7 @@ export class BotIdentityService {
       ).rows,
       summaries: (
         await this.pool.query<Record<string, unknown>>(
-          `SELECT s.chat_id,c.display_name,s.covered_through_index,c.bot_summary_rebuild_through,p.status,p.error_code FROM conversation_context_states s JOIN chats c ON c.id=s.chat_id LEFT JOIN LATERAL(SELECT status,error_code FROM conversation_context_compressions WHERE context_state_id=s.id ORDER BY started_at DESC LIMIT 1) p ON TRUE WHERE c.bot_summary_rebuild_through IS NOT NULL AND s.instance_namespace='default' AND NOT s.legacy`,
+          `SELECT s.chat_id,c.display_name,s.covered_through_index,c.bot_summary_rebuild_through,p.status,p.error_code FROM conversation_context_states s JOIN chats c ON c.id=s.chat_id LEFT JOIN LATERAL(SELECT status,error_code FROM conversation_context_compressions WHERE context_state_id=s.id AND base_version=s.version AND NOT preview AND reason='bot-identity-rebuild' ORDER BY started_at DESC,id DESC LIMIT 1) p ON TRUE WHERE c.bot_summary_rebuild_through IS NOT NULL AND s.instance_namespace='default' AND NOT s.legacy AND s.bot_identity_revision=c.bot_identity_revision AND s.summary_policy_version=coalesce((SELECT policy_version FROM conversation_summary_settings LIMIT 1),1)`,
         )
       ).rows,
       memoryJobs: (
@@ -235,7 +235,11 @@ export class BotIdentityService {
     try {
       await db.query("BEGIN");
       const c = (
-        await db.query<{ bot_identity_revision: number }>(
+        await db.query<{
+          bot_identity_revision: number;
+          bot_summary_rebuild_required: boolean;
+          bot_summary_rebuild_through: string | null;
+        }>(
           "SELECT * FROM chats WHERE id=$1 AND enabled AND deleted_at IS NULL FOR UPDATE",
           [chatId],
         )
@@ -255,6 +259,48 @@ export class BotIdentityService {
           "Finish attribution before rebuilding.",
           409,
         );
+      // A pending rebuild resumes its current batch; never erase committed progress.
+      if (
+        target === "summary" &&
+        !c.bot_summary_rebuild_required &&
+        c.bot_summary_rebuild_through !== null
+      ) {
+        if (!settings.enabled || !settings.providerRouteId) {
+          await db.query("COMMIT");
+          return { summary: false, memory: false };
+        }
+        const state = (
+          await db.query<{ id: string; version: number }>(
+            `SELECT id,version FROM conversation_context_states WHERE chat_id=$1 AND instance_namespace='default' AND NOT legacy AND summary_policy_version=$2 AND bot_identity_revision=$3 FOR UPDATE`,
+            [chatId, settings.policyVersion ?? 1, c.bot_identity_revision],
+          )
+        ).rows[0];
+        if (!state)
+          throw new ApplicationError(
+            "SUMMARY_REBUILD_STATE_UNAVAILABLE",
+            "Current summary rebuild state unavailable.",
+            409,
+          );
+        const resumed = await db.query<{ id: string }>(
+          `UPDATE conversation_context_compressions p SET status='queued',error_code=NULL,completed_at=NULL,lease_owner=NULL,lease_expires_at=now(),updated_at=now()
+           WHERE p.context_state_id=$1 AND p.base_version=$2 AND p.status='failed' AND NOT p.preview AND p.reason='bot-identity-rebuild' AND p.bot_identity_revision=$3
+           AND NOT EXISTS(SELECT 1 FROM conversation_context_compressions active WHERE active.context_state_id=p.context_state_id AND NOT active.preview AND active.status IN ('queued','running')) RETURNING id`,
+          [state.id, state.version, c.bot_identity_revision],
+        );
+        for (const operation of resumed.rows) {
+          await db.query(
+            `INSERT INTO conversation_context_compression_events(id,compression_id,status,metadata) VALUES($1,$2,'queued','{"manualRetry":true}'::jsonb)`,
+            [randomUUID(), operation.id],
+          );
+        }
+        if (resumed.rowCount)
+          await db.query(
+            "UPDATE conversation_context_states SET last_error_code=NULL,updated_at=now() WHERE id=$1",
+            [state.id],
+          );
+        await db.query("COMMIT");
+        return { summary: true, memory: false };
+      }
       const result = { summary: false, memory: false };
       if (target !== "memory" && settings.enabled && settings.providerRouteId) {
         await db.query(
