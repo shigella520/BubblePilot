@@ -7,6 +7,7 @@ import { AgentRunner } from "../modules/ai/agent-runner.js";
 import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import type {
+  AiChatMessage,
   AiProviderRecord,
   AiRouteRequest,
   AiRouteResult,
@@ -65,7 +66,12 @@ if (!baseUrl || !model) {
       capabilities: { functionCalling: true, hostedWebSearch: false },
     };
     const days = ["01", "02", "03", "04", "05", "06", "07"];
-    const scenarios = [
+    const scenarios: Array<{
+      id: string;
+      prompt: string;
+      expected: string;
+      history?: AiChatMessage[];
+    }> = [
       { id: "greeting", prompt: "你好！", expected: "自然问候，不调用工具。" },
       {
         id: "latest",
@@ -79,6 +85,23 @@ if (!baseUrl || !model) {
           "查询 fictional-alice 在 2026-09-01 至 2026-09-08 每天 06:00–24:00 的最早发言。",
         expected:
           "使用 get_chat_message_extrema，pick=first/groupBy=day/dailyTime=06:00–24:00；第八天写无匹配归档，不推断没有出现。",
+      },
+      {
+        id: "follow-up-scope",
+        history: [
+          {
+            role: "user",
+            content: "虚构甲近一周每天 06:00 之后最早什么时候发言？",
+          },
+          {
+            role: "assistant",
+            content:
+              "按此前确认的 2026-09-01 至 2026-09-07（Asia/Shanghai），每天 06:00–24:00，虚构甲最早发言时间分别是：9 月 1 日 07:11、2 日 07:12、3 日 07:13、4 日 07:14、5 日 07:15、6 日 07:16、7 日 07:17。",
+          },
+        ],
+        prompt: "我想看看他每天最早说的是啥。",
+        expected:
+          "沿用 9 月 1–7 日、fictional-alice、06:00–24:00 和每天最早；不得按当前日期重算近一周或多加一天。可重新查询 extrema 并展开本轮引用，或查询原文；检查每次参数和最终日期范围。",
       },
       {
         id: "literal-count",
@@ -126,6 +149,7 @@ if (!baseUrl || !model) {
           completionTokens = 0,
           usageAvailable = true;
         const tools: string[] = [];
+        const toolArguments: Array<{ name: string; arguments: string }> = [];
         const routing = {
           execute: async (request: AiRouteRequest): Promise<AiRouteResult> => {
             turns++;
@@ -168,6 +192,7 @@ if (!baseUrl || !model) {
           execute: (name: string, args: string) => {
             calls++;
             tools.push(name);
+            toolArguments.push({ name, arguments: args });
             let payload: Record<string, unknown> = {};
             try {
               payload = JSON.parse(args) as Record<string, unknown>;
@@ -390,6 +415,7 @@ if (!baseUrl || !model) {
               content:
                 "全部为虚构评测。当前消息时间 2026-09-21T12:00:00+08:00，聊天时区 Asia/Shanghai。已知成员 sender_id=fictional-alice，姓名虚构甲。",
             },
+            ...(scenario.history ?? []),
             { role: "user", content: scenario.prompt },
           ],
           maxOutputTokens: 1500,
@@ -409,6 +435,7 @@ if (!baseUrl || !model) {
             calls,
             turns,
             tools,
+            toolArguments,
             durationMs: Date.now() - started,
             promptTokens: usageAvailable ? promptTokens : null,
             completionTokens: usageAvailable ? completionTokens : null,
