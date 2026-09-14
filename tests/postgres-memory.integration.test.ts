@@ -889,16 +889,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     for (let i = 0; i < 4; i++) await message(id, "虚构重建消息".repeat(10));
     const identity = new BotIdentityService(url!);
     try {
-      await identity.rebuild(
-        id,
-        {
-          enabled: true,
-          providerRouteId: randomUUID(),
-          includeFromMe: true,
-          timeZone: "UTC",
-        },
-        "memory",
-      );
+      await identity.rebuild(id, "memory");
     } finally {
       await identity.close();
     }

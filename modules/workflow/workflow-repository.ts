@@ -1,6 +1,6 @@
 import type { BotIdentity } from "../identity/bot-identity.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
-import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
+import type { ConversationContextTrigger } from "./conversation-context-service.js";
 import type { TriggerConditions } from "./trigger-matcher.js";
 import type {
   WorkflowDefinition,
@@ -233,7 +233,7 @@ export interface WorkflowRepository {
   createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
-    summaryTrigger?: ConversationSummaryTrigger;
+    contextTrigger?: ConversationContextTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }>;
   createManualRetry(
     executionId: string,

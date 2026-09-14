@@ -48,7 +48,7 @@ describe("Bot identity administrator API", () => {
     const update = vi
       .fn()
       .mockResolvedValue({ nickname: "虚构甲", version: 1 });
-    const rebuild = vi.fn().mockResolvedValue({ summary: true, memory: false });
+    const rebuild = vi.fn().mockResolvedValue({ memory: true });
     const status = vi.fn().mockResolvedValue({});
     const startBackfill = vi.fn().mockResolvedValue({});
     const identity = {
@@ -149,7 +149,7 @@ describe("Bot identity administrator API", () => {
           await app.inject({
             method: "POST",
             url: rebuildUrl,
-            payload: { target: "summary" },
+            payload: { target: "memory" },
           })
         ).statusCode,
       ).toBe(401);
@@ -170,14 +170,13 @@ describe("Bot identity administrator API", () => {
             method: "POST",
             url: rebuildUrl,
             headers,
-            payload: { target: "summary" },
+            payload: { target: "memory" },
           })
         ).statusCode,
       ).toBe(200);
       expect(rebuild).toHaveBeenLastCalledWith(
         "22222222-2222-4222-8222-222222222222",
-        expect.any(Object),
-        "summary",
+        "memory",
       );
       expect(
         (await app.inject({ method: "POST", url: rebuildUrl, headers }))
@@ -185,8 +184,7 @@ describe("Bot identity administrator API", () => {
       ).toBe(200);
       expect(rebuild).toHaveBeenLastCalledWith(
         "22222222-2222-4222-8222-222222222222",
-        expect.any(Object),
-        "both",
+        "memory",
       );
       expect(authRepository.auditEvents).toContainEqual(
         expect.objectContaining({

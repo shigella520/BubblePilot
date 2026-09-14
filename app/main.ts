@@ -41,12 +41,9 @@ import { createDefaultNodeRegistry } from "../modules/workflow/node-registry.js"
 import { InProcessWorkflowExecutionDispatcher } from "../modules/workflow/execution-dispatcher.js";
 import { PostgresWorkflowRepository } from "../modules/workflow/postgres-workflow-repository.js";
 import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
-import {
-  ConversationContextService,
-  ConversationSummaryWorker,
-} from "../modules/workflow/conversation-context-service.js";
-import { PostgresSummarySettingsRepository } from "../modules/workflow/postgres-summary-settings-repository.js";
-import { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
+import { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
+import { PostgresContextSettingsRepository } from "../modules/workflow/postgres-context-settings-repository.js";
+import { ContextSettingsService } from "../modules/workflow/context-settings-service.js";
 
 const config = loadConfig();
 const botIdentity = new BotIdentityService(
@@ -184,41 +181,19 @@ const imageSummaryRepository = new PostgresImageSummaryRepository(
 );
 const conversationContext = new ConversationContextService(
   config.databaseUrl,
-  aiRouting,
   config.databaseQueryTimeoutMs,
   imageSummaryRepository,
 );
-const summarySettings = new SummarySettingsService(
-  new PostgresSummarySettingsRepository(
+const contextSettings = new ContextSettingsService(
+  new PostgresContextSettingsRepository(
     config.databaseUrl,
     config.databaseQueryTimeoutMs,
   ),
   {
-    enabled: false,
     includeFromMe: true,
     baseMessageWindow: 10,
     characterLimit: 6000,
     redundancyMessageWindow: 10,
-    providerRouteId: "",
-    timeZone: "UTC",
-  },
-);
-const conversationSummaryWorker = new ConversationSummaryWorker(
-  conversationContext,
-  async () => (await summarySettings.resolve()).providerRouteId,
-  async () => (await summarySettings.resolve()).timeZone,
-  5_000,
-  async () => {
-    const settings = await summarySettings.resolve();
-    return {
-      enabled: settings.enabled && settings.providerRouteId !== "",
-      providerRouteId: settings.providerRouteId,
-      baseMessageWindow: settings.baseMessageWindow,
-      redundancyMessageWindow: settings.redundancyMessageWindow,
-      includeFromMe: settings.includeFromMe,
-      timeZone: settings.timeZone,
-      policyVersion: settings.policyVersion ?? 1,
-    };
   },
 );
 const messageRetention =
@@ -228,7 +203,6 @@ const messageRetention =
           repository,
           config.messageRetentionDays,
           10_000,
-          () => conversationContext.invalidateAll(),
         ),
       )
     : undefined;
@@ -256,7 +230,7 @@ const workflowEngine = new WorkflowEngine(
     aiAgent,
     imageInput: nativeImageInput,
     conversationContext,
-    summarySettings,
+    contextSettings,
     imageSummaries: imageSummaryRepository,
   }),
   {
@@ -280,15 +254,14 @@ const application = buildApplication(config, repository, {
     agentSettings,
     imageInputSettings,
     rawRequestStore: aiRawRequestStore,
-    summarySettings,
+    contextSettings,
   },
   workflow: {
     repository: workflowRepository,
     engine: workflowEngine,
     dispatcher: workflowDispatcher,
     contextState: conversationContext,
-    conversationSummary: conversationContext,
-    summaryWorker: conversationSummaryWorker,
+    conversationContext,
   },
   dataExport: {
     repository: dataExportRepository,
@@ -314,9 +287,7 @@ process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 try {
-  botIdentity.start(async () =>
-    botIdentity.advanceSummaryRebuild(await summarySettings.resolve()),
-  );
+  botIdentity.start();
   await application.listen({ host: config.host, port: config.port });
 } catch (error) {
   application.log.fatal({ err: error }, "BubblePilot failed to start");

@@ -13,14 +13,6 @@ describe.runIf(url)("Postgres Bot identity lifecycle", () => {
   const db = service.pool;
   const fixtureChats: string[] = [];
   afterAll(async () => {
-    await db.query(
-      "UPDATE conversation_context_compressions p SET status='superseded' FROM conversation_context_states s WHERE s.id=p.context_state_id AND s.chat_id=ANY($1::uuid[]) AND p.status IN ('queued','running')",
-      [fixtureChats],
-    );
-    await db.query(
-      "UPDATE chats SET bot_summary_rebuild_through=NULL WHERE id=ANY($1::uuid[])",
-      [fixtureChats],
-    );
     await service.close();
   });
   async function fixture() {
@@ -95,69 +87,6 @@ describe.runIf(url)("Postgres Bot identity lifecycle", () => {
       link,
     };
   }
-  it("resumes a failed role summary batch without resetting committed progress or duplicating work", async () => {
-    const f = await fixture();
-    const sid = randomUUID(),
-      operation = randomUUID();
-    const settings = {
-      enabled: true,
-      providerRouteId: randomUUID(),
-      policyVersion: 1,
-      includeFromMe: true,
-      timeZone: "UTC",
-    };
-    await db.query(
-      "UPDATE chats SET bot_summary_rebuild_required=FALSE,bot_summary_rebuild_through=99 WHERE id=$1",
-      [f.chat],
-    );
-    await db.query(
-      `INSERT INTO conversation_context_states(id,chat_id,summary_policy_version,summary,covered_through_index,version,status,bot_identity_revision) VALUES($1,$2,1,'fictional committed summary',1,1,'idle',1)`,
-      [sid, f.chat],
-    );
-    await db.query(
-      `INSERT INTO conversation_context_compressions(id,context_state_id,base_version,from_index,through_index,status,reason,error_code,lease_expires_at) VALUES($1,$2,1,2,3,'failed','bot-identity-rebuild','AI_OUTPUT_TOO_LONG',now())`,
-      [operation, sid],
-    );
-    expect(
-      await service.rebuild(f.chat, { ...settings, enabled: false }, "summary"),
-    ).toEqual({ summary: false, memory: false });
-    await Promise.all([
-      service.rebuild(f.chat, settings, "summary"),
-      service.rebuild(f.chat, settings, "summary"),
-    ]);
-    expect(
-      (
-        await db.query(
-          "SELECT summary,covered_through_index,version FROM conversation_context_states WHERE id=$1",
-          [sid],
-        )
-      ).rows[0],
-    ).toEqual({
-      summary: "fictional committed summary",
-      covered_through_index: "1",
-      version: 1,
-    });
-    expect(
-      (
-        await db.query(
-          "SELECT id,status,error_code FROM conversation_context_compressions WHERE context_state_id=$1",
-          [sid],
-        )
-      ).rows,
-    ).toEqual([{ id: operation, status: "queued", error_code: null }]);
-    expect(
-      (
-        await db.query<{ count: number }>(
-          "SELECT count(*)::int count FROM conversation_context_compression_events WHERE compression_id=$1 AND metadata->>'manualRetry'='true'",
-          [operation],
-        )
-      ).rows[0]?.count,
-    ).toBe(1);
-    await db.query(
-      "UPDATE conversation_context_compressions SET status='superseded' WHERE id=$1",
-      [operation],
-    );
-  });
   it("matches both arrival orders, preserves execution snapshots and first historical nickname", async () => {
     const f = await fixture(),
       e = await f.execution(),
@@ -301,63 +230,6 @@ describe.runIf(url)("Postgres Bot identity lifecycle", () => {
       ).rows,
     ).toHaveLength(0);
   });
-  it("invalidates already summarized identities and starts a version-bound manual rebuild", async () => {
-    const f = await fixture(),
-      e = await f.execution(),
-      m = await f.message(1),
-      sid = randomUUID();
-    await db.query(
-      `INSERT INTO conversation_context_states(id,chat_id,summary_policy_version,summary,covered_through_index) VALUES($1,$2,1,'Fictional old combined Bot',1)`,
-      [sid, f.chat],
-    );
-    await f.delivery(e, m.guid);
-    await f.link(m.id);
-    expect(
-      (
-        await db.query<{
-          bot_summary_rebuild_required: boolean;
-          bot_identity_revision: number;
-        }>(
-          "SELECT bot_summary_rebuild_required,bot_identity_revision FROM chats WHERE id=$1",
-          [f.chat],
-        )
-      ).rows[0],
-    ).toEqual({ bot_summary_rebuild_required: true, bot_identity_revision: 2 });
-    // Isolate this fixture's pending-job check from unrelated integration fixtures.
-    await db.query(
-      "UPDATE bot_attribution_jobs SET status='succeeded' WHERE status='queued' AND message_id IS NOT NULL AND message_id IN(SELECT id FROM messages WHERE chat_id=$1)",
-      [f.chat],
-    );
-    const settings = {
-      enabled: true,
-      providerRouteId: randomUUID(),
-      policyVersion: 1,
-      includeFromMe: true,
-      timeZone: "UTC",
-    };
-    await service.rebuild(f.chat, settings);
-    // Keep the global summary worker in other test files from claiming this fixture.
-    await db.query(
-      "INSERT INTO bot_attribution_jobs(message_id,through_index) VALUES($1,1)",
-      [m.id],
-    );
-    await service.advanceSummaryRebuild(settings);
-    const state = (
-      await db.query<{ summary: string; bot_identity_revision: number }>(
-        "SELECT summary,bot_identity_revision FROM conversation_context_states WHERE id=$1",
-        [sid],
-      )
-    ).rows[0];
-    expect(state).toEqual({ summary: "", bot_identity_revision: 2 });
-    expect(
-      (
-        await db.query<{ bot_identity_revision: number }>(
-          "SELECT bot_identity_revision FROM conversation_context_compressions WHERE context_state_id=$1",
-          [sid],
-        )
-      ).rows[0]?.bot_identity_revision,
-    ).toBe(2);
-  });
   it("revokes a previously unique author when a late duplicate delivery creates ambiguity", async () => {
     const f = await fixture(),
       e = await f.execution(),
@@ -385,12 +257,11 @@ describe.runIf(url)("Postgres Bot identity lifecycle", () => {
     expect(
       (
         await db.query(
-          "SELECT bot_summary_rebuild_required, bot_memory_rebuild_required FROM chats WHERE id=$1",
+          "SELECT bot_memory_rebuild_required FROM chats WHERE id=$1",
           [f.chat],
         )
       ).rows[0],
     ).toEqual({
-      bot_summary_rebuild_required: true,
       bot_memory_rebuild_required: true,
     });
     expect(
@@ -461,37 +332,10 @@ describe.runIf(url)("Postgres Bot identity lifecycle", () => {
       expect.objectContaining({ id: job?.id, workflow_id: f.workflow }),
     );
     expect(result.jobs.every((j) => j.workflow_id === f.workflow)).toBe(true);
-    expect(result.summaries.every((s) => s.chat_id === f.chat)).toBe(true);
     expect(result.memoryJobs.every((j) => j.chat_id === f.chat)).toBe(true);
     await expect(service.status(randomUUID())).rejects.toMatchObject({
       code: "WORKFLOW_NOT_FOUND",
     });
-  });
-  it("does not reset summaries when only index rebuilding is requested", async () => {
-    const f = await fixture();
-    await db.query(
-      "INSERT INTO conversation_context_states(id,chat_id,summary_policy_version,summary,covered_through_index) VALUES($1,$2,1,$3,1)",
-      [randomUUID(), f.chat, "fictional retained summary"],
-    );
-    await service.rebuild(
-      f.chat,
-      {
-        enabled: true,
-        providerRouteId: randomUUID(),
-        includeFromMe: true,
-        timeZone: "UTC",
-        policyVersion: 1,
-      },
-      "memory",
-    );
-    expect(
-      (
-        await db.query<{ summary: string }>(
-          "SELECT summary FROM conversation_context_states WHERE chat_id=$1",
-          [f.chat],
-        )
-      ).rows[0]?.summary,
-    ).toBe("fictional retained summary");
   });
   it("groups Bot identities separately on a shared gateway sender", async () => {
     const a = await fixture(),

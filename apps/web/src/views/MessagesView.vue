@@ -6,7 +6,6 @@ import {
   Images,
   MessageCircle,
   RefreshCw,
-  RotateCcw,
   Save,
   Search,
   SlidersHorizontal,
@@ -42,42 +41,19 @@ interface Chat {
 }
 
 interface RebuildStatus {
-  summaries?: Array<{
-    chat_id: string;
-    covered_through_index: string;
-    status: string | null;
-    error_code: string | null;
-  }>;
   chats: Array<{
     id: string;
-    bot_summary_rebuild_required: boolean;
     bot_memory_rebuild_required: boolean;
-    bot_summary_rebuild_through: string | null;
   }>;
 }
 const rebuildStatus = ref<RebuildStatus | null>(null);
 const rebuildBusyIds = reactive(new Set<string>());
-function needsRebuild(id: string, target: "summary" | "memory") {
-  const chat = rebuildStatus.value?.chats.find((c) => c.id === id);
-  return target === "summary"
-    ? chat?.bot_summary_rebuild_required === true
-    : chat?.bot_memory_rebuild_required === true;
-}
-function summaryRebuilding(id: string) {
-  return !!rebuildStatus.value?.chats.find((c) => c.id === id)
-    ?.bot_summary_rebuild_through;
-}
-function summaryRebuildState(id: string) {
-  return rebuildStatus.value?.summaries?.find((item) => item.chat_id === id);
-}
-function summaryRebuildLabel(id: string) {
-  const state = summaryRebuildState(id);
-  const progress = state
-    ? `已摘要至第 ${state.covered_through_index} 条`
-    : "进度待刷新";
-  if (state?.status === "failed")
-    return `摘要重建失败 · ${progress} · ${state.error_code ?? "未知错误"}`;
-  return `摘要重建${state?.status === "running" ? "处理中" : "排队中"} · ${progress}`;
+function needsRebuild(id: string, _target: "memory") {
+  void _target;
+  return (
+    rebuildStatus.value?.chats.find((c) => c.id === id)
+      ?.bot_memory_rebuild_required === true
+  );
 }
 async function loadRebuildStatus() {
   rebuildStatus.value = null;
@@ -85,13 +61,9 @@ async function loadRebuildStatus() {
     "/api/v1/bot-attributions",
   );
 }
-async function rebuildChat(chat: Chat, target: "summary" | "memory") {
+async function rebuildChat(chat: Chat, target: "memory") {
   if (
-    (!needsRebuild(chat.id, target) &&
-      !(
-        target === "summary" &&
-        summaryRebuildState(chat.id)?.status === "failed"
-      )) ||
+    !needsRebuild(chat.id, target) ||
     rebuildBusyIds.has(chat.id) ||
     !chat.enabled
   )
@@ -99,14 +71,14 @@ async function rebuildChat(chat: Chat, target: "summary" | "memory") {
   rebuildBusyIds.add(chat.id);
   message.value = "";
   messageIsError.value = false;
-  const label = target === "summary" ? "摘要" : "索引";
+  const label = "索引";
   try {
-    const result = await apiRequest<{ summary: boolean; memory: boolean }>(
+    const result = await apiRequest<{ memory: boolean }>(
       `/api/v1/chats/${chat.id}/bot-identity/rebuild`,
       { method: "POST", body: JSON.stringify({ target }) },
     );
     message.value = result[target]
-      ? `「${chat.displayName || chat.providerChatId}」${label}重建已启动，请到执行与审计的${target === "summary" ? "对话压缩" : "历史索引"}查看进度。`
+      ? `「${chat.displayName || chat.providerChatId}」${label}重建已启动，请到执行与审计的历史索引查看进度。`
       : `未启动${label}重建，请检查对应服务配置及聊天授权。`;
     await loadRebuildStatus();
   } catch (cause) {
@@ -115,18 +87,6 @@ async function rebuildChat(chat: Chat, target: "summary" | "memory") {
   } finally {
     rebuildBusyIds.delete(chat.id);
   }
-}
-
-interface SummarySettings {
-  enabled: boolean;
-  providerRouteId: string;
-}
-
-interface SummaryResetResult {
-  chatId: string;
-  status: "created" | "not-needed";
-  id?: string;
-  messageCount: number;
 }
 
 interface MessageResult {
@@ -282,8 +242,6 @@ const exportPreviewBusy = ref(false);
 const exportConfirmBusy = ref(false);
 const chatToggleBusyIds = reactive(new Set<string>());
 const chatDeleteBusyIds = reactive(new Set<string>());
-const chatSummaryResetBusyIds = reactive(new Set<string>());
-const summaryResetAvailable = ref(false);
 const participantChat = ref<Chat | null>(null);
 const participantVersion = ref(0);
 const participantDrafts = ref<ChatParticipantDraft[]>([]);
@@ -478,57 +436,12 @@ async function loadChats(reset = false) {
       reset ? chatPager.first() : chatPager.refresh(),
       loadChatOptions(),
       loadRebuildStatus(),
-      apiRequest<SummarySettings>("/api/v1/ai/summary/settings").then(
-        (settings) => {
-          summaryResetAvailable.value =
-            settings.enabled && settings.providerRouteId.length > 0;
-        },
-      ),
     ]);
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
   } finally {
     busy.value = false;
-  }
-}
-
-async function resetChatSummary(chat: Chat) {
-  if (
-    !session.sensitiveActive ||
-    !summaryResetAvailable.value ||
-    !rebuildStatus.value ||
-    needsRebuild(chat.id, "summary") ||
-    summaryRebuilding(chat.id) ||
-    chatSummaryResetBusyIds.has(chat.id)
-  ) {
-    return;
-  }
-  const label = chat.displayName || chat.providerChatId;
-  if (
-    !window.confirm(
-      `确认重置聊天「${label}」的对话摘要？\n\n已有摘要会被忽略；系统只用最近一个压缩周期生成新摘要，更早历史不会进入新摘要。`,
-    )
-  ) {
-    return;
-  }
-  chatSummaryResetBusyIds.add(chat.id);
-  message.value = "";
-  messageIsError.value = false;
-  try {
-    const result = await apiRequest<SummaryResetResult>(
-      `/api/v1/chats/${chat.id}/summary/reset`,
-      { method: "POST" },
-    );
-    message.value =
-      result.status === "created"
-        ? `聊天「${label}」的摘要已重置，正在用最近 ${result.messageCount} 条窗口消息生成新摘要。`
-        : `聊天「${label}」的摘要已清空；当前消息未超过基础窗口，无需生成压缩摘要。`;
-  } catch (cause) {
-    message.value = errorMessage(cause);
-    messageIsError.value = true;
-  } finally {
-    chatSummaryResetBusyIds.delete(chat.id);
   }
 }
 
@@ -927,8 +840,7 @@ onBeforeUnmount(() =>
         <p class="panel-description">
           这里列出 Webhook
           已发现的聊天。启停操作需要二次验证，并使用版本号防止并发覆盖。
-          角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建更新聊天共享历史并产生模型用量；摘要记录在“执行与审计
-          → 对话压缩”，索引记录在“历史索引”。
+          角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建更新聊天共享历史并产生模型用量；索引记录在“历史索引”。
         </p>
         <div class="table-shell">
           <table>
@@ -1012,16 +924,6 @@ onBeforeUnmount(() =>
                 <td>
                   <div class="row-actions">
                     <button
-                      v-if="needsRebuild(chat.id, 'summary')"
-                      class="button tiny secondary"
-                      :disabled="
-                        !chat.enabled || rebuildBusyIds.has(chat.id) || busy
-                      "
-                      @click="rebuildChat(chat, 'summary')"
-                    >
-                      {{ rebuildBusyIds.has(chat.id) ? "处理中…" : "重建摘要" }}
-                    </button>
-                    <button
                       v-if="needsRebuild(chat.id, 'memory')"
                       class="button tiny secondary"
                       :disabled="
@@ -1031,58 +933,7 @@ onBeforeUnmount(() =>
                     >
                       {{ rebuildBusyIds.has(chat.id) ? "处理中…" : "重建索引" }}
                     </button>
-                    <span
-                      v-if="
-                        !needsRebuild(chat.id, 'summary') &&
-                        summaryRebuilding(chat.id)
-                      "
-                      class="muted"
-                      >{{ summaryRebuildLabel(chat.id) }}</span
-                    >
-                    <button
-                      v-if="
-                        !needsRebuild(chat.id, 'summary') &&
-                        summaryRebuildState(chat.id)?.status === 'failed'
-                      "
-                      class="button tiny secondary"
-                      :disabled="
-                        !session.sensitiveActive ||
-                        !chat.enabled ||
-                        rebuildBusyIds.has(chat.id)
-                      "
-                      title="保留已提交摘要，从失败批次继续"
-                      @click="rebuildChat(chat, 'summary')"
-                    >
-                      {{ rebuildBusyIds.has(chat.id) ? "处理中…" : "重试摘要" }}
-                    </button>
-                    <button
-                      v-if="
-                        !needsRebuild(chat.id, 'summary') &&
-                        !summaryRebuilding(chat.id)
-                      "
-                      class="button tiny secondary"
-                      type="button"
-                      :disabled="
-                        !session.sensitiveActive ||
-                        !rebuildStatus ||
-                        !summaryResetAvailable ||
-                        chatSummaryResetBusyIds.has(chat.id)
-                      "
-                      :aria-busy="chatSummaryResetBusyIds.has(chat.id)"
-                      :title="
-                        !summaryResetAvailable
-                          ? '请先启用对话摘要并配置 Provider Route'
-                          : '忽略已有摘要，用最近一个压缩周期建立新摘要'
-                      "
-                      @click="resetChatSummary(chat)"
-                    >
-                      <RotateCcw :size="14" />
-                      {{
-                        chatSummaryResetBusyIds.has(chat.id)
-                          ? "重置中…"
-                          : "重置摘要"
-                      }}
-                    </button>
+
                     <button
                       class="button tiny secondary"
                       type="button"

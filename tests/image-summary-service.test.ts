@@ -431,7 +431,7 @@ describe("history image summary payload", () => {
   };
 
   it("keeps a provided image native and marks its stable reference", () => {
-    const result = conversationHistoryMessages(null, [message], {}, [
+    const result = conversationHistoryMessages([message], {}, [
       {
         providerMessageId: message.providerMessageId,
         reference: `message-${sha256(message.providerMessageId).slice(0, 16)}:attachment:1`,
@@ -457,7 +457,6 @@ describe("history image summary payload", () => {
   it("inlines a saved summary or a stable unavailable statement", () => {
     const attachmentRef = `message-${sha256(message.providerMessageId).slice(0, 16)}:attachment:1`;
     const summarized = conversationHistoryMessages(
-      null,
       [
         {
           ...message,
@@ -482,7 +481,7 @@ describe("history image summary payload", () => {
       ],
       {},
     );
-    const unavailable = conversationHistoryMessages(null, [message], {});
+    const unavailable = conversationHistoryMessages([message], {});
 
     expect(summarized[0]?.content).toContain('status="summarized"');
     expect(summarized[0]?.content).toContain(

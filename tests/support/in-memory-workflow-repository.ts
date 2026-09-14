@@ -22,7 +22,7 @@ import type {
   WorkflowRuntimeSummary,
   WorkflowVersionRecord,
 } from "../../modules/workflow/workflow-repository.js";
-import type { ConversationSummaryTrigger } from "../../modules/workflow/conversation-context-service.js";
+import type { ConversationContextTrigger } from "../../modules/workflow/conversation-context-service.js";
 
 interface StoredWorkflow extends WorkflowRecord {
   versions: WorkflowVersionRecord[];
@@ -330,7 +330,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   async createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
-    summaryTrigger?: ConversationSummaryTrigger;
+    contextTrigger?: ConversationContextTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }> {
     const existing = [...this.executions.values()].find(
       (execution) =>
@@ -370,32 +370,9 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       cacheEligiblePromptTokens: 0,
       cacheHitRate: null,
       contextSnapshot:
-        input.summaryTrigger === undefined
+        input.contextTrigger === undefined
           ? null
-          : {
-              chatId:
-                input.summaryTrigger.summarySnapshot.chatId ??
-                input.envelope.chat.providerChatId,
-              providerChatId: input.envelope.chat.providerChatId,
-              triggerMessageIndex: input.summaryTrigger.triggerMessageIndex,
-              summaryVersion:
-                input.summaryTrigger.summarySnapshot.summaryVersion,
-              summaryCoveredThroughIndex:
-                input.summaryTrigger.summarySnapshot.coveredThroughIndex,
-              summaryPolicyVersion:
-                input.summaryTrigger.summarySnapshot.summaryPolicyVersion ??
-                null,
-              stateId: input.summaryTrigger.summarySnapshot.stateId,
-              summaryStateId: input.summaryTrigger.summarySnapshot.stateId,
-              compressionOperationId:
-                input.summaryTrigger.summarySnapshot.compressionOperationId ??
-                null,
-              scheduledCompressionOperationId:
-                input.summaryTrigger.compressionOperationId ??
-                input.summaryTrigger.summarySnapshot
-                  .scheduledCompressionOperationId ??
-                null,
-            },
+          : { ...input.contextTrigger.contextSnapshot },
       sourceProviderMessageId: input.envelope.message.providerMessageId,
       sourceEnvelope: structuredClone(input.envelope),
       nodes: [],

@@ -25,7 +25,7 @@ import type {
   WorkflowVersionStatus,
 } from "./workflow-repository.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
-import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
+import type { ConversationContextTrigger } from "./conversation-context-service.js";
 import {
   linkPreviewItemSchema,
   linkPreviewStatusSchema,
@@ -728,7 +728,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
-    summaryTrigger?: ConversationSummaryTrigger;
+    contextTrigger?: ConversationContextTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }> {
     const id = randomUUID();
     const inserted = await this.pool.query<IdentifierRow>(
@@ -761,31 +761,10 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         input.trigger.id,
         input.trigger.workflowVersionId,
         input.envelope.correlationId,
-        input.summaryTrigger?.triggerMessageIndex ?? null,
-        input.summaryTrigger === undefined
+        input.contextTrigger?.triggerMessageIndex ?? null,
+        input.contextTrigger === undefined
           ? null
-          : JSON.stringify({
-              chatId: input.summaryTrigger.summarySnapshot.chatId ?? null,
-              providerChatId: input.envelope.chat.providerChatId,
-              triggerMessageIndex: input.summaryTrigger.triggerMessageIndex,
-              summaryVersion:
-                input.summaryTrigger.summarySnapshot.summaryVersion,
-              summaryCoveredThroughIndex:
-                input.summaryTrigger.summarySnapshot.coveredThroughIndex,
-              summaryPolicyVersion:
-                input.summaryTrigger.summarySnapshot.summaryPolicyVersion ??
-                null,
-              stateId: input.summaryTrigger.summarySnapshot.stateId,
-              summaryStateId: input.summaryTrigger.summarySnapshot.stateId,
-              compressionOperationId:
-                input.summaryTrigger.summarySnapshot.compressionOperationId ??
-                null,
-              scheduledCompressionOperationId:
-                input.summaryTrigger.compressionOperationId ??
-                input.summaryTrigger.summarySnapshot
-                  .scheduledCompressionOperationId ??
-                null,
-            }),
+          : JSON.stringify(input.contextTrigger.contextSnapshot),
       ],
     );
     const persistedId = inserted.rows[0]?.id ?? id;

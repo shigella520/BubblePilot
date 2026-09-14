@@ -19,7 +19,7 @@ import type {
   WorkflowRepository,
 } from "./workflow-repository.js";
 import { runtimeTimeZone } from "./context-time.js";
-import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
+import type { ConversationContextTrigger } from "./conversation-context-service.js";
 import type {
   HistoryCoverage,
   ConversationContextSnapshot,
@@ -34,7 +34,7 @@ export interface AutomationResult {
 export interface MessageAutomation {
   handleMessage(
     envelope: MessageEnvelope,
-    options?: { summaryTrigger?: ConversationSummaryTrigger },
+    options?: { contextTrigger?: ConversationContextTrigger },
   ): Promise<AutomationResult>;
   retryExecution(
     executionId: string,
@@ -93,7 +93,7 @@ export class WorkflowEngine implements MessageAutomation {
 
   async handleMessage(
     envelope: MessageEnvelope,
-    options: { summaryTrigger?: ConversationSummaryTrigger } = {},
+    options: { contextTrigger?: ConversationContextTrigger } = {},
   ): Promise<AutomationResult> {
     const bindings = await this.repository.listActiveTriggerBindings();
     const matched = bindings.filter(
@@ -109,9 +109,9 @@ export class WorkflowEngine implements MessageAutomation {
           const claimed = await this.repository.createExecution({
             envelope,
             trigger,
-            ...(options.summaryTrigger === undefined
+            ...(options.contextTrigger === undefined
               ? {}
-              : { summaryTrigger: options.summaryTrigger }),
+              : { contextTrigger: options.contextTrigger }),
           });
           if (claimed.created) {
             await this.run(claimed.execution, trigger, envelope);
@@ -191,10 +191,6 @@ export class WorkflowEngine implements MessageAutomation {
     const history: ContextMessage[] = [];
     let historyCoverage: HistoryCoverage | undefined;
     let contextIncompleteReasons: string[] | undefined;
-    let historySummary: {
-      text: string;
-      coveredThroughIndex: string;
-    } | null = null;
     const participantIdentities = {};
     const outputs: Record<string, Record<string, unknown>> = {};
     const timeZone = trigger.conditions.timeWindow?.timeZone ?? this.timeZone;
@@ -277,12 +273,6 @@ export class WorkflowEngine implements MessageAutomation {
             set contextIncompleteReasons(value) {
               contextIncompleteReasons = value;
             },
-            get historySummary() {
-              return historySummary;
-            },
-            set historySummary(value) {
-              historySummary = value;
-            },
             participantIdentities,
             outputs,
             contextSnapshot:
@@ -303,13 +293,10 @@ export class WorkflowEngine implements MessageAutomation {
               attributionConflictCount:
                 result.outputSummary.attributionConflictCount ?? 0,
               unknownSelfCount: result.outputSummary.unknownSelfCount ?? 0,
-              summaryVersion: result.outputSummary.summaryVersion ?? null,
-              summaryPolicyVersion:
-                result.outputSummary.summaryPolicyVersion ?? null,
-              summaryCoveredThroughIndex:
-                result.outputSummary.summaryCoveredThroughIndex ?? null,
-              uncompressedMessageCount:
-                result.outputSummary.uncompressedMessageCount ?? null,
+              ...((result.outputSummary.contextSnapshot as Record<
+                string,
+                unknown
+              >) ?? {}),
               contextCharacters: result.outputSummary.contextCharacters ?? null,
               contextIncomplete:
                 result.outputSummary.contextIncomplete ?? false,
@@ -318,20 +305,6 @@ export class WorkflowEngine implements MessageAutomation {
                 result.outputSummary.contextIncompleteReasons ?? [],
               truncatedMessageCount:
                 result.outputSummary.truncatedMessageCount ?? 0,
-              usedPreviousSummary:
-                result.outputSummary.usedPreviousSummary ?? false,
-              compressionOperationId:
-                result.outputSummary.compressionOperationId ??
-                execution.contextSnapshot?.compressionOperationId ??
-                null,
-              scheduledCompressionOperationId:
-                result.outputSummary.scheduledCompressionOperationId ??
-                execution.contextSnapshot?.scheduledCompressionOperationId ??
-                null,
-              summaryStateId:
-                execution.contextSnapshot?.stateId ??
-                execution.contextSnapshot?.summaryStateId ??
-                null,
             });
           }
           await this.repository.finishNodeExecution({

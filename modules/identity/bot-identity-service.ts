@@ -159,11 +159,6 @@ export class BotIdentityService {
           [workflowId ?? null],
         )
       ).rows,
-      summaries: (
-        await this.pool.query<Record<string, unknown>>(
-          `SELECT s.chat_id,c.display_name,s.covered_through_index,c.bot_summary_rebuild_through,p.status,p.error_code FROM conversation_context_states s JOIN chats c ON c.id=s.chat_id LEFT JOIN LATERAL(SELECT status,error_code FROM conversation_context_compressions WHERE context_state_id=s.id AND base_version=s.version AND NOT preview AND reason='bot-identity-rebuild' ORDER BY started_at DESC,id DESC LIMIT 1) p ON TRUE WHERE c.bot_summary_rebuild_through IS NOT NULL AND s.instance_namespace='default' AND NOT s.legacy AND s.bot_identity_revision=c.bot_identity_revision AND s.summary_policy_version=coalesce((SELECT policy_version FROM conversation_summary_settings LIMIT 1),1)`,
-        )
-      ).rows,
       memoryJobs: (
         await this.pool.query<Record<string, unknown>>(
           `SELECT j.id,j.chat_id,c.display_name,j.status,j.cursor_index,j.through_index,j.error_code FROM memory_jobs j JOIN chats c ON c.id=j.chat_id WHERE j.reason='rebuild' AND ($1::uuid[] IS NULL OR j.chat_id=ANY($1)) ORDER BY j.created_at DESC LIMIT 30`,
@@ -172,7 +167,7 @@ export class BotIdentityService {
       ).rows,
       chats: (
         await this.pool.query<Record<string, unknown>>(
-          `SELECT id,display_name,bot_identity_revision,bot_summary_rebuild_required,bot_memory_rebuild_required,bot_summary_rebuild_through FROM chats WHERE deleted_at IS NULL AND (($1::uuid[] IS NOT NULL AND id=ANY($1)) OR ($1::uuid[] IS NULL AND (bot_summary_rebuild_required OR bot_memory_rebuild_required OR bot_summary_rebuild_through IS NOT NULL)))`,
+          `SELECT id,display_name,bot_identity_revision,bot_memory_rebuild_required FROM chats WHERE deleted_at IS NULL AND (($1::uuid[] IS NOT NULL AND id=ANY($1)) OR ($1::uuid[] IS NULL AND (bot_memory_rebuild_required)))`,
           [relatedChats],
         )
       ).rows,
@@ -182,9 +177,6 @@ export class BotIdentityService {
       ...result,
       preview: undefined,
       workflows: result.workflows.filter((w) => w.workflowId === workflowId),
-      summaries: result.summaries.filter((s) =>
-        relatedChats.includes(String(s.chat_id)),
-      ),
       memoryJobs: result.memoryJobs.filter((j) =>
         relatedChats.includes(String(j.chat_id)),
       ),
@@ -220,25 +212,14 @@ export class BotIdentityService {
     await this.running;
     await this.pool.end();
   }
-  async rebuild(
-    chatId: string,
-    settings: {
-      enabled: boolean;
-      providerRouteId: string;
-      policyVersion?: number;
-      includeFromMe: boolean;
-      timeZone: string;
-    },
-    target: "summary" | "memory" | "both" = "both",
-  ) {
+  async rebuild(chatId: string, _target: "memory" = "memory") {
+    void _target;
     const db = await this.pool.connect();
     try {
       await db.query("BEGIN");
       const c = (
         await db.query<{
           bot_identity_revision: number;
-          bot_summary_rebuild_required: boolean;
-          bot_summary_rebuild_through: string | null;
         }>(
           "SELECT * FROM chats WHERE id=$1 AND enabled AND deleted_at IS NULL FOR UPDATE",
           [chatId],
@@ -259,79 +240,14 @@ export class BotIdentityService {
           "Finish attribution before rebuilding.",
           409,
         );
-      // A pending rebuild resumes its current batch; never erase committed progress.
-      if (
-        target === "summary" &&
-        !c.bot_summary_rebuild_required &&
-        c.bot_summary_rebuild_through !== null
-      ) {
-        if (!settings.enabled || !settings.providerRouteId) {
-          await db.query("COMMIT");
-          return { summary: false, memory: false };
-        }
-        const state = (
-          await db.query<{ id: string; version: number }>(
-            `SELECT id,version FROM conversation_context_states WHERE chat_id=$1 AND instance_namespace='default' AND NOT legacy AND summary_policy_version=$2 AND bot_identity_revision=$3 FOR UPDATE`,
-            [chatId, settings.policyVersion ?? 1, c.bot_identity_revision],
-          )
-        ).rows[0];
-        if (!state)
-          throw new ApplicationError(
-            "SUMMARY_REBUILD_STATE_UNAVAILABLE",
-            "Current summary rebuild state unavailable.",
-            409,
-          );
-        const resumed = await db.query<{ id: string }>(
-          `UPDATE conversation_context_compressions p SET status='queued',error_code=NULL,completed_at=NULL,lease_owner=NULL,lease_expires_at=now(),updated_at=now()
-           WHERE p.context_state_id=$1 AND p.base_version=$2 AND p.status='failed' AND NOT p.preview AND p.reason='bot-identity-rebuild' AND p.bot_identity_revision=$3
-           AND NOT EXISTS(SELECT 1 FROM conversation_context_compressions active WHERE active.context_state_id=p.context_state_id AND NOT active.preview AND active.status IN ('queued','running')) RETURNING id`,
-          [state.id, state.version, c.bot_identity_revision],
-        );
-        for (const operation of resumed.rows) {
-          await db.query(
-            `INSERT INTO conversation_context_compression_events(id,compression_id,status,metadata) VALUES($1,$2,'queued','{"manualRetry":true}'::jsonb)`,
-            [randomUUID(), operation.id],
-          );
-        }
-        if (resumed.rowCount)
-          await db.query(
-            "UPDATE conversation_context_states SET last_error_code=NULL,updated_at=now() WHERE id=$1",
-            [state.id],
-          );
-        await db.query("COMMIT");
-        return { summary: true, memory: false };
-      }
-      const result = { summary: false, memory: false };
-      if (target !== "memory" && settings.enabled && settings.providerRouteId) {
-        await db.query(
-          "UPDATE conversation_context_compressions p SET status='superseded',lease_owner=NULL,error_code='BOT_IDENTITY_REBUILD' FROM conversation_context_states s WHERE p.context_state_id=s.id AND s.chat_id=$1 AND p.status IN ('queued','running')",
-          [chatId],
-        );
-        await db.query(
-          `INSERT INTO conversation_context_states(id,chat_id,summary_policy_version,summary,covered_through_index) VALUES($1,$2,$3,'',0) ON CONFLICT(instance_namespace,chat_id,summary_policy_version) DO NOTHING`,
-          [randomUUID(), chatId, settings.policyVersion ?? 1],
-        );
-        await db.query(
-          `UPDATE conversation_context_states SET summary='',covered_through_index=0,version=version+1,status='idle',bot_identity_revision=$2 WHERE chat_id=$1 AND instance_namespace='default' AND NOT legacy`,
-          [chatId, c.bot_identity_revision],
-        );
-        await db.query(
-          `INSERT INTO conversation_context_summary_revisions(context_state_id,version,summary,covered_through_index) SELECT id,version,'',0 FROM conversation_context_states WHERE chat_id=$1 ON CONFLICT DO NOTHING`,
-          [chatId],
-        );
-        await db.query(
-          `UPDATE chats SET bot_summary_rebuild_required=FALSE,bot_summary_rebuild_through=next_message_index-1 WHERE id=$1`,
-          [chatId],
-        );
-        result.summary = true;
-      }
+      const result = { memory: false };
       const memory = (
         await db.query<{ id: string }>(
           `SELECT g.id FROM memory_generations g WHERE g.status='active' AND EXISTS(SELECT 1 FROM memory_settings WHERE enabled) AND EXISTS(SELECT 1 FROM memory_chats WHERE chat_id=$1 AND enabled)`,
           [chatId],
         )
       ).rows[0];
-      if (target !== "summary" && memory) {
+      if (memory) {
         await db.query(
           "UPDATE memory_jobs SET status='superseded',lease_owner=NULL WHERE chat_id=$1 AND status IN ('queued','running','paused')",
           [chatId],
@@ -363,34 +279,7 @@ export class BotIdentityService {
       db.release();
     }
   }
-  async advanceSummaryRebuild(settings: {
-    enabled: boolean;
-    providerRouteId: string;
-    policyVersion?: number;
-    includeFromMe: boolean;
-    timeZone: string;
-  }) {
-    if (!settings.enabled || !settings.providerRouteId) return;
-    await this.pool.query(
-      `INSERT INTO conversation_context_compressions(id,context_state_id,base_version,from_index,through_index,status,reason,route_id,trigger_message_index,time_zone,include_from_me,summary_policy_version,lease_expires_at)
-   SELECT gen_random_uuid(),s.id,s.version,s.covered_through_index+1,coalesce(part.last_index,c.bot_summary_rebuild_through),'queued','bot-identity-rebuild',$1,c.bot_summary_rebuild_through,$2,$3,$4,now()
-   FROM chats c JOIN conversation_context_states s ON s.chat_id=c.id AND s.instance_namespace='default' AND NOT s.legacy AND s.summary_policy_version=$4
-   LEFT JOIN LATERAL (SELECT max(message_index) last_index FROM (SELECT message_index FROM messages WHERE chat_id=c.id AND message_index>s.covered_through_index AND message_index<=c.bot_summary_rebuild_through ORDER BY message_index LIMIT 100) batch) part ON TRUE
-   WHERE c.enabled AND c.deleted_at IS NULL AND NOT c.bot_summary_rebuild_required AND c.bot_summary_rebuild_through>s.covered_through_index AND s.status='idle'
-    AND NOT EXISTS(SELECT 1 FROM conversation_context_compressions p WHERE p.context_state_id=s.id AND p.status IN ('queued','running','failed') AND p.base_version=s.version)
-   ON CONFLICT DO NOTHING`,
-      [
-        settings.providerRouteId,
-        settings.timeZone,
-        settings.includeFromMe,
-        settings.policyVersion ?? 1,
-      ],
-    );
-    await this.pool.query(
-      `UPDATE chats c SET bot_summary_rebuild_through=NULL WHERE c.bot_summary_rebuild_through IS NOT NULL AND EXISTS(SELECT 1 FROM conversation_context_states s WHERE s.chat_id=c.id AND s.summary_policy_version=$1 AND s.covered_through_index>=c.bot_summary_rebuild_through AND s.bot_identity_revision=c.bot_identity_revision)`,
-      [settings.policyVersion ?? 1],
-    );
-  }
+
   async work(jobId?: string) {
     const owner = randomUUID();
     const job = (
@@ -494,7 +383,7 @@ export class BotIdentityService {
         if (changed.rowCount) {
           linked++;
           const derived = await db.query(
-            `SELECT 1 FROM conversation_context_states WHERE chat_id=$1 AND covered_through_index>=$2 AND summary<>'' UNION ALL SELECT 1 FROM memory_chunks WHERE chat_id=$1 AND through_index>=$2 AND from_index<=$2 AND valid UNION ALL SELECT 1 FROM memory_jobs WHERE chat_id=$1 AND status='running' AND through_index>=$2 UNION ALL SELECT 1 FROM conversation_context_compressions p JOIN conversation_context_states s ON s.id=p.context_state_id WHERE s.chat_id=$1 AND p.status IN ('queued','running') AND p.through_index>=$2 LIMIT 1`,
+            `SELECT 1 FROM memory_chunks WHERE chat_id=$1 AND through_index>=$2 AND from_index<=$2 AND valid UNION ALL SELECT 1 FROM memory_jobs WHERE chat_id=$1 AND status='running' AND through_index>=$2 LIMIT 1`,
             [m.chat_id, m.message_index],
           );
           if (derived.rowCount) affected.add(m.chat_id);
@@ -502,7 +391,7 @@ export class BotIdentityService {
       }
       for (const chatId of affected)
         await db.query(
-          `UPDATE chats SET bot_identity_revision=bot_identity_revision+1,bot_summary_rebuild_required=TRUE,bot_memory_rebuild_required=TRUE WHERE id=$1`,
+          `UPDATE chats SET bot_identity_revision=bot_identity_revision+1,bot_memory_rebuild_required=TRUE WHERE id=$1`,
           [chatId],
         );
       await db.query(

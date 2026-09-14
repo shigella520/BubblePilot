@@ -7,16 +7,16 @@ import type { LinkPreviewEnricher } from "../integrations/bluebubbles/link-previ
 import type { ImageSummaryScheduler } from "../ai/image-summary-service.js";
 import type {
   ConversationContextService,
-  ConversationSummaryTrigger,
+  ConversationContextTrigger,
 } from "../workflow/conversation-context-service.js";
-import type { SummarySettingsService } from "../workflow/summary-settings-service.js";
+import type { ContextSettingsService } from "../workflow/context-settings-service.js";
 import { emptyLinkPreview } from "./link-preview.js";
 import type { MessageEnvelope } from "./message-envelope.js";
 
 export interface IngestionOutcome {
   result: IngestionResult;
   automationEnvelope: MessageEnvelope | null;
-  summaryTrigger?: ConversationSummaryTrigger;
+  contextTrigger?: ConversationContextTrigger;
 }
 
 function scheduleImageSummary(operation: (() => Promise<void>) | undefined) {
@@ -35,9 +35,8 @@ export class IngestionService {
     private readonly monitoredChatIds: ReadonlySet<string>,
     private readonly linkPreviewEnricher?: LinkPreviewEnricher,
     private readonly imageSummary?: ImageSummaryScheduler,
-    private readonly conversationSummary?: ConversationContextService,
-    private readonly summarySettings?: SummarySettingsService,
-    private readonly wakeSummaryWorker?: () => void,
+    private readonly conversationContext?: ConversationContextService,
+    private readonly contextSettings?: ContextSettingsService,
   ) {}
 
   async ingest(
@@ -68,53 +67,23 @@ export class IngestionService {
         imageSummary.enqueueAttachments(messageId, normalized.envelope),
       );
     }
-    let summaryTrigger: ConversationSummaryTrigger | undefined;
+    let contextTrigger: ConversationContextTrigger | undefined;
     if (
       result.messageId !== null &&
-      this.conversationSummary !== undefined &&
-      this.summarySettings !== undefined
+      this.conversationContext &&
+      this.contextSettings
     ) {
-      // Summary scheduling is deliberately best-effort after archive commit.
-      // A transient summary database/provider failure must not prevent the
-      // workflow task from being created for this already-persisted message.
       try {
-        const settings = await this.summarySettings.view();
-        if (settings.enabled && settings.providerRouteId !== "") {
-          try {
-            summaryTrigger = await this.conversationSummary.enqueueForMessage({
-              provider: normalized.envelope.provider,
-              providerChatId: normalized.envelope.chat.providerChatId,
-              providerMessageId: normalized.envelope.message.providerMessageId,
-              routeId: settings.providerRouteId,
-              baseMessageWindow: settings.baseMessageWindow,
-              redundancyMessageWindow: settings.redundancyMessageWindow,
-              timeZone: settings.timeZone,
-              summaryPolicyVersion: settings.policyVersion,
-              correlationId,
-              includeFromMe: settings.includeFromMe,
-            });
-            this.wakeSummaryWorker?.();
-          } catch {
-            // Keep a read snapshot when possible so this workflow still has
-            // a fixed trigger boundary even if queue insertion failed.
-            try {
-              summaryTrigger =
-                await this.conversationSummary.snapshotForMessage({
-                  provider: normalized.envelope.provider,
-                  providerChatId: normalized.envelope.chat.providerChatId,
-                  providerMessageId:
-                    normalized.envelope.message.providerMessageId,
-                  includeFromMe: settings.includeFromMe,
-                  timeZone: settings.timeZone,
-                  summaryPolicyVersion: settings.policyVersion,
-                });
-            } catch {
-              // The workflow can still use its message boundary fallback.
-            }
-          }
-        }
+        const settings = await this.contextSettings.view();
+        contextTrigger = await this.conversationContext.snapshotForMessage({
+          provider: normalized.envelope.provider,
+          providerChatId: normalized.envelope.chat.providerChatId,
+          providerMessageId: normalized.envelope.message.providerMessageId,
+          settings,
+          settingsVersion: settings.version,
+        });
       } catch {
-        // Summary settings are optional for message automation availability.
+        // Archive ingestion remains available; load-context persists a bounded fallback.
       }
     }
     let automationEnvelope = normalized.envelope;
@@ -180,7 +149,7 @@ export class IngestionService {
           result.automationOutcome === "evaluation-pending")
           ? automationEnvelope
           : null,
-      ...(summaryTrigger === undefined ? {} : { summaryTrigger }),
+      ...(contextTrigger === undefined ? {} : { contextTrigger }),
     };
   }
 }

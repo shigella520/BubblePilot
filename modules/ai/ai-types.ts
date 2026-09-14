@@ -312,7 +312,7 @@ export interface AiRouteTraceRecordInput {
   id: string;
   executionId: string | null;
   backgroundOperationId: string | null;
-  purpose: "workflow-reply" | "context-summary" | "image-summary";
+  purpose: "workflow-reply" | "image-summary";
   nodeId: string;
   routeId: string;
   routeName: string | null;
@@ -505,7 +505,7 @@ export type AiCallResult =
 
 export interface AiAttemptRecordInput {
   executionId: string | null;
-  purpose: "workflow-reply" | "context-summary" | "image-summary";
+  purpose: "workflow-reply" | "image-summary";
   backgroundOperationId: string | null;
   routeTraceId?: string | null;
   routePhase?: AiRouteTracePhase;
@@ -632,7 +632,7 @@ export interface AiRouteRequest {
   agentTurn?: number;
   promptTraceKey?: string;
   sessionAffinityKey?: string;
-  purpose?: "workflow-reply" | "context-summary" | "image-summary";
+  purpose?: "workflow-reply" | "image-summary";
   backgroundOperationId?: string;
   allowImageDegrade?: boolean;
 }

@@ -72,7 +72,6 @@ describe("Bot author isolation", () => {
   });
   it("only recognizes its own stable workflow, even with identical nicknames", () => {
     const result = conversationHistoryMessages(
-      null,
       [message(alice), message(bob), message()],
       {},
       [],
@@ -87,9 +86,7 @@ describe("Bot author isolation", () => {
   });
   it("does not adopt unrecorded authors or nicknames as identity", () => {
     expect(
-      conversationHistoryMessages(null, [message(alice)], {}).map(
-        (m) => m.role,
-      ),
+      conversationHistoryMessages([message(alice)], {}).map((m) => m.role),
     ).toEqual(["user"]);
   });
   it("rejects ambiguous filters and empty or instruction-control nicknames", () => {

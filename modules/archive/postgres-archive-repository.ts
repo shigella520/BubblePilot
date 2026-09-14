@@ -1004,49 +1004,6 @@ export class PostgresArchiveRepository implements ArchiveRepository {
            WHERE message_id = ANY($1::uuid[])`,
           [messageIds],
         );
-        const chatIds = [
-          ...new Set(redacted.rows.map((message) => message.chat_id)),
-        ];
-        const ended = await client.query<{ id: string }>(
-          `UPDATE conversation_context_compressions operation
-           SET status = 'failed',
-               error_code = 'CONTEXT_SUMMARY_REDACTED_BY_RETENTION',
-               completed_at = NOW(), lease_owner = NULL, updated_at = NOW()
-           FROM conversation_context_states state
-           WHERE operation.context_state_id = state.id
-             AND state.chat_id = ANY($1::uuid[])
-             AND operation.status IN ('queued', 'running')
-           RETURNING operation.id`,
-          [chatIds],
-        );
-        for (const operation of ended.rows) {
-          await client.query(
-            `INSERT INTO conversation_context_compression_events
-               (id, compression_id, status, error_code, metadata)
-             VALUES ($1, $2, 'failed', $3, $4::jsonb)`,
-            [
-              randomUUID(),
-              operation.id,
-              "CONTEXT_SUMMARY_REDACTED_BY_RETENTION",
-              JSON.stringify({ source: "message-retention" }),
-            ],
-          );
-        }
-        await client.query(
-          `WITH reset AS (
-             UPDATE conversation_context_states
-             SET summary = '', covered_through_index = 0,
-                 version = version + 1, status = 'idle', updated_at = NOW(),
-                 last_error_code = 'CONTEXT_SUMMARY_REDACTED_BY_RETENTION'
-             WHERE chat_id = ANY($1::uuid[])
-             RETURNING id, version, summary, covered_through_index
-           )
-           INSERT INTO conversation_context_summary_revisions
-             (context_state_id, version, summary, covered_through_index)
-           SELECT id, version, summary, covered_through_index FROM reset
-           ON CONFLICT (context_state_id, version) DO NOTHING`,
-          [chatIds],
-        );
         await client.query(
           `INSERT INTO audit_events (
              id, actor_type, actor_session_id, action, target_type, target_id,

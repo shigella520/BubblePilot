@@ -76,9 +76,8 @@ BlueBubbles 只负责收发 iMessage；BubblePilot 保存自己的监听配置�
 
 ![BubblePilot 消息到回复流程](doc/message-workflow-flow.svg)
 
-上下文摘要采用周期性轮换：窗口在压缩边界前只追加，达到边界后再批量替换摘要；AI 请求同时保持稳定文本前缀，并把成员映射、链接预览和图片等易变材料放在尾部，以提高兼容 Provider 的 Prompt Cache 命中率。
+聊天上下文使用基础窗口 B 与缓冲窗口 R，默认各 10 条，范围各 1～50 条。历史原文达到 B＋R 时批量移出最早 R 条，返回 B 条；当前触发消息单独追加、不计入历史窗口。实际可读记录参与计数，不以索引差推算。移出只影响模型输入，归档和向量索引不删除。字符保护默认 6,000，范围 100～20,000；在消息窗口之后保留最新完整后缀，单条超长消息保留并说明超限。
 
-[![BubblePilot 消息轮换压缩、工作流编排与 Prompt Cache 优化](doc/message-context-orchestration-cache.svg)](doc/message-context-orchestration-cache.svg)
 
 ## 实际使用效果
 

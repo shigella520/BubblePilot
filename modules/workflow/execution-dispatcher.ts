@@ -1,12 +1,12 @@
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
-import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
+import type { ConversationContextTrigger } from "./conversation-context-service.js";
 import type { AutomationResult, MessageAutomation } from "./workflow-engine.js";
 
 export interface WorkflowExecutionDispatcher {
   readonly mode: "in-process" | "external-worker";
   dispatch(
     envelope: MessageEnvelope,
-    options?: { summaryTrigger?: ConversationSummaryTrigger },
+    options?: { contextTrigger?: ConversationContextTrigger },
   ): Promise<AutomationResult>;
 }
 
@@ -17,7 +17,7 @@ export class InProcessWorkflowExecutionDispatcher implements WorkflowExecutionDi
 
   dispatch(
     envelope: MessageEnvelope,
-    options?: { summaryTrigger?: ConversationSummaryTrigger },
+    options?: { contextTrigger?: ConversationContextTrigger },
   ): Promise<AutomationResult> {
     return this.automation.handleMessage(envelope, options);
   }

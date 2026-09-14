@@ -106,7 +106,6 @@ if (!baseUrl || !model) {
         messages: [
           { role: "system", content: botIdentityPrompt(self) },
           ...conversationHistoryMessages(
-            null,
             history,
             {},
             [],

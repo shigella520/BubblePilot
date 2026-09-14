@@ -93,90 +93,6 @@ interface AiRouteTrace {
   durationMs: number;
   createdAt: string;
 }
-interface ConversationCompression {
-  id: string;
-  chatId: string;
-  providerChatId: string;
-  chatDisplayName: string | null;
-  status: string;
-  fromMessageIndex: string;
-  throughMessageIndex: string;
-  triggerMessageIndex: string | null;
-  baseVersion: number;
-  outputVersion: number | null;
-  preview: boolean;
-  sourceCompressionId: string | null;
-  summaryPolicyVersion: number;
-  durationMs: number | null;
-  promptTokens: number | null;
-  completionTokens: number | null;
-  errorCode: string | null;
-  reason: string;
-  providerName: string | null;
-  model: string | null;
-  correlationId: string | null;
-  includeFromMe: boolean;
-  leaseOwner: string | null;
-  leaseExpiresAt: string | null;
-  startedAt: string;
-  completedAt: string | null;
-  statusEvents?: Array<{
-    status: string;
-    errorCode: string | null;
-    createdAt: string;
-  }>;
-  providerAttempts: Array<{
-    id: string;
-    routeTraceId: string | null;
-    routePhase: AiRouteTrace["phase"];
-    providerName: string;
-    model: string;
-    agentTurn: number;
-    round: number;
-    sequence: number;
-    status: string;
-    durationMs: number;
-    errorCategory: string | null;
-    errorCode: string | null;
-    retryable: boolean | null;
-    fallbackAllowed: boolean | null;
-    promptTokens: number | null;
-    completionTokens: number | null;
-    createdAt: string;
-  }>;
-  routeTraces: AiRouteTrace[];
-  workflowExecutions?: Array<{
-    id: string;
-    workflowId: string;
-    workflowName: string;
-    status: string;
-    createdAt: string;
-    summaryVersion: number | null;
-  }>;
-}
-interface ConversationCompressionContent {
-  id: string;
-  chatId: string;
-  providerChatId: string;
-  chatDisplayName: string | null;
-  status: string;
-  fromMessageIndex: string;
-  throughMessageIndex: string;
-  baseVersion: number;
-  outputVersion: number | null;
-  preview: boolean;
-  sourceCompressionId: string | null;
-  previousSummary: string;
-  outputSummary: string | null;
-  messages: Array<{
-    messageIndex: string;
-    providerMessageId: string;
-    senderId: string | null;
-    sentAt: string;
-    body: string;
-    isFromMe: boolean;
-  }>;
-}
 interface ExecutionDetail extends Execution {
   correlationId: string;
   nodes: Array<{
@@ -199,7 +115,7 @@ interface ExecutionDetail extends Execution {
   }>;
   aiProviderAttempts: Array<{
     id: string;
-    purpose: "workflow-reply" | "context-summary" | "image-summary";
+    purpose: "workflow-reply" | "image-summary";
     routeTraceId: string | null;
     routePhase: AiRouteTrace["phase"];
     nodeId: string;
@@ -371,15 +287,7 @@ const messageIsError = ref(false);
 const recoveryBusy = ref(false);
 const recoveryOnly = ref(false);
 const detailLoadingId = ref<string | null>(null);
-const compressionDetail = ref<ConversationCompression | null>(null);
-const compressionContent = ref<ConversationCompressionContent | null>(null);
-const compressionDetailLoadingId = ref<string | null>(null);
-const compressionRegenerateLoadingId = ref<string | null>(null);
-const compressionContentLoading = ref(false);
-let compressionInspectRequestId = 0;
-let compressionContentRequestId = 0;
 const detailDialog = ref<HTMLElement | null>(null);
-const compressionDialog = ref<HTMLElement | null>(null);
 const usage = ref<AiUsageReport | null>(null);
 const usageHours = ref<AiUsageReport["hours"]>(24);
 const usageBusy = ref(false);
@@ -389,10 +297,6 @@ let usageRequestId = 0;
 let usageRefreshTimer: number | null = null;
 let pageOverflowBeforeDetail = "";
 let detailReturnFocus: HTMLElement | null = null;
-let compressionReturnFocus: HTMLElement | null = null;
-let compressionPageOverflowBeforeDetail = "";
-let compressionApplicationRoot: HTMLElement | null = null;
-let compressionApplicationRootWasInert = false;
 let applicationRoot: HTMLElement | null = null;
 let applicationRootWasInert = false;
 const route = useRoute();
@@ -410,22 +314,10 @@ const auditPager = useCursorPager<AuditEvent>((cursor) => {
   if (cursor !== null) query.set("cursor", cursor);
   return apiPageRequest<AuditEvent[]>(`/api/v1/audit-events?${query}`);
 });
-const compressionPager = useCursorPager<ConversationCompression>((cursor) => {
-  const query = new URLSearchParams({ limit: "20" });
-  if (cursor !== null) query.set("cursor", cursor);
-  return apiPageRequest<ConversationCompression[]>(
-    `/api/v1/conversation-compressions?${query}`,
-  );
-});
 const executions = executionPager.items;
 const audits = auditPager.items;
-const compressions = compressionPager.items;
 const busy = computed(
-  () =>
-    executionPager.busy.value ||
-    auditPager.busy.value ||
-    compressionPager.busy.value ||
-    usageBusy.value,
+  () => executionPager.busy.value || auditPager.busy.value || usageBusy.value,
 );
 const usageColors = ["#6c8cff", "#20b486", "#f59e0b", "#e66a9c", "#8b5cf6"];
 const usageProviders = computed(() =>
@@ -541,11 +433,6 @@ async function loadUsage(): Promise<boolean> {
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
-function openCompressionFromExecution(operationId: unknown) {
-  if (typeof operationId !== "string" || operationId.length === 0) return;
-  clearDetail();
-  void inspectCompression(operationId);
-}
 const providerHealthLabels: Record<string, string> = {
   healthy: "健康",
   degraded: "已降级",
@@ -608,7 +495,6 @@ function cacheDivergenceReasonLabel(reason: string | null): string {
 function providerAttemptPurpose(
   item: ExecutionDetail["aiProviderAttempts"][number],
 ) {
-  if (item.purpose === "context-summary") return "历史摘要压缩";
   if (item.purpose === "image-summary") return "图片摘要";
   const nodeType = detail.value?.nodes.find(
     (node) => node.nodeId === item.nodeId,
@@ -616,8 +502,6 @@ function providerAttemptPurpose(
   switch (nodeType) {
     case "ai-chat":
       return "对话回复";
-    case "load-context":
-      return "历史摘要压缩";
     default:
       return nodeType === undefined ? "AI 请求" : `AI 请求 · ${nodeType}`;
   }
@@ -641,7 +525,6 @@ async function load(reset = false): Promise<boolean> {
   if (!session.authenticated) {
     executionPager.clear();
     auditPager.clear();
-    compressionPager.clear();
     return false;
   }
   message.value = "";
@@ -649,7 +532,6 @@ async function load(reset = false): Promise<boolean> {
   try {
     const requests = [
       reset ? executionPager.first() : executionPager.refresh(),
-      reset ? compressionPager.first() : compressionPager.refresh(),
       loadUsage(),
     ];
     if (session.sensitiveActive) {
@@ -706,108 +588,6 @@ async function inspect(id: string) {
   } finally {
     if (requestId === inspectRequestId) detailLoadingId.value = null;
   }
-}
-
-async function inspectCompression(id: string) {
-  if (!session.authenticated) return;
-  if (detail.value !== null) clearDetail();
-  if (
-    compressionDetail.value === null &&
-    document.activeElement instanceof HTMLElement
-  ) {
-    compressionReturnFocus = document.activeElement;
-  }
-  const requestId = ++compressionInspectRequestId;
-  compressionDetailLoadingId.value = id;
-  compressionContent.value = null;
-  message.value = "";
-  messageIsError.value = false;
-  try {
-    const loaded = await apiRequest<ConversationCompression>(
-      `/api/v1/conversation-compressions/${id}`,
-    );
-    if (requestId !== compressionInspectRequestId) return;
-    compressionDetail.value = loaded;
-    if (session.sensitiveActive) await loadCompressionContent(loaded.id);
-  } catch (cause) {
-    if (requestId !== compressionInspectRequestId) return;
-    message.value = errorMessage(cause);
-    messageIsError.value = true;
-  } finally {
-    if (requestId === compressionInspectRequestId) {
-      compressionDetailLoadingId.value = null;
-    }
-  }
-}
-
-async function regenerateCompression(id: string) {
-  if (
-    !session.authenticated ||
-    !session.sensitiveActive ||
-    compressionRegenerateLoadingId.value !== null
-  )
-    return;
-  if (
-    !window.confirm(
-      "确认手动重新生成一条验证预览？系统会使用当前摘要提示词和原记录的固定输入，且不会替换正式摘要。",
-    )
-  )
-    return;
-  compressionRegenerateLoadingId.value = id;
-  message.value = "";
-  messageIsError.value = false;
-  try {
-    const result = await apiRequest<{
-      id: string;
-      status: "created" | "active";
-    }>(`/api/v1/conversation-compressions/${id}/regenerate`, {
-      method: "POST",
-    });
-    message.value =
-      result.status === "created"
-        ? "手动重新生成已加入队列；结果将作为验证预览，原摘要不会被替换。"
-        : "该记录已有一条手动重新生成任务正在排队或运行。";
-    await compressionPager.refresh();
-  } catch (cause) {
-    message.value = errorMessage(cause);
-    messageIsError.value = true;
-  } finally {
-    compressionRegenerateLoadingId.value = null;
-  }
-}
-
-async function loadCompressionContent(id = compressionDetail.value?.id ?? "") {
-  if (!session.sensitiveActive || id.length === 0) return;
-  const requestId = ++compressionContentRequestId;
-  compressionContentLoading.value = true;
-  message.value = "";
-  messageIsError.value = false;
-  try {
-    const loaded = await apiRequest<ConversationCompressionContent>(
-      `/api/v1/conversation-compressions/${id}/content`,
-    );
-    if (requestId === compressionContentRequestId) {
-      compressionContent.value = loaded;
-    }
-  } catch (cause) {
-    if (requestId === compressionContentRequestId) {
-      message.value = errorMessage(cause);
-      messageIsError.value = true;
-    }
-  } finally {
-    if (requestId === compressionContentRequestId) {
-      compressionContentLoading.value = false;
-    }
-  }
-}
-
-function clearCompressionDetail() {
-  compressionInspectRequestId += 1;
-  compressionContentRequestId += 1;
-  compressionDetailLoadingId.value = null;
-  compressionContentLoading.value = false;
-  compressionDetail.value = null;
-  compressionContent.value = null;
 }
 
 let rawRequestEpoch = 0;
@@ -978,46 +758,12 @@ watch(
     detailReturnFocus = null;
   },
 );
-watch(
-  () => compressionDetail.value !== null,
-  async (open) => {
-    if (open) {
-      if (
-        compressionReturnFocus === null &&
-        document.activeElement instanceof HTMLElement
-      ) {
-        compressionReturnFocus = document.activeElement;
-      }
-      compressionPageOverflowBeforeDetail = document.body.style.overflow;
-      compressionApplicationRoot = document.getElementById("app");
-      compressionApplicationRootWasInert =
-        compressionApplicationRoot?.hasAttribute("inert") ?? false;
-      compressionApplicationRoot?.setAttribute("inert", "");
-      document.body.style.overflow = "hidden";
-      await nextTick();
-      compressionDialog.value?.focus();
-      return;
-    }
-    document.body.style.overflow = compressionPageOverflowBeforeDetail;
-    if (!compressionApplicationRootWasInert)
-      compressionApplicationRoot?.removeAttribute("inert");
-    compressionApplicationRoot = null;
-    compressionReturnFocus?.focus();
-    compressionReturnFocus = null;
-  },
-);
 function onKeydown(event: KeyboardEvent) {
   if (document.querySelector("dialog[open]")) return;
-  const dialog =
-    detail.value === null
-      ? compressionDetail.value === null
-        ? null
-        : compressionDialog.value
-      : detailDialog.value;
+  const dialog = detail.value === null ? null : detailDialog.value;
   if (dialog === null) return;
   if (event.key === "Escape") {
     if (detail.value !== null) clearDetail();
-    else clearCompressionDetail();
     return;
   }
   if (event.key !== "Tab") return;
@@ -1049,14 +795,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   document.removeEventListener("visibilitychange", refreshUsageWhenVisible);
   if (usageRefreshTimer !== null) window.clearInterval(usageRefreshTimer);
-  if (compressionDetail.value !== null) {
-    document.body.style.overflow = compressionPageOverflowBeforeDetail;
-    if (!compressionApplicationRootWasInert)
-      compressionApplicationRoot?.removeAttribute("inert");
-  } else {
-    document.body.style.overflow = pageOverflowBeforeDetail;
-    if (!applicationRootWasInert) applicationRoot?.removeAttribute("inert");
-  }
+  document.body.style.overflow = pageOverflowBeforeDetail;
+  if (!applicationRootWasInert) applicationRoot?.removeAttribute("inert");
 });
 onMounted(() => {
   if (session.authenticated) void loadSelected();
@@ -1072,7 +812,6 @@ watch(
     else {
       executionPager.clear();
       auditPager.clear();
-      clearCompressionDetail();
       usage.value = null;
       clearDetail();
     }
@@ -1083,15 +822,11 @@ watch(
   (active) => {
     if (active) {
       void changePage(resetAuditPage);
-      if (compressionDetail.value !== null) {
-        void loadCompressionContent(compressionDetail.value.id);
-      }
     } else {
       auditPager.clear();
       rawRequestEpoch += 1;
       rawRequests.value = {};
       rawResponses.value = {};
-      compressionContent.value = null;
     }
   },
 );
@@ -1107,84 +842,6 @@ function refreshUsageWhenVisible() {
 
 function resetAuditPage(): Promise<boolean> {
   return auditPager.first();
-}
-
-function compressionStatusLabel(status: string): string {
-  return (
-    (
-      {
-        queued: "排队中",
-        running: "处理中",
-        succeeded: "成功",
-        failed: "失败",
-        superseded: "已替代",
-      } as Record<string, string>
-    )[status] ?? status
-  );
-}
-
-function compressionReasonLabel(reason: string): string {
-  return (
-    (
-      {
-        "initial-catchup": "初始追赶",
-        "message-threshold": "消息阈值",
-        "bot-identity-rebuild": "Bot 身份重建",
-        "policy-rebuild": "历史策略重建",
-        "backlog-fast-forward": "积压自动追赶",
-        "manual-reset": "手动重置摘要",
-      } as Record<string, string>
-    )[reason] ?? reason
-  );
-}
-
-function compressionOperationTypeLabel(item: ConversationCompression): string {
-  if (item.preview) return "手动重新生成";
-  return item.reason === "manual-reset" ? "手动重置" : "正式压缩";
-}
-
-function compressionAttemptStatusLabel(status: string): string {
-  return (
-    (
-      {
-        succeeded: "成功",
-        failed: "失败",
-      } as Record<string, string>
-    )[status] ?? status
-  );
-}
-
-function compressionRetryabilityLabel(value: boolean | null): string {
-  if (value === null) return "重试策略未标记";
-  return value ? "可重试" : "不可重试";
-}
-
-function compressionFallbackLabel(value: boolean | null): string {
-  if (value === null) return "切换策略未标记";
-  return value ? "允许切换 Provider" : "停止切换 Provider";
-}
-
-function compressionProviderSwitchCount(item: ConversationCompression): number {
-  return item.providerAttempts.reduce((count, attempt, index, attempts) => {
-    const previous = attempts[index - 1];
-    return previous !== undefined &&
-      previous.providerName !== attempt.providerName
-      ? count + 1
-      : count;
-  }, 0);
-}
-
-function compressionAttemptTitle(
-  attempt: ConversationCompression["providerAttempts"][number],
-): string {
-  const details = [
-    `Agent 第 ${attempt.agentTurn} 轮`,
-    `路由第 ${attempt.round} 轮 / 顺序 ${attempt.sequence}`,
-    `${attempt.durationMs} ms`,
-  ];
-  if (attempt.errorCategory) details.push(attempt.errorCategory);
-  if (attempt.errorCode) details.push(attempt.errorCode);
-  return details.join(" · ");
 }
 
 function routeTracePhaseLabel(phase: AiRouteTrace["phase"]): string {
@@ -1228,10 +885,11 @@ function routeDecisionStatusClass(
 
 function coverageRangeText(
   snapshot: Record<string, unknown>,
-  key: "retained" | "omitted",
+  key: "retained" | "omitted" | "windowEvicted",
 ): string {
   const coverage = snapshot.historyCoverage;
   if (!coverage || typeof coverage !== "object") return "未记录覆盖范围";
+  if (!(key in coverage)) return "未记录覆盖范围";
   const range = (coverage as Record<string, unknown>)[key];
   if (!range || typeof range !== "object") return "无";
   const value = range as Record<string, unknown>;
@@ -1271,9 +929,7 @@ function contextSnapshotValue(
         >
           <FileClock :size="18" />执行记录
         </button>
-        <button type="button" @click="scrollToSection('compressions')">
-          <FileClock :size="18" />对话压缩
-        </button>
+
         <button type="button" @click="scrollToSection('audit')">
           <ShieldCheck :size="18" />审计事件
         </button>
@@ -1282,7 +938,7 @@ function contextSnapshotValue(
         </button>
       </nav>
       <div class="sidebar-note">
-        普通轨迹只显示元数据、错误码和哈希；压缩正文需敏感授权后在详情弹窗查看。
+        普通轨迹只显示元数据、错误码和哈希；原始模型请求与响应需敏感授权后查看。
       </div>
     </aside>
     <div class="admin-workspace">
@@ -1463,8 +1119,7 @@ function contextSnapshotValue(
             <p class="card-kicker">EXECUTION TRACE</p>
             <h1>工作流执行</h1>
             <p class="keyline">
-              回复缓存命中仅统计 ai-chat
-              对话请求；历史摘要压缩等辅助请求不计入。
+              回复缓存命中仅统计 ai-chat 对话请求；图片摘要等辅助请求不计入。
             </p>
           </div>
           <div class="row-actions">
@@ -1557,168 +1212,6 @@ function contextSnapshotValue(
           :has-next="executionPager.hasNext.value"
           @previous="changePage(executionPager.previous)"
           @next="changePage(executionPager.next)"
-        />
-      </section>
-      <section id="compressions" class="admin-panel">
-        <div class="panel-head">
-          <div>
-            <p class="card-kicker">CHAT SUMMARY TRACE</p>
-            <h2>对话压缩</h2>
-            <p class="keyline">
-              正式压缩由消息阈值自动触发；“手动重新生成”仅生成验证预览，不替换正式摘要。
-            </p>
-          </div>
-          <button
-            class="button secondary"
-            :disabled="busy"
-            @click="compressionPager.refresh()"
-          >
-            <RefreshCw :size="16" />刷新
-          </button>
-        </div>
-        <div class="table-shell">
-          <table>
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>聊天</th>
-                <th>状态</th>
-                <th>类型 / 原因</th>
-                <th>消息范围 / 触发消息</th>
-                <th>版本</th>
-                <th>耗时</th>
-                <th>AI 调用路径 / 错误</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="!compressions.length">
-                <td colspan="9" class="empty-cell">暂无对话压缩操作</td>
-              </tr>
-              <tr v-for="item in compressions" :key="item.id">
-                <td>{{ new Date(item.startedAt).toLocaleString() }}</td>
-                <td>
-                  <strong>{{
-                    item.chatDisplayName || item.providerChatId
-                  }}</strong
-                  ><span class="keyline">{{ item.chatId }}</span>
-                </td>
-                <td>
-                  <span class="table-status" :class="item.status">{{
-                    compressionStatusLabel(item.status)
-                  }}</span>
-                </td>
-                <td>
-                  <span class="state-badge" :class="{ preview: item.preview }">
-                    {{ compressionOperationTypeLabel(item) }}
-                  </span>
-                  <span class="keyline compression-reason-line">
-                    {{ compressionReasonLabel(item.reason) }}
-                  </span>
-                </td>
-                <td class="mono">
-                  {{ item.fromMessageIndex }}–{{ item.throughMessageIndex
-                  }}<br />
-                  触发 {{ item.triggerMessageIndex || "—" }}
-                </td>
-                <td>
-                  v{{ item.baseVersion }} →
-                  {{
-                    item.outputVersion === null ? "—" : `v${item.outputVersion}`
-                  }}
-                </td>
-                <td>
-                  {{ item.durationMs === null ? "—" : `${item.durationMs} ms` }}
-                </td>
-                <td>
-                  <span v-if="item.routeTraces[0]" class="keyline">
-                    路由 {{ item.routeTraces[0].routeName || "未命名" }} · v{{
-                      item.routeTraces[0].routeVersion ?? "—"
-                    }}
-                  </span>
-                  <div
-                    v-if="item.providerAttempts.length"
-                    class="compression-provider-path"
-                  >
-                    <template
-                      v-for="(attempt, index) in item.providerAttempts"
-                      :key="attempt.id"
-                    >
-                      <span v-if="index > 0" class="compression-path-arrow"
-                        >→</span
-                      >
-                      <span
-                        class="compression-path-step"
-                        :class="attempt.status"
-                        :title="compressionAttemptTitle(attempt)"
-                      >
-                        {{ attempt.providerName }} ·
-                        {{ compressionAttemptStatusLabel(attempt.status) }}
-                      </span>
-                    </template>
-                  </div>
-                  <span v-else class="keyline">
-                    {{
-                      item.status === "queued" || item.status === "running"
-                        ? "尚未发起 AI 调用"
-                        : "无 AI 调用记录"
-                    }}
-                  </span>
-                  <span v-if="item.providerAttempts.length" class="keyline">
-                    {{ item.providerAttempts.length }} 次调用 ·
-                    {{ compressionProviderSwitchCount(item) }} 次切换
-                  </span>
-                  <span v-if="item.errorCode" class="keyline danger-text">
-                    操作错误：{{ item.errorCode }}
-                  </span>
-                </td>
-                <td>
-                  <div class="row-actions">
-                    <button
-                      class="button tiny secondary"
-                      :disabled="compressionDetailLoadingId === item.id"
-                      @click="inspectCompression(item.id)"
-                    >
-                      <Search :size="14" />{{
-                        compressionDetailLoadingId === item.id
-                          ? "加载中…"
-                          : "详情"
-                      }}
-                    </button>
-                    <button
-                      v-if="!item.preview"
-                      class="button tiny secondary"
-                      :disabled="
-                        compressionRegenerateLoadingId === item.id ||
-                        !session.sensitiveActive
-                      "
-                      :title="
-                        session.sensitiveActive
-                          ? '使用当前提示词生成验证预览，不替换正式摘要'
-                          : '完成敏感操作二次验证后才能重新生成'
-                      "
-                      @click="regenerateCompression(item.id)"
-                    >
-                      {{
-                        compressionRegenerateLoadingId === item.id
-                          ? "排队中…"
-                          : "手动重新生成"
-                      }}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <CursorPagination
-          :page="compressionPager.pageNumber.value"
-          :item-count="compressions.length"
-          :busy="compressionPager.busy.value"
-          :has-previous="compressionPager.hasPrevious.value"
-          :has-next="compressionPager.hasNext.value"
-          @previous="changePage(compressionPager.previous)"
-          @next="changePage(compressionPager.next)"
         />
       </section>
       <MemoryPanel id="memory-jobs" mode="jobs" embedded />
@@ -1854,23 +1347,10 @@ function contextSnapshotValue(
             <div class="context-snapshot-heading">
               <div>
                 <h3>上下文读取</h3>
-                <p class="keyline">本次执行固定使用的摘要与消息水位线。</p>
+                <p class="keyline">
+                  本次执行固定使用的历史窗口与触发消息边界。
+                </p>
               </div>
-              <button
-                v-if="
-                  typeof detail.contextSnapshot.compressionOperationId ===
-                  'string'
-                "
-                type="button"
-                class="button tiny secondary"
-                @click="
-                  openCompressionFromExecution(
-                    detail.contextSnapshot.compressionOperationId,
-                  )
-                "
-              >
-                查看对话压缩轨迹
-              </button>
             </div>
             <dl class="context-snapshot-grid">
               <div>
@@ -1890,40 +1370,7 @@ function contextSnapshotValue(
                   }}
                 </dd>
               </div>
-              <div>
-                <dt>摘要版本</dt>
-                <dd>
-                  v{{
-                    contextSnapshotValue(
-                      detail.contextSnapshot,
-                      "summaryVersion",
-                    )
-                  }}
-                </dd>
-              </div>
-              <div>
-                <dt>摘要覆盖到</dt>
-                <dd>
-                  M{{
-                    contextSnapshotValue(
-                      detail.contextSnapshot,
-                      "summaryCoveredThroughIndex",
-                    )
-                  }}
-                </dd>
-              </div>
-              <div>
-                <dt>未压缩消息</dt>
-                <dd>
-                  {{
-                    contextSnapshotValue(
-                      detail.contextSnapshot,
-                      "uncompressedMessageCount",
-                    )
-                  }}
-                  条
-                </dd>
-              </div>
+
               <div>
                 <dt>实际上下文</dt>
                 <dd>
@@ -1948,17 +1395,6 @@ function contextSnapshotValue(
                   条
                 </dd>
               </div>
-              <div>
-                <dt>读取上一版摘要</dt>
-                <dd>
-                  {{
-                    contextSnapshotValue(
-                      detail.contextSnapshot,
-                      "usedPreviousSummary",
-                    )
-                  }}
-                </dd>
-              </div>
             </dl>
             <details v-if="detail.contextSnapshot.authorAttributions">
               <summary>
@@ -1974,13 +1410,26 @@ function contextSnapshotValue(
                 )
               }}</pre>
             </details>
+            <p v-if="detail.contextSnapshot.chatSummaryRetired">
+              聊天摘要内容已随功能移除。
+            </p>
+            <p>
+              窗口移出：{{
+                coverageRangeText(detail.contextSnapshot, "windowEvicted")
+              }}
+            </p>
+            <p>
+              配置版本：{{
+                contextSnapshotValue(detail.contextSnapshot, "settingsVersion")
+              }}
+            </p>
             <p>
               保留原文：{{
                 coverageRangeText(detail.contextSnapshot, "retained")
               }}
             </p>
             <p>
-              裁剪范围：{{
+              字符裁剪范围：{{
                 coverageRangeText(detail.contextSnapshot, "omitted")
               }}
             </p>
@@ -1997,11 +1446,13 @@ function contextSnapshotValue(
                 {{
                   detail.contextSnapshot.contextIncompleteReasons
                     .map((reason: string) =>
-                      reason === "history-trimmed"
-                        ? "历史原文因字符预算被裁剪"
-                        : reason === "character-overflow"
-                          ? "内容超过字符保护边界"
-                          : reason,
+                      reason === "window-evicted"
+                        ? "较早原文已移出上下文窗口"
+                        : reason === "history-trimmed"
+                          ? "历史原文因字符预算被裁剪"
+                          : reason === "character-overflow"
+                            ? "内容超过字符保护边界"
+                            : reason,
                     )
                     .join("；")
                 }}
@@ -2575,501 +2026,6 @@ function contextSnapshotValue(
               </article>
             </section>
           </div>
-        </div>
-      </section>
-    </div>
-  </Teleport>
-  <Teleport to="body">
-    <div
-      v-if="compressionDetail"
-      class="execution-detail-backdrop"
-      @click.self="clearCompressionDetail"
-    >
-      <section
-        ref="compressionDialog"
-        class="execution-detail-dialog compression-detail-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="compression-detail-title"
-        tabindex="-1"
-      >
-        <header class="execution-detail-header">
-          <div class="execution-detail-heading">
-            <p class="card-kicker">{{ compressionDetail.id }}</p>
-            <h2 id="compression-detail-title">
-              {{
-                compressionDetail.preview
-                  ? "手动重新生成摘要（验证预览）"
-                  : "正式对话压缩"
-              }}
-              ·
-              {{ compressionStatusLabel(compressionDetail.status) }}
-            </h2>
-            <p class="keyline">
-              {{
-                compressionDetail.chatDisplayName ||
-                compressionDetail.providerChatId
-              }}
-              · 消息 {{ compressionDetail.fromMessageIndex }}～{{
-                compressionDetail.throughMessageIndex
-              }}
-              · 摘要 v{{ compressionDetail.baseVersion }} →
-              {{ compressionDetail.outputVersion ?? "—" }}
-            </p>
-          </div>
-          <div class="row-actions execution-detail-actions">
-            <button
-              v-if="!compressionDetail.preview"
-              class="button secondary"
-              type="button"
-              :disabled="
-                compressionRegenerateLoadingId === compressionDetail.id ||
-                !session.sensitiveActive
-              "
-              :title="
-                session.sensitiveActive
-                  ? '使用当前提示词生成验证预览，不替换正式摘要'
-                  : '完成敏感操作二次验证后才能重新生成'
-              "
-              @click="regenerateCompression(compressionDetail.id)"
-            >
-              {{
-                compressionRegenerateLoadingId === compressionDetail.id
-                  ? "排队中…"
-                  : "手动重新生成"
-              }}
-            </button>
-            <button
-              class="button secondary"
-              type="button"
-              :disabled="compressionContentLoading || !session.sensitiveActive"
-              :title="
-                session.sensitiveActive
-                  ? '重新读取受保护的压缩内容'
-                  : '完成敏感操作二次验证后才能读取正文'
-              "
-              @click="loadCompressionContent()"
-            >
-              <RefreshCw :size="15" />刷新内容
-            </button>
-            <button
-              class="icon-button execution-detail-close"
-              type="button"
-              title="关闭对话压缩详情"
-              aria-label="关闭对话压缩详情"
-              @click="clearCompressionDetail"
-            >
-              <X :size="19" />
-            </button>
-          </div>
-        </header>
-        <div class="execution-detail-body">
-          <div class="trace-columns compression-metadata-columns">
-            <section class="compression-detail-card">
-              <h3>压缩操作</h3>
-              <dl class="compression-detail-list">
-                <div>
-                  <dt>操作类型</dt>
-                  <dd>
-                    <span
-                      class="state-badge"
-                      :class="{ preview: compressionDetail.preview }"
-                    >
-                      {{ compressionOperationTypeLabel(compressionDetail) }}
-                    </span>
-                  </dd>
-                </div>
-                <div>
-                  <dt>触发消息</dt>
-                  <dd>{{ compressionDetail.triggerMessageIndex || "—" }}</dd>
-                </div>
-                <div>
-                  <dt>压缩原因</dt>
-                  <dd>
-                    {{ compressionReasonLabel(compressionDetail.reason) }}
-                  </dd>
-                </div>
-                <div v-if="compressionDetail.preview">
-                  <dt>来源压缩记录</dt>
-                  <dd class="mono">
-                    {{ compressionDetail.sourceCompressionId || "—" }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>开始时间</dt>
-                  <dd>
-                    {{ new Date(compressionDetail.startedAt).toLocaleString() }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>完成时间</dt>
-                  <dd>
-                    {{
-                      compressionDetail.completedAt
-                        ? new Date(
-                            compressionDetail.completedAt,
-                          ).toLocaleString()
-                        : "—"
-                    }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>耗时</dt>
-                  <dd>
-                    {{ compressionDetail.durationMs ?? "—"
-                    }}{{ compressionDetail.durationMs === null ? "" : " ms" }}
-                  </dd>
-                </div>
-              </dl>
-            </section>
-            <section class="compression-detail-card">
-              <h3>最终结果与关联</h3>
-              <dl class="compression-detail-list">
-                <div>
-                  <dt>Provider / 模型</dt>
-                  <dd>
-                    {{ compressionDetail.providerName || "—" }} ·
-                    {{ compressionDetail.model || "—" }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Token</dt>
-                  <dd>
-                    输入 {{ compressionDetail.promptTokens ?? "—" }} · 输出
-                    {{ compressionDetail.completionTokens ?? "—" }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>错误码</dt>
-                  <dd>{{ compressionDetail.errorCode || "—" }}</dd>
-                </div>
-                <div>
-                  <dt>关联 ID</dt>
-                  <dd class="mono">
-                    {{ compressionDetail.correlationId || "—" }}
-                  </dd>
-                </div>
-                <div>
-                  <dt>租约</dt>
-                  <dd>
-                    {{ compressionDetail.leaseOwner || "—" }} ·
-                    {{
-                      compressionDetail.leaseExpiresAt
-                        ? new Date(
-                            compressionDetail.leaseExpiresAt,
-                          ).toLocaleString()
-                        : "无"
-                    }}
-                  </dd>
-                </div>
-              </dl>
-            </section>
-          </div>
-
-          <section class="compression-detail-card compression-attempts-card">
-            <div class="compression-attempts-heading">
-              <div>
-                <h3>路由决策</h3>
-                <p class="keyline">
-                  展示执行当时的路由版本、请求能力以及候选过滤和跳过原因。
-                </p>
-              </div>
-            </div>
-            <div
-              v-if="compressionDetail.routeTraces.length"
-              class="route-trace-list"
-            >
-              <article
-                v-for="trace in compressionDetail.routeTraces"
-                :key="trace.id"
-                class="route-trace-card"
-              >
-                <div class="provider-attempt-heading">
-                  <strong>
-                    {{ trace.routeName || "路由不可用" }} · v{{
-                      trace.routeVersion ?? "—"
-                    }}
-                  </strong>
-                  <span class="table-status" :class="trace.terminalStatus">
-                    {{ routeTracePhaseLabel(trace.phase) }}
-                  </span>
-                </div>
-                <p class="keyline mono">{{ trace.routeId }}</p>
-                <p>
-                  {{
-                    trace.requestRequirements.hasImages ? "携带图片" : "纯文本"
-                  }}
-                  ·
-                  {{
-                    trace.requestRequirements.requiresTools
-                      ? "需要工具能力"
-                      : "无需工具能力"
-                  }}
-                  · 搜索 {{ trace.requestRequirements.webSearch || "未请求" }}
-                  · Fallback
-                  {{
-                    trace.fallbackEnabled === null
-                      ? "—"
-                      : trace.fallbackEnabled
-                        ? "开启"
-                        : "关闭"
-                  }}
-                  · 最多
-                  {{ trace.maxRounds ?? "—" }} 轮
-                </p>
-                <div class="route-candidate-grid">
-                  <div
-                    v-for="(candidate, index) in trace.candidateDecisions"
-                    :key="
-                      candidate.providerId +
-                      ':' +
-                      (candidate.round ?? 'preflight') +
-                      ':' +
-                      candidate.reason +
-                      ':' +
-                      index
-                    "
-                    class="route-candidate-item"
-                  >
-                    <span class="mono">
-                      #{{ candidate.configuredPosition }}
-                      {{ candidate.providerName || candidate.providerId }}
-                      <template v-if="candidate.model">
-                        · {{ candidate.model }}
-                      </template>
-                    </span>
-                    <span
-                      class="table-status"
-                      :class="routeDecisionStatusClass(candidate)"
-                    >
-                      {{ routeDecisionLabel(candidate) }}
-                    </span>
-                    <span class="keyline">
-                      {{
-                        candidate.round === null
-                          ? "预检"
-                          : `第 ${candidate.round} 轮`
-                      }}
-                      <template v-if="candidate.imageInputConfigured !== null">
-                        · 图片配置
-                        {{ candidate.imageInputConfigured ? "开启" : "关闭" }}
-                        / 探测 {{ candidate.imageInputProbe || "unknown" }}
-                      </template>
-                    </span>
-                  </div>
-                </div>
-                <p v-if="trace.terminalCode" class="danger-text">
-                  结束原因：{{ trace.terminalCode }}
-                </p>
-              </article>
-            </div>
-            <p v-else class="keyline">
-              该记录创建时尚未启用路由决策追踪；不会使用当前配置反推历史结果。
-            </p>
-          </section>
-
-          <section class="compression-detail-card compression-attempts-card">
-            <div class="compression-attempts-heading">
-              <div>
-                <h3>AI 调用路径</h3>
-                <p class="keyline">
-                  按 Agent 轮次、路由轮次和候选顺序排列，包含重试与 Provider
-                  切换。
-                </p>
-              </div>
-              <span
-                v-if="compressionDetail.providerAttempts.length"
-                class="state-badge"
-              >
-                {{ compressionDetail.providerAttempts.length }} 次调用 ·
-                {{ compressionProviderSwitchCount(compressionDetail) }} 次切换
-              </span>
-            </div>
-            <div
-              v-if="compressionDetail.providerAttempts.length"
-              class="compression-attempt-timeline"
-            >
-              <article
-                v-for="(attempt, index) in compressionDetail.providerAttempts"
-                :key="attempt.id"
-                class="compression-attempt-item"
-              >
-                <span class="trace-dot" :class="attempt.status"></span>
-                <div>
-                  <div class="provider-attempt-heading">
-                    <strong>
-                      {{ index + 1 }}. {{ attempt.providerName }} ·
-                      {{ attempt.model }}
-                    </strong>
-                    <span class="table-status" :class="attempt.status">
-                      {{ compressionAttemptStatusLabel(attempt.status) }}
-                    </span>
-                  </div>
-                  <p>
-                    Agent 第 {{ attempt.agentTurn }} 轮 · 路由第
-                    {{ attempt.round }} 轮 / 顺序 {{ attempt.sequence }} ·
-                    {{ routeTracePhaseLabel(attempt.routePhase) }} ·
-                    {{ attempt.durationMs }} ms · 输入
-                    {{ attempt.promptTokens ?? "—" }} / 输出
-                    {{ attempt.completionTokens ?? "—" }} Token
-                  </p>
-                  <p v-if="attempt.status === 'failed'" class="keyline">
-                    {{ compressionRetryabilityLabel(attempt.retryable) }} ·
-                    {{ compressionFallbackLabel(attempt.fallbackAllowed) }}
-                    <span v-if="attempt.errorCategory || attempt.errorCode">
-                      · 错误：{{
-                        [attempt.errorCategory, attempt.errorCode]
-                          .filter(Boolean)
-                          .join(" · ")
-                      }}
-                    </span>
-                  </p>
-                  <p class="keyline mono">
-                    {{ attempt.id }} ·
-                    {{ new Date(attempt.createdAt).toLocaleString() }}
-                  </p>
-                </div>
-              </article>
-            </div>
-            <p v-else class="keyline">
-              {{
-                compressionDetail.status === "queued" ||
-                compressionDetail.status === "running"
-                  ? "任务尚未发起 AI 调用。"
-                  : "该任务没有 AI 调用记录。"
-              }}
-            </p>
-          </section>
-
-          <section class="compression-detail-card compression-status-card">
-            <h3>状态变化</h3>
-            <div
-              v-if="(compressionDetail.statusEvents ?? []).length"
-              class="compression-status-events"
-            >
-              <div
-                v-for="event in compressionDetail.statusEvents ?? []"
-                :key="event.createdAt + event.status"
-                class="compression-status-event"
-              >
-                <span class="table-status" :class="event.status">
-                  {{ compressionStatusLabel(event.status) }}
-                </span>
-                <span>{{ new Date(event.createdAt).toLocaleString() }}</span>
-                <span class="keyline">{{ event.errorCode || "无错误" }}</span>
-              </div>
-            </div>
-            <p v-else class="keyline">暂无状态变化记录。</p>
-          </section>
-
-          <section class="compression-detail-card compression-content-section">
-            <div class="compression-content-heading">
-              <div>
-                <h3>压缩内容</h3>
-                <p class="keyline">
-                  包含本批次消息正文以及摘要前后对比，可能涉及饮食、健康等敏感信息。
-                </p>
-              </div>
-              <ShieldCheck :size="20" />
-            </div>
-            <div v-if="!session.sensitiveActive" class="sensitive-mask">
-              <ShieldCheck :size="24" />
-              <strong>内容已保护</strong>
-              <span>完成敏感操作二次验证后才能查看摘要正文和本批次消息。</span>
-              <SensitiveUnlock />
-            </div>
-            <div
-              v-else-if="compressionContentLoading"
-              class="empty-panel compact"
-            >
-              <LoaderCircle :size="16" class="spin" />正在读取受保护内容…
-            </div>
-            <div
-              v-else-if="compressionContent"
-              class="compression-content-body"
-            >
-              <div class="compression-content-grid">
-                <article>
-                  <h4>压缩前摘要 · v{{ compressionContent.baseVersion }}</h4>
-                  <pre>{{
-                    compressionContent.previousSummary || "（空摘要）"
-                  }}</pre>
-                </article>
-                <article>
-                  <h4>
-                    压缩后摘要 ·
-                    {{
-                      compressionContent.outputVersion === null
-                        ? "尚未生成"
-                        : "v" + compressionContent.outputVersion
-                    }}
-                  </h4>
-                  <pre>{{
-                    compressionContent.outputSummary || "（尚未生成）"
-                  }}</pre>
-                </article>
-              </div>
-              <div class="compression-messages-heading">
-                <h4>
-                  本次压缩消息（{{ compressionContent.messages.length }} 条）
-                </h4>
-                <span class="keyline">
-                  {{ compressionContent.fromMessageIndex }}～{{
-                    compressionContent.throughMessageIndex
-                  }}
-                </span>
-              </div>
-              <div class="compression-message-list">
-                <article
-                  v-for="item in compressionContent.messages"
-                  :key="item.providerMessageId"
-                  class="compression-message"
-                >
-                  <div class="compression-message-meta">
-                    <strong>M{{ item.messageIndex }}</strong>
-                    <span>{{
-                      item.isFromMe
-                        ? "我（机器人）"
-                        : item.senderId || "未知发送者"
-                    }}</span>
-                    <time>{{ new Date(item.sentAt).toLocaleString() }}</time>
-                  </div>
-                  <p>{{ item.body || "（无文本内容）" }}</p>
-                </article>
-              </div>
-            </div>
-            <div v-else class="empty-panel compact">
-              <button
-                class="button secondary"
-                type="button"
-                @click="loadCompressionContent()"
-              >
-                <ShieldCheck :size="15" />读取受保护内容
-              </button>
-            </div>
-          </section>
-
-          <section
-            v-if="(compressionDetail.workflowExecutions ?? []).length"
-            class="compression-detail-card"
-          >
-            <h3>关联工作流执行</h3>
-            <div class="compression-workflow-links">
-              <div
-                v-for="execution in compressionDetail.workflowExecutions ?? []"
-                :key="execution.id"
-              >
-                <strong>{{ execution.workflowName }}</strong>
-                <span class="keyline">
-                  {{ execution.status }} · 摘要 v{{
-                    execution.summaryVersion ?? "—"
-                  }}
-                  ·
-                  {{ execution.id }}
-                </span>
-              </div>
-            </div>
-          </section>
         </div>
       </section>
     </div>
