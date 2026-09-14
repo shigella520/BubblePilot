@@ -1,3 +1,8 @@
+import {
+  chatMessageQuerySchema,
+  chatCountQuerySchema,
+  chatExtremaQuerySchema,
+} from "../modules/memory/chat-query-types.js";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
 import { MemoryRepository } from "../modules/memory/memory-repository.js";
@@ -58,6 +63,321 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     return id;
   }
 
+  it("uses a single raw filtering contract for exact counts, extrema and microsecond pages", async () => {
+    const id = await chat();
+    const records = [];
+    for (const [timestamp, sender, body] of [
+      ["2026-09-10T21:59:59.999999Z", "alice", "Backup 100% _ Backup"],
+      ["2026-09-10T22:00:00.000001Z", "alice", "Backup 100% _"],
+      ["2026-09-10T22:00:00.000002Z", "alice", "backup 100% _"],
+      ["2026-09-10T22:00:00.000002Z", "bob", "backup"],
+      ["2026-09-11T16:00:00Z", "alice", "archive only"],
+      ["2026-09-09T23:00:00Z", "alice", "Backup 100% _"],
+    ]) {
+      const mid = await message(id, body!);
+      await repo.pool.query(
+        "UPDATE messages SET sent_at=$2,sender_id=$3 WHERE id=$1",
+        [mid, timestamp, sender],
+      );
+      records.push(mid);
+    }
+    const trigger = await message(id, "trigger");
+    await message(id, "backup 100% _");
+    await message(await chat(), "backup 100% _");
+    const scope = (await repo.scopeForEvent(
+      "bluebubbles",
+      trigger,
+      randomUUID(),
+      "Asia/Shanghai",
+    ))!;
+    const filters = {
+      senderId: "alice",
+      from: "2026-09-10T00:00:00+08:00",
+      to: "2026-09-13T00:00:00+08:00",
+      dailyTime: { from: "06:00", to: "24:00" },
+      keywords: ["BACKUP", "100%", "_"],
+      keywordMode: "all" as const,
+    };
+    const all = await repo.archiveQueries.query(
+      scope,
+      chatMessageQuerySchema.parse({ ...filters, order: "asc" }),
+      scope.timeZone!,
+    );
+    expect(all.rows.map((r) => r.message.id)).toEqual([
+      records[5],
+      records[1],
+      records[2],
+    ]);
+    expect(all.rows[1]?.position.sentAt).toBe("2026-09-10T22:00:00.000001Z");
+    const secondPage = await repo.archiveQueries.query(
+      scope,
+      chatMessageQuerySchema.parse({ ...filters, order: "asc", limit: 1 }),
+      scope.timeZone!,
+      all.rows[1]!.position,
+    );
+    expect(secondPage.rows.map((r) => r.message.id)).toEqual([records[2]]);
+    const counts = await repo.archiveQueries.aggregate(
+      scope,
+      chatCountQuerySchema.parse({ ...filters, groupBy: "day", limit: 1 }),
+      scope.timeZone!,
+    );
+    expect(counts.rows.map((r) => [r.key, r.count])).toEqual([
+      ["2026-09-10", 1],
+      ["2026-09-11", 2],
+    ]);
+    const total = await repo.archiveQueries.aggregate(
+      scope,
+      chatCountQuerySchema.parse(filters),
+      scope.timeZone!,
+    );
+    expect(total.rows[0]?.count).toBe(3);
+    const extrema = await repo.archiveQueries.aggregate(
+      scope,
+      chatExtremaQuerySchema.parse({
+        ...filters,
+        groupBy: "day",
+        pick: "first",
+      }),
+      scope.timeZone!,
+    );
+    expect(extrema.rows.map((r) => r.message?.message.id ?? null)).toEqual([
+      records[5],
+      records[1],
+      null,
+      null,
+    ]);
+    const any = await repo.archiveQueries.aggregate(
+      scope,
+      chatCountQuerySchema.parse({
+        keywords: ["archive", "BACKUP"],
+        keywordMode: "any",
+      }),
+      "UTC",
+    );
+    expect(any.rows[0]?.count).toBe(6);
+    await repo.pool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
+      [records[1]],
+    );
+    const cleaned = await repo.archiveQueries.aggregate(
+      scope,
+      chatCountQuerySchema.parse(filters),
+      scope.timeZone!,
+    );
+    expect(cleaned.rows[0]?.count).toBe(2);
+  });
+  it("returns empty local dates, separate unknown senders and overnight/DST matches", async () => {
+    const id = await chat();
+    const a = await message(id, "fictional night");
+    const b = await message(id, "fictional night");
+    await repo.pool.query(
+      "UPDATE messages SET sent_at='2026-11-01T05:30:00Z',sender_id=NULL WHERE id=$1",
+      [a],
+    );
+    await repo.pool.query(
+      "UPDATE messages SET sent_at='2026-11-01T06:30:00Z',sender_id='unknown' WHERE id=$1",
+      [b],
+    );
+    const scope = (await repo.scope(id, 999, null))!;
+    const filter = {
+      from: "2026-11-01T00:00:00-04:00",
+      to: "2026-11-02T23:59:59-05:00",
+      dailyTime: { from: "23:00", to: "02:00" },
+    };
+    const result = await repo.archiveQueries.aggregate(
+      scope,
+      chatCountQuerySchema.parse({ ...filter, groupBy: "day" }),
+      "America/New_York",
+    );
+    expect(result.rows.map((r) => r.count)).toEqual([2, 0]);
+    const senders = await repo.archiveQueries.aggregate(
+      scope,
+      chatCountQuerySchema.parse({ ...filter, groupBy: "sender" }),
+      "America/New_York",
+    );
+    expect(senders.rows.map((r) => [r.senderId, r.count])).toEqual([
+      [null, 1],
+      ["unknown", 1],
+    ]);
+    const last = await repo.archiveQueries.aggregate(
+      scope,
+      chatExtremaQuerySchema.parse({ ...filter, pick: "last" }),
+      "America/New_York",
+    );
+    expect(last.rows[0]?.message?.message.id).toBe(b);
+  });
+  it("binds session cursors, fits actual returned pages and expands extrema sources offline", async () => {
+    const id = await chat();
+    for (let i = 0; i < 4; i++)
+      await message(id, "fictional body " + i + "x".repeat(100));
+    const scope = {
+      ...(await repo.scope(id, 999, null))!,
+      timeZone: "Asia/Shanghai",
+    };
+    const offline = new MemoryService(repo, {
+      identity: () => Promise.reject(new Error("offline")),
+      encode: () => Promise.reject(new Error("offline")),
+    });
+    const session = await offline.session(scope);
+    const execute = async (name: string, args: unknown, maximum = 24000) =>
+      JSON.parse(
+        await session.execute(name, JSON.stringify(args), {
+          signal: new AbortController().signal,
+          deadline: Date.now() + 60000,
+          maxOutputCharacters: maximum,
+        }),
+      ) as {
+        status: string;
+        reason?: string;
+        nextCursor: string | null;
+        hasMore: boolean;
+        truncated: boolean;
+        count?: number;
+        evidence: { messageId: string; ref: string }[];
+        groups: { message: { ref: string } | null }[];
+      };
+    const first = await execute(
+      "query_chat_messages",
+      { order: "asc", limit: 4 },
+      1250,
+    );
+    expect(first.status).toBe("succeeded");
+    expect(first.truncated).toBe(true);
+    expect(first.hasMore).toBe(true);
+    const next = await execute("query_chat_messages", {
+      order: "asc",
+      limit: 4,
+      cursor: first.nextCursor,
+    });
+    expect(
+      new Set([...first.evidence, ...next.evidence].map((r) => r.messageId))
+        .size,
+    ).toBe(4);
+    expect(
+      (
+        await execute("query_chat_messages", {
+          order: "desc",
+          cursor: first.nextCursor,
+        })
+      ).reason,
+    ).toBe("invalid-cursor");
+    expect(
+      (await execute("query_chat_messages", { cursor: randomUUID() })).reason,
+    ).toBe("invalid-cursor");
+    const repeated = await execute("query_chat_messages", {
+      order: "asc",
+      limit: 1,
+    });
+    expect(repeated.evidence[0]?.ref).toBe(first.evidence[0]?.ref);
+    const extrema = await execute("get_chat_message_extrema", {
+      pick: "first",
+    });
+    const expanded = await execute("read_chat_excerpt", {
+      ref: extrema.groups[0]!.message!.ref,
+    });
+    expect(expanded.status).toBe("succeeded");
+    expect(
+      (await execute("count_chat_messages", { senderId: "absent" })).count,
+    ).toBe(0);
+    await repo.authorize(id, false, 1);
+    expect((await execute("count_chat_messages", {})).status).toBe(
+      "unavailable",
+    );
+  });
+
+  it("pages exact count groups after content fitting and never turns failures into zeros", async () => {
+    const id = await chat();
+    await message(id, "fixture");
+    const session = await service.session({
+      ...(await repo.scope(id, 999, null))!,
+      timeZone: "UTC",
+    });
+    const args = {
+      groupBy: "day",
+      from: "2026-01-01T00:00:00Z",
+      to: "2026-01-31T23:59:59Z",
+    };
+    const invoke = async (input: unknown, maximum = 24000) =>
+      JSON.parse(
+        await session.execute("count_chat_messages", JSON.stringify(input), {
+          signal: new AbortController().signal,
+          deadline: Date.now() + 60000,
+          maxOutputCharacters: maximum,
+        }),
+      ) as {
+        status: string;
+        count?: number;
+        groups: { date: string; count: number }[];
+        nextCursor: string | null;
+        hasMore: boolean;
+        truncated: boolean;
+      };
+    const first = await invoke(args, 1000);
+    expect(first.truncated).toBe(true);
+    const second = await invoke({ ...args, cursor: first.nextCursor });
+    expect(
+      new Set([...first.groups, ...second.groups].map((g) => g.date)).size,
+    ).toBe(31);
+    expect(
+      [...first.groups, ...second.groups].every((g) => g.count === 0),
+    ).toBe(true);
+    expect(session.references()).toEqual([]);
+    const spy = vi
+      .spyOn(repo.archiveQueries, "aggregate")
+      .mockRejectedValueOnce(new Error("fictional query failure"));
+    expect(await invoke({})).toEqual({
+      status: "unavailable",
+      reason: "invalid-or-unavailable",
+    });
+    spy.mockRestore();
+    const other = await service.session((await repo.scope(id, 999, null))!);
+    expect(
+      JSON.parse(
+        await other.execute(
+          "count_chat_messages",
+          JSON.stringify({ ...args, cursor: first.nextCursor }),
+        ),
+      ),
+    ).toMatchObject({ status: "unavailable", reason: "invalid-cursor" });
+  });
+  it("cancels raw SQL with the remaining shared duration and discards late query evidence", async () => {
+    const id = await chat();
+    await message(id, "fictional cancellable source");
+    const scope = (await repo.scope(id, 999, null))!;
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      repo.archiveQueries.query(
+        scope,
+        chatMessageQuerySchema.parse({}),
+        "UTC",
+        undefined,
+        {
+          signal: controller.signal,
+          deadline: Date.now() + 1000,
+          maxOutputCharacters: 24000,
+        },
+      ),
+    ).rejects.toThrow();
+    const session = await service.session(scope);
+    const original = repo.archiveQueries.query.bind(repo.archiveQueries);
+    const delayed = vi
+      .spyOn(repo.archiveQueries, "query")
+      .mockImplementation(async (...args) => {
+        const result = await original(...args);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return result;
+      });
+    await expect(
+      session.execute("query_chat_messages", "{}", {
+        signal: new AbortController().signal,
+        deadline: Date.now() + 10,
+        maxOutputCharacters: 24000,
+      }),
+    ).rejects.toThrow();
+    expect(session.references()).toEqual([]);
+    delayed.mockRestore();
+  });
   it("queries event-time order with sender, time and trigger boundaries without indexing", async () => {
     const id = await chat();
     const old = await message(id, "虚构旧话题：备份备份");

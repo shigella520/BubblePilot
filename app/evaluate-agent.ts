@@ -34,7 +34,7 @@ if (!baseUrl || !model) {
     baselineFile,
     execFileSync("git", ["show", `${baselineRef}:modules/ai/agent-runner.ts`], {
       encoding: "utf8",
-    }),
+    }).replaceAll("get_latest_chat_messages", "query_chat_messages"),
   );
   try {
     const baseline = (await import(pathToFileURL(baselineFile).href)) as {
@@ -71,7 +71,27 @@ if (!baseUrl || !model) {
         id: "latest",
         prompt: "fictional-alice 最近一次发言是什么时候？",
         expected:
-          "使用 get_latest_chat_messages，准确返回 2026-09-07T07:17:00+08:00。",
+          "使用 query_chat_messages，准确返回 2026-09-07T07:17:00+08:00。",
+      },
+      {
+        id: "daily-first",
+        prompt:
+          "查询 fictional-alice 在 2026-09-01 至 2026-09-08 每天 06:00–24:00 的最早发言。",
+        expected:
+          "使用 get_chat_message_extrema，pick=first/groupBy=day/dailyTime=06:00–24:00；第八天写无匹配归档，不推断没有出现。",
+      },
+      {
+        id: "literal-count",
+        prompt:
+          "fictional-alice 在 2026-09-01 至 2026-09-07 有多少条正文包含‘虚构’的消息？再给出最早一条的原文。",
+        expected:
+          "组合 count_chat_messages 与 query_chat_messages(order=asc) 或 extrema+read；7 条消息，无须向量服务，计数不能用候选条数代替。",
+      },
+      {
+        id: "ambiguous",
+        prompt: "小李最近说过什么？",
+        expected:
+          "已有身份映射不包含小李，询问准确成员，不猜 fictional-alice。",
       },
       {
         id: "mixed",
@@ -140,9 +160,11 @@ if (!baseUrl || !model) {
         const session = {
           id: "fictional-retrieval",
           validate: () => Promise.resolve(true),
-          references: () => ["M1"],
+          references: () => Array.from({ length: 8 }, (_, i) => `M${i + 1}`),
           render: (text: string) =>
-            /\[M(?!1\])/u.test(text) ? null : text.replace(/\[M1\]/gu, ""),
+            /\[M(?:0|[9]|\d{2,})\]/u.test(text)
+              ? null
+              : text.replace(/\[M[1-8]\]/gu, ""),
           execute: (name: string, args: string) => {
             calls++;
             tools.push(name);
@@ -163,25 +185,151 @@ if (!baseUrl || !model) {
               return Promise.resolve(
                 '{"status":"unavailable","reason":"tool-limit"}',
               );
+            if (
+              [
+                "query_chat_messages",
+                "count_chat_messages",
+                "get_chat_message_extrema",
+              ].includes(name)
+            ) {
+              // This evaluation uses a finite fictional archive; deterministic SQL is tested separately.
+              const matched = days
+                .map((day) => ({
+                  day,
+                  sentAt: `2026-09-${day}T07:${10 + Number(day)}:00+08:00`,
+                  text: "虚构每日发言",
+                }))
+                .filter((row) => {
+                  if (
+                    payload.senderId &&
+                    payload.senderId !== "fictional-alice"
+                  )
+                    return false;
+                  if (
+                    typeof payload.from === "string" &&
+                    Date.parse(row.sentAt) < Date.parse(payload.from)
+                  )
+                    return false;
+                  if (
+                    typeof payload.to === "string" &&
+                    Date.parse(row.sentAt) > Date.parse(payload.to)
+                  )
+                    return false;
+                  const daily = payload.dailyTime as
+                    { from: string; to: string } | undefined;
+                  const clock = row.sentAt.slice(11, 16);
+                  if (
+                    daily &&
+                    !(daily.from < daily.to
+                      ? clock >= daily.from && clock < daily.to
+                      : clock >= daily.from || clock < daily.to)
+                  )
+                    return false;
+                  const words = payload.keywords as string[] | undefined;
+                  return (
+                    !words ||
+                    (payload.keywordMode === "all"
+                      ? words.every((w) => row.text.includes(w))
+                      : words.some((w) => row.text.includes(w)))
+                  );
+                });
+              const result: Record<string, unknown> = {
+                status: "succeeded",
+                complete: true,
+                truncated: false,
+                hasMore: false,
+                nextCursor: null,
+                timeZone: "Asia/Shanghai",
+              };
+              if (name === "query_chat_messages") {
+                if (payload.order !== "asc") matched.reverse();
+                const limit =
+                  typeof payload.limit === "number" ? payload.limit : 20;
+                result.evidence = matched.slice(0, limit).map((row) => ({
+                  ref: "M" + Number(row.day),
+                  messageId: "fictional-" + row.day,
+                  sentAt: row.sentAt,
+                  senderId: "fictional-alice",
+                  text: row.text,
+                }));
+                result.status = matched.length ? "succeeded" : "no-results";
+                result.complete = matched.length <= limit;
+              } else if (payload.groupBy === "day") {
+                const from =
+                  typeof payload.from === "string"
+                    ? Number(payload.from.slice(8, 10))
+                    : 1;
+                const to =
+                  typeof payload.to === "string"
+                    ? Number(payload.to.slice(8, 10))
+                    : 7;
+                result.groups = Array.from(
+                  { length: Math.max(0, to - from + 1) },
+                  (_, i) => {
+                    const day = String(i + from).padStart(2, "0");
+                    const row = matched.find((r) => r.day === day);
+                    return {
+                      date: "2026-09-" + day,
+                      ...(name === "count_chat_messages"
+                        ? { count: row ? 1 : 0 }
+                        : {
+                            message: row
+                              ? {
+                                  messageId: "fictional-" + day,
+                                  sentAt: row.sentAt,
+                                  senderId: "fictional-alice",
+                                  ref: "M" + Number(day),
+                                }
+                              : null,
+                          }),
+                    };
+                  },
+                );
+              } else if (name === "count_chat_messages")
+                result.count = matched.length;
+              else {
+                const row =
+                  payload.pick === "last" ? matched.at(-1) : matched[0];
+                result.groups = [
+                  {
+                    message: row
+                      ? {
+                          messageId: "fictional-" + row.day,
+                          sentAt: row.sentAt,
+                          senderId: "fictional-alice",
+                          ref: "M" + Number(row.day),
+                        }
+                      : null,
+                  },
+                ];
+                result.status = row ? "succeeded" : "no-results";
+              }
+              const content = JSON.stringify(result);
+              characters += content.length;
+              return Promise.resolve(content);
+            }
             const day =
               typeof payload.from === "string"
                 ? payload.from.slice(8, 10)
                 : "07";
             const valid = days.includes(day);
-            const text =
-              name === "get_latest_chat_messages"
-                ? "2026-09-" +
-                  day +
-                  "T07:" +
-                  (10 + Number(day)) +
-                  ":00+08:00 sender_id=fictional-alice role=user\n虚构每日发言"
+            const excerptDay =
+              name === "read_chat_excerpt" &&
+              typeof payload.ref === "string" &&
+              /^M[1-7]$/u.test(payload.ref)
+                ? payload.ref.slice(1).padStart(2, "0")
+                : null;
+            const text = excerptDay
+              ? `2026-09-${excerptDay}T07:${10 + Number(excerptDay)}:00+08:00 sender_id=fictional-alice role=user\n虚构每日发言`
+              : name === "query_chat_messages"
+                ? `2026-09-${day}T07:${10 + Number(day)}:00+08:00 sender_id=fictional-alice role=user\n虚构每日发言`
                 : "2026-09-01T08:00:00+08:00 sender_id=fictional-alice role=user\n虚构计划仍在测试，尚未启用。";
             const content = JSON.stringify({
               status: valid ? "succeeded" : "no-results",
               evidence: valid
                 ? [
                     {
-                      ref: "M1",
+                      ref: excerptDay ? "M" + Number(excerptDay) : "M8",
                       text,
                       participants: [
                         { senderId: "fictional-alice", name: "虚构甲" },
@@ -234,6 +382,7 @@ if (!baseUrl || !model) {
           memoryEvent: {
             provider: "fictional",
             messageId: "fictional-trigger",
+            timeZone: "Asia/Shanghai",
           },
           messages: [
             {

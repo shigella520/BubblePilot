@@ -36,6 +36,7 @@ export interface Generation {
   status: string;
 }
 export interface MemoryScope {
+  timeZone?: string;
   chatId: string;
   upperIndex: number;
   executionId: string | null;

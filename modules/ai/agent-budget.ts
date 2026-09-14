@@ -102,10 +102,15 @@ export class AgentBudget {
         reason?: string;
         evidence?: unknown[];
         results?: unknown[];
+        groups?: unknown[];
       };
       if (payload.reason === "tool-output") {
         this.exhaust("tool-output");
-        if (!(payload.evidence?.length || payload.results?.length))
+        if (!(
+          payload.evidence?.length ||
+          payload.results?.length ||
+          payload.groups?.length
+        ))
           return this.control();
       }
     } catch {
@@ -132,6 +137,8 @@ export function fitToolOutput(
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload))
     return { content: null, truncated: true };
+  // Paginated tools must fit whole items and bind their cursor themselves.
+  if ("nextCursor" in payload) return { content: null, truncated: true };
   const items = Array.isArray(payload.evidence)
     ? payload.evidence
     : Array.isArray(payload.results)

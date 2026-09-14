@@ -41,7 +41,7 @@ function response(calls: AiToolCall[] = [], text = "虚构答案"): AiRouteSucce
 }
 function call(
   id: number,
-  name = "get_latest_chat_messages",
+  name = "query_chat_messages",
   args = "{}",
 ): AiToolCall {
   return { id: String(id), name, arguments: args };

@@ -585,7 +585,7 @@ describe("AgentRunner", () => {
       },
     ]);
   });
-  it.each(["search_chat_history", "get_latest_chat_messages"])(
+  it.each(["search_chat_history", "query_chat_messages"])(
     "offers %s without web search and redacts diagnostics",
     async (toolName) => {
       const { repository, client, routing, search, request } = await setup();
@@ -646,7 +646,9 @@ describe("AgentRunner", () => {
         text: "Earlier decision",
       });
       expect(client.requests[0]?.tools?.map((t) => t.name)).toEqual([
-        "get_latest_chat_messages",
+        "query_chat_messages",
+        "count_chat_messages",
+        "get_chat_message_extrema",
         "search_chat_history",
         "read_chat_excerpt",
       ]);

@@ -1212,6 +1212,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
         ...(node.config.includeLoadedContext
           ? {
               memoryEvent: {
+                timeZone: context.timeZone,
                 provider: context.envelope.provider,
                 messageId: context.envelope.message.providerMessageId,
               },

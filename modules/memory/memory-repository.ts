@@ -1,3 +1,9 @@
+import {
+  memoryMessage,
+  messageColumns,
+  type MessageRow,
+} from "./archive-message.js";
+import { ChatQueryRepository } from "./chat-query-repository.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { createPostgresPool } from "../shared/postgres-pool.js";
@@ -40,46 +46,14 @@ export interface Candidate {
   from_index: string;
   through_index: string;
 }
-interface MessageRow {
-  id: string;
-  message_index: string;
-  sent_at: Date;
-  sender_id: string | null;
-  is_from_me: boolean;
-  body: string | null;
-  attachments: unknown;
-  link_previews: unknown;
-  images: string | null;
-}
-export function memoryMessage(row: MessageRow): MemoryMessage {
-  const text = [
-    row.body ?? "",
-    JSON.stringify(row.attachments),
-    JSON.stringify(row.link_previews),
-    row.images ?? "",
-  ]
-    .filter((v) => v && v !== "[]")
-    .join("\n");
-  return {
-    id: row.id,
-    index: Number(row.message_index),
-    sentAt: row.sent_at.toISOString(),
-    senderId: row.sender_id ?? (row.is_from_me ? "Bot" : "unknown"),
-    role: row.is_from_me ? "assistant" : "user",
-    text,
-    hash: contentHash(
-      JSON.stringify([text, row.sender_id, row.is_from_me, row.sent_at]),
-    ),
-  };
-}
-const messageColumns = `m.id,m.message_index,m.sent_at,m.sender_id,m.is_from_me,m.body,m.attachments,m.link_previews,
- (SELECT string_agg(s.summary,E'\n' ORDER BY s.id) FROM message_image_summaries s WHERE s.message_id=m.id AND s.status='succeeded') images`;
 export class MemoryRepository {
   readonly workerId = randomUUID();
   readonly pool: Pool;
   readonly cipher: SettingsCipher;
+  readonly archiveQueries: ChatQueryRepository;
   constructor(databaseUrl: string, key: string) {
     this.pool = createPostgresPool(databaseUrl, 3, 5000);
+    this.archiveQueries = new ChatQueryRepository(this.pool);
     this.cipher = new SettingsCipher(key);
   }
   async close(): Promise<void> {
@@ -246,6 +220,7 @@ export class MemoryRepository {
     provider: string,
     messageId: string,
     executionId: string,
+    timeZone = "UTC",
   ): Promise<MemoryScope | null> {
     const row = (
       await this.pool.query<{ chat_id: string; message_index: string }>(
@@ -253,9 +228,10 @@ export class MemoryRepository {
         [provider, messageId],
       )
     ).rows[0];
-    return row
-      ? this.scope(row.chat_id, Number(row.message_index), executionId)
+    const scope = row
+      ? await this.scope(row.chat_id, Number(row.message_index), executionId)
       : null;
+    return scope ? { ...scope, timeZone } : null;
   }
   async allowed(scope: MemoryScope): Promise<boolean> {
     return (

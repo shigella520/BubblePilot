@@ -616,7 +616,7 @@ export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 export interface AiRouteRequest {
   executionId: string | null;
   nodeId: string;
-  memoryEvent?: { provider: string; messageId: string };
+  memoryEvent?: { provider: string; messageId: string; timeZone?: string };
   routeId: string;
   messages: readonly AiChatMessage[];
   maxOutputTokens: number;
