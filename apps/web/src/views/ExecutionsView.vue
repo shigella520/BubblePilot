@@ -1642,7 +1642,15 @@ function contextSnapshotValue(
                   <span
                     v-if="item.diagnostics?.responseFinishReason"
                     class="keyline"
-                    >Finish Reason：{{ item.diagnostics.responseFinishReason }}
+                  >
+                    {{
+                      item.diagnostics.responseFinishReason === "length" ||
+                      item.diagnostics.responseFinishReason.startsWith(
+                        "incomplete",
+                      )
+                        ? "模型输出未完成 · "
+                        : ""
+                    }}Finish Reason：{{ item.diagnostics.responseFinishReason }}
                     · 推理字段
                     {{ item.diagnostics.responseReasoningCharacters ?? 0 }}
                     字符</span

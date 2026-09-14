@@ -1,4 +1,9 @@
 import {
+  maxReplyCharacters,
+  resolveGenerationPolicy,
+  generationLengthInstruction,
+} from "../ai/execution-policy.js";
+import {
   authorLabel,
   botIdentityPrompt,
   messageAuthor,
@@ -959,6 +964,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
     context: NodeExecutionContext,
   ): Promise<NodeHandlerResult> {
     this.assertType(node, this.type);
+    const generationPolicy = resolveGenerationPolicy(node.config);
     const systemPrompt = renderTemplate(
       node.config.systemPrompt,
       context,
@@ -1105,6 +1111,16 @@ class AiChatNodeHandler extends BaseNodeHandler {
         ...(usesConversationContent
           ? [{ role: "system" as const, content: bubblePilotInputProtocol }]
           : []),
+        ...(generationPolicy.targetOutputCharacters !== undefined
+          ? [
+              {
+                role: "system" as const,
+                content: generationLengthInstruction(
+                  generationPolicy.targetOutputCharacters,
+                ),
+              },
+            ]
+          : []),
         ...(systemPrompt.length > 0
           ? [
               {
@@ -1175,9 +1191,9 @@ class AiChatNodeHandler extends BaseNodeHandler {
         nodeId: node.id,
         routeId: node.config.providerRouteId,
         messages,
-        maxOutputTokens: node.config.maxOutputTokens,
+        maxOutputTokens: generationPolicy.maxOutputTokens,
         temperature: node.config.temperature,
-        maxOutputCharacters: node.config.maxOutputCharacters,
+        maxOutputCharacters: generationPolicy.maxOutputCharacters,
         outputFormat: node.config.outputFormat,
         ...(node.config.webSearch === undefined
           ? {}
@@ -1263,10 +1279,10 @@ function renderReplyTemplate(
   context: NodeExecutionContext,
 ): string {
   const rendered = renderTemplate(template, context);
-  if (rendered.length === 0 || rendered.length > 4_000) {
+  if (rendered.length === 0 || rendered.length > maxReplyCharacters) {
     throw new WorkflowExecutionError(
       "INVALID_REPLY_OUTPUT",
-      "The rendered reply is empty or exceeds the 4,000 character limit.",
+      `The rendered reply is empty or exceeds the ${maxReplyCharacters} character safety limit.`,
       false,
     );
   }

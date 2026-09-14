@@ -147,7 +147,10 @@ export function fitToolOutput(
   if (!items) return { content: null, truncated: true };
   payload.truncated = true;
   payload.reason = "tool-output";
-  while (items.length && JSON.stringify(payload).length > maximum) items.pop();
+  while (items.length && JSON.stringify(payload).length > maximum) {
+    items.pop();
+    if ("returnedCount" in payload) payload.returnedCount = items.length;
+  }
   if (!items.length) return { content: null, truncated: true };
   return { content: JSON.stringify(payload), truncated: true };
 }

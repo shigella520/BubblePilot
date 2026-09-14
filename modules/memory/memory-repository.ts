@@ -1,3 +1,4 @@
+import { executionPolicy } from "../ai/execution-policy.js";
 import {
   memoryMessage,
   messageColumns,
@@ -313,6 +314,38 @@ export class MemoryRepository {
       [chatId, from, through],
     );
     return rows.rows.map(memoryMessage);
+  }
+  async surrounding(
+    scope: MemoryScope,
+    first: number,
+    last: number,
+    before: number,
+    after: number,
+  ) {
+    // Count readable rows, not index offsets: gaps and redacted rows do not consume a slot.
+    const read = async (direction: "before" | "after", count: number) => {
+      const rows = await this.pool.query<MessageRow>(
+        `SELECT ${messageColumns} FROM messages m WHERE m.chat_id=$1
+         AND m.message_index<$2 AND m.content_redacted_at IS NULL
+         AND m.message_index ${direction === "before" ? "<" : ">"} $3
+         ORDER BY m.message_index ${direction === "before" ? "DESC" : "ASC"} LIMIT $4`,
+        [
+          scope.chatId,
+          scope.upperIndex,
+          direction === "before" ? first : last,
+          count + 1,
+        ],
+      );
+      return rows.rows.map(memoryMessage);
+    };
+    const earlier = await read("before", before);
+    const later = await read("after", after);
+    return {
+      before: earlier.slice(0, before).reverse(),
+      after: later.slice(0, after),
+      hasEarlier: earlier.length > before,
+      hasLater: later.length > after,
+    };
   }
   async createJob(
     chatId: string,
@@ -862,7 +895,7 @@ export class MemoryRepository {
     return rows.rows
       .map(memoryMessage)
       .filter((m) => tokens.some((t) => m.text.toLowerCase().includes(t)))
-      .slice(0, 5);
+      .slice(0, query.limit ?? executionPolicy.search.limit);
   }
   async identities(chatId: string, senderIds: string[]) {
     return (
@@ -911,8 +944,8 @@ export class MemoryRepository {
     return (
       await this.pool.query<Candidate>(
         vector
-          ? `SELECT c.id,c.from_index,c.through_index FROM memory_chunks c JOIN memory_embeddings e ON e.chunk_id=c.id WHERE ${filter} ORDER BY e.embedding <=> $7::vector LIMIT 20`
-          : `SELECT c.id,c.from_index,c.through_index FROM memory_chunks c WHERE ${filter} AND c.keywords @@ to_tsquery('simple',$7) ORDER BY ts_rank(c.keywords,to_tsquery('simple',$7)) DESC,c.id LIMIT 20`,
+          ? `SELECT c.id,c.from_index,c.through_index FROM memory_chunks c JOIN memory_embeddings e ON e.chunk_id=c.id WHERE ${filter} ORDER BY e.embedding <=> $7::vector LIMIT ${executionPolicy.search.candidates}`
+          : `SELECT c.id,c.from_index,c.through_index FROM memory_chunks c WHERE ${filter} AND c.keywords @@ to_tsquery('simple',$7) ORDER BY ts_rank(c.keywords,to_tsquery('simple',$7)) DESC,c.id LIMIT ${executionPolicy.search.candidates}`,
         [
           scope.chatId,
           scope.generation.id,

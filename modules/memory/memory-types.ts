@@ -1,3 +1,4 @@
+import { executionPolicy } from "../ai/execution-policy.js";
 import type { MessageAuthor } from "../identity/bot-identity.js";
 import { z } from "zod";
 import {
@@ -13,6 +14,12 @@ export const memorySearchSchema = z
   .object({
     botWorkflowId: z.string().uuid().optional(),
     query: z.string().trim().min(1).max(500),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(executionPolicy.search.maxLimit)
+      .optional(),
     from: z.string().datetime({ offset: true }).optional(),
     to: z.string().datetime({ offset: true }).optional(),
     senderId: z.string().max(255).optional(),
@@ -23,6 +30,23 @@ export const memorySearchSchema = z
       !(v.senderId && v.botWorkflowId) &&
       (!v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to)),
   );
+export const chatExcerptSchema = z
+  .object({
+    ref: z.string().min(1),
+    before: z
+      .number()
+      .int()
+      .min(0)
+      .max(executionPolicy.excerpt.maxSurrounding)
+      .default(executionPolicy.excerpt.surrounding),
+    after: z
+      .number()
+      .int()
+      .min(0)
+      .max(executionPolicy.excerpt.maxSurrounding)
+      .default(executionPolicy.excerpt.surrounding),
+  })
+  .strict();
 export const latestChatMessagesSchema = z
   .object({
     senderId: z.string().trim().min(1).max(255).optional(),
@@ -64,6 +88,10 @@ export interface MemoryCoverage {
   pending: number;
 }
 export interface MemorySearchResult {
+  returnedCount?: number;
+  candidateLimitReached?: boolean;
+  selectionLimited?: boolean;
+  exhaustive?: false;
   status: "succeeded" | "no-results" | "partial" | "unavailable";
   retrievalMode: "hybrid" | "keyword-only";
   evidence: Evidence[];

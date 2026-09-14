@@ -64,6 +64,102 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     return id;
   }
 
+  it("expands actual readable rows across gaps, preserves source and fits whole messages", async () => {
+    const id = await chat();
+    const ids: string[] = [];
+    for (let i = 0; i < 28; i++)
+      ids.push(await message(id, `虚构片段${i} ` + "甲".repeat(80)));
+    await repo.pool.query(
+      "UPDATE messages SET message_index=1000+message_index*10 WHERE chat_id=$1",
+      [id],
+    );
+    await repo.pool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=ANY($1::uuid[])",
+      [[ids[11], ids[16]]],
+    );
+    const trigger = (
+      await repo.pool.query<{ message_index: string }>(
+        "SELECT message_index FROM messages WHERE id=$1",
+        [ids[26]],
+      )
+    ).rows[0]!;
+    const scope = (await repo.scope(id, Number(trigger.message_index), null))!;
+    const session = await service.session(scope);
+    const query = JSON.parse(
+      await session.execute(
+        "query_chat_messages",
+        JSON.stringify({
+          order: "asc",
+          keywords: ["虚构片段14 "],
+          keywordMode: "all",
+        }),
+      ),
+    ) as { evidence: { ref: string }[] };
+    const ref = query.evidence[0]!.ref;
+    const expanded = JSON.parse(
+      await session.execute("read_chat_excerpt", JSON.stringify({ ref })),
+    ) as {
+      beforeCount: number;
+      afterCount: number;
+      evidence: { messageIds: string[] }[];
+    };
+    expect(expanded.beforeCount).toBe(8);
+    expect(expanded.afterCount).toBe(8);
+    expect(expanded.evidence[0]!.messageIds).toHaveLength(17);
+    expect(expanded.evidence[0]!.messageIds).not.toContain(ids[11]);
+    expect(expanded.evidence[0]!.messageIds).not.toContain(ids[16]);
+    const bounded = JSON.parse(
+      await session.execute(
+        "read_chat_excerpt",
+        JSON.stringify({ ref, before: 0, after: 20 }),
+      ),
+    ) as {
+      afterCount: number;
+      hasLater: boolean;
+      evidence: { messageIds: string[] }[];
+    };
+    expect(bounded.afterCount).toBe(10);
+    expect(bounded.hasLater).toBe(false);
+    expect(bounded.evidence[0]!.messageIds).not.toContain(ids[26]);
+    const fitted = JSON.parse(
+      await session.execute("read_chat_excerpt", JSON.stringify({ ref }), {
+        signal: new AbortController().signal,
+        deadline: Date.now() + 60000,
+        maxOutputCharacters: 1600,
+      }),
+    ) as { truncated: boolean; evidence: { messageIds: string[] }[] };
+    expect(fitted.truncated).toBe(true);
+    expect(fitted.evidence[0]!.messageIds).toContain(ids[14]);
+  });
+  it("returns default eight or requested twenty semantic sources and reports limited selection", async () => {
+    const id = await chat();
+    for (let i = 0; i < 24; i++)
+      await message(id, "虚构备份" + "甲".repeat(1600));
+    await drain();
+    const scope = (await repo.scope(id, 99999, null))!;
+    const session = await service.session(scope);
+    const query = async (limit?: number) =>
+      JSON.parse(
+        await session.execute(
+          "search_chat_history",
+          JSON.stringify({ query: "备份", ...(limit ? { limit } : {}) }),
+          {
+            signal: new AbortController().signal,
+            deadline: Date.now() + 60000,
+            maxOutputCharacters: 100000,
+          },
+        ),
+      ) as {
+        evidence: unknown[];
+        selectionLimited: boolean;
+        exhaustive: boolean;
+      };
+    expect((await query()).evidence).toHaveLength(8);
+    const larger = await query(20);
+    expect(larger.evidence).toHaveLength(20);
+    expect(larger.selectionLimited).toBe(true);
+    expect(larger.exhaustive).toBe(false);
+  });
   it("uses a single raw filtering contract for exact counts, extrema and microsecond pages", async () => {
     const id = await chat();
     const records = [];

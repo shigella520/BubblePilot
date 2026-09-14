@@ -742,7 +742,13 @@ onBeforeUnmount(() => {
                   >已移除 {{ job.progress.removed }} 条</small
                 >
               </td>
-              <td v-else>统计不完整</td>
+              <td v-else>
+                {{
+                  job.reason === "incremental" && !job.request_key
+                    ? "增量任务，不统计百分比"
+                    : "未记录进度统计"
+                }}
+              </td>
               <td>
                 {{
                   !progressError &&
@@ -860,10 +866,8 @@ onBeforeUnmount(() => {
           <p v-else>
             {{
               job.reason !== "incremental" || job.request_key
-                ? ["queued", "running", "paused"].includes(job.status)
-                  ? "等待初始化进度统计"
-                  : "历史任务，统计不完整"
-                : "新增消息索引，范围可能继续增长"
+                ? "未记录进度统计"
+                : "增量任务，不统计百分比"
             }}
           </p>
           <p>任务 ID：{{ job.id }}</p>

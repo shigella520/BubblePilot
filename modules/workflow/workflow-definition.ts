@@ -1,3 +1,4 @@
+import { executionPolicy } from "../ai/execution-policy.js";
 import { z } from "zod";
 
 import { actionBlockDefinitions } from "./action-blocks.js";
@@ -117,19 +118,51 @@ const aiChatNodeSchema = z.object({
   id: nodeIdSchema,
   type: z.literal("ai-chat"),
   version: z.literal(1),
-  config: z.object({
-    providerRouteId: z.string().uuid(),
-    systemPrompt: z.string().max(12_000).default(""),
-    promptTemplate: z.string().min(1).max(12_000),
-    includeLoadedContext: z.boolean().default(true),
-    maxOutputTokens: z.number().int().min(1).max(8_192).default(1_024),
-    maxOutputCharacters: z.number().int().min(1).max(12_000).default(4_000),
-    temperature: z.number().min(0).max(2).nullable().default(null),
-    webSearch: z.enum(["disabled", "auto", "required"]).optional(),
-    webSearchSources: z.enum(["full", "compact", "hidden"]).default("full"),
-    outputFormat: z.enum(["text", "json"]).default("text"),
-    outputVariable: variableNameSchema.default("aiReply"),
-  }),
+  config: z
+    .object({
+      providerRouteId: z.string().uuid(),
+      systemPrompt: z.string().max(12_000).default(""),
+      promptTemplate: z.string().min(1).max(12_000),
+      includeLoadedContext: z.boolean().default(true),
+      maxOutputTokens: z
+        .number()
+        .int()
+        .min(1)
+        .max(executionPolicy.chat.maxTokens)
+        .optional(),
+      targetOutputCharacters: z
+        .number()
+        .int()
+        .min(1)
+        .max(executionPolicy.chat.maxTargetCharacters)
+        .optional(),
+      maxOutputCharacters: z
+        .number()
+        .int()
+        .min(1)
+        .max(
+          executionPolicy.chat.maxTargetCharacters *
+            executionPolicy.protectionFactor,
+        )
+        .optional(),
+      temperature: z.number().min(0).max(2).nullable().default(null),
+      webSearch: z.enum(["disabled", "auto", "required"]).optional(),
+      webSearchSources: z.enum(["full", "compact", "hidden"]).default("full"),
+      outputFormat: z.enum(["text", "json"]).default("text"),
+      outputVariable: variableNameSchema.default("aiReply"),
+    })
+    .refine(
+      (config) =>
+        config.targetOutputCharacters === undefined ||
+        config.maxOutputCharacters === undefined,
+      {
+        message:
+          "Use targetOutputCharacters or legacy maxOutputCharacters, never both",
+      },
+    )
+    .meta({
+      not: { required: ["targetOutputCharacters", "maxOutputCharacters"] },
+    }),
   onSuccess: nextNodeIdSchema,
   onFailure: nextNodeIdSchema.optional(),
 });

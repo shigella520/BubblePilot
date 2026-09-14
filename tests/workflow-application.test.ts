@@ -196,6 +196,22 @@ describe("workflow application", () => {
     };
   }
 
+  it.each([4500, 12001])(
+    "preserves complete replies within the shared sending protection: %i",
+    async (length) => {
+      await configureWorkflow();
+      const text = "/ping " + "甲".repeat(length - 6);
+      await application.inject({
+        method: "POST",
+        url: "/api/v1/webhooks/bluebubbles",
+        headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+        payload: newMessageWebhook({ text }),
+      });
+      if (length === 4500)
+        expect(gateway.commands[0]?.text).toBe("Pong: " + text);
+      else expect(gateway.commands).toHaveLength(0);
+    },
+  );
   it("only exposes implemented data actions in the action catalog", async () => {
     const response = await application.inject({
       method: "GET",

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { executionPolicy } from "../../../../modules/ai/execution-policy";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 import {
   Boxes,
@@ -535,8 +536,8 @@ function aiConversationDefinition(name: string) {
           systemPrompt: aiFlowForm.systemPrompt,
           promptTemplate: aiFlowForm.promptTemplate,
           includeLoadedContext: true,
-          maxOutputTokens: 1024,
-          maxOutputCharacters: 4000,
+          maxOutputTokens: executionPolicy.chat.maxTokens,
+          targetOutputCharacters: executionPolicy.chat.targetCharacters,
           temperature: null,
           outputFormat: "text",
           outputVariable: "aiReply",

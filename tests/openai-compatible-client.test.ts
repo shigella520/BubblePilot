@@ -31,6 +31,88 @@ const request = {
 };
 
 describe("OpenAiCompatibleClient", () => {
+  it.each([
+    [
+      "chat-completions",
+      {
+        choices: [
+          {
+            finish_reason: "length",
+            message: {
+              content: "虚构回答尚未",
+              tool_calls: [
+                {
+                  id: "call",
+                  function: {
+                    name: "query_chat_messages",
+                    arguments: '{"limit":',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      "length",
+    ],
+    [
+      "chat-completions",
+      { choices: [{ finish_reason: "length", message: { content: "" } }] },
+      "length",
+    ],
+    [
+      "responses",
+      {
+        status: "incomplete",
+        incomplete_details: { reason: "max_output_tokens" },
+        output_text: "虚构回答尚未",
+        output: [
+          {
+            type: "function_call",
+            call_id: "call",
+            name: "query_chat_messages",
+            arguments: '{"limit":',
+          },
+        ],
+      },
+      "incomplete:max_output_tokens",
+    ],
+    ["responses", { status: "incomplete", output: [] }, "incomplete"],
+  ] as const)(
+    "rejects incomplete %s output before exposing text or calls",
+    async (apiKind, body, reason) => {
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional-secret" }),
+        () => Promise.resolve(new Response(JSON.stringify(body))),
+      );
+      const result = await client.call({ ...provider, apiKind }, request);
+      expect(result).toMatchObject({
+        status: "failed",
+        code: "AI_PROVIDER_INCOMPLETE_OUTPUT",
+        retryable: true,
+        fallbackAllowed: true,
+        countsForDegrade: false,
+        diagnostics: { responseFinishReason: reason },
+      });
+      expect(result).not.toHaveProperty("text");
+      expect(result).not.toHaveProperty("toolCalls");
+    },
+  );
+  it("does not infer incompleteness from punctuation or missing finish reason", async () => {
+    const client = new OpenAiCompatibleClient(
+      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional-secret" }),
+      () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({ choices: [{ message: { content: "虚构短答" } }] }),
+          ),
+        ),
+    );
+    expect(await client.call(provider, request)).toMatchObject({
+      status: "succeeded",
+      text: "虚构短答",
+    });
+  });
   it("retains historical tool request bodies in transient diagnostics even on HTTP failure", async () => {
     const store = new AiRawRequestStore();
     const client = new OpenAiCompatibleClient(

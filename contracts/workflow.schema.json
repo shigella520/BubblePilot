@@ -886,13 +886,16 @@
                         "type": "boolean"
                       },
                       "maxOutputTokens": {
-                        "default": 1024,
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 8192
                       },
+                      "targetOutputCharacters": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 4000
+                      },
                       "maxOutputCharacters": {
-                        "default": 4000,
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 12000
@@ -935,14 +938,18 @@
                       "systemPrompt",
                       "promptTemplate",
                       "includeLoadedContext",
-                      "maxOutputTokens",
-                      "maxOutputCharacters",
                       "temperature",
                       "webSearchSources",
                       "outputFormat",
                       "outputVariable"
                     ],
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "not": {
+                      "required": [
+                        "targetOutputCharacters",
+                        "maxOutputCharacters"
+                      ]
+                    }
                   },
                   "onSuccess": {
                     "type": "string",
