@@ -1,3 +1,4 @@
+import { BotIdentityService } from "../modules/identity/bot-identity-service.js";
 import {
   chatMessageQuerySchema,
   chatCountQuerySchema,
@@ -881,6 +882,117 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     expect(
       (await repo.jobs(id)).find((j) => j.id === task.id)!.progress.processed,
     ).toBe(2);
+  });
+  it("tracks role rebuild membership, samples, estimates and preserves its kind across batches", async () => {
+    await drain();
+    const id = await chat();
+    for (let i = 0; i < 4; i++) await message(id, "虚构重建消息".repeat(10));
+    const identity = new BotIdentityService(url!);
+    try {
+      await identity.rebuild(
+        id,
+        {
+          enabled: true,
+          providerRouteId: randomUUID(),
+          includeFromMe: true,
+          timeZone: "UTC",
+        },
+        "memory",
+      );
+    } finally {
+      await identity.close();
+    }
+    let claimed = (await repo.claim())!;
+    expect(claimed.chat_id).toBe(id);
+    expect(claimed.request_key).toBeNull();
+    const taskId = claimed.id;
+    expect(
+      (await repo.jobs(id)).find((j) => j.id === taskId)!.progress,
+    ).toMatchObject({ scope: "full", total: 4, processed: 0 });
+    for (let i = 0; i < 3; i++) {
+      await repo.pool.query(
+        "UPDATE memory_jobs SET progress_started_at=now()-interval '6 seconds',progress_last_at=now()-interval '6 seconds' WHERE id=$1",
+        [taskId],
+      );
+      const batch = (
+        await repo.messages(
+          id,
+          Number(claimed.cursor_index) + 1,
+          Number(claimed.through_index),
+        )
+      ).slice(0, 1);
+      await repo.publish(claimed, batch, [], [], batch[0]!.index);
+      const state = (await repo.jobs(id)).find((j) => j.id === taskId)!;
+      expect(state.reason).toBe("rebuild");
+      expect(state.progress.processed).toBe(i + 1);
+      if (i === 2) {
+        expect(state.progress.estimate.status).toBe("available");
+        expect(state.progress.estimate.messagesPerMinute).toBeGreaterThan(0);
+        expect(state.progress.estimate.remainingSeconds).toBeGreaterThan(0);
+      }
+      claimed = (await repo.claim())!;
+      expect(claimed.id).toBe(taskId);
+    }
+    await repo.fail(claimed, "FICTIONAL_RETRY");
+    expect((await repo.jobs(id)).find((j) => j.id === taskId)!.reason).toBe(
+      "rebuild",
+    );
+    await repo.pool.query(
+      "UPDATE memory_jobs SET next_attempt_at=now() WHERE id=$1",
+      [taskId],
+    );
+    claimed = (await repo.claim())!;
+    const state = (await repo.jobs(id)).find((j) => j.id === taskId)!;
+    await repo.action(taskId, "pause", state.version);
+    const paused = (await repo.jobs(id)).find((j) => j.id === taskId)!;
+    await repo.action(taskId, "resume", paused.version);
+    await drain();
+    const finished = (await repo.jobs(id)).find((j) => j.id === taskId)!;
+    expect(finished.reason).toBe("rebuild");
+    expect(finished.progress).toMatchObject({
+      total: 4,
+      processed: 4,
+      percent: 100,
+    });
+  });
+  it("recovers unkeyed legacy rebuild progress without reprocessing its completed prefix", async () => {
+    await drain();
+    const id = await chat();
+    await message(id, "虚构已完成消息");
+    await message(id, "虚构剩余消息");
+    await repo.pool.query(
+      "UPDATE memory_jobs SET status='cancelled' WHERE chat_id=$1",
+      [id],
+    );
+    const task = (
+      await repo.pool.query<{ id: string }>(
+        "INSERT INTO memory_jobs(chat_id,generation_id,reason,from_index,through_index,cursor_index,progress_samples) VALUES($1,$2,'backfill',1,2,1,$3) RETURNING id",
+        [
+          id,
+          generationId,
+          JSON.stringify([
+            {
+              at: Date.now(),
+              milliseconds: 20000,
+              characters: 100,
+              messages: 0,
+            },
+          ]),
+        ],
+      )
+    ).rows[0]!;
+    const claimed = (await repo.claim())!;
+    expect(claimed.id).toBe(task.id);
+    expect(claimed.cursor_index).toBe("1");
+    expect(claimed.progress_samples).toEqual([]);
+    expect(
+      (await repo.jobs(id)).find((j) => j.id === task.id)!.progress,
+    ).toMatchObject({ scope: "remaining", total: 1, processed: 0 });
+    const batch = await repo.messages(id, 2, 2);
+    await repo.publish(claimed, batch, [], [], 2);
+    expect(
+      (await repo.jobs(id)).find((j) => j.id === task.id)!.progress,
+    ).toMatchObject({ scope: "remaining", processed: 1, percent: 100 });
   });
   it("initializes old tasks from their remaining range and rejects stale lease progress", async () => {
     await drain();

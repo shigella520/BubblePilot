@@ -25,6 +25,7 @@ import {
 import type { EmbeddingConfig } from "./embedding-client.js";
 import { estimateProgress, type ProgressSample } from "./job-progress.js";
 export interface MemoryJob {
+  reason: string;
   request_key: string | null;
   progress_scope: string | null;
   progress_samples: ProgressSample[];
@@ -620,7 +621,7 @@ export class MemoryRepository {
             409,
           );
         await db.query(
-          "UPDATE memory_jobs SET status=$2,reason=CASE WHEN $2='queued' THEN 'backfill' ELSE reason END,version=version+1,lease_owner=NULL,lease_until=NULL,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,attempts=0,next_attempt_at=now(),updated_at=now() WHERE id=$1",
+          "UPDATE memory_jobs SET status=$2,reason=CASE WHEN $2='queued' AND reason!='rebuild' THEN 'backfill' ELSE reason END,version=version+1,lease_owner=NULL,lease_until=NULL,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,attempts=0,next_attempt_at=now(),updated_at=now() WHERE id=$1",
           [id, next],
         );
       }
@@ -639,8 +640,22 @@ export class MemoryRepository {
         ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`)
       ).rows[0];
       if (!row) return null;
-      if (!row.progress_scope && row.request_key)
-        await this.initializeProgress(db, row.id, "remaining");
+      if (
+        !row.progress_scope &&
+        (row.request_key || row.reason !== "incremental")
+      ) {
+        const scope =
+          row.reason === "rebuild" &&
+          Number(row.cursor_index) < Number(row.from_index)
+            ? "full"
+            : "remaining";
+        await this.initializeProgress(db, row.id, scope);
+        // Samples collected without membership have zero message counts.
+        await db.query(
+          "UPDATE memory_jobs SET progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,progress_worker=NULL WHERE id=$1",
+          [row.id],
+        );
+      }
       await db.query(
         `UPDATE memory_jobs SET progress_samples='[]',progress_started_at=NULL,progress_worker=NULL WHERE id<>$1 AND progress_worker IS NOT NULL`,
         [row.id],
@@ -773,14 +788,14 @@ export class MemoryRepository {
       );
       await db.query(
         `UPDATE memory_jobs SET cursor_index=$2,status=CASE WHEN $2>=through_index THEN 'succeeded' ELSE 'queued' END,
-        reason=CASE WHEN $2<through_index THEN 'backfill' ELSE reason END,attempts=0,lease_owner=NULL,lease_until=NULL,version=version+1,updated_at=now() WHERE id=$1`,
+        reason=CASE WHEN $2<through_index AND reason!='rebuild' THEN 'backfill' ELSE reason END,attempts=0,lease_owner=NULL,lease_until=NULL,version=version+1,updated_at=now() WHERE id=$1`,
         [job.id, cursor],
       );
     });
   }
   async fail(job: MemoryJob, code: string) {
     await this.pool.query(
-      "UPDATE memory_jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,reason='backfill',error_code=$3,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,lease_owner=NULL,lease_until=NULL,next_attempt_at=now()+interval '10 seconds'*attempts,version=version+1 WHERE id=$1 AND lease_owner=$2 AND status='running'",
+      "UPDATE memory_jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,reason=CASE WHEN reason='rebuild' THEN reason ELSE 'backfill' END,error_code=$3,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,lease_owner=NULL,lease_until=NULL,next_attempt_at=now()+interval '10 seconds'*attempts,version=version+1 WHERE id=$1 AND lease_owner=$2 AND status='running'",
       [job.id, job.lease_owner, code],
     );
   }

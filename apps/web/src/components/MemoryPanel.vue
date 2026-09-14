@@ -52,6 +52,7 @@ interface Settings {
   generations: Generation[];
 }
 interface Job {
+  reason: string;
   id: string;
   created_at: string;
   updated_at: string;
@@ -84,6 +85,12 @@ interface Job {
       estimatedCompletionAt: string | null;
     };
   };
+}
+function jobKind(job: Job) {
+  if (job.reason === "rebuild") return "角色历史索引重建";
+  return job.request_key || job.reason !== "incremental"
+    ? "历史补建"
+    : "新增消息索引";
 }
 interface SearchResult {
   status: string;
@@ -714,10 +721,7 @@ onBeforeUnmount(() => {
             <tr v-for="job in jobs" :key="job.id">
               <td>
                 {{ job.chat_name || job.chat_id
-                }}<small
-                  >{{ job.request_key ? "历史补建" : "新增消息索引" }} ·
-                  {{ job.model }}</small
-                >
+                }}<small>{{ jobKind(job) }} · {{ job.model }}</small>
               </td>
               <td>
                 <span class="state-badge">{{
@@ -792,8 +796,7 @@ onBeforeUnmount(() => {
         }}</DismissibleMessage>
         <article v-for="job in selectedJob ? [selectedJob] : []" :key="job.id">
           <h4>
-            {{ job.chat_name || "聊天" }} ·
-            {{ job.request_key ? "历史补建" : "新增消息索引" }} ·
+            {{ job.chat_name || "聊天" }} · {{ jobKind(job) }} ·
             {{
               stateName(
                 job.status === "queued" &&
@@ -856,8 +859,10 @@ onBeforeUnmount(() => {
           </template>
           <p v-else>
             {{
-              job.request_key
-                ? "历史任务，统计不完整"
+              job.reason !== "incremental" || job.request_key
+                ? ["queued", "running", "paused"].includes(job.status)
+                  ? "等待初始化进度统计"
+                  : "历史任务，统计不完整"
                 : "新增消息索引，范围可能继续增长"
             }}
           </p>
