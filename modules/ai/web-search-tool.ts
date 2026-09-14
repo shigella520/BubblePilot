@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 
 import type { WebSearchExecutionOptions } from "./ai-types.js";
@@ -131,6 +132,8 @@ interface WebSearchTransportAttempt {
 }
 
 interface ResolvedWebSearchExecutionOptions {
+  signal?: AbortSignal;
+  deadline?: number;
   maxAttempts: number;
   attemptTimeoutMs: number;
   retryDelayMs: number;
@@ -355,6 +358,8 @@ export class SearxngWebSearchTool implements WebSearchTool {
       60_000,
     );
     return {
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.deadline === undefined ? {} : { deadline: options.deadline }),
       maxAttempts: integer(options.maxAttempts, this.maxAttempts, 1, 5),
       attemptTimeoutMs,
       retryDelayMs: integer(options.retryDelayMs, this.retryDelayMs, 0, 5_000),
@@ -371,7 +376,11 @@ export class SearxngWebSearchTool implements WebSearchTool {
     const transportAttempts: WebSearchTransportAttempt[] = [];
     let lastError: WebSearchToolError | null = null;
     for (let attempt = 1; attempt <= options.maxAttempts; attempt += 1) {
-      const timeoutMs = options.attemptTimeoutMs;
+      options.signal?.throwIfAborted();
+      const timeoutMs = Math.min(
+        options.attemptTimeoutMs,
+        Math.max(1, (options.deadline ?? Infinity) - Date.now()),
+      );
       const attemptStartedAt = Date.now();
       try {
         const result = await this.searchOnce(
@@ -379,6 +388,7 @@ export class SearxngWebSearchTool implements WebSearchTool {
           strategy,
           timeoutMs,
           requestDetails,
+          options.signal,
         );
         transportAttempts.push({
           attempt,
@@ -409,14 +419,26 @@ export class SearxngWebSearchTool implements WebSearchTool {
               : null,
           errorCode: lastError.code,
         });
-        if (attempt >= options.maxAttempts || !this.isRetryable(lastError)) {
+        options.signal?.throwIfAborted();
+        if (
+          Date.now() >= (options.deadline ?? Infinity) ||
+          attempt >= options.maxAttempts ||
+          !this.isRetryable(lastError)
+        ) {
           break;
         }
         const jitteredDelayMs = Math.round(
           options.retryDelayMs * (0.75 + Math.random() * 0.5),
         );
         if (jitteredDelayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, jitteredDelayMs));
+          await delay(
+            Math.min(
+              jitteredDelayMs,
+              Math.max(1, (options.deadline ?? Infinity) - Date.now()),
+            ),
+            undefined,
+            { signal: options.signal },
+          );
         }
       }
     }
@@ -457,6 +479,7 @@ export class SearxngWebSearchTool implements WebSearchTool {
     strategy: SearxngSearchAttempt["strategy"],
     timeoutMs: number,
     requestDetails: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
   ): Promise<SearxngSearchAttempt> {
     const endpoint = new URL("search", `${this.baseUrl}/`);
     endpoint.searchParams.set("q", query);
@@ -471,7 +494,9 @@ export class SearxngWebSearchTool implements WebSearchTool {
     try {
       const response = await this.fetchImplementation(endpoint, {
         headers: { accept: "application/json" },
-        signal: controller.signal,
+        signal: signal
+          ? AbortSignal.any([signal, controller.signal])
+          : controller.signal,
       });
       if (!response.ok) {
         throw new WebSearchToolError(

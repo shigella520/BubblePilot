@@ -1,3 +1,5 @@
+import type { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
+import { agentSettingsUpdateSchema } from "../modules/ai/agent-settings-types.js";
 import type { MemoryService } from "../modules/memory/memory-service.js";
 import { memorySearchSchema } from "../modules/memory/memory-types.js";
 import { randomUUID } from "node:crypto";
@@ -355,6 +357,7 @@ export interface ApplicationOptions {
     repository: AiRepository;
     management: AiManagementService;
     searchTool?: WebSearchTool;
+    agentSettings?: AgentSettingsService;
     searchSettings?: WebSearchSettingsService;
     imageInputSettings?: ImageInputSettingsService;
     rawRequestStore?: AiRawRequestStore;
@@ -780,6 +783,7 @@ export function buildApplication(
       options.auth?.isReady() ?? Promise.resolve(true),
       options.workflow?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.repository.isReady() ?? Promise.resolve(true),
+      options.ai?.agentSettings?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.searchSettings?.repository.isReady() ?? Promise.resolve(true),
       options.ai?.imageInputSettings?.repository.isReady() ??
         Promise.resolve(true),
@@ -1894,6 +1898,51 @@ export function buildApplication(
               : false,
         },
       }),
+    );
+
+    application.get(
+      "/api/v1/ai/agent/settings",
+      { preHandler: requireAdmin },
+      async () => {
+        if (options.ai?.agentSettings === undefined) {
+          throw new ApplicationError(
+            "AI_AGENT_SETTINGS_UNAVAILABLE",
+            "Agent settings are unavailable.",
+            503,
+          );
+        }
+        return { data: await options.ai.agentSettings.view() };
+      },
+    );
+
+    application.put(
+      "/api/v1/ai/agent/settings",
+      {
+        preHandler: requireAuditedAdmin(
+          "ai.agent.settings.update",
+          "ai-agent-settings",
+        ),
+      },
+      async (request) => {
+        if (options.ai?.agentSettings === undefined) {
+          throw new ApplicationError(
+            "AI_AGENT_SETTINGS_UNAVAILABLE",
+            "Agent settings are unavailable.",
+            503,
+          );
+        }
+        const result = await options.ai.agentSettings.update(
+          agentSettingsUpdateSchema.parse(request.body),
+        );
+        if (result.status === "conflict") {
+          throw new ApplicationError(
+            "AI_AGENT_SETTINGS_CONFLICT",
+            "Agent settings changed; refresh before retrying.",
+            409,
+          );
+        }
+        return { data: result.value };
+      },
     );
 
     application.get(
@@ -3582,6 +3631,7 @@ export function buildApplication(
       options.workflow?.repository.close() ?? Promise.resolve(),
       options.workflow?.contextState?.close() ?? Promise.resolve(),
       options.ai?.repository.close() ?? Promise.resolve(),
+      options.ai?.agentSettings?.repository.close() ?? Promise.resolve(),
       options.ai?.searchSettings?.repository.close() ?? Promise.resolve(),
       options.ai?.imageInputSettings?.repository.close() ?? Promise.resolve(),
       options.ai?.summarySettings?.repository.close?.() ?? Promise.resolve(),

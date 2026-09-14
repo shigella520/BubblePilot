@@ -1,3 +1,4 @@
+import type { AgentBudgetSnapshot } from "./agent-settings-types.js";
 import { z } from "zod";
 
 const parameterValueSchema = z.union([
@@ -131,6 +132,8 @@ export type WebSearchPolicy = "disabled" | "auto" | "required";
 export type WebSearchSourceDisplay = "full" | "compact" | "hidden";
 export type WebSearchFailurePolicy = "mode-default" | "fail" | "continue";
 export interface WebSearchExecutionOptions {
+  signal?: AbortSignal;
+  deadline?: number;
   maxAttempts?: number;
   attemptTimeoutMs?: number;
   retryDelayMs?: number;
@@ -584,6 +587,7 @@ export interface AiUsageReport {
 }
 
 export interface AiRouteSuccess {
+  agentBudget?: AgentBudgetSnapshot;
   status: "succeeded";
   text: string;
   toolCalls: readonly AiToolCall[];
@@ -599,6 +603,7 @@ export interface AiRouteSuccess {
 }
 
 export interface AiRouteFailure {
+  agentBudget?: AgentBudgetSnapshot;
   status: "failed";
   code: string;
   summary: string;

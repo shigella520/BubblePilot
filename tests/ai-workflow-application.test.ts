@@ -564,6 +564,25 @@ describe("AI workflow", () => {
         ],
       },
     });
+    const nodes = detail.json<{
+      data: {
+        nodes: { nodeType: string; outputSummary: { agentBudget?: unknown } }[];
+      };
+    }>().data.nodes;
+    const aiNodes = nodes.filter((node) => node.nodeType === "ai-chat");
+    expect(aiNodes).toHaveLength(2);
+    for (const node of aiNodes)
+      expect(node.outputSummary.agentBudget).toMatchObject({
+        settings: {
+          version: 0,
+          maxToolCalls: 10,
+          maxToolOutputCharacters: 24000,
+          maxToolDurationMs: 60000,
+        },
+        modelTurns: 1,
+        toolCalls: 0,
+        outcome: "completed",
+      });
     expect(detail.body).not.toContain("fictional-server-secret");
     expect(detail.body).not.toContain("Earlier fictional context");
     expect(detail.body).not.toContain("Fictional AI answer");

@@ -22,7 +22,13 @@ const message: MemoryMessage = {
 };
 function fixture(messages = [message]) {
   const repository = {
-    pool: { query: vi.fn().mockResolvedValue({ rows: [] }) },
+    pool: {
+      query: vi.fn().mockResolvedValue({ rows: [] }),
+      connect: vi.fn().mockResolvedValue({
+        query: vi.fn().mockResolvedValue({ rows: [] }),
+        release: vi.fn(),
+      }),
+    },
     allowed: vi.fn().mockResolvedValue(true),
     latest: vi.fn().mockResolvedValue(messages),
     messages: vi
@@ -115,7 +121,7 @@ describe("latest chat messages", () => {
         ).execute("get_latest_chat_messages", "{}"),
       ).status,
     ).toBe("unavailable");
-    const large = fixture([{ ...message, text: "x".repeat(6100) }]);
+    const large = fixture([{ ...message, text: "x".repeat(24100) }]);
     expect(
       parseResult(
         await (await large.session()).execute("get_latest_chat_messages", "{}"),

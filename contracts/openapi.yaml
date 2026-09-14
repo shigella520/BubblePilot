@@ -1458,6 +1458,61 @@ paths:
           description: 返回实例联网搜索总开关、后端类型与即时可用状态。
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/ai/agent/settings:
+    get:
+      operationId: getAiAgentSettings
+      description: 返回所有工作流共享的Agent 执行预算运行参数；尚未保存时返回应用默认值。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 返回当前Agent 执行预算全局配置、来源和乐观锁版本。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AgentSettingsView"
+                additionalProperties: false
+        "401":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: updateAiAgentSettings
+      description: 将Agent 执行预算全局配置保存到数据库；新的 AI 执行会立即读取该版本，无需重启应用。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentSettingsUpdate"
+      responses:
+        "200":
+          description: 全局配置已保存，对后续 Agent 运行生效。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/AgentSettingsView"
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /api/v1/ai/search/settings:
     get:
       operationId: getAiWebSearchSettings
@@ -2560,6 +2615,42 @@ components:
         maxTotalBytes: { type: integer, minimum: 1024, maximum: 104857600 }
         fetchTimeoutMs: { type: integer, minimum: 1000, maximum: 60000 }
         detail: { enum: [low, high, auto] }
+        source: { enum: [defaults, database] }
+        version: { type: integer, minimum: 0 }
+        updatedAt: { type: [string, "null"], format: date-time }
+      additionalProperties: false
+    AgentSettingsUpdate:
+      type: object
+      required:
+        [
+          maxToolCalls,
+          maxToolOutputCharacters,
+          maxToolDurationMs,
+          expectedVersion,
+        ]
+      properties:
+        maxToolCalls: { type: integer, minimum: 1, maximum: 30 }
+        maxToolOutputCharacters:
+          { type: integer, minimum: 4000, maximum: 100000 }
+        maxToolDurationMs: { type: integer, minimum: 5000, maximum: 180000 }
+        expectedVersion: { type: integer, minimum: 0 }
+      additionalProperties: false
+    AgentSettingsView:
+      type: object
+      required:
+        [
+          maxToolCalls,
+          maxToolOutputCharacters,
+          maxToolDurationMs,
+          source,
+          version,
+          updatedAt,
+        ]
+      properties:
+        maxToolCalls: { type: integer, minimum: 1, maximum: 30 }
+        maxToolOutputCharacters:
+          { type: integer, minimum: 4000, maximum: 100000 }
+        maxToolDurationMs: { type: integer, minimum: 5000, maximum: 180000 }
         source: { enum: [defaults, database] }
         version: { type: integer, minimum: 0 }
         updatedAt: { type: [string, "null"], format: date-time }

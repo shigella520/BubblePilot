@@ -1,3 +1,10 @@
+import {
+  AgentBudget,
+  AgentToolTimeout,
+  fitToolOutput,
+  type AgentToolContext,
+} from "../ai/agent-budget.js";
+import { defaultAgentSettings } from "../ai/agent-settings-types.js";
 import { hashJson } from "../../app/canonical-json.js";
 import { randomUUID } from "node:crypto";
 import { ApplicationError } from "../../app/errors.js";
@@ -247,20 +254,24 @@ export class MemoryService {
   }
 }
 export class MemorySession {
-  readonly id = randomUUID();
   private evidence = new Map<
     string,
     { item: Evidence; messages: MemoryMessage[] }
   >();
-  private searches = 0;
-  private reads = 0;
-  private usedCharacters = 0;
+  private operationContext?: AgentToolContext;
   private elapsed = 0;
-  private deadline = Number.POSITIVE_INFINITY;
   constructor(
     private readonly service: MemoryService,
     readonly scope: MemoryScope,
+    readonly id = randomUUID(),
   ) {}
+  private checkActive() {
+    if (
+      this.operationContext?.signal.aborted ||
+      Date.now() >= (this.operationContext?.deadline ?? Infinity)
+    )
+      throw new AgentToolTimeout();
+  }
   async initialize() {
     await this.service.repository.pool.query(
       "INSERT INTO memory_retrievals(id,chat_id,execution_id,generation_id,upper_index) VALUES($1,$2,$3,$4,$5)",
@@ -273,98 +284,67 @@ export class MemorySession {
       ],
     );
   }
-  private async add(
-    messages: MemoryMessage[],
-    allowOverlap = false,
-  ): Promise<Evidence | null> {
-    if (Date.now() >= this.deadline) return null;
-    const unique = messages.filter(
-      (m) =>
-        allowOverlap ||
-        ![...this.evidence.values()].some((e) =>
-          e.messages.some(
-            (old) =>
-              old.id === m.id &&
-              old.excerptStart === m.excerptStart &&
-              old.excerptEnd === m.excerptEnd,
-          ),
-        ),
+  private async add(messages: MemoryMessage[]): Promise<Evidence | null> {
+    this.checkActive();
+    if (!messages.length) return null;
+    // Repeated queries reuse an identical source; deduplication is never a zero-result signal.
+    const existing = [...this.evidence.values()].find(
+      (entry) =>
+        entry.messages.length === messages.length &&
+        entry.messages.every((m, i) => {
+          const other = messages[i];
+          return (
+            other?.id === m.id &&
+            other.hash === m.hash &&
+            other.text === m.text &&
+            (other.excerptStart ?? 0) === (m.excerptStart ?? 0) &&
+            (other.excerptEnd ??
+              other.text.length + (other.excerptStart ?? 0)) ===
+              (m.excerptEnd ?? m.text.length + (m.excerptStart ?? 0))
+          );
+        }),
     );
-    if (!unique.length) return null;
-    const kept: MemoryMessage[] = [];
-    let text = "";
-    for (const m of unique) {
-      const line = `${m.sentAt} sender_id=${m.senderId} role=${m.role}\n${m.text}`;
-      if (this.usedCharacters + text.length + line.length + 1 > 6000) break;
-      kept.push(m);
-      text += (text ? "\n" : "") + line;
-    }
-    if (!kept.length) return null;
-    this.usedCharacters += text.length;
-    const ref = `M${this.evidence.size + 1}`;
+    if (existing) return existing.item;
     const identities = await this.service.repository.identities(
       this.scope.chatId,
-      kept.map((m) => m.senderId),
+      messages.map((m) => m.senderId),
     );
-    const item = {
+    this.checkActive();
+    const item: Evidence = {
+      ref: `M${this.evidence.size + 1}`,
       participants: identities.map((i) => ({
         senderId: i.sender_id,
         name: i.nickname ?? i.real_name ?? i.sender_id,
       })),
-      ref,
-      text,
-      messageIds: kept.map((m) => m.id),
-      dates: kept.map((m) => m.sentAt),
-      senderIds: kept.map((m) => m.senderId),
+      text: messages
+        .map(
+          (m) =>
+            `${m.sentAt} sender_id=${m.senderId} role=${m.role}\n${m.text}`,
+        )
+        .join("\n"),
+      messageIds: messages.map((m) => m.id),
+      dates: messages.map((m) => m.sentAt),
+      senderIds: messages.map((m) => m.senderId),
     };
-    for (const m of kept)
-      await this.service.repository.pool.query(
-        "INSERT INTO memory_retrieval_sources VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
-        [this.id, ref, m.id, m.hash, m.excerptStart ?? 0, m.excerptEnd ?? null],
-      );
-    if (Date.now() >= this.deadline) return null;
-    this.evidence.set(ref, { item, messages: kept });
+    this.evidence.set(item.ref, { item, messages });
     return item;
   }
   async search(query: MemorySearch): Promise<MemorySearchResult> {
-    const remaining = Math.max(0, 5000 - this.elapsed);
-    if (!remaining)
-      return {
-        status: "unavailable",
-        retrievalMode: "keyword-only",
-        evidence: [],
-        coverage: { total: 0, indexed: 0, pending: 0 },
-        retrievalId: this.id,
-        truncated: true,
-      };
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        this.searchWithinBudget(query),
-        new Promise<MemorySearchResult>((resolve) => {
-          timer = setTimeout(() => {
-            this.deadline = 0;
-            this.elapsed = 5000;
-            resolve({
-              status: "unavailable",
-              retrievalMode: "keyword-only",
-              evidence: [],
-              coverage: { total: 0, indexed: 0, pending: 0 },
-              retrievalId: this.id,
-              truncated: true,
-            });
-          }, remaining);
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    const result = JSON.parse(
+      await this.execute("search_chat_history", JSON.stringify(query)),
+    ) as Partial<MemorySearchResult>;
+    return {
+      retrievalMode: "keyword-only",
+      coverage: { total: 0, indexed: 0, pending: 0 },
+      evidence: [],
+      truncated: false,
+      ...result,
+      retrievalId: this.id,
+    } as MemorySearchResult;
   }
   private async searchWithinBudget(
     query: MemorySearch,
   ): Promise<MemorySearchResult> {
-    const started = Date.now();
-    this.deadline = started + Math.max(0, 5000 - this.elapsed);
     const repository = this.service.repository;
     const result: MemorySearchResult = {
       status: "unavailable",
@@ -374,260 +354,261 @@ export class MemorySession {
       retrievalId: this.id,
       truncated: false,
     };
-    if (
-      ++this.searches > 2 ||
-      this.elapsed >= 5000 ||
-      !(await repository.allowed(this.scope))
-    )
-      return result;
+    if (!(await repository.allowed(this.scope))) return result;
+    this.checkActive();
+    result.coverage = await repository.coverage(this.scope);
+    const generation = this.scope.generation;
+    const secret = generation.encrypted_secret
+      ? repository.cipher.decrypt(generation.encrypted_secret)
+      : null;
+    let keywordFailed = false;
+    const keywordPromise = repository
+      .candidates(this.scope, query, null)
+      .catch(() => {
+        keywordFailed = true;
+        return [];
+      });
+    let vector: number[] | null = null;
     try {
-      result.coverage = await repository.coverage(this.scope);
-      const generation = this.scope.generation;
-      const secret = generation.encrypted_secret
-        ? repository.cipher.decrypt(generation.encrypted_secret)
-        : null;
-      let keywordFailed = false;
-      const keywordPromise = repository
-        .candidates(this.scope, query, null)
-        .catch(() => {
-          keywordFailed = true;
-          return [];
-        });
-      let vector: number[] | null = null;
-      try {
-        if (
-          (await this.service.embedding.identity(
+      if (
+        (await this.service.embedding.identity(
+          generation.config,
+          secret,
+          Math.max(
+            1,
+            Math.min(
+              1500,
+              (this.operationContext?.deadline ?? Infinity) - Date.now(),
+            ),
+          ),
+        )) !== generation.identity
+      )
+        throw new EmbeddingError("MEMORY_MODEL_CHANGED");
+      this.checkActive();
+      vector =
+        (
+          await this.service.embedding.encode(
             generation.config,
             secret,
-            Math.max(1, Math.min(1500, this.deadline - Date.now())),
-          )) !== generation.identity
-        )
-          throw new EmbeddingError("MEMORY_MODEL_CHANGED");
-        vector =
-          (
-            await this.service.embedding.encode(
-              generation.config,
-              secret,
-              [generation.config.queryPrefix + query.query],
-              Math.max(1, 5000 - this.elapsed - (Date.now() - started)),
-            )
-          )[0] ?? null;
-      } catch {
-        vector = null;
-      }
-      const keywords = await keywordPromise;
-      if (Date.now() >= this.deadline)
-        throw new Error("MEMORY_BUDGET_EXHAUSTED");
-      const semantic = vector
-        ? await repository.candidates(this.scope, query, vector)
-        : [];
-      if (keywordFailed && !vector)
-        throw new Error("MEMORY_RETRIEVAL_UNAVAILABLE");
-      result.retrievalMode = vector ? "hybrid" : "keyword-only";
-      for (const candidate of fuseRanks([keywords, semantic]).slice(0, 5)) {
-        const messages = await repository.excerpt(this.scope, candidate.id);
-        const evidence = await this.add(messages);
+            [generation.config.queryPrefix + query.query],
+            Math.max(
+              1,
+              Math.min(
+                15000,
+                (this.operationContext?.deadline ?? Infinity) - Date.now(),
+              ),
+            ),
+          )
+        )[0] ?? null;
+    } catch {
+      vector = null;
+    }
+    const keywords = await keywordPromise;
+    this.checkActive();
+    const semantic = vector
+      ? await repository.candidates(this.scope, query, vector)
+      : [];
+    if (keywordFailed && !vector) return result;
+    result.retrievalMode = vector ? "hybrid" : "keyword-only";
+    for (const candidate of fuseRanks([keywords, semantic]).slice(0, 5)) {
+      this.checkActive();
+      const evidence = await this.add(
+        await repository.excerpt(this.scope, candidate.id),
+      );
+      if (evidence) result.evidence.push(evidence);
+    }
+    if (result.coverage.pending > 0 && result.evidence.length < 5) {
+      this.checkActive();
+      for (const message of await repository.unindexed(this.scope, query)) {
+        if (result.evidence.length >= 5) break;
+        const evidence = await this.add([message]);
         if (evidence) result.evidence.push(evidence);
       }
-      if (
-        result.coverage.pending > 0 &&
-        result.evidence.length < 5 &&
-        Date.now() < this.deadline
-      ) {
-        const fallback = await repository.unindexed(this.scope, query);
-        for (const message of fallback) {
-          if (result.evidence.length >= 5) break;
-          const evidence = await this.add([message]);
-          if (evidence) result.evidence.push(evidence);
-        }
-      }
-      result.truncated =
-        this.usedCharacters >= 5500 || Date.now() >= this.deadline;
-      result.status =
-        result.coverage.pending > 0
-          ? "partial"
-          : result.evidence.length
-            ? "succeeded"
-            : "no-results";
-      if (!(await this.validate())) {
-        result.status = "unavailable";
-        result.evidence = [];
-      }
-    } catch {
-      result.status = "unavailable";
-      result.evidence = [];
-    } finally {
-      this.elapsed += Date.now() - started;
-      await repository.pool.query(
-        "UPDATE memory_retrievals SET status=$2,mode=$3,duration_ms=$4 WHERE id=$1",
-        [this.id, result.status, result.retrievalMode, this.elapsed],
-      );
     }
-    if (Date.now() >= this.deadline) {
-      result.status = "unavailable";
-      result.evidence = [];
-      result.truncated = true;
-    }
+    result.status =
+      result.coverage.pending > 0
+        ? "partial"
+        : result.evidence.length
+          ? "succeeded"
+          : "no-results";
     return result;
   }
   private async latest(query: LatestChatMessages): Promise<string> {
-    const started = Date.now();
-    const remaining = Math.max(0, 5000 - this.elapsed);
-    const unavailable = JSON.stringify({
-      status: "unavailable",
-      order: "sent_at_desc,message_index_desc",
-      truncated: true,
-      evidence: [],
-    });
-    if (!remaining) return unavailable;
-    this.deadline = started + remaining;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        (async () => {
-          if (!(await this.validate())) return unavailable;
-          const messages = await this.service.repository.latest(
-            this.scope,
-            query,
-          );
-          const evidence: (Evidence & {
-            messageId: string;
-            sentAt: string;
-            senderId: string;
-          })[] = [];
-          for (const message of messages) {
-            // Reuse only an exact, complete single-message source, not a search excerpt.
-            const existing = [...this.evidence.values()].find(
-              (entry) =>
-                entry.messages.length === 1 &&
-                entry.messages[0]?.id === message.id &&
-                entry.messages[0]?.hash === message.hash &&
-                entry.messages[0]?.text === message.text,
-            );
-            const item = existing?.item ?? (await this.add([message], true));
-            if (!item) break;
-            evidence.push({
-              ...item,
-              messageId: message.id,
-              sentAt: message.sentAt,
-              senderId: message.senderId,
-            });
-          }
-          if (!(await this.validate()) || Date.now() >= this.deadline)
-            return unavailable;
-          return JSON.stringify({
-            status:
-              messages.length && !evidence.length
-                ? "unavailable"
-                : messages.length
-                  ? "succeeded"
-                  : "no-results",
-            order: "sent_at_desc,message_index_desc",
-            limit: query.limit,
-            limitReached: messages.length === query.limit,
-            truncated: evidence.length < messages.length,
-            evidence,
-          });
-        })(),
-        new Promise<string>((resolve) => {
-          timer = setTimeout(() => {
-            this.deadline = 0;
-            resolve(unavailable);
-          }, remaining);
-        }),
-      ]);
-    } catch {
-      return unavailable;
-    } finally {
-      if (timer) clearTimeout(timer);
-      this.elapsed += Date.now() - started;
+    const messages = await this.service.repository.latest(this.scope, query);
+    this.checkActive();
+    const evidence = [];
+    for (const message of messages) {
+      const item = await this.add([message]);
+      if (item)
+        evidence.push({
+          ...item,
+          messageId: message.id,
+          sentAt: message.sentAt,
+          senderId: message.senderId,
+        });
     }
+    return JSON.stringify({
+      status: messages.length ? "succeeded" : "no-results",
+      order: "sent_at_desc,message_index_desc",
+      limit: query.limit,
+      limitReached: messages.length === query.limit,
+      truncated: false,
+      evidence,
+    });
   }
-  async execute(name: string, args: string): Promise<string> {
-    try {
-      const parsed = JSON.parse(args) as unknown;
-      if (name === "get_latest_chat_messages")
-        return this.latest(latestChatMessagesSchema.parse(parsed));
-      if (name === "search_chat_history") {
-        const result = await this.search(memorySearchSchema.parse(parsed));
+  private async query(name: string, args: string): Promise<string> {
+    const parsed = JSON.parse(args) as unknown;
+    if (!(await this.validate()))
+      return JSON.stringify({
+        status: "unavailable",
+        reason: "source-unavailable",
+      });
+    this.checkActive();
+    if (name === "get_latest_chat_messages")
+      return this.latest(latestChatMessagesSchema.parse(parsed));
+    if (name === "search_chat_history")
+      return JSON.stringify(
+        await this.searchWithinBudget(memorySearchSchema.parse(parsed)),
+      );
+    const ref =
+      name === "read_chat_excerpt" &&
+      typeof parsed === "object" &&
+      parsed !== null &&
+      Object.keys(parsed).length === 1 &&
+      "ref" in parsed &&
+      typeof parsed.ref === "string"
+        ? parsed.ref
+        : null;
+    const entry = ref ? this.evidence.get(ref) : undefined;
+    const first = entry?.messages[0],
+      last = entry?.messages.at(-1);
+    if (!first || !last)
+      return JSON.stringify({
+        status: "unavailable",
+        reason: "invalid-or-unavailable",
+      });
+    const messages = await this.service.repository.messages(
+      this.scope.chatId,
+      Math.max(1, first.index - 2),
+      Math.min(this.scope.upperIndex - 1, last.index + 2),
+    );
+    const evidence = await this.add(messages);
+    return JSON.stringify({
+      status: evidence ? "succeeded" : "no-results",
+      evidence: evidence ? [evidence] : [],
+    });
+  }
+  async execute(
+    name: string,
+    args: string,
+    context?: AgentToolContext,
+  ): Promise<string> {
+    if (!context) {
+      const budget = new AgentBudget({
+        ...defaultAgentSettings,
+        version: 0,
+        source: "defaults",
+        updatedAt: null,
+      });
+      try {
+        return await budget.execute((ctx) => this.execute(name, args, ctx));
+      } catch {
         return JSON.stringify({
-          status: result.status,
-          retrievalMode: result.retrievalMode,
-          coverage: result.coverage,
-          truncated: result.truncated,
-          evidence: result.evidence.map(({ ref, text, participants }) => ({
-            ref,
-            text,
-            participants,
-          })),
+          status: "unavailable",
+          reason: "tool-duration",
+          truncated: true,
         });
       }
-      if (
-        name !== "read_chat_excerpt" ||
-        ++this.reads > 3 ||
-        this.elapsed >= 5000
-      )
-        return JSON.stringify({ status: "unavailable", reason: "tool-limit" });
-      const ref =
-        typeof parsed === "object" &&
-        parsed !== null &&
-        "ref" in parsed &&
-        Object.keys(parsed).length === 1 &&
-        typeof parsed.ref === "string"
-          ? parsed.ref
-          : null;
-      const started = Date.now();
-      const remaining = Math.max(0, 5000 - this.elapsed);
-      this.deadline = started + remaining;
-      let timer: ReturnType<typeof setTimeout> | undefined;
+    }
+    // Each operation owns a staging map. Timed-out work cannot modify the live session.
+    const staged = new MemorySession(this.service, this.scope, this.id);
+    staged.evidence = new Map(this.evidence);
+    staged.operationContext = context;
+    const started = Date.now();
+    try {
+      const raw = await staged.query(name, args);
+      staged.checkActive();
+      if (!(await staged.validate()))
+        return JSON.stringify({
+          status: "unavailable",
+          reason: "source-unavailable",
+        });
+      staged.checkActive();
+      const fitted = fitToolOutput(raw, context.maxOutputCharacters);
+      const content =
+        fitted.content ??
+        JSON.stringify({
+          status: "unavailable",
+          reason: "tool-output",
+          truncated: true,
+        });
+      const payload = JSON.parse(content) as {
+        evidence?: { ref: string }[];
+        status: string;
+        retrievalMode?: string;
+      };
+      const accepted = (payload.evidence ?? []).flatMap((item) => {
+        const entry = staged.evidence.get(item.ref);
+        return entry && !this.evidence.has(item.ref) ? [entry] : [];
+      });
+      const client = await this.service.repository.pool.connect();
+      let released = false;
+      const cancel = () => {
+        if (!released) {
+          released = true;
+          client.release(true);
+        }
+      };
+      context.signal.addEventListener("abort", cancel, { once: true });
       try {
-        return await Promise.race([
-          (async () => {
-            const entry = ref ? this.evidence.get(ref) : undefined;
-            if (!entry || !(await this.validate()))
-              return JSON.stringify({
-                status: "unavailable",
-                reason: "source-unavailable",
-              });
-            const first = entry.messages[0],
-              last = entry.messages.at(-1);
-            if (!first || !last) return "{}";
-            const messages = await this.service.repository.messages(
-              this.scope.chatId,
-              Math.max(1, first.index - 2),
-              Math.min(this.scope.upperIndex - 1, last.index + 2),
-            );
-            const evidence = await this.add(messages);
-            return JSON.stringify({
-              status: evidence ? "succeeded" : "no-results",
-              evidence: evidence
-                ? [
-                    {
-                      ref: evidence.ref,
-                      text: evidence.text,
-                      participants: evidence.participants,
-                    },
-                  ]
-                : [],
-            });
-          })(),
-          new Promise<string>((resolve) => {
-            timer = setTimeout(() => {
-              this.deadline = 0;
-              resolve(
-                JSON.stringify({
-                  status: "unavailable",
-                  reason: "tool-budget",
-                }),
-              );
-            }, remaining);
-          }),
+        staged.checkActive();
+        await client.query("BEGIN");
+        staged.checkActive();
+        await client.query("SELECT set_config('statement_timeout', $1, true)", [
+          String(Math.max(1, Math.min(5000, context.deadline - Date.now()))),
         ]);
+        for (const entry of accepted)
+          for (const message of entry.messages) {
+            staged.checkActive();
+            await client.query(
+              "INSERT INTO memory_retrieval_sources VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
+              [
+                this.id,
+                entry.item.ref,
+                message.id,
+                message.hash,
+                message.excerptStart ?? 0,
+                message.excerptEnd ?? null,
+              ],
+            );
+          }
+        staged.checkActive();
+        await client.query(
+          "UPDATE memory_retrievals SET status=$2,mode=$3,duration_ms=$4 WHERE id=$1",
+          [
+            this.id,
+            payload.status,
+            payload.retrievalMode ?? "keyword-only",
+            this.elapsed + Math.max(0, Date.now() - started),
+          ],
+        );
+        staged.checkActive();
+        await client.query("COMMIT");
+        staged.checkActive();
+        for (const entry of accepted) this.evidence.set(entry.item.ref, entry);
+      } catch (error) {
+        if (!released) await client.query("ROLLBACK");
+        throw error;
       } finally {
-        if (timer) clearTimeout(timer);
-        this.elapsed += Date.now() - started;
+        context.signal.removeEventListener("abort", cancel);
+        if (!released) client.release();
       }
-    } catch {
+      this.elapsed += Math.max(0, Date.now() - started);
+      return content;
+    } catch (error) {
+      if (context.signal.aborted || Date.now() >= context.deadline)
+        throw new AgentToolTimeout();
+      if (error instanceof AgentToolTimeout) throw error;
       return JSON.stringify({
         status: "unavailable",
         reason: "invalid-or-unavailable",

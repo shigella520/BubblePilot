@@ -476,7 +476,11 @@ describe("AgentRunner", () => {
     };
 
     await expect(
-      new AgentRunner(routing, search, repository).run(request),
+      new AgentRunner(routing, search, repository, undefined, {
+        maxToolCalls: 3,
+        maxToolOutputCharacters: 24000,
+        maxToolDurationMs: 60000,
+      }).run(request),
     ).resolves.toMatchObject({
       status: "succeeded",
       text: "Final answer from the three completed searches",

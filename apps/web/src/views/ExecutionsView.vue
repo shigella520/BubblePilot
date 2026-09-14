@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
 import MemorySources from "../components/MemorySources.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
 import {
@@ -1994,6 +1995,10 @@ function contextSnapshotValue(
                     ·
                     {{ node.errorCode || node.status }}
                   </p>
+                  <AgentBudgetDetails
+                    v-if="node.nodeType === 'ai-chat'"
+                    :summary="node.outputSummary"
+                  />
                   <details>
                     <summary>脱敏摘要</summary>
                     <pre>{{

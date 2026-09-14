@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AgentSettingsPanel from "../components/AgentSettingsPanel.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
 import {
   Activity,
@@ -822,6 +823,9 @@ onMounted(load);
         <h2>Provider 管理</h2>
       </div>
       <nav>
+        <button type="button" @click="scrollToSection('agent-settings')">
+          <Bot :size="18" />Agent 执行配置
+        </button>
         <button type="button" @click="scrollToSection('memory-settings')">
           <Search :size="18" />长期聊天检索
         </button>
@@ -850,6 +854,7 @@ onMounted(load);
       </div>
     </aside>
     <div class="admin-workspace">
+      <AgentSettingsPanel />
       <MemoryPanel id="memory-settings" mode="settings" embedded />
       <DismissibleMessage
         v-if="message"

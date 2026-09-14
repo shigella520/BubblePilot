@@ -353,6 +353,9 @@ export class WorkflowEngine implements MessageAutomation {
           await this.repository.finishNodeExecution({
             nodeExecutionId,
             status: "failed",
+            ...(workflowError.outputSummary
+              ? { outputSummary: workflowError.outputSummary }
+              : {}),
             error: {
               code: workflowError.code,
               summary: workflowError.message,

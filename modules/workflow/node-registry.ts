@@ -1261,6 +1261,9 @@ class AiChatNodeHandler extends BaseNodeHandler {
         result.code,
         result.summary,
         result.retryable,
+        false,
+        undefined,
+        result.agentBudget ? { agentBudget: result.agentBudget } : undefined,
       );
     }
     setVariable(context, node.config.outputVariable, result.text);
@@ -1273,6 +1276,11 @@ class AiChatNodeHandler extends BaseNodeHandler {
           "AI_OUTPUT_INVALID_JSON",
           "The AI output is not valid JSON.",
           false,
+          false,
+          undefined,
+          result.agentBudget
+            ? { agentBudget: { ...result.agentBudget, outcome: "failed" } }
+            : undefined,
         );
       }
     }
@@ -1281,6 +1289,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
       nextNodeId: node.onSuccess,
       outputSummary: {
         ...this.routing.outputSummary(result),
+        ...(result.agentBudget ? { agentBudget: result.agentBudget } : {}),
         outputVariable: node.config.outputVariable,
         imageInputCount: preparedImages?.selectedCount ?? 0,
         imageInputBytes: preparedImages?.totalBytes ?? 0,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, it, expect } from "vitest";
+import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
 import { MemoryRepository } from "../modules/memory/memory-repository.js";
 import { MemoryService } from "../modules/memory/memory-service.js";
 import { defaultMemoryConfig } from "../modules/memory/memory-types.js";
@@ -57,6 +57,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     );
     return id;
   }
+
   it("queries event-time order with sender, time and trigger boundaries without indexing", async () => {
     const id = await chat();
     const old = await message(id, "虚构旧话题：备份备份");
@@ -102,6 +103,167 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       [latest],
     );
     expect((await repo.latest(scope, { limit: 1 }))[0]?.id).toBe(old);
+  });
+  it("reuses sources beyond the old search/read quotas and validates every repeat", async () => {
+    const id = await chat();
+    await message(id, "虚构备份计划");
+    await drain();
+    const session = await service.session((await repo.scope(id, 999, null))!);
+    for (let i = 0; i < 4; i++) {
+      const result = await session.search({ query: "备份" });
+      expect(result.evidence[0]?.ref).toBe("M1");
+    }
+    for (let i = 0; i < 4; i++)
+      expect(
+        JSON.parse(await session.execute("read_chat_excerpt", '{"ref":"M1"}')),
+      ).toMatchObject({ status: "succeeded", evidence: [{ ref: "M1" }] });
+    const count = await repo.pool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM memory_retrieval_sources WHERE retrieval_id=$1",
+      [session.id],
+    );
+    expect(count.rows[0]!.n).toBe(1);
+    await repo.authorize(id, false, 1);
+    expect(
+      JSON.parse(await session.execute("get_latest_chat_messages", "{}")),
+    ).toMatchObject({ status: "unavailable" });
+  });
+  it("isolates a cancelled query's late result without persisting or registering sources", async () => {
+    const id = await chat();
+    await message(id, "虚构迟到结果");
+    const scope = (await repo.scope(id, 999, null))!;
+    const rows = await repo.latest(scope, { limit: 1 });
+    const session = await service.session(scope);
+    let release!: () => void;
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi.spyOn(repo, "latest").mockImplementationOnce(async () => {
+      entered();
+      await blocked;
+      return rows;
+    });
+    const controller = new AbortController();
+    try {
+      const pending = session.execute("get_latest_chat_messages", "{}", {
+        signal: controller.signal,
+        deadline: Date.now() + 5000,
+        maxOutputCharacters: 24000,
+      });
+      await ready;
+      controller.abort();
+      release();
+      await expect(pending).rejects.toThrow();
+      expect(session.references()).toEqual([]);
+      expect(
+        (
+          await repo.pool.query<{ n: number }>(
+            "SELECT count(*)::int AS n FROM memory_retrieval_sources WHERE retrieval_id=$1",
+            [session.id],
+          )
+        ).rows[0]!.n,
+      ).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it("rolls back source writes when cancellation interrupts an open transaction", async () => {
+    const id = await chat();
+    await message(id, "虚构取消中的来源");
+    const session = await service.session((await repo.scope(id, 999, null))!);
+    const controller = new AbortController();
+    await repo.pool.query(
+      "CREATE OR REPLACE FUNCTION agent_fixture_delay_source() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(1); RETURN NEW; END $$",
+    );
+    await repo.pool.query(
+      `CREATE TRIGGER agent_fixture_delay_source BEFORE INSERT ON memory_retrieval_sources FOR EACH ROW WHEN (NEW.retrieval_id = '${session.id}') EXECUTE FUNCTION agent_fixture_delay_source()`,
+    );
+    try {
+      const pending = session.execute("get_latest_chat_messages", "{}", {
+        signal: controller.signal,
+        deadline: Date.now() + 5000,
+        maxOutputCharacters: 24000,
+      });
+      const assertion = expect(pending).rejects.toThrow();
+      let waiting = false;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const state = await repo.pool.query<{ waiting: boolean }>(
+          "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE wait_event='PgSleep' AND query LIKE 'INSERT INTO memory_retrieval_sources%') AS waiting",
+        );
+        if (state.rows[0]?.waiting) {
+          waiting = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      controller.abort();
+      await assertion;
+      expect(waiting).toBe(true);
+      expect(session.references()).toEqual([]);
+      expect(
+        (
+          await repo.pool.query<{ n: number }>(
+            "SELECT count(*)::int AS n FROM memory_retrieval_sources WHERE retrieval_id=$1",
+            [session.id],
+          )
+        ).rows[0]?.n,
+      ).toBe(0);
+    } finally {
+      controller.abort();
+      await repo.pool.query(
+        "DROP TRIGGER IF EXISTS agent_fixture_delay_source ON memory_retrieval_sources",
+      );
+      await repo.pool.query(
+        "DROP FUNCTION IF EXISTS agent_fixture_delay_source()",
+      );
+    }
+  });
+  it("only commits references that fit the serialized result, and marks oversized messages unavailable", async () => {
+    const id = await chat();
+    await message(id, "虚构大消息".repeat(3000));
+    await message(id, "虚构小消息");
+    const session = await service.session((await repo.scope(id, 999, null))!);
+    const context = {
+      signal: new AbortController().signal,
+      deadline: Date.now() + 5000,
+      maxOutputCharacters: 4000,
+    };
+    const result = JSON.parse(
+      await session.execute(
+        "get_latest_chat_messages",
+        '{"limit":20}',
+        context,
+      ),
+    ) as { evidence: unknown[] };
+    expect(result).toMatchObject({
+      status: "succeeded",
+      truncated: true,
+      evidence: [{ ref: "M1" }],
+    });
+    expect(result.evidence).toHaveLength(1);
+    expect(session.references()).toEqual(["M1"]);
+    expect(
+      (
+        await repo.pool.query<{ n: number }>(
+          "SELECT count(*)::int AS n FROM memory_retrieval_sources WHERE retrieval_id=$1",
+          [session.id],
+        )
+      ).rows[0]!.n,
+    ).toBe(1);
+    const tiny = JSON.parse(
+      await session.execute("get_latest_chat_messages", "{}", {
+        ...context,
+        maxOutputCharacters: 1,
+      }),
+    ) as unknown;
+    expect(tiny).toMatchObject({
+      status: "unavailable",
+      reason: "tool-output",
+      truncated: true,
+    });
   });
   async function drain() {
     await repo.pool.query(
@@ -289,7 +451,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     expect(result.evidence.length).toBeGreaterThan(0);
     expect(
       result.evidence.reduce((n, e) => n + e.text.length, 0),
-    ).toBeLessThanOrEqual(6000);
+    ).toBeLessThanOrEqual(24000);
     expect(session.render("原计划 [M1]")).toBe("原计划");
     expect(
       JSON.parse(session.render('{"answer":"原计划 [M1]"}', "json")!) as {

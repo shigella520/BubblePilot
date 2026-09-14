@@ -1,7 +1,8 @@
+import type { AgentToolContext } from "./agent-budget.js";
 import type { AiToolDefinition } from "./ai-types.js";
 export interface RegisteredAgentTool {
   definition: AiToolDefinition;
-  execute(argumentsJson: string): Promise<string>;
+  execute(argumentsJson: string, context: AgentToolContext): Promise<string>;
   diagnostics: "metadata-only" | "web-search";
 }
 /** Per-execution registry: capabilities are selected by trusted runtime scope. */

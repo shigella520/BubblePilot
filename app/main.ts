@@ -1,3 +1,5 @@
+import { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
+import { PostgresAgentSettingsRepository } from "../modules/ai/postgres-agent-settings-repository.js";
 import { MemoryRepository } from "../modules/memory/memory-repository.js";
 import { MemoryService } from "../modules/memory/memory-service.js";
 import { buildApplication } from "./application.js";
@@ -59,6 +61,11 @@ const aiRepository = new PostgresAiRepository(
   config.settingsEncryptionKey,
   config.databaseQueryTimeoutMs,
 );
+const agentSettingsRepository = new PostgresAgentSettingsRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
+const agentSettings = new AgentSettingsService(agentSettingsRepository);
 const webSearchSettingsRepository = new PostgresWebSearchSettingsRepository(
   config.databaseUrl,
   config.databaseQueryTimeoutMs,
@@ -164,6 +171,7 @@ const aiAgent = new AgentRunner(
   webSearchSettings,
   undefined,
   memoryService,
+  agentSettings,
 );
 const imageSummaryRepository = new PostgresImageSummaryRepository(
   config.databaseUrl,
@@ -263,6 +271,7 @@ const application = buildApplication(config, repository, {
     management: aiManagement,
     searchTool: webSearchTool,
     searchSettings: webSearchSettings,
+    agentSettings,
     imageInputSettings,
     rawRequestStore: aiRawRequestStore,
     summarySettings,

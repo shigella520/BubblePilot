@@ -5,6 +5,7 @@ export class WorkflowExecutionError extends Error {
     readonly retryable: boolean,
     readonly requiresManualRecovery = false,
     options?: ErrorOptions,
+    readonly outputSummary?: Readonly<Record<string, unknown>>,
   ) {
     super(message, options);
     this.name = "WorkflowExecutionError";

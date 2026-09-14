@@ -1,3 +1,5 @@
+import { WorkflowExecutionError } from "../modules/workflow/workflow-errors.js";
+import { defaultAgentSettings } from "../modules/ai/agent-settings-types.js";
 import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
 import { NodeRegistry } from "../modules/workflow/node-registry.js";
 import type { HistoryCoverage } from "../modules/workflow/conversation-context-service.js";
@@ -184,6 +186,55 @@ it("shares coverage across node contexts and records the same execution snapshot
       historyCoverage: coverage,
       contextIncomplete: true,
       contextIncompleteReasons: ["history-trimmed"],
+    }),
+  );
+});
+
+it("persists failed Agent budget metadata in the node JSON snapshot", async () => {
+  const repository = new InMemoryWorkflowRepository();
+  vi.spyOn(repository, "listActiveTriggerBindings").mockResolvedValue([
+    trigger,
+  ]);
+  const finish = vi.spyOn(repository, "finishNodeExecution");
+  const budget = {
+    settings: {
+      ...defaultAgentSettings,
+      source: "defaults",
+      version: 0,
+      updatedAt: null,
+    },
+    modelTurns: 3,
+    toolCalls: 2,
+    toolOutputCharacters: 128,
+    toolDurationMs: 30,
+    finalizingDueToBudget: true,
+    reasons: ["tool-calls"],
+    outcome: "failed",
+  };
+  const registry = new NodeRegistry();
+  registry.register({
+    type: "end",
+    version: 1,
+    retryPolicy: () => ({ maxAttempts: 1, initialDelayMs: 0 }),
+    failureTarget: () => null,
+    execute: () => {
+      return Promise.reject(
+        new WorkflowExecutionError(
+          "AI_AGENT_TOOL_LIMIT_EXCEEDED",
+          "Fictional failure",
+          false,
+          false,
+          undefined,
+          { agentBudget: budget },
+        ),
+      );
+    },
+  });
+  await new WorkflowEngine(repository, registry).handleMessage(envelope);
+  expect(finish).toHaveBeenCalledWith(
+    expect.objectContaining({
+      status: "failed",
+      outputSummary: { agentBudget: budget },
     }),
   );
 });
