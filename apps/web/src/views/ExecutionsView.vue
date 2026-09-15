@@ -4,6 +4,7 @@ import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
 import MemorySources from "../components/MemorySources.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
 import {
+  ChartColumn,
   FileClock,
   Image,
   ClipboardCopy,
@@ -921,6 +922,7 @@ function contextSnapshotValue(
       </div>
       <SectionNavigation
         :items="[
+          { id: 'ai-usage', label: 'AI 用量与缓存', icon: ChartColumn },
           { id: 'executions', label: '执行记录', icon: FileClock },
           { id: 'memory-jobs', label: '历史索引', icon: FileClock },
           { id: 'audit', label: '审计事件', icon: ShieldCheck },
@@ -938,7 +940,7 @@ function contextSnapshotValue(
         >{{ message }}</DismissibleMessage
       >
       <SensitiveUnlock />
-      <section class="admin-panel ai-usage-panel">
+      <section id="ai-usage" class="admin-panel ai-usage-panel">
         <div class="panel-head">
           <div>
             <p class="card-kicker">AI USAGE</p>
