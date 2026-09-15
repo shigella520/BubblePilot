@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentSettingsPanel from "../components/AgentSettingsPanel.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
 import {
@@ -140,9 +141,6 @@ interface ProviderForm {
 type ReasoningEffort =
   "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-function scrollToSection(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-}
 function probeLabel(value: "verified" | "failed" | "unknown") {
   return value === "verified"
     ? "已验证"
@@ -822,33 +820,17 @@ onMounted(async () => {
         <p class="eyebrow">AI ROUTING</p>
         <h2>Provider 管理</h2>
       </div>
-      <nav>
-        <button type="button" @click="scrollToSection('agent-settings')">
-          <Bot :size="18" />Agent 执行配置
-        </button>
-        <button type="button" @click="scrollToSection('memory-settings')">
-          <Search :size="18" />长期聊天检索
-        </button>
-        <button
-          class="active"
-          type="button"
-          @click="scrollToSection('search-settings')"
-        >
-          <Search :size="18" />联网搜索
-        </button>
-        <button type="button" @click="scrollToSection('context-settings')">
-          <MessageCircle :size="18" />聊天上下文
-        </button>
-        <button type="button" @click="scrollToSection('image-input-settings')">
-          <Image :size="18" />原生图片输入
-        </button>
-        <button type="button" @click="scrollToSection('providers')">
-          <Bot :size="18" />Provider
-        </button>
-        <button type="button" @click="scrollToSection('routes')">
-          <Route :size="18" />路由策略
-        </button>
-      </nav>
+      <SectionNavigation
+        :items="[
+          { id: 'agent-settings', label: 'Agent 执行配置', icon: Bot },
+          { id: 'memory-settings', label: '长期聊天检索', icon: Search },
+          { id: 'search-settings', label: '联网搜索', icon: Search },
+          { id: 'context-settings', label: '聊天上下文', icon: MessageCircle },
+          { id: 'image-input-settings', label: '原生图片输入', icon: Image },
+          { id: 'providers', label: 'Provider', icon: Bot },
+          { id: 'routes', label: '路由策略', icon: Route },
+        ]"
+      />
       <div class="sidebar-note">
         固定顺序由管理员配置；自动降级只影响当前有效顺序，不会改写人工排序。
       </div>

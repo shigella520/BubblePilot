@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
 import MemorySources from "../components/MemorySources.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
@@ -429,9 +430,6 @@ async function loadUsage(): Promise<boolean> {
   } finally {
     if (requestId === usageRequestId) usageBusy.value = false;
   }
-}
-function scrollToSection(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
 const providerHealthLabels: Record<string, string> = {
   healthy: "健康",
@@ -921,22 +919,13 @@ function contextSnapshotValue(
         <p class="eyebrow">TRACEABILITY</p>
         <h2>执行与审计</h2>
       </div>
-      <nav>
-        <button
-          class="active"
-          type="button"
-          @click="scrollToSection('executions')"
-        >
-          <FileClock :size="18" />执行记录
-        </button>
-
-        <button type="button" @click="scrollToSection('audit')">
-          <ShieldCheck :size="18" />审计事件
-        </button>
-        <button type="button" @click="scrollToSection('memory-jobs')">
-          <FileClock :size="18" />历史索引
-        </button>
-      </nav>
+      <SectionNavigation
+        :items="[
+          { id: 'executions', label: '执行记录', icon: FileClock },
+          { id: 'audit', label: '审计事件', icon: ShieldCheck },
+          { id: 'memory-jobs', label: '历史索引', icon: FileClock },
+        ]"
+      />
       <div class="sidebar-note">
         普通轨迹只显示元数据、错误码和哈希；原始模型请求与响应需敏感授权后查看。
       </div>

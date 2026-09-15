@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SectionNavigation from "../components/SectionNavigation.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
 import {
   Download,
@@ -419,10 +420,6 @@ function handleMediaKeydown(event: KeyboardEvent) {
   }
 }
 
-function scrollToSection(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-}
-
 async function loadChatOptions() {
   chatOptions.value = await apiAllPages<Chat>("/api/v1/chats?limit=100");
 }
@@ -793,24 +790,14 @@ onBeforeUnmount(() =>
         <p class="eyebrow">MESSAGES</p>
         <h2>聊天与归档</h2>
       </div>
-      <nav>
-        <button
-          class="active"
-          type="button"
-          @click="scrollToSection('monitoring')"
-        >
-          <SlidersHorizontal :size="18" />监听范围
-        </button>
-        <button type="button" @click="scrollToSection('search')">
-          <MessageCircle :size="18" />消息搜索
-        </button>
-        <button type="button" @click="scrollToSection('export')">
-          <FileJson2 :size="18" />数据导出
-        </button>
-        <button type="button" @click="scrollToSection('chat-memory')">
-          <MessageCircle :size="18" />长期记忆
-        </button>
-      </nav>
+      <SectionNavigation
+        :items="[
+          { id: 'monitoring', label: '监听范围', icon: SlidersHorizontal },
+          { id: 'search', label: '消息搜索', icon: MessageCircle },
+          { id: 'export', label: '数据导出', icon: FileJson2 },
+          { id: 'chat-memory', label: '长期记忆', icon: MessageCircle },
+        ]"
+      />
       <div class="sidebar-note">
         监听变更只影响后续消息，不自动回填或删除历史。
       </div>
