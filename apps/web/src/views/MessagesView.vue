@@ -793,9 +793,9 @@ onBeforeUnmount(() =>
       <SectionNavigation
         :items="[
           { id: 'monitoring', label: '监听范围', icon: SlidersHorizontal },
+          { id: 'chat-memory', label: '长期记忆', icon: MessageCircle },
           { id: 'search', label: '消息搜索', icon: MessageCircle },
           { id: 'export', label: '数据导出', icon: FileJson2 },
-          { id: 'chat-memory', label: '长期记忆', icon: MessageCircle },
         ]"
       />
       <div class="sidebar-note">

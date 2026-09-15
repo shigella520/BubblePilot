@@ -922,8 +922,8 @@ function contextSnapshotValue(
       <SectionNavigation
         :items="[
           { id: 'executions', label: '执行记录', icon: FileClock },
-          { id: 'audit', label: '审计事件', icon: ShieldCheck },
           { id: 'memory-jobs', label: '历史索引', icon: FileClock },
+          { id: 'audit', label: '审计事件', icon: ShieldCheck },
         ]"
       />
       <div class="sidebar-note">

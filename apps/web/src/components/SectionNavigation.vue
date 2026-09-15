@@ -1,14 +1,22 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, type Component } from "vue";
+import { onBeforeUnmount, onMounted, ref, computed, type Component } from "vue";
 
 const props = defineProps<{
   items: { id: string; label: string; icon: Component }[];
 }>();
 const navigation = ref<HTMLElement>();
 const activeId = ref("");
+const sectionOrder = ref<string[]>(props.items.map((item) => item.id));
+const orderedItems = computed(() =>
+  [...props.items].sort(
+    (a, b) =>
+      sectionOrder.value.indexOf(a.id) - sectionOrder.value.indexOf(b.id),
+  ),
+);
 const indicator = ref<Record<string, string>>({ opacity: "0" });
 let frame = 0;
 let observer: ResizeObserver | undefined;
+let mutationObserver: MutationObserver | undefined;
 
 function update() {
   frame = 0;
@@ -18,15 +26,18 @@ function update() {
     0,
     document.documentElement.scrollHeight - window.innerHeight,
   );
-  const sections = props.items.flatMap((item, index) => {
+  const sections = props.items.flatMap((item) => {
     const section = document.getElementById(item.id);
-    const button = nav.querySelectorAll("button")[index];
+    const button = Array.from(nav.querySelectorAll("button")).find(
+      (candidate) => candidate.getAttribute("aria-controls") === item.id,
+    );
     if (!section || !button || !section.getClientRects().length) return [];
     const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 96;
     return [
       {
         id: item.id,
         button,
+        documentTop: section.getBoundingClientRect().top + window.scrollY,
         top: Math.max(
           0,
           Math.min(
@@ -39,6 +50,19 @@ function update() {
   });
   if (!sections.length) {
     indicator.value = { opacity: "0" };
+    return;
+  }
+  // Use physical page order before clamping anchors at the scroll boundary.
+  sections.sort((a, b) => a.documentTop - b.documentTop);
+  const orderedIds = sections.map((section) => section.id);
+  const missingIds = props.items
+    .filter((item) => !orderedIds.includes(item.id))
+    .map((item) => item.id);
+  const nextOrder = [...orderedIds, ...missingIds];
+  if (nextOrder.join("\0") !== sectionOrder.value.join("\0")) {
+    sectionOrder.value = nextOrder;
+    // Measure button positions after Vue has applied the new DOM order.
+    schedule();
     return;
   }
   const position = Math.max(0, window.scrollY);
@@ -86,6 +110,8 @@ onMounted(() => {
   if (workspace) {
     observer.observe(workspace);
     for (const child of workspace.children) observer.observe(child);
+    mutationObserver = new MutationObserver(schedule);
+    mutationObserver.observe(workspace, { childList: true, subtree: true });
   }
   schedule();
 });
@@ -93,6 +119,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("scroll", schedule);
   window.removeEventListener("resize", schedule);
   observer?.disconnect();
+  mutationObserver?.disconnect();
   cancelAnimationFrame(frame);
 });
 </script>
@@ -101,7 +128,7 @@ onBeforeUnmount(() => {
   <nav ref="navigation" class="section-navigation" aria-label="页面模块">
     <span class="section-indicator" :style="indicator" aria-hidden="true" />
     <button
-      v-for="item in items"
+      v-for="item in orderedItems"
       :key="item.id"
       type="button"
       :class="{ 'section-current': activeId === item.id }"
