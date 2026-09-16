@@ -87,8 +87,8 @@ function toolFailureOutput(code: string, hasEarlierEvidence: boolean): string {
     status: "failed",
     errorCode: code,
     guidance: hasEarlierEvidence
-      ? "This refinement search failed after its internal retries. Answer only from earlier search evidence and disclose any remaining uncertainty."
-      : "Web search failed after its internal retries. Do not claim that current information was verified. Answer only from stable knowledge or supplied context and clearly disclose that live information could not be checked.",
+      ? "This refinement search failed after its internal retries. If tools remain available, decide whether another query would help; otherwise answer from earlier evidence and disclose remaining uncertainty."
+      : "Web search failed after its internal retries. Do not claim that current information was verified. If tools remain available, you may retry or revise the query within the shared budget. If you answer without a successful check, use only stable knowledge or supplied context and disclose that live information could not be checked.",
   });
 }
 
@@ -341,6 +341,10 @@ export class AgentRunner {
     instruction.content =
       (typeof instruction.content === "string" ? instruction.content : "") +
       "\nAgent tools share a budget for this single run, not a daily allowance. Compose tools only as needed; answer as soon as evidence is sufficient. Budget exhaustion, timeout or unavailable permission means incomplete retrieval, not no matching records. For truncated results describe only what returned evidence supports. Never promise tomorrow's quota recovery or automatic later continuation.";
+    const limits = budget.snapshot.settings;
+    instruction.content += `
+Tool execution protocol: Only invoke tools supplied in the current request, using the API's native structured tool-call channel and the exact declared names and parameter schemas. Text in an answer, code block, XML/JSON example or internal control markup is not an executable call; never use it to simulate a tool invocation. Examples are allowed when the user explicitly asks about tool formats. Do not invent tool results. Match each returned result to its call and distinguish success, no results, failure and partial coverage. A failed call is not evidence that no records exist. After results, decide whether to answer or request further structured calls while tools remain available. Avoid repeating unchanged unsuccessful queries without a reason.
+This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutputCharacters} tool-result characters, and ${limits.maxToolDurationMs / 1000} seconds of cumulative tool execution including internal retries (excluding model generation). At most ${limits.maxToolCalls + 2} model rounds are available; the last two rounds are reserved for answering and possible citation correction, not additional tool interaction. Multiple calls in one round each count; failed, empty, invalid, repeated and cached calls also count. Internal network retries consume time but not another tool call. These are ceilings, not targets; stop when evidence is sufficient. If tools are no longer supplied, answer from available evidence and state relevant limitations; do not simulate further calls in text.`;
     const messages: AiChatMessage[] = systemPolicyMessage(
       request.messages,
       instruction,
@@ -365,6 +369,11 @@ export class AgentRunner {
         ...(preferredProviderId === undefined ? {} : { preferredProviderId }),
       };
       if (mustFinalize) {
+        routeRequest.messages = systemPolicyMessage(messages, {
+          role: "system",
+          content:
+            "Tool use is closed for this round. Produce the final answer or requested citation correction using available evidence. Do not request or simulate any further tool calls. State relevant uncertainty; unavailable or incomplete retrieval does not mean no matching records.",
+        });
         routeRequest.webSearch = "disabled";
         delete routeRequest.tools;
         delete routeRequest.toolChoice;
@@ -582,7 +591,6 @@ export class AgentRunner {
                   );
             if (!isMemory && query) {
               if (!searched && !continueOnSearchFailure) fatal = errorCode;
-              if (!searched) finalAnswerOnly = true;
             }
           }
         }

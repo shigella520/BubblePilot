@@ -177,7 +177,7 @@ describe("AgentRunner", () => {
     });
   });
 
-  it("degrades auto mode to a final answer when local search retries fail", async () => {
+  it("lets auto mode choose to answer after local search retries fail", async () => {
     const { repository, client, routing, request } = await setup(
       "I could not verify live information, so this is only stable background.",
     );
@@ -211,7 +211,9 @@ describe("AgentRunner", () => {
       text: "I could not verify live information, so this is only stable background.",
     });
     expect(client.requests).toHaveLength(2);
-    expect(client.requests[1]?.tools).toBeUndefined();
+    expect(client.requests[1]?.tools?.map((tool) => tool.name)).toContain(
+      "web_search",
+    );
     const failedToolMessage = client.requests[1]?.messages.at(-1);
     expect(failedToolMessage?.role).toBe("tool");
     expect(failedToolMessage?.content).toContain('"status":"failed"');
@@ -219,6 +221,76 @@ describe("AgentRunner", () => {
       { status: "failed", errorCode: "AI_WEB_SEARCH_TIMEOUT" },
     ]);
   });
+
+  it.each([false, true])(
+    "keeps tools available for a revised query after a timeout (same-batch success: %s)",
+    async (sameBatchSuccess) => {
+      const { repository, request, search: workingSearch } = await setup();
+      const requests: AiChatRequest[] = [];
+      const queries: string[] = [];
+      const client: AiClient = {
+        call: (_provider, current) => {
+          requests.push(structuredClone(current));
+          const calls =
+            requests.length === 1
+              ? ["timeout", ...(sameBatchSuccess ? ["other"] : [])]
+              : requests.length === 2
+                ? ["revised"]
+                : [];
+          return Promise.resolve({
+            status: "succeeded",
+            text: calls.length ? "" : "Verified fictional answer",
+            durationMs: 1,
+            toolCalls: calls.map((query) => ({
+              id: query,
+              name: "web_search",
+              arguments: JSON.stringify({ query }),
+            })),
+          });
+        },
+      };
+      const runner = new AgentRunner(
+        new AiRoutingService(
+          repository,
+          client,
+          new EnvironmentSecretResolver({ FICTIONAL_KEY: "fictional-secret" }),
+          true,
+        ),
+        {
+          isReady: () => Promise.resolve(true),
+          search: async (query, options) => {
+            queries.push(query);
+            if (query === "timeout")
+              throw new WebSearchToolError(
+                "AI_WEB_SEARCH_TIMEOUT",
+                "Fictional timeout",
+              );
+            return workingSearch.search(query, options);
+          },
+        },
+        repository,
+      );
+      const result = await runner.run({ ...request, webSearch: "auto" });
+      expect(result.status).toBe("succeeded");
+      expect(queries).toEqual([
+        "timeout",
+        ...(sameBatchSuccess ? ["other"] : []),
+        "revised",
+      ]);
+      expect(requests[1]?.tools?.map((tool) => tool.name)).toContain(
+        "web_search",
+      );
+      expect(result.agentBudget?.toolCalls).toBe(sameBatchSuccess ? 3 : 2);
+      const policy = requests[0]?.messages.find(
+        (message) => message.role === "system",
+      )?.content;
+      expect(policy).toContain(
+        "10 tool calls, 24000 tool-result characters, and 60 seconds",
+      );
+      expect(policy).toContain("12 model rounds");
+      expect(policy).toContain("native structured tool-call channel");
+    },
+  );
 
   it("allows required mode to opt into a degraded answer", async () => {
     const { repository, client, routing, request } = await setup(
