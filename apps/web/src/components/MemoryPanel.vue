@@ -16,17 +16,21 @@ import SensitiveUnlock from "./SensitiveUnlock.vue";
 const props = defineProps<{
   mode: "settings" | "chat" | "jobs";
   embedded?: boolean;
+  fixedChatId?: string;
   chats?: readonly {
     id: string;
     displayName?: string | null;
     providerChatId?: string;
   }[];
 }>();
+const emit = defineEmits<{
+  authorizationChanged: [state: { chatId: string; enabled: boolean }];
+}>();
 const session = useSessionStore();
 const busy = ref(false);
 const error = ref("");
 const notice = ref("");
-const chatId = ref("");
+const chatId = ref(props.fixedChatId ?? "");
 const query = ref("");
 const from = ref("");
 const to = ref("");
@@ -345,10 +349,13 @@ async function probe() {
 }
 async function authorize() {
   if (!session.sensitiveActive) return;
-  await apiRequest(`/api/v1/chats/${chatId.value}/memory`, {
+  const id = chatId.value;
+  const enabled = !chat.enabled;
+  await apiRequest(`/api/v1/chats/${id}/memory`, {
     method: "PUT",
-    body: jsonBody({ enabled: !chat.enabled, expectedVersion: chat.version }),
+    body: jsonBody({ enabled, expectedVersion: chat.version }),
   });
+  emit("authorizationChanged", { chatId: id, enabled });
   await refresh();
 }
 async function search() {
@@ -508,7 +515,7 @@ onBeforeUnmount(() => {
       AI
       根据问题自行查找已授权聊天中的历史记录，无需添加工作流节点。可检索范围受消息保留期限限制。
     </p>
-    <SensitiveUnlock v-if="!embedded || mode === 'settings'" />
+    <SensitiveUnlock v-if="!embedded || mode === 'settings' || fixedChatId" />
     <DismissibleMessage
       v-if="error && !selectedJob"
       error
@@ -580,7 +587,7 @@ onBeforeUnmount(() => {
       </fieldset>
     </form>
     <div v-if="mode === 'chat'">
-      <label
+      <label v-if="!fixedChatId"
         >聊天<select v-model="chatId" :disabled="busy">
           <option value="">选择聊天</option>
           <option v-for="item in chats" :key="item.id" :value="item.id">
@@ -603,7 +610,7 @@ onBeforeUnmount(() => {
         </p>
         <button
           class="button"
-          :disabled="busy || !session.sensitiveActive"
+          :disabled="busy || !session.sensitiveActive || !chat.version"
           @click="run(authorize)"
         >
           {{ chat.enabled ? "停用检索" : "授权此聊天检索" }}

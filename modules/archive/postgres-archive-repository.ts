@@ -62,6 +62,7 @@ interface ChatRow {
   type: "direct" | "group" | "unknown";
   display_name: string | null;
   enabled: boolean;
+  memory_authorized: boolean;
   message_count: string;
   version: number;
   updated_at: Date;
@@ -127,6 +128,7 @@ function chatSummary(row: ChatRow): ChatSummary {
     type: row.type,
     displayName: row.display_name,
     enabled: row.enabled,
+    memoryAuthorized: row.memory_authorized,
     messageCount: Number(row.message_count),
     version: row.version,
     updatedAt: row.updated_at.toISOString(),
@@ -510,6 +512,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<ChatRow>(
       `SELECT
          c.id, c.provider_chat_id, c.type, c.display_name, c.enabled, c.version,
+         EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
          c.updated_at,
          COUNT(m.id)::text AS message_count
        FROM chats c
@@ -539,6 +542,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<ChatRow>(
       `SELECT
          c.id, c.provider_chat_id, c.type, c.display_name, c.enabled, c.version,
+         EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
          c.updated_at, COUNT(m.id)::text AS message_count
        FROM chats c
        LEFT JOIN messages m ON m.chat_id = c.id
@@ -1112,6 +1116,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<ChatRow>(
       `SELECT
          c.id, c.provider_chat_id, c.type, c.display_name, c.enabled, c.version,
+         EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
          c.updated_at, COUNT(m.id)::text AS message_count
        FROM chats c
        LEFT JOIN messages m ON m.chat_id = c.id

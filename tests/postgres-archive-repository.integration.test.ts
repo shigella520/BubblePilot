@@ -70,6 +70,7 @@ describe.runIf(testDatabaseUrl !== undefined)(
         automationOutcome: "matched",
       });
       expect(chat?.messageCount).toBe(1);
+      expect(chat?.memoryAuthorized).toBe(false);
 
       const messages = await repository.listMessages(chat?.id ?? randomUUID(), {
         limit: 100,
@@ -85,6 +86,30 @@ describe.runIf(testDatabaseUrl !== undefined)(
           [first.messageId],
         );
         expect(indexed.rows[0]?.message_index).toBe("1");
+        await database.query(
+          "INSERT INTO memory_chats (chat_id, enabled, from_index) VALUES ($1, TRUE, 1)",
+          [chat?.id],
+        );
+        for (const list of [
+          await repository.listChats({ limit: 100, cursor: null }),
+          await repository.listChatMonitoring({ limit: 100, cursor: null }),
+        ]) {
+          expect(
+            list.find((item) => item.id === chat?.id)?.memoryAuthorized,
+          ).toBe(true);
+        }
+        await database.query(
+          "UPDATE memory_chats SET enabled = FALSE WHERE chat_id = $1",
+          [chat?.id],
+        );
+        const revoked = await repository.listChatMonitoring({
+          limit: 100,
+          cursor: null,
+        });
+        expect(revoked.find((item) => item.id === chat?.id)).toMatchObject({
+          enabled: true,
+          memoryAuthorized: false,
+        });
       } finally {
         await database.end();
       }

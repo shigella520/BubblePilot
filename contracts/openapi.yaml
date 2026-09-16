@@ -902,7 +902,7 @@ paths:
         - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
-          description: 返回已发现聊天的监听状态、乐观版本和消息数量，不返回正文。
+          description: 返回已发现聊天的监听状态、长期记忆授权 memoryAuthorized（无授权记录为 false）、乐观版本和消息数量，不返回正文。
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/chat-monitoring/{chatId}:

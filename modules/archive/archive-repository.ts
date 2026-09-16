@@ -46,6 +46,7 @@ export interface ChatSummary {
   type: "direct" | "group" | "unknown";
   displayName: string | null;
   enabled: boolean;
+  memoryAuthorized: boolean;
   messageCount: number;
   version: number;
   updatedAt: string;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import SectionNavigation from "../components/SectionNavigation.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
+import AdminDetailDialog from "../components/AdminDetailDialog.vue";
 import {
   Download,
   FileJson2,
@@ -36,9 +37,18 @@ interface Chat {
   displayName: string | null;
   type: string;
   enabled: boolean;
+  memoryAuthorized: boolean;
   messageCount: number;
   version: number;
   updatedAt: string;
+}
+
+const memoryChat = ref<Chat | null>(null);
+const memoryTrigger = ref<HTMLElement | null>(null);
+function openChatMemory(chat: Chat, event: MouseEvent) {
+  memoryTrigger.value =
+    event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+  memoryChat.value = chat;
 }
 
 interface RebuildStatus {
@@ -424,6 +434,17 @@ async function loadChatOptions() {
   chatOptions.value = await apiAllPages<Chat>("/api/v1/chats?limit=100");
 }
 
+function updateMemoryAuthorization(state: {
+  chatId: string;
+  enabled: boolean;
+}) {
+  for (const list of [chats.value, chatOptions.value]) {
+    for (const chat of list) {
+      if (chat.id === state.chatId) chat.memoryAuthorized = state.enabled;
+    }
+  }
+}
+
 async function loadChats(reset = false) {
   busy.value = true;
   message.value = "";
@@ -793,7 +814,6 @@ onBeforeUnmount(() =>
       <SectionNavigation
         :items="[
           { id: 'monitoring', label: '监听范围', icon: SlidersHorizontal },
-          { id: 'chat-memory', label: '长期记忆', icon: MessageCircle },
           { id: 'search', label: '消息搜索', icon: MessageCircle },
           { id: 'export', label: '数据导出', icon: FileJson2 },
         ]"
@@ -827,7 +847,7 @@ onBeforeUnmount(() =>
         <p class="panel-description">
           这里列出 Webhook
           已发现的聊天。启停操作需要二次验证，并使用版本号防止并发覆盖。
-          角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建更新聊天共享历史并产生模型用量；索引记录在“历史索引”。
+          长期记忆授权独立于聊天监听；已授权不代表全局服务已开启或索引已完成，可点击对应聊天的“配置”调整。角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建更新聊天共享历史并产生模型用量；索引记录在“历史索引”。
         </p>
         <div class="table-shell">
           <table>
@@ -839,12 +859,13 @@ onBeforeUnmount(() =>
                 <th>最后发现</th>
                 <th>成员身份</th>
                 <th>监听</th>
+                <th>长期记忆授权</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!chats.length">
-                <td colspan="7" class="empty-cell">
+                <td colspan="8" class="empty-cell">
                   <strong>尚未发现聊天</strong>
                   <span class="empty-help"
                     >聊天列表由 BlueBubbles Webhook 首次投递消息后创建；REST
@@ -906,6 +927,23 @@ onBeforeUnmount(() =>
                           ? "已启用"
                           : "已停用"
                     }}
+                  </button>
+                </td>
+                <td>
+                  <span class="state-badge">{{
+                    chat.memoryAuthorized === true
+                      ? "已授权"
+                      : chat.memoryAuthorized === false
+                        ? "未授权"
+                        : "状态未知"
+                  }}</span>
+                  <button
+                    class="button secondary tiny"
+                    type="button"
+                    :aria-label="`配置 ${chat.displayName || chat.providerChatId} 的长期记忆`"
+                    @click="openChatMemory(chat, $event)"
+                  >
+                    配置
                   </button>
                 </td>
                 <td>
@@ -1052,7 +1090,20 @@ onBeforeUnmount(() =>
           @next="changePage(chatPager.next)"
         />
       </section>
-      <MemoryPanel id="chat-memory" mode="chat" :chats="chatOptions" embedded />
+      <AdminDetailDialog
+        v-if="memoryChat"
+        :title="`长期记忆 · ${memoryChat.displayName || memoryChat.providerChatId}`"
+        :return-focus="memoryTrigger"
+        @close="memoryChat = null"
+      >
+        <MemoryPanel
+          :key="memoryChat.id"
+          mode="chat"
+          :fixed-chat-id="memoryChat.id"
+          embedded
+          @authorization-changed="updateMemoryAuthorization"
+        />
+      </AdminDetailDialog>
       <section id="search" class="admin-panel">
         <div class="panel-head">
           <div>
