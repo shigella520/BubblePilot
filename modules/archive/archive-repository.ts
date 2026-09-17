@@ -1,3 +1,4 @@
+import type { MessageAuthor } from "../identity/bot-identity.js";
 import type {
   IgnoredInboundEvent,
   MessageAttachment,
@@ -45,6 +46,7 @@ export interface ChatSummary {
   type: "direct" | "group" | "unknown";
   displayName: string | null;
   enabled: boolean;
+  memoryAuthorized: boolean;
   messageCount: number;
   version: number;
   updatedAt: string;
@@ -58,6 +60,7 @@ export interface ArchivedMessage {
   body: string | null;
   contentType: "text" | "attachment" | "mixed" | "unknown";
   isFromMe: boolean;
+  author?: MessageAuthor;
   attachments: readonly MessageAttachment[];
   linkPreview: LinkPreviewBundle;
   linkPreviewDiagnostics: readonly LinkPreviewDiagnostic[];
@@ -113,6 +116,7 @@ export interface ContextMessage {
   sentAt: string;
   body: string;
   isFromMe: boolean;
+  author?: MessageAuthor;
   attachments: readonly MessageAttachment[];
   linkPreview: LinkPreviewBundle;
   imageSummaries?: readonly MessageImageSummary[];

@@ -1,32 +1,31 @@
-import type { SummarySettingsRepository } from "./summary-settings-repository.js";
+import type { ContextSettingsRepository } from "./context-settings-repository.js";
 import type {
-  SummaryRuntimeSettings,
-  SummarySettingsUpdate,
-  SummarySettingsView,
-} from "./summary-settings-types.js";
+  ContextRuntimeSettings,
+  ContextSettingsUpdate,
+  ContextSettingsView,
+} from "./context-settings-types.js";
 
-export class SummarySettingsService {
+export class ContextSettingsService {
   constructor(
-    readonly repository: SummarySettingsRepository,
-    private readonly fallback: SummaryRuntimeSettings,
+    readonly repository: ContextSettingsRepository,
+    private readonly fallback: ContextRuntimeSettings,
   ) {}
-  async view(): Promise<SummarySettingsView> {
+  async view(): Promise<ContextSettingsView> {
     const value = await this.repository.find();
     return value === null
       ? {
           ...this.fallback,
           source: "defaults",
           version: 0,
-          policyVersion: 1,
           updatedAt: null,
         }
       : { ...value, source: "database" };
   }
-  async resolve(): Promise<SummaryRuntimeSettings> {
+  async resolve(): Promise<ContextRuntimeSettings> {
     const value = await this.repository.find();
     return value === null ? this.fallback : value;
   }
-  async update(input: SummarySettingsUpdate) {
+  async update(input: ContextSettingsUpdate) {
     const result = await this.repository.save(input);
     return result.status === "conflict"
       ? result

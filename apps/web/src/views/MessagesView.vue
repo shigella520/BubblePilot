@@ -1,12 +1,13 @@
 <script setup lang="ts">
+import SectionNavigation from "../components/SectionNavigation.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
+import AdminDetailDialog from "../components/AdminDetailDialog.vue";
 import {
   Download,
   FileJson2,
   Images,
   MessageCircle,
   RefreshCw,
-  RotateCcw,
   Save,
   Search,
   SlidersHorizontal,
@@ -17,7 +18,6 @@ import {
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import CursorPagination from "../components/CursorPagination.vue";
-import SensitiveUnlock from "../components/SensitiveUnlock.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { useCursorPager } from "../composables/useCursorPager";
 import {
@@ -36,21 +36,67 @@ interface Chat {
   displayName: string | null;
   type: string;
   enabled: boolean;
+  memoryAuthorized: boolean;
   messageCount: number;
   version: number;
   updatedAt: string;
 }
 
-interface SummarySettings {
-  enabled: boolean;
-  providerRouteId: string;
+const memoryChat = ref<Chat | null>(null);
+const memoryTrigger = ref<HTMLElement | null>(null);
+function openChatMemory(chat: Chat, event: MouseEvent) {
+  memoryTrigger.value =
+    event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+  memoryChat.value = chat;
 }
 
-interface SummaryResetResult {
-  chatId: string;
-  status: "created" | "not-needed";
-  id?: string;
-  messageCount: number;
+interface RebuildStatus {
+  chats: Array<{
+    id: string;
+    bot_memory_rebuild_required: boolean;
+  }>;
+}
+const rebuildStatus = ref<RebuildStatus | null>(null);
+const rebuildBusyIds = reactive(new Set<string>());
+function needsRebuild(id: string, _target: "memory") {
+  void _target;
+  return (
+    rebuildStatus.value?.chats.find((c) => c.id === id)
+      ?.bot_memory_rebuild_required === true
+  );
+}
+async function loadRebuildStatus() {
+  rebuildStatus.value = null;
+  rebuildStatus.value = await apiRequest<RebuildStatus>(
+    "/api/v1/bot-attributions",
+  );
+}
+async function rebuildChat(chat: Chat, target: "memory") {
+  if (
+    !needsRebuild(chat.id, target) ||
+    rebuildBusyIds.has(chat.id) ||
+    !chat.enabled
+  )
+    return;
+  rebuildBusyIds.add(chat.id);
+  message.value = "";
+  messageIsError.value = false;
+  const label = "索引";
+  try {
+    const result = await apiRequest<{ memory: boolean }>(
+      `/api/v1/chats/${chat.id}/bot-identity/rebuild`,
+      { method: "POST", body: JSON.stringify({ target }) },
+    );
+    message.value = result[target]
+      ? `「${chat.displayName || chat.providerChatId}」${label}重建已启动，请到执行与审计的历史索引查看进度。`
+      : `未启动${label}重建，请检查对应服务配置及聊天授权。`;
+    await loadRebuildStatus();
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    rebuildBusyIds.delete(chat.id);
+  }
 }
 
 interface MessageResult {
@@ -206,8 +252,6 @@ const exportPreviewBusy = ref(false);
 const exportConfirmBusy = ref(false);
 const chatToggleBusyIds = reactive(new Set<string>());
 const chatDeleteBusyIds = reactive(new Set<string>());
-const chatSummaryResetBusyIds = reactive(new Set<string>());
-const summaryResetAvailable = ref(false);
 const participantChat = ref<Chat | null>(null);
 const participantVersion = ref(0);
 const participantDrafts = ref<ChatParticipantDraft[]>([]);
@@ -385,12 +429,19 @@ function handleMediaKeydown(event: KeyboardEvent) {
   }
 }
 
-function scrollToSection(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-}
-
 async function loadChatOptions() {
   chatOptions.value = await apiAllPages<Chat>("/api/v1/chats?limit=100");
+}
+
+function updateMemoryAuthorization(state: {
+  chatId: string;
+  enabled: boolean;
+}) {
+  for (const list of [chats.value, chatOptions.value]) {
+    for (const chat of list) {
+      if (chat.id === state.chatId) chat.memoryAuthorized = state.enabled;
+    }
+  }
 }
 
 async function loadChats(reset = false) {
@@ -401,54 +452,13 @@ async function loadChats(reset = false) {
     await Promise.all([
       reset ? chatPager.first() : chatPager.refresh(),
       loadChatOptions(),
-      apiRequest<SummarySettings>("/api/v1/ai/summary/settings").then(
-        (settings) => {
-          summaryResetAvailable.value =
-            settings.enabled && settings.providerRouteId.length > 0;
-        },
-      ),
+      loadRebuildStatus(),
     ]);
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
   } finally {
     busy.value = false;
-  }
-}
-
-async function resetChatSummary(chat: Chat) {
-  if (
-    !session.sensitiveActive ||
-    !summaryResetAvailable.value ||
-    chatSummaryResetBusyIds.has(chat.id)
-  ) {
-    return;
-  }
-  const label = chat.displayName || chat.providerChatId;
-  if (
-    !window.confirm(
-      `确认重置聊天「${label}」的对话摘要？\n\n已有摘要会被忽略；系统只用最近一个压缩周期生成新摘要，更早历史不会进入新摘要。`,
-    )
-  ) {
-    return;
-  }
-  chatSummaryResetBusyIds.add(chat.id);
-  message.value = "";
-  messageIsError.value = false;
-  try {
-    const result = await apiRequest<SummaryResetResult>(
-      `/api/v1/chats/${chat.id}/summary/reset`,
-      { method: "POST" },
-    );
-    message.value =
-      result.status === "created"
-        ? `聊天「${label}」的摘要已重置，正在用最近 ${result.messageCount} 条窗口消息生成新摘要。`
-        : `聊天「${label}」的摘要已清空；当前消息未超过基础窗口，无需生成压缩摘要。`;
-  } catch (cause) {
-    message.value = errorMessage(cause);
-    messageIsError.value = true;
-  } finally {
-    chatSummaryResetBusyIds.delete(chat.id);
   }
 }
 
@@ -775,7 +785,10 @@ async function downloadExport(job: DataExportJob) {
 watch(
   () => session.sensitiveActive,
   (active) => {
-    if (active) return;
+    if (active) {
+      void search();
+      return;
+    }
     messagePager.clear();
     exportPreview.value = null;
     exportConfirmed.value = false;
@@ -800,30 +813,18 @@ onBeforeUnmount(() =>
         <p class="eyebrow">MESSAGES</p>
         <h2>聊天与归档</h2>
       </div>
-      <nav>
-        <button
-          class="active"
-          type="button"
-          @click="scrollToSection('monitoring')"
-        >
-          <SlidersHorizontal :size="18" />监听范围
-        </button>
-        <button type="button" @click="scrollToSection('search')">
-          <MessageCircle :size="18" />消息搜索
-        </button>
-        <button type="button" @click="scrollToSection('export')">
-          <FileJson2 :size="18" />数据导出
-        </button>
-        <button type="button" @click="scrollToSection('chat-memory')">
-          <MessageCircle :size="18" />长期记忆
-        </button>
-      </nav>
+      <SectionNavigation
+        :items="[
+          { id: 'monitoring', label: '监听范围', icon: SlidersHorizontal },
+          { id: 'search', label: '消息搜索', icon: MessageCircle },
+          { id: 'export', label: '数据导出', icon: FileJson2 },
+        ]"
+      />
       <div class="sidebar-note">
         监听变更只影响后续消息，不自动回填或删除历史。
       </div>
     </aside>
     <div class="admin-workspace">
-      <SensitiveUnlock @verified="search" />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"
@@ -847,6 +848,7 @@ onBeforeUnmount(() =>
         <p class="panel-description">
           这里列出 Webhook
           已发现的聊天。启停操作需要二次验证，并使用版本号防止并发覆盖。
+          长期记忆授权独立于聊天监听；已授权不代表全局服务已开启或索引已完成，可点击对应聊天的“配置”调整。角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建更新聊天共享历史并产生模型用量；索引记录在“历史索引”。
         </p>
         <div class="table-shell">
           <table>
@@ -858,12 +860,13 @@ onBeforeUnmount(() =>
                 <th>最后发现</th>
                 <th>成员身份</th>
                 <th>监听</th>
+                <th>长期记忆授权</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="!chats.length">
-                <td colspan="7" class="empty-cell">
+                <td colspan="8" class="empty-cell">
                   <strong>尚未发现聊天</strong>
                   <span class="empty-help"
                     >聊天列表由 BlueBubbles Webhook 首次投递消息后创建；REST
@@ -928,30 +931,35 @@ onBeforeUnmount(() =>
                   </button>
                 </td>
                 <td>
+                  <span class="state-badge">{{
+                    chat.memoryAuthorized === true
+                      ? "已授权"
+                      : chat.memoryAuthorized === false
+                        ? "未授权"
+                        : "状态未知"
+                  }}</span>
+                  <button
+                    class="button secondary tiny"
+                    type="button"
+                    :aria-label="`配置 ${chat.displayName || chat.providerChatId} 的长期记忆`"
+                    @click="openChatMemory(chat, $event)"
+                  >
+                    配置
+                  </button>
+                </td>
+                <td>
                   <div class="row-actions">
                     <button
+                      v-if="needsRebuild(chat.id, 'memory')"
                       class="button tiny secondary"
-                      type="button"
                       :disabled="
-                        !session.sensitiveActive ||
-                        !summaryResetAvailable ||
-                        chatSummaryResetBusyIds.has(chat.id)
+                        !chat.enabled || rebuildBusyIds.has(chat.id) || busy
                       "
-                      :aria-busy="chatSummaryResetBusyIds.has(chat.id)"
-                      :title="
-                        !summaryResetAvailable
-                          ? '请先启用对话摘要并配置 Provider Route'
-                          : '忽略已有摘要，用最近一个压缩周期建立新摘要'
-                      "
-                      @click="resetChatSummary(chat)"
+                      @click="rebuildChat(chat, 'memory')"
                     >
-                      <RotateCcw :size="14" />
-                      {{
-                        chatSummaryResetBusyIds.has(chat.id)
-                          ? "重置中…"
-                          : "重置摘要"
-                      }}
+                      {{ rebuildBusyIds.has(chat.id) ? "处理中…" : "重建索引" }}
                     </button>
+
                     <button
                       class="button tiny secondary"
                       type="button"
@@ -1083,7 +1091,20 @@ onBeforeUnmount(() =>
           @next="changePage(chatPager.next)"
         />
       </section>
-      <MemoryPanel id="chat-memory" mode="chat" :chats="chatOptions" embedded />
+      <AdminDetailDialog
+        v-if="memoryChat"
+        :title="`长期记忆 · ${memoryChat.displayName || memoryChat.providerChatId}`"
+        :return-focus="memoryTrigger"
+        @close="memoryChat = null"
+      >
+        <MemoryPanel
+          :key="memoryChat.id"
+          mode="chat"
+          :fixed-chat-id="memoryChat.id"
+          embedded
+          @authorization-changed="updateMemoryAuthorization"
+        />
+      </AdminDetailDialog>
       <section id="search" class="admin-panel">
         <div class="panel-head">
           <div>

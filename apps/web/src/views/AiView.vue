@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentSettingsPanel from "../components/AgentSettingsPanel.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
 import {
@@ -99,17 +100,13 @@ interface ImageInputSettings {
   version: number;
   updatedAt: string | null;
 }
-interface SummarySettings {
-  enabled: boolean;
+interface ContextSettings {
   includeFromMe: boolean;
   baseMessageWindow: number;
   characterLimit: number;
   redundancyMessageWindow: number;
-  providerRouteId: string;
-  timeZone: string;
   source: "defaults" | "database";
   version: number;
-  policyVersion: number;
   updatedAt: string | null;
 }
 type ImageInputSettingsForm = Omit<
@@ -144,9 +141,6 @@ interface ProviderForm {
 type ReasoningEffort =
   "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-function scrollToSection(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-}
 function probeLabel(value: "verified" | "failed" | "unknown") {
   return value === "verified"
     ? "已验证"
@@ -161,16 +155,13 @@ const searchSettings = ref<WebSearchSettings | null>(null);
 const searchSettingsBusy = ref(false);
 const imageInputSettings = ref<ImageInputSettings | null>(null);
 const imageInputSettingsBusy = ref(false);
-const summarySettings = ref<SummarySettings | null>(null);
-const summarySettingsBusy = ref(false);
-const summarySettingsForm = reactive({
-  enabled: false,
+const contextSettings = ref<ContextSettings | null>(null);
+const contextSettingsBusy = ref(false);
+const contextSettingsForm = reactive({
   includeFromMe: true,
   baseMessageWindow: 10,
   characterLimit: 6000,
   redundancyMessageWindow: 10,
-  providerRouteId: "",
-  timeZone: "UTC",
 });
 const imageInputSettingsForm = reactive<ImageInputSettingsForm>({
   enabled: false,
@@ -257,9 +248,14 @@ function applySearchSettings(value: WebSearchSettings) {
     failurePolicy: value.failurePolicy,
   });
 }
-function applySummarySettings(value: SummarySettings) {
-  summarySettings.value = value;
-  Object.assign(summarySettingsForm, value);
+function applyContextSettings(value: ContextSettings) {
+  contextSettings.value = value;
+  Object.assign(contextSettingsForm, {
+    includeFromMe: value.includeFromMe,
+    baseMessageWindow: value.baseMessageWindow,
+    redundancyMessageWindow: value.redundancyMessageWindow,
+    characterLimit: value.characterLimit,
+  });
 }
 
 function applyImageInputSettings(value: ImageInputSettings) {
@@ -315,7 +311,7 @@ async function load() {
       statusData,
       settingsData,
       imageSettingsData,
-      summarySettingsData,
+      contextSettingsData,
     ] = await Promise.all([
       apiRequest<Provider[]>("/api/v1/ai/providers"),
       apiRequest<AiRoute[]>("/api/v1/ai/routes"),
@@ -324,14 +320,14 @@ async function load() {
       ),
       apiRequest<WebSearchSettings>("/api/v1/ai/search/settings"),
       apiRequest<ImageInputSettings>("/api/v1/ai/image-input/settings"),
-      apiRequest<SummarySettings>("/api/v1/ai/summary/settings"),
+      apiRequest<ContextSettings>("/api/v1/ai/context/settings"),
     ]);
     providers.value = providerData;
     routes.value = routeData;
     searchStatus.value = statusData;
     applySearchSettings(settingsData);
     applyImageInputSettings(imageSettingsData);
-    applySummarySettings(summarySettingsData);
+    applyContextSettings(contextSettingsData);
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
@@ -339,27 +335,27 @@ async function load() {
     busy.value = false;
   }
 }
-async function saveSummarySettings() {
-  if (summarySettingsBusy.value || summarySettings.value === null) return;
-  summarySettingsBusy.value = true;
+async function saveContextSettings() {
+  if (contextSettingsBusy.value || contextSettings.value === null) return;
+  contextSettingsBusy.value = true;
   try {
-    const saved = await apiRequest<SummarySettings>(
-      "/api/v1/ai/summary/settings",
+    const saved = await apiRequest<ContextSettings>(
+      "/api/v1/ai/context/settings",
       {
         method: "PUT",
         body: jsonBody({
-          ...summarySettingsForm,
-          expectedVersion: summarySettings.value.version,
+          ...contextSettingsForm,
+          expectedVersion: contextSettings.value.version,
         }),
       },
     );
-    applySummarySettings(saved);
-    message.value = "对话摘要全局配置已保存并立即生效。";
+    applyContextSettings(saved);
+    message.value = "聊天上下文配置已保存，将用于后续执行。";
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
   } finally {
-    summarySettingsBusy.value = false;
+    contextSettingsBusy.value = false;
   }
 }
 async function saveImageInputSettings() {
@@ -812,7 +808,9 @@ async function deleteRoute(item: AiRoute) {
     routeDeleteBusyIds.delete(item.id);
   }
 }
-onMounted(load);
+onMounted(async () => {
+  await load();
+});
 </script>
 
 <template>
@@ -822,33 +820,17 @@ onMounted(load);
         <p class="eyebrow">AI ROUTING</p>
         <h2>Provider 管理</h2>
       </div>
-      <nav>
-        <button type="button" @click="scrollToSection('agent-settings')">
-          <Bot :size="18" />Agent 执行配置
-        </button>
-        <button type="button" @click="scrollToSection('memory-settings')">
-          <Search :size="18" />长期聊天检索
-        </button>
-        <button
-          class="active"
-          type="button"
-          @click="scrollToSection('search-settings')"
-        >
-          <Search :size="18" />联网搜索
-        </button>
-        <button type="button" @click="scrollToSection('summary-settings')">
-          <MessageCircle :size="18" />对话摘要压缩
-        </button>
-        <button type="button" @click="scrollToSection('image-input-settings')">
-          <Image :size="18" />原生图片输入
-        </button>
-        <button type="button" @click="scrollToSection('providers')">
-          <Bot :size="18" />Provider
-        </button>
-        <button type="button" @click="scrollToSection('routes')">
-          <Route :size="18" />路由策略
-        </button>
-      </nav>
+      <SectionNavigation
+        :items="[
+          { id: 'agent-settings', label: 'Agent 执行配置', icon: Bot },
+          { id: 'memory-settings', label: '长期聊天检索', icon: Search },
+          { id: 'search-settings', label: '联网搜索', icon: Search },
+          { id: 'context-settings', label: '聊天上下文', icon: MessageCircle },
+          { id: 'image-input-settings', label: '原生图片输入', icon: Image },
+          { id: 'providers', label: 'Provider', icon: Bot },
+          { id: 'routes', label: '路由策略', icon: Route },
+        ]"
+      />
       <div class="sidebar-note">
         固定顺序由管理员配置；自动降级只影响当前有效顺序，不会改写人工排序。
       </div>
@@ -965,87 +947,91 @@ onMounted(load);
           </div>
         </form>
       </section>
-      <section id="summary-settings" class="admin-panel">
+      <section id="context-settings" class="admin-panel">
         <div class="panel-head">
           <div>
-            <p class="card-kicker">CHAT SUMMARY</p>
-            <h2>对话摘要压缩</h2>
+            <p class="card-kicker">CHAT CONTEXT</p>
+            <h2>聊天上下文配置</h2>
           </div>
           <span class="state-badge">全局配置</span>
         </div>
         <p class="panel-description">
-          所有聊天统一使用此摘要压缩策略；未压缩消息数（包含当前消息）达到基础窗口与冗余窗口之和时，后台任务压缩最早的冗余窗口消息。字符数只约束上下文提取，不限制下游
-          AI 对话请求。
+          历史原文达到基础窗口与缓冲窗口之和时，批量移出最早的缓冲窗口消息，回到基础窗口。当前触发消息单独追加。字符保护可能让实际保留条数少于基础窗口；移出上下文不会删除归档或索引。稳定前缀有助于缓存复用，实际命中取决于模型服务。
         </p>
         <form
-          v-if="summarySettings"
+          v-if="contextSettings"
           class="settings-form boxed-form"
-          @submit.prevent="saveSummarySettings"
+          @submit.prevent="saveContextSettings"
         >
           <div class="field-grid">
             <label
-              ><span>启用摘要压缩</span
-              ><input v-model="summarySettingsForm.enabled" type="checkbox"
-            /></label>
-            <label
-              ><span>包含机器人消息</span
+              ><span>包含本账号消息</span
               ><input
-                v-model="summarySettingsForm.includeFromMe"
+                v-model="contextSettingsForm.includeFromMe"
                 type="checkbox"
             /></label>
             <label
               ><span>基础消息窗口</span
               ><input
-                v-model.number="summarySettingsForm.baseMessageWindow"
+                v-model.number="contextSettingsForm.baseMessageWindow"
                 type="number"
                 min="1"
                 max="50"
                 required
             /></label>
             <label
-              ><span>上下文提取目标字符数</span
+              ><span>历史上下文字符保护值</span
               ><input
-                v-model.number="summarySettingsForm.characterLimit"
+                v-model.number="contextSettingsForm.characterLimit"
                 type="number"
                 min="100"
                 max="20000"
                 required
             /></label>
             <label
-              ><span>冗余消息窗口</span
+              ><span>缓冲消息窗口</span
               ><input
-                v-model.number="summarySettingsForm.redundancyMessageWindow"
+                v-model.number="contextSettingsForm.redundancyMessageWindow"
                 type="number"
                 min="1"
                 max="50"
                 required
             /></label>
-            <label
-              ><span>摘要 Provider Route</span
-              ><select v-model="summarySettingsForm.providerRouteId">
-                <option value="">未选择</option>
-                <option
-                  v-for="route in routes"
-                  :key="route.id"
-                  :value="route.id"
-                >
-                  {{ route.name }}
-                </option>
-              </select></label
-            >
-            <label
-              ><span>摘要时区</span
-              ><input v-model="summarySettingsForm.timeZone" required
-            /></label>
           </div>
+          <p class="panel-description">
+            来源：{{
+              contextSettings.source === "database" ? "已保存配置" : "默认值"
+            }}
+            · 版本 {{ contextSettings.version }} · 更新于
+            {{
+              contextSettings.updatedAt
+                ? new Date(contextSettings.updatedAt).toLocaleString()
+                : "尚未保存"
+            }}
+          </p>
           <div class="form-actions">
             <button
               class="button secondary"
+              type="button"
+              :disabled="contextSettingsBusy"
+              @click="
+                Object.assign(contextSettingsForm, {
+                  includeFromMe: true,
+                  baseMessageWindow: 10,
+                  redundancyMessageWindow: 10,
+                  characterLimit: 6000,
+                })
+              "
+            >
+              恢复默认值（保存后生效）
+            </button>
+            <button
+              class="button secondary"
               type="submit"
-              :disabled="summarySettingsBusy"
+              :disabled="contextSettingsBusy"
             >
               <Save :size="16" />{{
-                summarySettingsBusy ? "保存中…" : "保存摘要配置"
+                contextSettingsBusy ? "保存中…" : "保存上下文配置"
               }}
             </button>
           </div>

@@ -18,6 +18,7 @@ function instantMicros(value: string): bigint {
   );
 }
 const fields = {
+  botWorkflowId: z.string().uuid().optional(),
   senderId: z.string().trim().min(1).max(255).optional(),
   from: timestamp.optional(),
   to: timestamp.optional(),
@@ -35,12 +36,14 @@ const fields = {
 };
 function validFilter(v: ChatFilters) {
   return (
+    !(v.senderId && v.botWorkflowId) &&
     (!v.from || !v.to || instantMicros(v.from) <= instantMicros(v.to)) &&
     (v.keywords !== undefined) === (v.keywordMode !== undefined)
   );
 }
 export interface ChatFilters {
   senderId?: string | undefined;
+  botWorkflowId?: string | undefined;
   from?: string | undefined;
   to?: string | undefined;
   dailyTime?: { from: string; to: string } | undefined;
@@ -126,6 +129,22 @@ export function dayBounds(
   return [first, last];
 }
 export function appliedFilters(query: ChatArchiveQuery): ChatFilters {
-  const { senderId, from, to, dailyTime, keywords, keywordMode } = query;
-  return { senderId, from, to, dailyTime, keywords, keywordMode };
+  const {
+    senderId,
+    botWorkflowId,
+    from,
+    to,
+    dailyTime,
+    keywords,
+    keywordMode,
+  } = query;
+  return {
+    senderId,
+    botWorkflowId,
+    from,
+    to,
+    dailyTime,
+    keywords,
+    keywordMode,
+  };
 }

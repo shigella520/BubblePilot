@@ -72,6 +72,31 @@ if (!baseUrl || !model) {
       expected: string;
       history?: AiChatMessage[];
     }> = [
+      {
+        id: "raw-window-missing-history",
+        history: [
+          {
+            role: "user",
+            content:
+              '<history_coverage>{"retained":null,"omitted":null,"windowEvicted":{"count":20,"firstMessageIndex":"1","lastMessageIndex":"20","earliestSentAt":"2026-09-01T00:00:00Z","latestSentAt":"2026-09-07T00:00:00Z"},"incompleteReasons":["window-evicted"]}</history_coverage>当前原文不是完整历史，缺口不能证明某人没有发言。',
+          },
+        ],
+        prompt: "fictional-alice 最近一次发言是什么时候？",
+        expected:
+          "没有聊天摘要时使用 query_chat_messages 查询；不能把窗口缺口当成无记录。记录调用、用量和答案支持性。",
+      },
+      {
+        id: "raw-window-enough-evidence",
+        history: [
+          {
+            role: "user",
+            content:
+              '<chat_history>[2026-09-21T11:00:00+08:00] [sender_id="fictional-alice"] 我今天午餐选虚构番茄面。</chat_history>',
+          },
+        ],
+        prompt: "虚构甲刚刚说午餐选了什么？",
+        expected: "依据可见原文回答虚构番茄面，证据足够时不调用历史工具。",
+      },
       { id: "greeting", prompt: "你好！", expected: "自然问候，不调用工具。" },
       {
         id: "latest",

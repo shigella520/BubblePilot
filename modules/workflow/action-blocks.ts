@@ -203,7 +203,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
     type: "load-context",
     version: 1,
     name: "加载聊天上下文",
-    description: "读取当前聊天摘要与触发消息之前的归档增量。",
+    description: "读取当前聊天双窗口内、触发消息之前的归档原文。",
     category: "context",
     inputs: noInputs,
     outputs: [
@@ -211,7 +211,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         name: "messages",
         label: "消息列表",
         type: "messages",
-        description: "摘要游标之后、当前消息之前的上下文消息。",
+        description: "双窗口内、当前消息之前的上下文原文。",
       },
       {
         name: "count",
@@ -224,18 +224,6 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         label: "成员映射",
         type: "json",
         description: "仅包含当前上下文和当前消息中已出现成员的身份映射。",
-      },
-      {
-        name: "summary",
-        label: "历史摘要",
-        type: "string",
-        description: "已覆盖更早消息的有效摘要；未启用或尚未生成时为空。",
-      },
-      {
-        name: "summaryCoveredThroughIndex",
-        label: "摘要覆盖游标",
-        type: "string",
-        description: "摘要已经覆盖到的稳定消息索引。",
       },
     ],
     config: [],

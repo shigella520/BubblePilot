@@ -196,6 +196,22 @@ describe("workflow application", () => {
     };
   }
 
+  it.each([4500, 12001])(
+    "preserves complete replies within the shared sending protection: %i",
+    async (length) => {
+      await configureWorkflow();
+      const text = "/ping " + "甲".repeat(length - 6);
+      await application.inject({
+        method: "POST",
+        url: "/api/v1/webhooks/bluebubbles",
+        headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+        payload: newMessageWebhook({ text }),
+      });
+      if (length === 4500)
+        expect(gateway.commands[0]?.text).toBe("Pong: " + text);
+      else expect(gateway.commands).toHaveLength(0);
+    },
+  );
   it("only exposes implemented data actions in the action catalog", async () => {
     const response = await application.inject({
       method: "GET",
@@ -1039,6 +1055,15 @@ describe("workflow application", () => {
     });
     expect(gateway.commands).toHaveLength(1);
 
+    const pending = await application.inject({
+      method: "GET",
+      url: "/api/v1/executions?attention=unknown-outbound&limit=1",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(pending.json()).toMatchObject({ data: [{ id: executionId }] });
+    const beforeClose = await workflows.getRuntimeSummary(new Date());
+    expect(beforeClose.outbound.unknown).toBe(1);
+
     const closed = await application.inject({
       method: "POST",
       url: `/api/v1/executions/${executionId}/close`,
@@ -1087,13 +1112,25 @@ describe("workflow application", () => {
     }>();
     expect(operationsBody).toMatchObject({
       data: {
-        status: "critical",
-        workflow: { outbound: { unknown: 1 } },
+        status: "healthy",
+        workflow: { outbound: { unknown: 0 } },
         executionGate: { active: 0, queued: 0 },
         messageRetention: { enabled: true, retentionDays: 90 },
       },
     });
-    expect(operationsBody.data.alerts.map((alert) => alert.code)).toContain(
+    const resolved = await application.inject({
+      method: "GET",
+      url: "/api/v1/executions?attention=unknown-outbound",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(resolved.json()).toMatchObject({ data: [] });
+    const invalidFilter = await application.inject({
+      method: "GET",
+      url: "/api/v1/executions?attention=invalid",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    expect(invalidFilter.statusCode).toBe(400);
+    expect(operationsBody.data.alerts.map((alert) => alert.code)).not.toContain(
       "UNKNOWN_OUTBOUND_DELIVERIES",
     );
   });

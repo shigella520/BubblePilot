@@ -984,12 +984,8 @@ export class PostgresAiRepository implements AiRepository {
            WHERE node ->> 'type' = 'ai-chat'
              AND node -> 'config' ->> 'providerRouteId' = $1::text
          )
-         OR EXISTS (
-           SELECT 1 FROM conversation_summary_settings settings
-           WHERE settings.provider_route_id = $2::uuid
-         )
          LIMIT 1`,
-        [routeId, routeId],
+        [routeId],
       );
       if (workflowReference.rowCount !== 0) {
         await client.query("ROLLBACK");

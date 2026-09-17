@@ -1,3 +1,4 @@
+import { BotIdentityService } from "../modules/identity/bot-identity-service.js";
 import {
   chatMessageQuerySchema,
   chatCountQuerySchema,
@@ -63,6 +64,102 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     return id;
   }
 
+  it("expands actual readable rows across gaps, preserves source and fits whole messages", async () => {
+    const id = await chat();
+    const ids: string[] = [];
+    for (let i = 0; i < 28; i++)
+      ids.push(await message(id, `虚构片段${i} ` + "甲".repeat(80)));
+    await repo.pool.query(
+      "UPDATE messages SET message_index=1000+message_index*10 WHERE chat_id=$1",
+      [id],
+    );
+    await repo.pool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=ANY($1::uuid[])",
+      [[ids[11], ids[16]]],
+    );
+    const trigger = (
+      await repo.pool.query<{ message_index: string }>(
+        "SELECT message_index FROM messages WHERE id=$1",
+        [ids[26]],
+      )
+    ).rows[0]!;
+    const scope = (await repo.scope(id, Number(trigger.message_index), null))!;
+    const session = await service.session(scope);
+    const query = JSON.parse(
+      await session.execute(
+        "query_chat_messages",
+        JSON.stringify({
+          order: "asc",
+          keywords: ["虚构片段14 "],
+          keywordMode: "all",
+        }),
+      ),
+    ) as { evidence: { ref: string }[] };
+    const ref = query.evidence[0]!.ref;
+    const expanded = JSON.parse(
+      await session.execute("read_chat_excerpt", JSON.stringify({ ref })),
+    ) as {
+      beforeCount: number;
+      afterCount: number;
+      evidence: { messageIds: string[] }[];
+    };
+    expect(expanded.beforeCount).toBe(8);
+    expect(expanded.afterCount).toBe(8);
+    expect(expanded.evidence[0]!.messageIds).toHaveLength(17);
+    expect(expanded.evidence[0]!.messageIds).not.toContain(ids[11]);
+    expect(expanded.evidence[0]!.messageIds).not.toContain(ids[16]);
+    const bounded = JSON.parse(
+      await session.execute(
+        "read_chat_excerpt",
+        JSON.stringify({ ref, before: 0, after: 20 }),
+      ),
+    ) as {
+      afterCount: number;
+      hasLater: boolean;
+      evidence: { messageIds: string[] }[];
+    };
+    expect(bounded.afterCount).toBe(10);
+    expect(bounded.hasLater).toBe(false);
+    expect(bounded.evidence[0]!.messageIds).not.toContain(ids[26]);
+    const fitted = JSON.parse(
+      await session.execute("read_chat_excerpt", JSON.stringify({ ref }), {
+        signal: new AbortController().signal,
+        deadline: Date.now() + 60000,
+        maxOutputCharacters: 1600,
+      }),
+    ) as { truncated: boolean; evidence: { messageIds: string[] }[] };
+    expect(fitted.truncated).toBe(true);
+    expect(fitted.evidence[0]!.messageIds).toContain(ids[14]);
+  });
+  it("returns default eight or requested twenty semantic sources and reports limited selection", async () => {
+    const id = await chat();
+    for (let i = 0; i < 24; i++)
+      await message(id, "虚构备份" + "甲".repeat(1600));
+    await drain();
+    const scope = (await repo.scope(id, 99999, null))!;
+    const session = await service.session(scope);
+    const query = async (limit?: number) =>
+      JSON.parse(
+        await session.execute(
+          "search_chat_history",
+          JSON.stringify({ query: "备份", ...(limit ? { limit } : {}) }),
+          {
+            signal: new AbortController().signal,
+            deadline: Date.now() + 60000,
+            maxOutputCharacters: 100000,
+          },
+        ),
+      ) as {
+        evidence: unknown[];
+        selectionLimited: boolean;
+        exhaustive: boolean;
+      };
+    expect((await query()).evidence).toHaveLength(8);
+    const larger = await query(20);
+    expect(larger.evidence).toHaveLength(20);
+    expect(larger.selectionLimited).toBe(true);
+    expect(larger.exhaustive).toBe(false);
+  });
   it("uses a single raw filtering contract for exact counts, extrema and microsecond pages", async () => {
     const id = await chat();
     const records = [];
@@ -881,6 +978,108 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     expect(
       (await repo.jobs(id)).find((j) => j.id === task.id)!.progress.processed,
     ).toBe(2);
+  });
+  it("tracks role rebuild membership, samples, estimates and preserves its kind across batches", async () => {
+    await drain();
+    const id = await chat();
+    for (let i = 0; i < 4; i++) await message(id, "虚构重建消息".repeat(10));
+    const identity = new BotIdentityService(url!);
+    try {
+      await identity.rebuild(id, "memory");
+    } finally {
+      await identity.close();
+    }
+    let claimed = (await repo.claim())!;
+    expect(claimed.chat_id).toBe(id);
+    expect(claimed.request_key).toBeNull();
+    const taskId = claimed.id;
+    expect(
+      (await repo.jobs(id)).find((j) => j.id === taskId)!.progress,
+    ).toMatchObject({ scope: "full", total: 4, processed: 0 });
+    for (let i = 0; i < 3; i++) {
+      await repo.pool.query(
+        "UPDATE memory_jobs SET progress_started_at=now()-interval '6 seconds',progress_last_at=now()-interval '6 seconds' WHERE id=$1",
+        [taskId],
+      );
+      const batch = (
+        await repo.messages(
+          id,
+          Number(claimed.cursor_index) + 1,
+          Number(claimed.through_index),
+        )
+      ).slice(0, 1);
+      await repo.publish(claimed, batch, [], [], batch[0]!.index);
+      const state = (await repo.jobs(id)).find((j) => j.id === taskId)!;
+      expect(state.reason).toBe("rebuild");
+      expect(state.progress.processed).toBe(i + 1);
+      if (i === 2) {
+        expect(state.progress.estimate.status).toBe("available");
+        expect(state.progress.estimate.messagesPerMinute).toBeGreaterThan(0);
+        expect(state.progress.estimate.remainingSeconds).toBeGreaterThan(0);
+      }
+      claimed = (await repo.claim())!;
+      expect(claimed.id).toBe(taskId);
+    }
+    await repo.fail(claimed, "FICTIONAL_RETRY");
+    expect((await repo.jobs(id)).find((j) => j.id === taskId)!.reason).toBe(
+      "rebuild",
+    );
+    await repo.pool.query(
+      "UPDATE memory_jobs SET next_attempt_at=now() WHERE id=$1",
+      [taskId],
+    );
+    claimed = (await repo.claim())!;
+    const state = (await repo.jobs(id)).find((j) => j.id === taskId)!;
+    await repo.action(taskId, "pause", state.version);
+    const paused = (await repo.jobs(id)).find((j) => j.id === taskId)!;
+    await repo.action(taskId, "resume", paused.version);
+    await drain();
+    const finished = (await repo.jobs(id)).find((j) => j.id === taskId)!;
+    expect(finished.reason).toBe("rebuild");
+    expect(finished.progress).toMatchObject({
+      total: 4,
+      processed: 4,
+      percent: 100,
+    });
+  });
+  it("recovers unkeyed legacy rebuild progress without reprocessing its completed prefix", async () => {
+    await drain();
+    const id = await chat();
+    await message(id, "虚构已完成消息");
+    await message(id, "虚构剩余消息");
+    await repo.pool.query(
+      "UPDATE memory_jobs SET status='cancelled' WHERE chat_id=$1",
+      [id],
+    );
+    const task = (
+      await repo.pool.query<{ id: string }>(
+        "INSERT INTO memory_jobs(chat_id,generation_id,reason,from_index,through_index,cursor_index,progress_samples) VALUES($1,$2,'backfill',1,2,1,$3) RETURNING id",
+        [
+          id,
+          generationId,
+          JSON.stringify([
+            {
+              at: Date.now(),
+              milliseconds: 20000,
+              characters: 100,
+              messages: 0,
+            },
+          ]),
+        ],
+      )
+    ).rows[0]!;
+    const claimed = (await repo.claim())!;
+    expect(claimed.id).toBe(task.id);
+    expect(claimed.cursor_index).toBe("1");
+    expect(claimed.progress_samples).toEqual([]);
+    expect(
+      (await repo.jobs(id)).find((j) => j.id === task.id)!.progress,
+    ).toMatchObject({ scope: "remaining", total: 1, processed: 0 });
+    const batch = await repo.messages(id, 2, 2);
+    await repo.publish(claimed, batch, [], [], 2);
+    expect(
+      (await repo.jobs(id)).find((j) => j.id === task.id)!.progress,
+    ).toMatchObject({ scope: "remaining", processed: 1, percent: 100 });
   });
   it("initializes old tasks from their remaining range and rejects stale lease progress", async () => {
     await drain();

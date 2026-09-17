@@ -3,7 +3,7 @@ import { defaultAgentSettings } from "../modules/ai/agent-settings-types.js";
 import { WorkflowEngine } from "../modules/workflow/workflow-engine.js";
 import { NodeRegistry } from "../modules/workflow/node-registry.js";
 import type { HistoryCoverage } from "../modules/workflow/conversation-context-service.js";
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import type { MessageEnvelope } from "../modules/ingestion/message-envelope.js";
 import type { TriggerBinding } from "../modules/workflow/workflow-repository.js";
@@ -71,39 +71,6 @@ const trigger: TriggerBinding = {
   },
 };
 
-describe("workflow execution context snapshot", () => {
-  it("distinguishes the summary source from the compression scheduled by the trigger", async () => {
-    const repository = new InMemoryWorkflowRepository();
-
-    const result = await repository.createExecution({
-      envelope,
-      trigger,
-      summaryTrigger: {
-        triggerMessageIndex: "42",
-        compressionOperationId: "scheduled-operation",
-        summarySnapshot: {
-          stateId: "summary-state",
-          chatId: "internal-chat-uuid",
-          summaryVersion: 7,
-          coveredThroughIndex: "31",
-          summaryPolicyVersion: 3,
-          compressionOperationId: "source-operation",
-        },
-      },
-    });
-
-    expect(result.execution.contextSnapshot).toMatchObject({
-      chatId: "internal-chat-uuid",
-      providerChatId: "iMessage;-;fictional-context-chat",
-      triggerMessageIndex: "42",
-      summaryVersion: 7,
-      summaryCoveredThroughIndex: "31",
-      compressionOperationId: "source-operation",
-      scheduledCompressionOperationId: "scheduled-operation",
-    });
-  });
-});
-
 it("shares coverage across node contexts and records the same execution snapshot", async () => {
   const snapshot = vi.fn().mockResolvedValue(undefined);
   const repository = Object.assign(new InMemoryWorkflowRepository(), {
@@ -131,7 +98,7 @@ it("shares coverage across node contexts and records the same execution snapshot
     binding,
   ]);
   const coverage: HistoryCoverage = {
-    summaryCoveredThroughIndex: "2",
+    windowEvicted: null,
     retained: null,
     omitted: {
       count: 1,

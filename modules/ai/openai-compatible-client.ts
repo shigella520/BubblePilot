@@ -760,7 +760,13 @@ function responseDiagnostics(
     httpStatus: response.status,
     responseBytes: new TextEncoder().encode(responseBody).byteLength,
     responseBodyHash: sha256(responseBody),
-    responseFinishReason: parsed.finishReason,
+    responseFinishReason:
+      parsed.finishReason === "incomplete" &&
+      typeof body === "object" &&
+      body !== null &&
+      "incomplete_details" in body
+        ? `incomplete:${z.object({ reason: z.enum(["max_output_tokens", "content_filter"]).optional() }).safeParse(body.incomplete_details).data?.reason ?? "unknown"}`
+        : parsed.finishReason,
     responseContentCharacters: parsed.contentCharacters,
     responseReasoningCharacters: parsed.reasoningCharacters,
     ...tokenDiagnostics(body),
@@ -964,6 +970,21 @@ export class OpenAiCompatibleClient implements AiClient {
           retryable: true,
           fallbackAllowed: true,
           countsForDegrade: true,
+          durationMs,
+          diagnostics,
+        });
+      }
+      if (
+        parsed.finishReason === "length" ||
+        parsed.finishReason === "incomplete"
+      ) {
+        return failure({
+          category: "invalid-response",
+          code: "AI_PROVIDER_INCOMPLETE_OUTPUT",
+          summary: "The AI provider stopped before completing its output.",
+          retryable: true,
+          fallbackAllowed: true,
+          countsForDegrade: false,
           durationMs,
           diagnostics,
         });

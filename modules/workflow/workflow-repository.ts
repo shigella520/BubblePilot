@@ -1,5 +1,6 @@
+import type { BotIdentity } from "../identity/bot-identity.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
-import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
+import type { ConversationContextTrigger } from "./conversation-context-service.js";
 import type { TriggerConditions } from "./trigger-matcher.js";
 import type {
   WorkflowDefinition,
@@ -57,6 +58,7 @@ export interface TriggerBinding extends TriggerRecord {
 }
 
 export interface WorkflowExecutionRecord {
+  botIdentity?: BotIdentity | null;
   id: string;
   provider: string;
   externalEventId: string;
@@ -231,7 +233,7 @@ export interface WorkflowRepository {
   createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
-    summaryTrigger?: ConversationSummaryTrigger;
+    contextTrigger?: ConversationContextTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }>;
   createManualRetry(
     executionId: string,
@@ -293,6 +295,7 @@ export interface WorkflowRepository {
   listExecutions(options: {
     limit: number;
     statuses?: readonly WorkflowExecutionStatus[];
+    attention?: "unknown-outbound";
     cursor: { timestamp: Date; id: string } | null;
   }): Promise<readonly WorkflowExecutionRecord[]>;
   listExecutionsForMessages(

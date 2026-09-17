@@ -269,8 +269,7 @@ describe("AI workflow", () => {
             systemPrompt: "Answer safely for {{message.senderId}}.",
             promptTemplate: "Question: {{variables.question}}",
             includeLoadedContext: true,
-            maxOutputTokens: 256,
-            maxOutputCharacters: 2_000,
+            targetOutputCharacters: 2_000,
             temperature: 0.2,
             webSearchSources: "full",
             outputFormat: "text",
@@ -477,6 +476,10 @@ describe("AI workflow", () => {
       .data.executionIds[0];
     expect(executionId).toBeDefined();
     expect(aiClient.requests).toHaveLength(2);
+    expect(aiClient.requests[0]?.maxOutputTokens).toBe(8192);
+    expect(JSON.stringify(aiClient.requests[0]?.messages)).toContain(
+      "最终回答尽量不超过 2000 个字符",
+    );
     const firstMessages = aiClient.requests[0]?.messages ?? [];
     expect(firstMessages[0]?.role).toBe("system");
     expect(firstMessages[0]?.content).toContain("BubblePilot 输入协议");

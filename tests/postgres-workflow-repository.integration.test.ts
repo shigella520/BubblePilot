@@ -179,6 +179,55 @@ describe.runIf(testDatabaseUrl !== undefined)(
         ]),
       );
 
+      // Fictional delivery: closing resolves attention without rewriting delivery history.
+      const attentionDatabase = new Client({
+        connectionString: testDatabaseUrl,
+      });
+      await attentionDatabase.connect();
+      try {
+        const baseline = await repository.getRuntimeSummary(new Date());
+        await attentionDatabase.query(
+          "UPDATE outbound_deliveries SET status = 'unknown' WHERE execution_id = $1",
+          [first.executionIds[0]],
+        );
+        await attentionDatabase.query(
+          "UPDATE workflow_executions SET status = 'dead-lettered' WHERE id = $1",
+          [first.executionIds[0]],
+        );
+        expect(
+          (await repository.getRuntimeSummary(new Date())).outbound.unknown,
+        ).toBe(baseline.outbound.unknown + 1);
+        const pending = await repository.listExecutions({
+          limit: 100,
+          cursor: null,
+          attention: "unknown-outbound",
+        });
+        expect(
+          pending.filter((item) => item.id === first.executionIds[0]),
+        ).toHaveLength(1);
+        await repository.closeExecution(first.executionIds[0]!);
+        expect(
+          (await repository.getRuntimeSummary(new Date())).outbound.unknown,
+        ).toBe(baseline.outbound.unknown);
+        expect(
+          await repository.listExecutions({
+            limit: 100,
+            cursor: null,
+            attention: "unknown-outbound",
+          }),
+        ).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: first.executionIds[0] }),
+          ]),
+        );
+        expect(
+          (await repository.getExecution(first.executionIds[0]!))?.deliveries[0]
+            ?.status,
+        ).toBe("unknown");
+      } finally {
+        await attentionDatabase.end();
+      }
+
       await expect(
         repository.setWorkflowEnabled(version.workflowId, false),
       ).resolves.toMatchObject({ status: "inactive", publishedVersion: 1 });

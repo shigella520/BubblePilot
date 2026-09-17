@@ -11,8 +11,7 @@ import type { AiClient } from "../modules/ai/openai-compatible-client.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import type { AiCallResult, AiProviderRecord } from "../modules/ai/ai-types.js";
 import { AuthService } from "../modules/auth/auth-service.js";
-import type { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
-import { SummarySettingsService } from "../modules/workflow/summary-settings-service.js";
+import { ContextSettingsService } from "../modules/workflow/context-settings-service.js";
 import type { MessageAutomation } from "../modules/workflow/workflow-engine.js";
 import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
@@ -21,10 +20,6 @@ import { InMemoryWorkflowRepository } from "./support/in-memory-workflow-reposit
 
 const loginPassword = "fictional-login-password";
 const sensitivePassword = "fictional-sensitive-password";
-const compressionContentId = "00000000-0000-4000-8000-000000000042";
-const compressionRegenerationId = "00000000-0000-4000-8000-000000000044";
-const summaryResetChatId = "00000000-0000-4000-8000-000000000045";
-const summaryResetOperationId = "00000000-0000-4000-8000-000000000046";
 let loginPasswordHash: string;
 let sensitiveOperationPasswordHash: string;
 
@@ -125,89 +120,31 @@ describe("Web admin authentication", () => {
           new SuccessfulAiClient(),
           secrets,
         ),
-        summarySettings: new SummarySettingsService(
+        contextSettings: new ContextSettingsService(
           {
             isReady: () => Promise.resolve(true),
             find: () =>
               Promise.resolve({
-                enabled: true,
                 includeFromMe: true,
                 baseMessageWindow: 30,
                 characterLimit: 6_000,
                 redundancyMessageWindow: 10,
-                providerRouteId: "00000000-0000-4000-8000-000000000047",
-                timeZone: "UTC",
                 version: 1,
-                policyVersion: 1,
                 updatedAt: "2026-09-08T00:00:00.000Z",
               }),
             save: () => Promise.resolve({ status: "conflict" as const }),
           },
           {
-            enabled: false,
             includeFromMe: true,
             baseMessageWindow: 30,
             characterLimit: 6_000,
             redundancyMessageWindow: 10,
-            providerRouteId: "",
-            timeZone: "UTC",
           },
         ),
       },
       workflow: {
         repository: workflowRepository,
         engine: workflowEngine,
-        contextState: {
-          close: () => Promise.resolve(),
-          getCompressionContent: (id) =>
-            Promise.resolve(
-              id === compressionContentId
-                ? {
-                    id,
-                    chatId: "00000000-0000-4000-8000-000000000043",
-                    providerChatId: "fictional-chat",
-                    chatDisplayName: "Fictional chat",
-                    status: "succeeded" as const,
-                    fromMessageIndex: "10",
-                    throughMessageIndex: "12",
-                    baseVersion: 3,
-                    outputVersion: 4,
-                    preview: false,
-                    sourceCompressionId: null,
-                    previousSummary: "Fictional previous summary",
-                    outputSummary: "Fictional compressed summary",
-                    messages: [
-                      {
-                        messageIndex: "10",
-                        providerMessageId: "fictional-message-10",
-                        senderId: "fictional-sender",
-                        sentAt: "2026-01-01T00:00:00.000Z",
-                        body: "Fictional meal note",
-                        isFromMe: false,
-                      },
-                    ],
-                  }
-                : null,
-            ),
-          regenerateCompression: (id) =>
-            Promise.resolve(
-              id === compressionContentId
-                ? { status: "created" as const, id: compressionRegenerationId }
-                : { status: "not-found" as const },
-            ),
-        },
-        conversationSummary: {
-          resetChatSummary: (chatId: string) =>
-            Promise.resolve(
-              chatId === summaryResetChatId
-                ? {
-                    status: "created" as const,
-                    id: summaryResetOperationId,
-                    messageCount: 10,
-                  }
-                : { status: "not-found" as const },
-            ),
-        } as unknown as ConversationContextService,
       },
     });
   });
@@ -241,6 +178,81 @@ describe("Web admin authentication", () => {
         outcome: "succeeded",
       }),
     );
+  });
+  it("protects context settings, validates limits and audits concurrent-save conflicts", async () => {
+    expect(
+      (
+        await application.inject({
+          method: "GET",
+          url: "/api/v1/ai/context/settings",
+        })
+      ).statusCode,
+    ).toBe(401);
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    const headers = { cookie, origin: "http://localhost" };
+    const payload = {
+      includeFromMe: true,
+      baseMessageWindow: 10,
+      redundancyMessageWindow: 10,
+      characterLimit: 6000,
+      expectedVersion: 1,
+    };
+    expect(
+      (
+        await application.inject({
+          method: "GET",
+          url: "/api/v1/ai/context/settings",
+          headers,
+        })
+      ).statusCode,
+    ).toBe(200);
+    for (const invalid of [
+      { baseMessageWindow: 0 },
+      { redundancyMessageWindow: 51 },
+      { characterLimit: 99 },
+      { enabled: true },
+    ]) {
+      expect(
+        (
+          await application.inject({
+            method: "PUT",
+            url: "/api/v1/ai/context/settings",
+            headers,
+            payload: { ...payload, ...invalid },
+          })
+        ).statusCode,
+      ).toBe(400);
+    }
+    expect(
+      (
+        await application.inject({
+          method: "PUT",
+          url: "/api/v1/ai/context/settings",
+          headers,
+          payload,
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(authRepository.auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: "ai.context.settings.update",
+        outcome: "failed",
+      }),
+    );
+    for (const path of [
+      "/api/v1/ai/summary/settings",
+      "/api/v1/conversation-compressions",
+    ]) {
+      expect(
+        (await application.inject({ method: "GET", url: path, headers }))
+          .statusCode,
+      ).toBe(404);
+    }
   });
   it("creates an opaque server session and audits failed login attempts", async () => {
     const failed = await application.inject({
@@ -447,154 +459,6 @@ describe("Web admin authentication", () => {
     expect(retry.json()).toMatchObject({
       error: { code: "SENSITIVE_AUTH_REQUIRED" },
     });
-  });
-
-  it("protects conversation compression content with the sensitive grant", async () => {
-    const anonymous = await application.inject({
-      method: "GET",
-      url: `/api/v1/conversation-compressions/${compressionContentId}/content`,
-    });
-    expect(anonymous.statusCode).toBe(401);
-
-    const login = await application.inject({
-      method: "POST",
-      url: "/api/v1/auth/session",
-      payload: { password: loginPassword },
-    });
-    const cookie = login.headers["set-cookie"];
-
-    const denied = await application.inject({
-      method: "GET",
-      url: `/api/v1/conversation-compressions/${compressionContentId}/content`,
-      headers: { cookie },
-    });
-    expect(denied.statusCode).toBe(403);
-    expect(denied.json()).toMatchObject({
-      error: { code: "SENSITIVE_AUTH_REQUIRED" },
-    });
-
-    const verified = await application.inject({
-      method: "POST",
-      url: "/api/v1/auth/sensitive",
-      headers: { cookie },
-      payload: { password: sensitivePassword },
-    });
-    expect(verified.statusCode).toBe(200);
-
-    const allowed = await application.inject({
-      method: "GET",
-      url: `/api/v1/conversation-compressions/${compressionContentId}/content`,
-      headers: { cookie },
-    });
-    expect(allowed.statusCode).toBe(200);
-    expect(allowed.headers["cache-control"]).toBe("no-store");
-    expect(allowed.headers.pragma).toBe("no-cache");
-    const allowedPayload = allowed.json<{
-      data: {
-        previousSummary: string;
-        outputSummary: string | null;
-        messages: Array<{ body: string }>;
-      };
-    }>();
-    expect(allowedPayload.data.previousSummary).toBe(
-      "Fictional previous summary",
-    );
-    expect(allowedPayload.data.outputSummary).toBe(
-      "Fictional compressed summary",
-    );
-    expect(allowedPayload.data.messages).toEqual([
-      expect.objectContaining({ body: "Fictional meal note" }),
-    ]);
-    expect(allowed.body).not.toContain("prompt");
-    expect(allowed.body).not.toContain("secret");
-
-    const missing = await application.inject({
-      method: "GET",
-      url: "/api/v1/conversation-compressions/00000000-0000-4000-8000-000000000099/content",
-      headers: { cookie },
-    });
-    expect(missing.statusCode).toBe(404);
-  });
-
-  it("protects conversation compression regeneration with the sensitive grant", async () => {
-    const login = await application.inject({
-      method: "POST",
-      url: "/api/v1/auth/session",
-      payload: { password: loginPassword },
-    });
-    const cookie = login.headers["set-cookie"];
-    const denied = await application.inject({
-      method: "POST",
-      url: `/api/v1/conversation-compressions/${compressionContentId}/regenerate`,
-      headers: { cookie },
-    });
-    expect(denied.statusCode).toBe(403);
-
-    await application.inject({
-      method: "POST",
-      url: "/api/v1/auth/sensitive",
-      headers: { cookie },
-      payload: { password: sensitivePassword },
-    });
-    const created = await application.inject({
-      method: "POST",
-      url: `/api/v1/conversation-compressions/${compressionContentId}/regenerate`,
-      headers: { cookie },
-    });
-    expect(created.statusCode).toBe(202);
-    expect(created.json()).toEqual({
-      data: { id: compressionRegenerationId, status: "created" },
-    });
-
-    const missing = await application.inject({
-      method: "POST",
-      url: "/api/v1/conversation-compressions/00000000-0000-4000-8000-000000000099/regenerate",
-      headers: { cookie },
-    });
-    expect(missing.statusCode).toBe(404);
-  });
-
-  it("protects chat summary reset with the sensitive grant", async () => {
-    const login = await application.inject({
-      method: "POST",
-      url: "/api/v1/auth/session",
-      payload: { password: loginPassword },
-    });
-    const cookie = login.headers["set-cookie"];
-    const denied = await application.inject({
-      method: "POST",
-      url: `/api/v1/chats/${summaryResetChatId}/summary/reset`,
-      headers: { cookie },
-    });
-    expect(denied.statusCode).toBe(403);
-
-    await application.inject({
-      method: "POST",
-      url: "/api/v1/auth/sensitive",
-      headers: { cookie },
-      payload: { password: sensitivePassword },
-    });
-    const created = await application.inject({
-      method: "POST",
-      url: `/api/v1/chats/${summaryResetChatId}/summary/reset`,
-      headers: { cookie },
-    });
-    expect(created.statusCode).toBe(202);
-    expect(created.json()).toEqual({
-      data: {
-        chatId: summaryResetChatId,
-        status: "created",
-        id: summaryResetOperationId,
-        messageCount: 10,
-      },
-    });
-
-    const missing = await application.inject({
-      method: "POST",
-      url: "/api/v1/chats/00000000-0000-4000-8000-000000000099/summary/reset",
-      headers: { cookie },
-    });
-    expect(missing.statusCode).toBe(404);
   });
 
   it("allows provider changes after login and audits the outcome", async () => {

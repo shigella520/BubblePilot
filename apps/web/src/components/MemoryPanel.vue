@@ -12,21 +12,24 @@ import AdminDetailDialog from "./AdminDetailDialog.vue";
 import CursorPagination from "./CursorPagination.vue";
 import DismissibleMessage from "./DismissibleMessage.vue";
 import { RefreshCw } from "@lucide/vue";
-import SensitiveUnlock from "./SensitiveUnlock.vue";
 const props = defineProps<{
   mode: "settings" | "chat" | "jobs";
   embedded?: boolean;
+  fixedChatId?: string;
   chats?: readonly {
     id: string;
     displayName?: string | null;
     providerChatId?: string;
   }[];
 }>();
+const emit = defineEmits<{
+  authorizationChanged: [state: { chatId: string; enabled: boolean }];
+}>();
 const session = useSessionStore();
 const busy = ref(false);
 const error = ref("");
 const notice = ref("");
-const chatId = ref("");
+const chatId = ref(props.fixedChatId ?? "");
 const query = ref("");
 const from = ref("");
 const to = ref("");
@@ -52,6 +55,7 @@ interface Settings {
   generations: Generation[];
 }
 interface Job {
+  reason: string;
   id: string;
   created_at: string;
   updated_at: string;
@@ -84,6 +88,12 @@ interface Job {
       estimatedCompletionAt: string | null;
     };
   };
+}
+function jobKind(job: Job) {
+  if (job.reason === "rebuild") return "角色历史索引重建";
+  return job.request_key || job.reason !== "incremental"
+    ? "历史补建"
+    : "新增消息索引";
 }
 interface SearchResult {
   status: string;
@@ -338,10 +348,13 @@ async function probe() {
 }
 async function authorize() {
   if (!session.sensitiveActive) return;
-  await apiRequest(`/api/v1/chats/${chatId.value}/memory`, {
+  const id = chatId.value;
+  const enabled = !chat.enabled;
+  await apiRequest(`/api/v1/chats/${id}/memory`, {
     method: "PUT",
-    body: jsonBody({ enabled: !chat.enabled, expectedVersion: chat.version }),
+    body: jsonBody({ enabled, expectedVersion: chat.version }),
   });
+  emit("authorizationChanged", { chatId: id, enabled });
   await refresh();
 }
 async function search() {
@@ -501,7 +514,6 @@ onBeforeUnmount(() => {
       AI
       根据问题自行查找已授权聊天中的历史记录，无需添加工作流节点。可检索范围受消息保留期限限制。
     </p>
-    <SensitiveUnlock v-if="!embedded || mode === 'settings'" />
     <DismissibleMessage
       v-if="error && !selectedJob"
       error
@@ -573,7 +585,7 @@ onBeforeUnmount(() => {
       </fieldset>
     </form>
     <div v-if="mode === 'chat'">
-      <label
+      <label v-if="!fixedChatId"
         >聊天<select v-model="chatId" :disabled="busy">
           <option value="">选择聊天</option>
           <option v-for="item in chats" :key="item.id" :value="item.id">
@@ -596,7 +608,7 @@ onBeforeUnmount(() => {
         </p>
         <button
           class="button"
-          :disabled="busy || !session.sensitiveActive"
+          :disabled="busy || !session.sensitiveActive || !chat.version"
           @click="run(authorize)"
         >
           {{ chat.enabled ? "停用检索" : "授权此聊天检索" }}
@@ -714,10 +726,7 @@ onBeforeUnmount(() => {
             <tr v-for="job in jobs" :key="job.id">
               <td>
                 {{ job.chat_name || job.chat_id
-                }}<small
-                  >{{ job.request_key ? "历史补建" : "新增消息索引" }} ·
-                  {{ job.model }}</small
-                >
+                }}<small>{{ jobKind(job) }} · {{ job.model }}</small>
               </td>
               <td>
                 <span class="state-badge">{{
@@ -738,7 +747,13 @@ onBeforeUnmount(() => {
                   >已移除 {{ job.progress.removed }} 条</small
                 >
               </td>
-              <td v-else>统计不完整</td>
+              <td v-else>
+                {{
+                  job.reason === "incremental" && !job.request_key
+                    ? "增量任务，不统计百分比"
+                    : "未记录进度统计"
+                }}
+              </td>
               <td>
                 {{
                   !progressError &&
@@ -792,8 +807,7 @@ onBeforeUnmount(() => {
         }}</DismissibleMessage>
         <article v-for="job in selectedJob ? [selectedJob] : []" :key="job.id">
           <h4>
-            {{ job.chat_name || "聊天" }} ·
-            {{ job.request_key ? "历史补建" : "新增消息索引" }} ·
+            {{ job.chat_name || "聊天" }} · {{ jobKind(job) }} ·
             {{
               stateName(
                 job.status === "queued" &&
@@ -856,9 +870,9 @@ onBeforeUnmount(() => {
           </template>
           <p v-else>
             {{
-              job.request_key
-                ? "历史任务，统计不完整"
-                : "新增消息索引，范围可能继续增长"
+              job.reason !== "incremental" || job.request_key
+                ? "未记录进度统计"
+                : "增量任务，不统计百分比"
             }}
           </p>
           <p>任务 ID：{{ job.id }}</p>

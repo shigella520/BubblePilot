@@ -129,6 +129,63 @@ async function route(
 }
 
 describe("AiRoutingService", () => {
+  it("uses finite existing retry/fallback for incomplete output without degrading providers", async () => {
+    const repository = new InMemoryAiRepository();
+    const primary = await provider(repository, "primary");
+    const backup = await provider(repository, "backup");
+    const configuredRoute = await route(repository, [primary.id, backup.id], {
+      rounds: 2,
+      threshold: 1,
+    });
+    const client = new FakeAiClient(() => ({
+      status: "failed",
+      category: "invalid-response",
+      code: "AI_PROVIDER_INCOMPLETE_OUTPUT",
+      summary: "Incomplete output",
+      retryable: true,
+      fallbackAllowed: true,
+      countsForDegrade: false,
+      durationMs: 1,
+    }));
+    const service = new AiRoutingService(repository, client, secretResolver());
+    expect(
+      await service.execute(routeRequest(configuredRoute.id)),
+    ).toMatchObject({ status: "failed" });
+    expect(client.calls).toEqual([
+      primary.id,
+      backup.id,
+      primary.id,
+      backup.id,
+    ]);
+    expect(
+      repository.attempts.every((attempt) => attempt.healthState === "healthy"),
+    ).toBe(true);
+  });
+  it("accepts complete replies above target but fails hard protection without slicing", async () => {
+    const repository = new InMemoryAiRepository();
+    const primary = await provider(repository, "primary");
+    const configuredRoute = await route(repository, [primary.id], {
+      rounds: 1,
+    });
+    const client = new FakeAiClient((_, n) => ({
+      status: "succeeded",
+      text: "答".repeat(n === 1 ? 2500 : 6001),
+      durationMs: 1,
+    }));
+    const service = new AiRoutingService(repository, client, secretResolver());
+    const request = {
+      ...routeRequest(configuredRoute.id),
+      maxOutputCharacters: 6000,
+    };
+    expect(await service.execute(request)).toMatchObject({
+      status: "succeeded",
+      text: "答".repeat(2500),
+    });
+    expect(await service.execute(request)).toMatchObject({
+      status: "failed",
+      code: "AI_OUTPUT_TOO_LONG",
+    });
+  });
   it("keeps the affinity session stable while request trace ids remain unique", async () => {
     const repository = new InMemoryAiRepository();
     const primary = await provider(repository, "primary");
@@ -721,36 +778,6 @@ describe("AiRoutingService", () => {
     });
     expect(client.calls).toEqual([primary.id]);
     expect(JSON.stringify(repository.attempts)).not.toContain("primary-secret");
-  });
-
-  it("allows protected conversation summaries to preserve archived secret text", async () => {
-    const repository = new InMemoryAiRepository();
-    const primary = await provider(repository, "primary");
-    const configuredRoute = await route(repository, [primary.id]);
-    const client = new FakeAiClient(() => ({
-      status: "succeeded",
-      text: "The archived participant wrote primary-secret",
-      durationMs: 8,
-    }));
-    const service = new AiRoutingService(repository, client, secretResolver());
-
-    const result = await service.execute({
-      ...routeRequest(configuredRoute.id),
-      executionId: null,
-      purpose: "context-summary",
-      backgroundOperationId: "summary-operation",
-    });
-
-    expect(result).toMatchObject({
-      status: "succeeded",
-      text: "The archived participant wrote primary-secret",
-      attemptCount: 1,
-    });
-    expect(repository.attempts[0]).toMatchObject({
-      purpose: "context-summary",
-      status: "succeeded",
-      errorCode: null,
-    });
   });
 
   it("degrades a failed primary and restores it with one half-open probe", async () => {

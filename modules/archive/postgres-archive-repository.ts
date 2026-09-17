@@ -1,3 +1,4 @@
+import type { MessageAuthor } from "../identity/bot-identity.js";
 import { randomUUID } from "node:crypto";
 
 import type { Pool, PoolClient, QueryResult } from "pg";
@@ -61,6 +62,7 @@ interface ChatRow {
   type: "direct" | "group" | "unknown";
   display_name: string | null;
   enabled: boolean;
+  memory_authorized: boolean;
   message_count: string;
   version: number;
   updated_at: Date;
@@ -74,6 +76,7 @@ interface MessageRow {
   body: string | null;
   content_type: "text" | "attachment" | "mixed" | "unknown";
   is_from_me: boolean;
+  author?: MessageAuthor;
   attachments: unknown[];
   link_preview_status: string;
   link_previews: unknown;
@@ -97,6 +100,7 @@ interface ContextMessageRow {
   sent_at: Date;
   body: string;
   is_from_me: boolean;
+  author?: MessageAuthor;
   attachments: unknown;
   link_preview_status: string;
   link_previews: unknown;
@@ -124,6 +128,7 @@ function chatSummary(row: ChatRow): ChatSummary {
     type: row.type,
     displayName: row.display_name,
     enabled: row.enabled,
+    memoryAuthorized: row.memory_authorized,
     messageCount: Number(row.message_count),
     version: row.version,
     updatedAt: row.updated_at.toISOString(),
@@ -139,6 +144,7 @@ function archivedMessage(row: MessageRow): ArchivedMessage {
     body: row.body,
     contentType: row.content_type,
     isFromMe: row.is_from_me,
+    ...(row.author ? { author: row.author } : {}),
     attachments: messageAttachments(row.attachments),
     linkPreview: linkPreviewBundle(row),
     linkPreviewDiagnostics: Array.isArray(row.link_preview_diagnostics)
@@ -506,6 +512,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<ChatRow>(
       `SELECT
          c.id, c.provider_chat_id, c.type, c.display_name, c.enabled, c.version,
+         EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
          c.updated_at,
          COUNT(m.id)::text AS message_count
        FROM chats c
@@ -535,6 +542,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<ChatRow>(
       `SELECT
          c.id, c.provider_chat_id, c.type, c.display_name, c.enabled, c.version,
+         EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
          c.updated_at, COUNT(m.id)::text AS message_count
        FROM chats c
        LEFT JOIN messages m ON m.chat_id = c.id
@@ -759,7 +767,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body, m.content_type,
-         m.is_from_me, m.attachments, m.link_preview_status, m.link_previews,
+         m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.link_preview_status, m.link_previews,
          m.link_preview_error_code, m.link_preview_diagnostics,
          m.link_preview_fetched_at, m.content_redacted_at, m.created_at
        FROM messages m
@@ -789,7 +797,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageSearchRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
-         m.content_type, m.is_from_me, m.attachments, m.content_redacted_at,
+         m.content_type, m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.content_redacted_at,
          m.created_at, m.link_preview_status, m.link_previews,
          m.link_preview_error_code, m.link_preview_diagnostics,
          m.link_preview_fetched_at,
@@ -835,7 +843,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
-         m.content_type, m.is_from_me, m.attachments, m.link_preview_status,
+         m.content_type, m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.link_preview_status,
          m.link_previews, m.link_preview_error_code,
          m.link_preview_diagnostics, m.link_preview_fetched_at,
          m.content_redacted_at, m.created_at
@@ -853,12 +861,12 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     options: ContextWindowOptions,
   ): Promise<readonly ContextMessage[]> {
     const result = await this.pool.query<ContextMessageRow>(
-      `SELECT message_index::text, provider_message_id, sender_id, sent_at, body, is_from_me, attachments,
+      `SELECT message_index::text, provider_message_id, sender_id, sent_at, body, is_from_me, author, attachments,
               link_preview_status, link_previews, link_preview_error_code
        FROM (
          SELECT m.message_index, m.provider_message_id, m.sender_id, m.sent_at,
                 LEFT(COALESCE(m.body, ''), $5) AS body,
-                m.is_from_me, m.id, m.attachments, m.link_preview_status, m.link_previews,
+                m.is_from_me, bot_message_author(m.id) AS author, m.id, m.attachments, m.link_preview_status, m.link_previews,
                 m.link_preview_error_code
          FROM messages m
          INNER JOIN chats c ON c.id = m.chat_id
@@ -912,6 +920,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
         sentAt: row.sent_at.toISOString(),
         body: row.body,
         isFromMe: row.is_from_me,
+        ...(row.author ? { author: row.author } : {}),
         attachments: messageAttachments(row.attachments),
         linkPreview,
       });
@@ -998,49 +1007,6 @@ export class PostgresArchiveRepository implements ArchiveRepository {
                lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
            WHERE message_id = ANY($1::uuid[])`,
           [messageIds],
-        );
-        const chatIds = [
-          ...new Set(redacted.rows.map((message) => message.chat_id)),
-        ];
-        const ended = await client.query<{ id: string }>(
-          `UPDATE conversation_context_compressions operation
-           SET status = 'failed',
-               error_code = 'CONTEXT_SUMMARY_REDACTED_BY_RETENTION',
-               completed_at = NOW(), lease_owner = NULL, updated_at = NOW()
-           FROM conversation_context_states state
-           WHERE operation.context_state_id = state.id
-             AND state.chat_id = ANY($1::uuid[])
-             AND operation.status IN ('queued', 'running')
-           RETURNING operation.id`,
-          [chatIds],
-        );
-        for (const operation of ended.rows) {
-          await client.query(
-            `INSERT INTO conversation_context_compression_events
-               (id, compression_id, status, error_code, metadata)
-             VALUES ($1, $2, 'failed', $3, $4::jsonb)`,
-            [
-              randomUUID(),
-              operation.id,
-              "CONTEXT_SUMMARY_REDACTED_BY_RETENTION",
-              JSON.stringify({ source: "message-retention" }),
-            ],
-          );
-        }
-        await client.query(
-          `WITH reset AS (
-             UPDATE conversation_context_states
-             SET summary = '', covered_through_index = 0,
-                 version = version + 1, status = 'idle', updated_at = NOW(),
-                 last_error_code = 'CONTEXT_SUMMARY_REDACTED_BY_RETENTION'
-             WHERE chat_id = ANY($1::uuid[])
-             RETURNING id, version, summary, covered_through_index
-           )
-           INSERT INTO conversation_context_summary_revisions
-             (context_state_id, version, summary, covered_through_index)
-           SELECT id, version, summary, covered_through_index FROM reset
-           ON CONFLICT (context_state_id, version) DO NOTHING`,
-          [chatIds],
         );
         await client.query(
           `INSERT INTO audit_events (
@@ -1150,6 +1116,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<ChatRow>(
       `SELECT
          c.id, c.provider_chat_id, c.type, c.display_name, c.enabled, c.version,
+         EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
          c.updated_at, COUNT(m.id)::text AS message_count
        FROM chats c
        LEFT JOIN messages m ON m.chat_id = c.id

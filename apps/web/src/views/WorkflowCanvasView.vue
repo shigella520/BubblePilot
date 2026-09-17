@@ -12,6 +12,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import DismissibleMessage from "../components/DismissibleMessage.vue";
+import BotIdentityPanel from "../components/workflow/BotIdentityPanel.vue";
 import WorkflowEditor from "../components/workflow/WorkflowEditor.vue";
 import { apiAllPages, apiRequest, errorMessage } from "../services/api";
 
@@ -284,6 +285,11 @@ onMounted(load);
         }}
       </span>
       <div class="workflow-canvas-actions">
+        <BotIdentityPanel
+          v-if="!isNew"
+          :key="workflowId"
+          :workflow-id="workflowId"
+        />
         <button
           class="button secondary"
           type="button"

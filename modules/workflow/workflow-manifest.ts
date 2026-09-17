@@ -58,6 +58,7 @@ export const workflowManifestSchema = z
       .object({
         name: z.string().trim().min(1).max(120),
         description: z.string().max(2_000).default(""),
+        botNickname: z.string().trim().min(1).max(120).optional(),
       })
       .strict(),
     spec: z
@@ -158,6 +159,7 @@ function mergeCapabilities(
 export function exportWorkflowManifest(input: {
   definition: WorkflowDefinition | Record<string, unknown>;
   description?: string;
+  botNickname?: string | undefined;
   mode: "portable" | "instance-bound";
   catalog: WorkflowBindingCatalog;
   schemaUrl?: string;
@@ -237,6 +239,7 @@ export function exportWorkflowManifest(input: {
           ? definition.name
           : "Imported workflow",
       description: input.description ?? "",
+      ...(input.botNickname ? { botNickname: input.botNickname } : {}),
     },
     spec: {
       maxSteps: definition.maxSteps ?? 64,

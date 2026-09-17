@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { executionPolicy } from "../../../../../modules/ai/execution-policy";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unused-expressions */
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { VueFlow, type Connection, useVueFlow } from "@vue-flow/core";
@@ -89,8 +90,8 @@ function defaultConfig(block: Block): Record<string, unknown> {
     values.template = "{{context.event.message.text}}";
   if (block.type === "ai-chat")
     Object.assign(values, {
-      maxOutputTokens: 1024,
-      maxOutputCharacters: 4000,
+      maxOutputTokens: executionPolicy.chat.maxTokens,
+      targetOutputCharacters: executionPolicy.chat.targetCharacters,
       temperature: null,
       outputVariable: "aiReply",
       includeLoadedContext: true,

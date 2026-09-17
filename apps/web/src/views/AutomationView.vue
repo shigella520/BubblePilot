@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { executionPolicy } from "../../../../modules/ai/execution-policy";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 import {
   Boxes,
@@ -99,6 +100,15 @@ async function deleteWorkflow(workflow: Workflow) {
   }
 }
 const workflows = ref<Workflow[]>([]);
+const roleStatus = ref<{
+  workflows: Array<{ workflowId: string; nickname: string | null }>;
+} | null>(null);
+function roleNickname(id: string) {
+  return (
+    roleStatus.value?.workflows.find((w) => w.workflowId === id)?.nickname ??
+    "未配置角色"
+  );
+}
 const versions = ref<WorkflowVersion[]>([]);
 const triggers = ref<Trigger[]>([]);
 const chats = ref<Array<{ providerChatId: string; displayName: string }>>([]);
@@ -450,6 +460,7 @@ async function load() {
       aiRoutes.value,
       actionBlocks.value,
       chats.value,
+      roleStatus.value,
     ] = await Promise.all([
       apiRequest<Workflow[]>("/api/v1/workflows"),
       apiRequest<Trigger[]>("/api/v1/triggers"),
@@ -458,6 +469,9 @@ async function load() {
       apiAllPages<{ providerChatId: string; displayName: string }>(
         "/api/v1/chats?limit=100",
       ),
+      apiRequest<{
+        workflows: Array<{ workflowId: string; nickname: string | null }>;
+      }>("/api/v1/bot-attributions"),
     ]);
     actionBlocks.value = actionBlocks.value.map((block) =>
       block.type === "ai-chat" || block.type === "load-context"
@@ -522,8 +536,8 @@ function aiConversationDefinition(name: string) {
           systemPrompt: aiFlowForm.systemPrompt,
           promptTemplate: aiFlowForm.promptTemplate,
           includeLoadedContext: true,
-          maxOutputTokens: 1024,
-          maxOutputCharacters: 4000,
+          maxOutputTokens: executionPolicy.chat.maxTokens,
+          targetOutputCharacters: executionPolicy.chat.targetCharacters,
           temperature: null,
           outputFormat: "text",
           outputVariable: "aiReply",
@@ -1131,6 +1145,10 @@ onMounted(load);
               <tr v-for="workflow in workflows" :key="workflow.id">
                 <td>
                   <strong>{{ workflow.name }}</strong
+                  ><span class="keyline"
+                    >角色：{{
+                      roleStatus ? roleNickname(workflow.id) : "未读取"
+                    }}</span
                   ><span class="keyline">{{ workflow.id }}</span>
                 </td>
                 <td>

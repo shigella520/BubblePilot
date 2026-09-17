@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { KeyRound, ShieldCheck } from "@lucide/vue";
-import { ref } from "vue";
+import { onBeforeUnmount, ref } from "vue";
 
 import { errorMessage } from "../services/api";
 import DismissibleMessage from "./DismissibleMessage.vue";
@@ -12,16 +12,24 @@ const password = ref("");
 const busy = ref(false);
 const message = ref("");
 
+let alive = true;
+onBeforeUnmount(() => {
+  alive = false;
+  password.value = "";
+});
+
 async function verify() {
+  if (busy.value) return;
   busy.value = true;
   message.value = "";
   try {
     await session.verifySensitive(password.value);
     password.value = "";
-    emit("verified");
+    if (alive) emit("verified");
   } catch (cause) {
-    message.value = errorMessage(cause);
+    if (alive) message.value = errorMessage(cause);
   } finally {
+    password.value = "";
     busy.value = false;
   }
 }
@@ -33,6 +41,10 @@ async function verify() {
     <div>
       <strong>敏感操作已解锁</strong
       ><span>授权仅绑定当前会话，并会自动过期。</span>
+      <span v-if="session.session?.sensitiveUntil"
+        >有效期至
+        {{ new Date(session.session.sensitiveUntil).toLocaleString() }}</span
+      >
     </div>
   </div>
   <form v-else class="sensitive-unlock" @submit.prevent="verify">
@@ -44,6 +56,9 @@ async function verify() {
     <input
       v-model="password"
       type="password"
+      aria-label="敏感操作密码"
+      autofocus
+      :disabled="busy"
       autocomplete="current-password"
       placeholder="敏感操作密码"
       required
@@ -56,3 +71,15 @@ async function verify() {
     }}</DismissibleMessage>
   </form>
 </template>
+
+<style scoped>
+.sensitive-unlock {
+  grid-template-columns: auto 1fr;
+}
+.sensitive-unlock input,
+.sensitive-unlock .button,
+.sensitive-unlock .form-message {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+</style>

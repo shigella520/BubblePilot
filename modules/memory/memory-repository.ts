@@ -1,3 +1,4 @@
+import { executionPolicy } from "../ai/execution-policy.js";
 import {
   memoryMessage,
   messageColumns,
@@ -25,6 +26,7 @@ import {
 import type { EmbeddingConfig } from "./embedding-client.js";
 import { estimateProgress, type ProgressSample } from "./job-progress.js";
 export interface MemoryJob {
+  reason: string;
   request_key: string | null;
   progress_scope: string | null;
   progress_samples: ProgressSample[];
@@ -312,6 +314,38 @@ export class MemoryRepository {
       [chatId, from, through],
     );
     return rows.rows.map(memoryMessage);
+  }
+  async surrounding(
+    scope: MemoryScope,
+    first: number,
+    last: number,
+    before: number,
+    after: number,
+  ) {
+    // Count readable rows, not index offsets: gaps and redacted rows do not consume a slot.
+    const read = async (direction: "before" | "after", count: number) => {
+      const rows = await this.pool.query<MessageRow>(
+        `SELECT ${messageColumns} FROM messages m WHERE m.chat_id=$1
+         AND m.message_index<$2 AND m.content_redacted_at IS NULL
+         AND m.message_index ${direction === "before" ? "<" : ">"} $3
+         ORDER BY m.message_index ${direction === "before" ? "DESC" : "ASC"} LIMIT $4`,
+        [
+          scope.chatId,
+          scope.upperIndex,
+          direction === "before" ? first : last,
+          count + 1,
+        ],
+      );
+      return rows.rows.map(memoryMessage);
+    };
+    const earlier = await read("before", before);
+    const later = await read("after", after);
+    return {
+      before: earlier.slice(0, before).reverse(),
+      after: later.slice(0, after),
+      hasEarlier: earlier.length > before,
+      hasLater: later.length > after,
+    };
   }
   async createJob(
     chatId: string,
@@ -620,7 +654,7 @@ export class MemoryRepository {
             409,
           );
         await db.query(
-          "UPDATE memory_jobs SET status=$2,reason=CASE WHEN $2='queued' THEN 'backfill' ELSE reason END,version=version+1,lease_owner=NULL,lease_until=NULL,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,attempts=0,next_attempt_at=now(),updated_at=now() WHERE id=$1",
+          "UPDATE memory_jobs SET status=$2,reason=CASE WHEN $2='queued' AND reason!='rebuild' THEN 'backfill' ELSE reason END,version=version+1,lease_owner=NULL,lease_until=NULL,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,attempts=0,next_attempt_at=now(),updated_at=now() WHERE id=$1",
           [id, next],
         );
       }
@@ -633,13 +667,28 @@ export class MemoryRepository {
       );
       const row = (
         await db.query<MemoryJob>(`SELECT j.* FROM memory_jobs j JOIN chats c ON c.id=j.chat_id JOIN memory_chats mc ON mc.chat_id=c.id JOIN memory_generations g ON g.id=j.generation_id
-        WHERE c.enabled AND mc.enabled AND c.deleted_at IS NULL AND g.status!='retired' AND EXISTS(SELECT 1 FROM memory_settings WHERE enabled)
+        WHERE c.enabled AND NOT c.bot_memory_rebuild_required AND j.bot_identity_revision=c.bot_identity_revision AND mc.enabled AND c.deleted_at IS NULL AND g.status!='retired' AND EXISTS(SELECT 1 FROM memory_settings WHERE enabled)
+        AND NOT EXISTS(SELECT 1 FROM bot_attribution_jobs b JOIN messages bm ON bm.id=b.message_id WHERE b.status IN ('queued','running') AND bm.chat_id=c.id AND bm.message_index BETWEEN j.from_index AND j.through_index)
         AND (j.status='queued' OR (j.status='running' AND j.lease_until<now())) AND j.attempts<3 AND j.next_attempt_at<=now()
         ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1`)
       ).rows[0];
       if (!row) return null;
-      if (!row.progress_scope && row.request_key)
-        await this.initializeProgress(db, row.id, "remaining");
+      if (
+        !row.progress_scope &&
+        (row.request_key || row.reason !== "incremental")
+      ) {
+        const scope =
+          row.reason === "rebuild" &&
+          Number(row.cursor_index) < Number(row.from_index)
+            ? "full"
+            : "remaining";
+        await this.initializeProgress(db, row.id, scope);
+        // Samples collected without membership have zero message counts.
+        await db.query(
+          "UPDATE memory_jobs SET progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,progress_worker=NULL WHERE id=$1",
+          [row.id],
+        );
+      }
       await db.query(
         `UPDATE memory_jobs SET progress_samples='[]',progress_started_at=NULL,progress_worker=NULL WHERE id<>$1 AND progress_worker IS NOT NULL`,
         [row.id],
@@ -668,8 +717,11 @@ export class MemoryRepository {
     scannedThrough?: number,
   ) {
     await this.transaction(async (db) => {
+      await db.query("SELECT id FROM chats WHERE id=$1 FOR SHARE", [
+        job.chat_id,
+      ]);
       const row = await db.query(
-        "SELECT 1 FROM memory_jobs WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_until>now() FOR UPDATE",
+        "SELECT 1 FROM memory_jobs WHERE id=$1 AND status='running' AND lease_owner=$2 AND lease_until>now() AND bot_identity_revision=(SELECT bot_identity_revision FROM chats WHERE id=memory_jobs.chat_id) AND NOT (SELECT bot_memory_rebuild_required FROM chats WHERE id=memory_jobs.chat_id) FOR UPDATE",
         [job.id, job.lease_owner],
       );
       if (!row.rowCount) return;
@@ -769,14 +821,14 @@ export class MemoryRepository {
       );
       await db.query(
         `UPDATE memory_jobs SET cursor_index=$2,status=CASE WHEN $2>=through_index THEN 'succeeded' ELSE 'queued' END,
-        reason=CASE WHEN $2<through_index THEN 'backfill' ELSE reason END,attempts=0,lease_owner=NULL,lease_until=NULL,version=version+1,updated_at=now() WHERE id=$1`,
+        reason=CASE WHEN $2<through_index AND reason!='rebuild' THEN 'backfill' ELSE reason END,attempts=0,lease_owner=NULL,lease_until=NULL,version=version+1,updated_at=now() WHERE id=$1`,
         [job.id, cursor],
       );
     });
   }
   async fail(job: MemoryJob, code: string) {
     await this.pool.query(
-      "UPDATE memory_jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,reason='backfill',error_code=$3,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,lease_owner=NULL,lease_until=NULL,next_attempt_at=now()+interval '10 seconds'*attempts,version=version+1 WHERE id=$1 AND lease_owner=$2 AND status='running'",
+      "UPDATE memory_jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,reason=CASE WHEN reason='rebuild' THEN reason ELSE 'backfill' END,error_code=$3,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,lease_owner=NULL,lease_until=NULL,next_attempt_at=now()+interval '10 seconds'*attempts,version=version+1 WHERE id=$1 AND lease_owner=$2 AND status='running'",
       [job.id, job.lease_owner, code],
     );
   }
@@ -787,7 +839,7 @@ export class MemoryRepository {
       start_offset: number;
       end_offset: number;
     }>(
-      `SELECT m.message_index,s.source_hash,s.start_offset,s.end_offset FROM memory_chunks c JOIN memory_chunk_sources s ON s.chunk_id=c.id JOIN messages m ON m.id=s.message_id WHERE c.id=$1 AND c.chat_id=$2 AND c.generation_id=$3 AND c.valid AND c.through_index<$4 AND m.content_redacted_at IS NULL ORDER BY m.message_index,s.start_offset`,
+      `SELECT m.message_index,s.source_hash,s.start_offset,s.end_offset FROM memory_chunks c JOIN memory_chunk_sources s ON s.chunk_id=c.id JOIN messages m ON m.id=s.message_id WHERE c.id=$1 AND c.chat_id=$2 AND c.generation_id=$3 AND c.valid AND c.bot_identity_revision=(SELECT bot_identity_revision FROM chats WHERE id=c.chat_id) AND NOT (SELECT bot_memory_rebuild_required FROM chats WHERE id=c.chat_id) AND c.through_index<$4 AND m.content_redacted_at IS NULL ORDER BY m.message_index,s.start_offset`,
       [chunkId, scope.chatId, scope.generation.id, scope.upperIndex],
     );
     const result: MemoryMessage[] = [];
@@ -828,7 +880,7 @@ export class MemoryRepository {
       WHERE m.chat_id=$1 AND m.message_index<$2 AND m.content_redacted_at IS NULL
       AND NOT EXISTS(SELECT 1 FROM memory_indexed_messages i WHERE i.message_id=m.id AND i.generation_id=$3)
       AND ($4::timestamptz IS NULL OR m.sent_at >= $4) AND ($5::timestamptz IS NULL OR m.sent_at <= $5)
-      AND ($6::text IS NULL OR m.sender_id=$6) ORDER BY m.message_index DESC LIMIT 100`,
+      AND ($6::text IS NULL OR m.sender_id=$6) AND ($7::uuid IS NULL OR EXISTS(SELECT 1 FROM message_bot_attributions a WHERE a.message_id=m.id AND a.workflow_id=$7)) ORDER BY m.message_index DESC LIMIT 100`,
       [
         scope.chatId,
         scope.upperIndex,
@@ -836,13 +888,14 @@ export class MemoryRepository {
         query.from ?? null,
         query.to ?? null,
         query.senderId ?? null,
+        query.botWorkflowId ?? null,
       ],
     );
     const tokens = keywordTokens(query.query);
     return rows.rows
       .map(memoryMessage)
       .filter((m) => tokens.some((t) => m.text.toLowerCase().includes(t)))
-      .slice(0, 5);
+      .slice(0, query.limit ?? executionPolicy.search.limit);
   }
   async identities(chatId: string, senderIds: string[]) {
     return (
@@ -885,14 +938,14 @@ export class MemoryRepository {
   ): Promise<Candidate[]> {
     const tokens = keywordTokens(query.query).slice(0, 40);
     if (!vector && !tokens.length) return [];
-    const filter = `c.chat_id=$1 AND c.generation_id=$2 AND c.through_index<$3 AND c.valid
+    const filter = `c.chat_id=$1 AND c.generation_id=$2 AND c.through_index<$3 AND c.valid AND c.bot_identity_revision=(SELECT bot_identity_revision FROM chats WHERE id=c.chat_id) AND NOT (SELECT bot_memory_rebuild_required FROM chats WHERE id=c.chat_id)
       AND NOT EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN messages m ON m.id=s.message_id WHERE s.chunk_id=c.id AND (m.content_redacted_at IS NOT NULL OR ($4::timestamptz IS NOT NULL AND m.sent_at<$4) OR ($5::timestamptz IS NOT NULL AND m.sent_at>$5)))
-      AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN messages m ON m.id=s.message_id WHERE s.chunk_id=c.id AND m.sender_id=$6))`;
+      AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN messages m ON m.id=s.message_id WHERE s.chunk_id=c.id AND m.sender_id=$6)) AND ($8::uuid IS NULL OR EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN message_bot_attributions a ON a.message_id=s.message_id WHERE s.chunk_id=c.id AND a.workflow_id=$8))`;
     return (
       await this.pool.query<Candidate>(
         vector
-          ? `SELECT c.id,c.from_index,c.through_index FROM memory_chunks c JOIN memory_embeddings e ON e.chunk_id=c.id WHERE ${filter} ORDER BY e.embedding <=> $7::vector LIMIT 20`
-          : `SELECT c.id,c.from_index,c.through_index FROM memory_chunks c WHERE ${filter} AND c.keywords @@ to_tsquery('simple',$7) ORDER BY ts_rank(c.keywords,to_tsquery('simple',$7)) DESC,c.id LIMIT 20`,
+          ? `SELECT c.id,c.from_index,c.through_index FROM memory_chunks c JOIN memory_embeddings e ON e.chunk_id=c.id WHERE ${filter} ORDER BY e.embedding <=> $7::vector LIMIT ${executionPolicy.search.candidates}`
+          : `SELECT c.id,c.from_index,c.through_index FROM memory_chunks c WHERE ${filter} AND c.keywords @@ to_tsquery('simple',$7) ORDER BY ts_rank(c.keywords,to_tsquery('simple',$7)) DESC,c.id LIMIT ${executionPolicy.search.candidates}`,
         [
           scope.chatId,
           scope.generation.id,
@@ -903,6 +956,7 @@ export class MemoryRepository {
           vector
             ? JSON.stringify(vector)
             : tokens.map((t) => `'${t.replaceAll("'", "''")}'`).join(" | "),
+          query.botWorkflowId ?? null,
         ],
       )
     ).rows;

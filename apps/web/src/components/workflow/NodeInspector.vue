@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, vue/no-mutating-props */
+import { executionPolicy } from "../../../../../modules/ai/execution-policy";
 import ContextTemplateEditor from "./ContextTemplateEditor.vue";
 
 const contextTemplateReferences = [
@@ -117,6 +118,11 @@ function templateReferences() {
   });
   return [...contextTemplateReferences, ...outputs];
 }
+function adoptGenerationPolicy() {
+  delete props.config.maxOutputCharacters;
+  props.config.targetOutputCharacters = executionPolicy.chat.targetCharacters;
+  props.config.maxOutputTokens = executionPolicy.chat.maxTokens;
+}
 function configVisible(item: any): boolean {
   if (!item.visibleWhen) return true;
   return props.config[item.visibleWhen.field] === item.visibleWhen.equals;
@@ -140,6 +146,46 @@ function configVisible(item: any): boolean {
     <p class="workflow-inspector-description">
       {{ node.data.block.description }}
     </p>
+    <div v-if="node.data.block.type === 'ai-chat'">
+      <template v-if="config.targetOutputCharacters === undefined">
+        <p>
+          沿用旧输出限制：{{
+            config.maxOutputCharacters ?? executionPolicy.legacy.maxCharacters
+          }}
+          字符。保存其他配置不会自动升级。
+        </p>
+        <button type="button" @click="adoptGenerationPolicy">
+          采用新输出策略
+        </button>
+      </template>
+      <template v-else>
+        <label
+          >期望回答字符数<input
+            v-model.number="config.targetOutputCharacters"
+            type="number"
+            min="1"
+            :max="executionPolicy.chat.maxTargetCharacters"
+        /></label>
+        <p>
+          提示词目标；异常保护为
+          {{ config.targetOutputCharacters * executionPolicy.protectionFactor }}
+          字符，超过目标但未超过保护值的完整回答仍可发送。
+        </p>
+      </template>
+      <label
+        >生成 Token 上限<input
+          :value="config.maxOutputTokens ?? executionPolicy.legacy.maxTokens"
+          type="number"
+          min="1"
+          :max="executionPolicy.chat.maxTokens"
+          @input="
+            config.maxOutputTokens = Number(
+              ($event.target as HTMLInputElement).value,
+            )
+          "
+      /></label>
+      <small>Token 可能包含推理消耗，与中文字数没有固定比例。</small>
+    </div>
     <div v-if="node.data.block.inputs.length" class="workflow-inspector-inputs">
       <strong>输入引用</strong
       ><label v-for="input in node.data.block.inputs" :key="input.name"

@@ -76,9 +76,8 @@ BlueBubbles remains the iMessage gateway. BubblePilot owns its monitoring rules,
 
 ![BubblePilot message workflow](doc/message-workflow-flow.svg)
 
-Conversation summaries rotate periodically: the raw window remains append-only until it reaches a compression boundary, then the oldest batch is replaced by a new summary. AI requests keep a stable text prefix while participant mappings, link previews, images, and other volatile material are moved to the tail, improving Prompt Cache hit rates for compatible providers.
+Chat context uses a base window and a buffer. At their combined threshold, the oldest buffer is removed from model input in one batch. Chat summaries are no longer generated or stored; image summaries, raw archives and history retrieval remain. Prefix stability may help provider caching but does not guarantee cache hits.
 
-[![BubblePilot message rotation, workflow orchestration, and Prompt Cache optimization](doc/message-context-orchestration-cache.svg)](doc/message-context-orchestration-cache.svg)
 
 ## Product preview
 

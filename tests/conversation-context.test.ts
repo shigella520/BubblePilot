@@ -1,18 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
-  contextRetentionThreshold,
-  contextCompressionBatchRange,
-  conversationContextCacheKey,
-  conversationContextProfileHash,
-  contextCompressionPlan,
-  contextFastForwardPlan,
-  ConversationContextService,
-  ConversationSummaryWorker,
-  conversationCompressionPrompt,
-  conversationCompressionTranscript,
   fitContextMessages,
   historyCoverage,
+  retainedWindowCount,
 } from "../modules/workflow/conversation-context-service.js";
 import { conversationHistoryMessages } from "../modules/workflow/node-registry.js";
 import type { ContextMessage } from "../modules/archive/archive-repository.js";
@@ -75,39 +66,7 @@ function sharedMessagePrefixLength(
   return index;
 }
 
-describe("conversation context summary contract", () => {
-  it("runs one startup catch-up scan before processing queued work", async () => {
-    const enqueueStartupCatchups = vi.fn().mockResolvedValue(2);
-    const processQueued = vi.fn().mockResolvedValue(false);
-    const worker = new ConversationSummaryWorker(
-      {
-        enqueueStartupCatchups,
-        processQueued,
-      } as unknown as ConversationContextService,
-      () => Promise.resolve("11111111-1111-4111-8111-111111111111"),
-      () => Promise.resolve("UTC"),
-      5_000,
-      () =>
-        Promise.resolve({
-          enabled: true,
-          providerRouteId: "11111111-1111-4111-8111-111111111111",
-          baseMessageWindow: 4,
-          redundancyMessageWindow: 3,
-          includeFromMe: true,
-          timeZone: "UTC",
-          policyVersion: 2,
-        }),
-    );
-
-    worker.trigger();
-    await worker.stop();
-    worker.trigger();
-    await worker.stop();
-
-    expect(enqueueStartupCatchups).toHaveBeenCalledOnce();
-    expect(processQueued).toHaveBeenCalledTimes(2);
-  });
-
+describe("raw conversation context contract", () => {
   it("keeps load-context configuration global", () => {
     const parsed = parseWorkflowDefinition(definition({}));
     const node = parsed.nodes[0];
@@ -125,39 +84,8 @@ describe("conversation context summary contract", () => {
     ).toThrow();
   });
 
-  it("isolates cache keys by chat, workflow, node and semantic profile", () => {
-    const common = {
-      provider: "bluebubbles",
-      providerChatId: "fictional-chat",
-      workflowId: "workflow-a",
-      nodeId: "load-history",
-      profileHash: conversationContextProfileHash(true),
-    };
-    const base = conversationContextCacheKey(common);
-    expect(
-      new Set([
-        base,
-        conversationContextCacheKey({ ...common, providerChatId: "chat-b" }),
-        conversationContextCacheKey({
-          ...common,
-          profileHash: conversationContextProfileHash(false),
-        }),
-      ]).size,
-    ).toBe(3);
-    expect(
-      conversationContextCacheKey({ ...common, workflowId: "workflow-b" }),
-    ).toBe(base);
-    expect(
-      conversationContextCacheKey({ ...common, nodeId: "other-node" }),
-    ).toBe(base);
-    expect(conversationContextProfileHash(true, "UTC")).not.toBe(
-      conversationContextProfileHash(true, "Asia/Shanghai"),
-    );
-  });
-
   it("renders history timestamps in the execution time zone", () => {
     const [message] = conversationHistoryMessages(
-      null,
       [contextMessage("1")],
       {},
       [],
@@ -167,122 +95,6 @@ describe("conversation context summary contract", () => {
       "[2026-08-10 08:00:01 GMT+08:00 [Asia/Shanghai]]",
     );
     expect(message?.content).not.toContain("2026-08-10T00:00:01.000Z");
-  });
-
-  it("keeps the raw window append-only until the compression boundary", () => {
-    expect(contextRetentionThreshold(50, 10)).toBe(60);
-    for (const eligibleCount of [50, 51, 58, 59]) {
-      expect(
-        contextCompressionPlan({
-          coveredThroughIndex: "20",
-          eligibleCount,
-          baseMessageWindow: 50,
-          redundancyMessageWindow: 10,
-        }),
-      ).toEqual({ reason: null, count: 0 });
-    }
-    expect(
-      contextCompressionPlan({
-        coveredThroughIndex: "20",
-        eligibleCount: 60,
-        baseMessageWindow: 50,
-        redundancyMessageWindow: 10,
-      }),
-    ).toEqual({ reason: "message-threshold", count: 10 });
-  });
-
-  it("advances an initial backlog by only one compression cycle", () => {
-    expect(
-      contextCompressionPlan({
-        coveredThroughIndex: "0",
-        eligibleCount: 83,
-        baseMessageWindow: 50,
-        redundancyMessageWindow: 10,
-      }),
-    ).toEqual({ reason: "initial-catchup", count: 10 });
-    expect(
-      contextCompressionPlan({
-        coveredThroughIndex: "20",
-        eligibleCount: 83,
-        baseMessageWindow: 50,
-        redundancyMessageWindow: 10,
-      }),
-    ).toEqual({ reason: "message-threshold", count: 10 });
-    expect(
-      contextCompressionBatchRange({
-        candidateCount: 83,
-        baseMessageWindow: 50,
-        count: 10,
-        reason: "initial-catchup",
-      }),
-    ).toEqual({ start: 0, end: 10 });
-    expect(
-      contextCompressionBatchRange({
-        candidateCount: 60,
-        baseMessageWindow: 50,
-        count: 10,
-        reason: "message-threshold",
-      }),
-    ).toEqual({ start: 0, end: 10 });
-  });
-
-  it("uses the message windows independently from character trimming", () => {
-    expect(
-      contextCompressionPlan({
-        coveredThroughIndex: "20",
-        eligibleCount: 6,
-        baseMessageWindow: 4,
-        redundancyMessageWindow: 3,
-      }),
-    ).toEqual({ reason: null, count: 0 });
-    expect(
-      contextCompressionPlan({
-        coveredThroughIndex: "20",
-        eligibleCount: 7,
-        baseMessageWindow: 4,
-        redundancyMessageWindow: 3,
-      }),
-    ).toEqual({ reason: "message-threshold", count: 3 });
-    expect(
-      contextCompressionBatchRange({
-        candidateCount: 7,
-        baseMessageWindow: 4,
-        count: 3,
-        reason: "message-threshold",
-      }),
-    ).toEqual({ start: 0, end: 3 });
-  });
-
-  it("fast-forwards only one newest window and skips older backlog", () => {
-    expect(
-      contextFastForwardPlan({
-        eligibleCount: 159,
-        baseMessageWindow: 50,
-        redundancyMessageWindow: 30,
-      }),
-    ).toBeNull();
-    expect(
-      contextFastForwardPlan({
-        eligibleCount: 160,
-        baseMessageWindow: 50,
-        redundancyMessageWindow: 30,
-      }),
-    ).toEqual({
-      skippedMessageCount: 80,
-      compressionMessageCount: 30,
-      retainedMessageCount: 50,
-    });
-    expect(
-      contextFastForwardPlan({
-        eligibleCount: 1_898,
-        baseMessageWindow: 50,
-        redundancyMessageWindow: 30,
-      }),
-    ).toEqual({
-      skippedMessageCount: 1_818,
-      compressionMessageCount: 30,
-      retainedMessageCount: 50,
-    });
   });
 
   it("trims older complete messages while retaining the newest suffix", () => {
@@ -349,214 +161,12 @@ describe("conversation context summary contract", () => {
     ).toEqual(["2"]);
   });
 
-  it("preserves non-body message material in compression input", () => {
-    const message = {
-      ...contextMessage("1", {
-        body: "",
-        attachments: [
-          {
-            providerAttachmentId: "attachment-1",
-            mimeType: "image/jpeg",
-            fileName: "fictional-meal.jpg",
-            sizeBytes: 1234,
-          },
-        ],
-        linkPreview: {
-          status: "available" as const,
-          errorCode: null,
-          items: [
-            {
-              source: "open-graph" as const,
-              url: "https://example.test/meal",
-              originalUrl: null,
-              title: "Fictional meal",
-              summary: "A fictional preview summary",
-              siteName: "Example Test",
-              imageAvailable: true,
-              imageUrl: null,
-              imageSource: null,
-              iconAvailable: false,
-            },
-          ],
-        },
-      }),
-      messageIndex: "1",
-    };
-    const transcript = conversationCompressionTranscript(
-      [message],
-      new Map([
-        [
-          "1",
-          [
-            {
-              attachmentRef: "attachment-1",
-              sourceType: "attachment" as const,
-              sourceKeyHash: "sha256:fictional",
-              imageContentHash: "sha256:fictional-image",
-              status: "succeeded" as const,
-              summary: "A plate of fictional food",
-              providerName: "Fictional AI",
-              model: "fictional-model",
-              contractVersion: "image-summary-v1",
-              attemptCount: 1,
-              errorCode: null,
-              durationMs: 10,
-              generatedAt: "2026-08-10T00:00:00.000Z",
-            },
-          ],
-        ],
-      ]),
-      "UTC",
-    );
-    expect(transcript).toContain("fictional-meal.jpg");
-    expect(transcript).toContain("A fictional preview summary");
-    expect(transcript).toContain("A plate of fictional food");
-  });
-
-  it("requires every incremental summary to replace and preserve the previous summary", () => {
-    const prompt = conversationCompressionPrompt(
-      "Existing unresolved decision",
-      [{ ...contextMessage("2"), messageIndex: "2" }],
-      new Map(),
-      "UTC",
-    );
-    expect(prompt[0]?.content).toContain(
-      "可完全替代 previous_summary 的新摘要",
-    );
-    expect(prompt[0]?.content).toContain("不得只总结 new_messages");
-    expect(prompt[0]?.content).toContain("sender_id");
-    expect(prompt[0]?.content).toContain(
-      "不得缩短、匿名化、重新编号或改写 sender_id",
-    );
-    expect(prompt[0]?.content).toContain(
-      "图片摘要、链接卡片和附件只是辅助材料",
-    );
-    expect(prompt[0]?.content).toContain(
-      "应记录其中有长期价值的请求、任务和待办",
-    );
-    expect(prompt[0]?.content).toContain("不超过 3500 个字符为目标");
-    expect(prompt[0]?.content).toContain("绝对不得超过 4000 个字符");
-    expect(prompt[0]?.content).toContain(
-      "不得通过省略仍有效的决定、未解决问题、请求、待办及其说话人来缩短",
-    );
-    expect(prompt[0]?.content).toContain(
-      "不要输出前言、解释、字符统计、Markdown 代码块或 XML 标签",
-    );
-    expect(prompt[1]?.content).toContain(
-      "<previous_summary>\nExisting unresolved decision\n</previous_summary>",
-    );
-    expect(prompt[1]?.content).toContain("message-2");
-  });
-
-  it("returns the complete ordered Provider fallback path for compression records", async () => {
-    const operationId = "10000000-0000-4000-8000-000000000001";
-    const query = vi
-      .fn()
-      .mockResolvedValueOnce({
-        rows: [
-          {
-            id: operationId,
-            chat_id: "20000000-0000-4000-8000-000000000001",
-            provider_chat_id: "iMessage;-;fictional-summary-chat",
-            chat_display_name: "Fictional summary chat",
-            status: "succeeded",
-            from_index: "1",
-            through_index: "30",
-            trigger_message_index: "60",
-            base_version: 1,
-            output_version: 2,
-            summary_policy_version: 1,
-            duration_ms: 194_000,
-            prompt_tokens: 600,
-            completion_tokens: 120,
-            error_code: null,
-            started_at: new Date("2026-08-10T00:00:00.000Z"),
-            completed_at: new Date("2026-08-10T00:03:14.000Z"),
-            reason: "message-threshold",
-            provider_name: "Fallback Provider",
-            model: "fallback-model",
-            correlation_id: "30000000-0000-4000-8000-000000000001",
-            include_from_me: true,
-            lease_owner: null,
-            lease_expires_at: null,
-            preview: false,
-            source_compression_id: null,
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        rows: [
-          {
-            id: "40000000-0000-4000-8000-000000000001",
-            background_operation_id: operationId,
-            provider_name: "Primary Provider",
-            model: "primary-model",
-            agent_turn: 1,
-            round: 1,
-            sequence: 1,
-            status: "failed",
-            duration_ms: 125_000,
-            error_category: "timeout",
-            error_code: "PROVIDER_TIMEOUT",
-            retryable: true,
-            fallback_allowed: true,
-            prompt_tokens: null,
-            completion_tokens: null,
-            created_at: new Date("2026-08-10T00:00:00.000Z"),
-          },
-          {
-            id: "40000000-0000-4000-8000-000000000002",
-            background_operation_id: operationId,
-            provider_name: "Fallback Provider",
-            model: "fallback-model",
-            agent_turn: 1,
-            round: 1,
-            sequence: 2,
-            status: "succeeded",
-            duration_ms: 69_000,
-            error_category: null,
-            error_code: null,
-            retryable: null,
-            fallback_allowed: null,
-            prompt_tokens: 600,
-            completion_tokens: 120,
-            created_at: new Date("2026-08-10T00:02:05.000Z"),
-          },
-        ],
-      })
-      .mockResolvedValueOnce({ rows: [] });
-    const service = Object.create(
-      ConversationContextService.prototype,
-    ) as ConversationContextService;
-    Object.defineProperty(service, "pool", { value: { query } });
-
-    const result = await service.listCompressions({ limit: 20 });
-
-    expect(result[0]?.providerAttempts).toEqual([
-      expect.objectContaining({
-        providerName: "Primary Provider",
-        sequence: 1,
-        status: "failed",
-        errorCode: "PROVIDER_TIMEOUT",
-        fallbackAllowed: true,
-      }),
-      expect.objectContaining({
-        providerName: "Fallback Provider",
-        sequence: 2,
-        status: "succeeded",
-      }),
-    ]);
-    expect(query.mock.calls[1]?.[1]).toEqual([[operationId]]);
-  });
-
   it("serializes history as exact append-only provider message blocks", () => {
     const previous = conversationHistoryMessages(
-      "stable summary",
       [contextMessage("1"), contextMessage("2", { isFromMe: true })],
       {},
     );
     const next = conversationHistoryMessages(
-      "stable summary",
       [
         contextMessage("1"),
         contextMessage("2", { isFromMe: true }),
@@ -565,11 +175,7 @@ describe("conversation context summary contract", () => {
       {},
     );
     expect(next.slice(0, previous.length)).toEqual(previous);
-    expect(previous.map((item) => item.role)).toEqual([
-      "user",
-      "user",
-      "assistant",
-    ]);
+    expect(previous.map((item) => item.role)).toEqual(["user", "user"]);
   });
 
   it("binds historical images to their owning chat message", () => {
@@ -586,13 +192,11 @@ describe("conversation context summary contract", () => {
       },
     ];
     const previous = conversationHistoryMessages(
-      "stable summary",
       [contextMessage("1")],
       {},
       imageItems,
     );
     const next = conversationHistoryMessages(
-      "stable summary",
       [
         contextMessage("1"),
         contextMessage("2", { isFromMe: true }),
@@ -602,7 +206,6 @@ describe("conversation context summary contract", () => {
       imageItems,
     );
     const third = conversationHistoryMessages(
-      "stable summary",
       [
         contextMessage("1"),
         contextMessage("2", { isFromMe: true }),
@@ -616,9 +219,9 @@ describe("conversation context summary contract", () => {
 
     expect(next.slice(0, previous.length)).toEqual(previous);
     expect(third.slice(0, next.length)).not.toEqual(next);
-    expect(third[1]?.content).toContain("message-1");
-    expect(previous).toHaveLength(2);
-    expect(JSON.stringify(previous[1]?.content)).toContain("data:image");
+    expect(third[0]?.content).toContain("message-1");
+    expect(previous).toHaveLength(1);
+    expect(JSON.stringify(previous[0]?.content)).toContain("data:image");
   });
 
   it("keeps the history prefix stable when a participant mapping changes", () => {
@@ -633,8 +236,8 @@ describe("conversation context summary contract", () => {
         linkPreview: emptyLinkPreview(),
       },
     ];
-    const before = conversationHistoryMessages("stable summary", history, {});
-    const after = conversationHistoryMessages("stable summary", history, {
+    const before = conversationHistoryMessages(history, {});
+    const after = conversationHistoryMessages(history, {
       "member@example.test": {
         senderId: "member@example.test",
         realName: "林一",
@@ -643,24 +246,7 @@ describe("conversation context summary contract", () => {
     });
     expect(before[0]).toEqual(after[0]);
     expect(before).toEqual(after);
-    expect(after[1]?.content).toContain('sender_id="member@example.test"');
-  });
-
-  it("treats a summary update as an intentional cache-prefix boundary", () => {
-    const history = [contextMessage("11"), contextMessage("12")];
-    const before = conversationHistoryMessages(
-      "summary version one",
-      history,
-      {},
-    );
-    const after = conversationHistoryMessages(
-      "summary version two",
-      history,
-      {},
-    );
-
-    expect(sharedMessagePrefixLength(before, after)).toBe(0);
-    expect(before.slice(1)).toEqual(after.slice(1));
+    expect(after[0]?.content).toContain('sender_id="member@example.test"');
   });
 
   it("keeps every historical text item stable when a link preview is enriched", () => {
@@ -688,21 +274,13 @@ describe("conversation context summary contract", () => {
         ],
       },
     });
-    const before = conversationHistoryMessages(
-      "stable summary",
-      [stable, pending],
-      {},
-    );
-    const after = conversationHistoryMessages(
-      "stable summary",
-      [stable, enriched],
-      {},
-    );
+    const before = conversationHistoryMessages([stable, pending], {});
+    const after = conversationHistoryMessages([stable, enriched], {});
 
     expect(before).not.toEqual(after);
-    expect(sharedMessagePrefixLength(before, after)).toBe(2);
-    expect(after[2]?.content).toContain("link_preview");
-    expect(after[2]?.content).toContain("article.example.test");
+    expect(sharedMessagePrefixLength(before, after)).toBe(1);
+    expect(after[1]?.content).toContain("link_preview");
+    expect(after[1]?.content).toContain("article.example.test");
   });
 });
 
@@ -722,7 +300,7 @@ describe("history coverage metadata", () => {
         messageIndex: "21",
       },
     ];
-    const coverage = historyCoverage("9", candidates, candidates.slice(2));
+    const coverage = historyCoverage(candidates, candidates.slice(2));
     expect(coverage.omitted).toEqual({
       count: 2,
       firstMessageIndex: "11",
@@ -731,7 +309,6 @@ describe("history coverage metadata", () => {
       latestSentAt: "2026-09-11T00:00:00.000Z",
     });
     const input = conversationHistoryMessages(
-      null,
       candidates.slice(2),
       {},
       [],
@@ -741,7 +318,32 @@ describe("history coverage metadata", () => {
     );
     expect(input.at(-1)?.content).toContain("history-trimmed");
     expect(input.at(-1)?.content).not.toContain("message-1");
-    expect(historyCoverage("9", candidates, candidates).omitted).toBeNull();
-    expect(historyCoverage("9", [], []).retained).toBeNull();
+    expect(historyCoverage(candidates, candidates).omitted).toBeNull();
+    expect(historyCoverage([], []).retained).toBeNull();
   });
+});
+
+it("advances by whole buffers using actual counts", () => {
+  expect(
+    [0, 3, 4, 5, 6, 7, 12].map((n) => retainedWindowCount(n, 3, 2)),
+  ).toEqual([0, 3, 4, 3, 4, 3, 4]);
+});
+
+it("rejects explicit retired summary ports with the offending node", () => {
+  const raw = definition({});
+  const retired = {
+    ...raw,
+    nodes: [
+      raw.nodes[0],
+      {
+        id: "render",
+        type: "render-text",
+        version: 1,
+        config: { template: "{{context.outputs.load-history.summary}}" },
+        onSuccess: "end",
+      },
+      raw.nodes[1],
+    ],
+  };
+  expect(() => parseWorkflowDefinition(retired)).toThrow(/render.*summary/);
 });

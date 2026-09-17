@@ -1,3 +1,4 @@
+import type { BotIdentity } from "../identity/bot-identity.js";
 import { randomUUID } from "node:crypto";
 
 import type { Pool } from "pg";
@@ -24,7 +25,7 @@ import type {
   WorkflowVersionStatus,
 } from "./workflow-repository.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
-import type { ConversationSummaryTrigger } from "./conversation-context-service.js";
+import type { ConversationContextTrigger } from "./conversation-context-service.js";
 import {
   linkPreviewItemSchema,
   linkPreviewStatusSchema,
@@ -75,6 +76,7 @@ interface TriggerRow {
 }
 
 interface ExecutionRow {
+  bot_identity: BotIdentity | null;
   id: string;
   provider: string;
   external_event_id: string;
@@ -182,7 +184,7 @@ const triggerSelect = `SELECT
   t.created_at, t.updated_at, t.deleted_at`;
 
 const executionSelect = `SELECT
-  e.id, e.provider, e.external_event_id,
+  e.id, e.bot_identity, e.provider, e.external_event_id,
   source_message.provider_message_id AS source_provider_message_id,
   source_chat.provider_chat_id, source_chat.display_name AS chat_display_name,
   e.trigger_id,
@@ -289,6 +291,7 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
       cachedPromptTokens === null || cacheEligiblePromptTokens === 0
         ? null
         : cachedPromptTokens / cacheEligiblePromptTokens,
+    botIdentity: row.bot_identity,
     contextSnapshot:
       row.context_snapshot === null && row.trigger_message_index === null
         ? null
@@ -725,7 +728,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
-    summaryTrigger?: ConversationSummaryTrigger;
+    contextTrigger?: ConversationContextTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }> {
     const id = randomUUID();
     const inserted = await this.pool.query<IdentifierRow>(
@@ -758,31 +761,10 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         input.trigger.id,
         input.trigger.workflowVersionId,
         input.envelope.correlationId,
-        input.summaryTrigger?.triggerMessageIndex ?? null,
-        input.summaryTrigger === undefined
+        input.contextTrigger?.triggerMessageIndex ?? null,
+        input.contextTrigger === undefined
           ? null
-          : JSON.stringify({
-              chatId: input.summaryTrigger.summarySnapshot.chatId ?? null,
-              providerChatId: input.envelope.chat.providerChatId,
-              triggerMessageIndex: input.summaryTrigger.triggerMessageIndex,
-              summaryVersion:
-                input.summaryTrigger.summarySnapshot.summaryVersion,
-              summaryCoveredThroughIndex:
-                input.summaryTrigger.summarySnapshot.coveredThroughIndex,
-              summaryPolicyVersion:
-                input.summaryTrigger.summarySnapshot.summaryPolicyVersion ??
-                null,
-              stateId: input.summaryTrigger.summarySnapshot.stateId,
-              summaryStateId: input.summaryTrigger.summarySnapshot.stateId,
-              compressionOperationId:
-                input.summaryTrigger.summarySnapshot.compressionOperationId ??
-                null,
-              scheduledCompressionOperationId:
-                input.summaryTrigger.compressionOperationId ??
-                input.summaryTrigger.summarySnapshot
-                  .scheduledCompressionOperationId ??
-                null,
-            }),
+          : JSON.stringify(input.contextTrigger.contextSnapshot),
       ],
     );
     const persistedId = inserted.rows[0]?.id ?? id;
@@ -1228,6 +1210,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async listExecutions(options: {
     limit: number;
     statuses?: readonly WorkflowExecutionStatus[];
+    attention?: "unknown-outbound";
     cursor: { timestamp: Date; id: string } | null;
   }): Promise<readonly WorkflowExecutionRecord[]> {
     const statuses = options.statuses ?? [];
@@ -1238,12 +1221,17 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
            $2::timestamptz IS NULL
            OR (e.created_at, e.id) < ($2::timestamptz, $3::uuid)
          )
+         AND ($5::text IS NULL OR (e.status <> 'closed' AND EXISTS (
+           SELECT 1 FROM outbound_deliveries d
+           WHERE d.execution_id = e.id AND d.status = 'unknown'
+         )))
        ORDER BY e.created_at DESC, e.id DESC LIMIT $4`,
       [
         statuses,
         options.cursor?.timestamp.toISOString() ?? null,
         options.cursor?.id ?? null,
         options.limit,
+        options.attention ?? null,
       ],
     );
     return result.rows.map(executionRecord);
@@ -1340,9 +1328,10 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       ),
       this.pool.query<{ sending: string; unknown: string }>(
         `SELECT
-           COUNT(*) FILTER (WHERE status = 'sending') AS sending,
-           COUNT(*) FILTER (WHERE status = 'unknown') AS unknown
-         FROM outbound_deliveries`,
+           COUNT(*) FILTER (WHERE d.status = 'sending') AS sending,
+           COUNT(*) FILTER (WHERE d.status = 'unknown' AND e.status IS DISTINCT FROM 'closed') AS unknown
+         FROM outbound_deliveries d
+         LEFT JOIN workflow_executions e ON e.id = d.execution_id`,
       ),
     ]);
     const execution = executions.rows[0];

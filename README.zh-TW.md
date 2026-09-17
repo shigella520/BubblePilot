@@ -76,9 +76,8 @@ BlueBubbles 只負責收發 iMessage；BubblePilot 保存自己的監聽設定�
 
 ![BubblePilot 訊息工作流程](doc/message-workflow-flow.svg)
 
-上下文摘要採用週期性輪換：視窗在壓縮邊界前只追加，到達邊界後再批次替換摘要；AI 請求同時保持穩定文字前綴，並把成員映射、連結預覽和圖片等易變材料放在尾部，以提高相容 Provider 的 Prompt Cache 命中率。
+聊天上下文保留基礎視窗與緩衝視窗，達到兩者總和時批次移出最早的緩衝訊息。聊天 AI 摘要功能與資料已移除，圖片摘要、原始歸檔和歷史檢索保留。穩定前綴有助於快取複用，但不保證命中。
 
-[![BubblePilot 訊息輪換壓縮、工作流程編排與 Prompt Cache 最佳化](doc/message-context-orchestration-cache.svg)](doc/message-context-orchestration-cache.svg)
 
 ## 實際使用效果
 

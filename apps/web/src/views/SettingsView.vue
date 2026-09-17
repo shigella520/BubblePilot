@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SectionNavigation from "../components/SectionNavigation.vue";
 import {
   Cable,
   CheckCircle2,
@@ -10,7 +11,6 @@ import {
 } from "@lucide/vue";
 import { onMounted, reactive, ref } from "vue";
 
-import SensitiveUnlock from "../components/SensitiveUnlock.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { apiRequest, errorMessage, jsonBody } from "../services/api";
 import { useSessionStore } from "../stores/session";
@@ -52,10 +52,6 @@ const form = reactive({
   openGraphFallbackEnabled: true,
   openGraphTimeoutMs: 5_000,
 });
-
-function scrollToSection(id: string) {
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-}
 
 function apply(value: BlueBubblesSettings) {
   current.value = value;
@@ -146,22 +142,15 @@ onMounted(load);
         <p class="eyebrow">SETTINGS</p>
         <h2>系统设置</h2>
       </div>
-      <nav>
-        <button
-          class="active"
-          type="button"
-          @click="scrollToSection('bluebubbles')"
-        >
-          <Cable :size="18" />BlueBubbles
-        </button>
-      </nav>
+      <SectionNavigation
+        :items="[{ id: 'bluebubbles', label: 'BlueBubbles', icon: Cable }]"
+      />
       <div class="sidebar-note">
         运行时配置保存在应用数据库中，修改后无需重新部署容器。
       </div>
     </aside>
 
     <div class="admin-workspace">
-      <SensitiveUnlock />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"
