@@ -295,6 +295,7 @@ export interface WorkflowRepository {
   listExecutions(options: {
     limit: number;
     statuses?: readonly WorkflowExecutionStatus[];
+    attention?: "unknown-outbound";
     cursor: { timestamp: Date; id: string } | null;
   }): Promise<readonly WorkflowExecutionRecord[]>;
   listExecutionsForMessages(

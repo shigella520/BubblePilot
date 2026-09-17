@@ -242,7 +242,10 @@ onMounted(load);
         </span>
       </div>
       <div v-if="operations" class="runtime-summary-grid">
-        <RouterLink to="/executions" class="runtime-summary-item">
+        <RouterLink
+          to="/executions?attention=recovery"
+          class="runtime-summary-item"
+        >
           <span>死信 / 等待重试</span>
           <strong
             >{{ operations.workflow.executions.deadLettered }} /
@@ -250,7 +253,10 @@ onMounted(load);
           >
           <em>卡住 {{ operations.workflow.executions.staleRetrying }}</em>
         </RouterLink>
-        <RouterLink to="/executions" class="runtime-summary-item">
+        <RouterLink
+          to="/executions?attention=unknown-outbound"
+          class="runtime-summary-item"
+        >
           <span>未知出站结果</span>
           <strong>{{ operations.workflow.outbound.unknown }}</strong>
           <em>需要人工确认，不会盲目重发</em>

@@ -26,7 +26,7 @@ import {
   ref,
   watch,
 } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import CursorPagination from "../components/CursorPagination.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
@@ -286,7 +286,10 @@ const rawRequestLoadingId = ref<string | null>(null);
 const message = ref("");
 const messageIsError = ref(false);
 const recoveryBusy = ref(false);
-const recoveryOnly = ref(false);
+const recoveryOnly = computed(() => route.query.attention === "recovery");
+const unknownOnly = computed(
+  () => route.query.attention === "unknown-outbound",
+);
 const detailLoadingId = ref<string | null>(null);
 const detailDialog = ref<HTMLElement | null>(null);
 const usage = ref<AiUsageReport | null>(null);
@@ -301,12 +304,14 @@ let detailReturnFocus: HTMLElement | null = null;
 let applicationRoot: HTMLElement | null = null;
 let applicationRootWasInert = false;
 const route = useRoute();
+const router = useRouter();
 const session = useSessionStore();
 const executionPager = useCursorPager<Execution>((cursor) => {
   const query = new URLSearchParams({ limit: "10" });
   if (recoveryOnly.value) {
-    query.set("status", "retrying,failed,dead-lettered,closed");
+    query.set("status", "retrying,failed,dead-lettered");
   }
+  if (unknownOnly.value) query.set("attention", "unknown-outbound");
   if (cursor !== null) query.set("cursor", cursor);
   return apiPageRequest<Execution[]>(`/api/v1/executions?${query}`);
 });
@@ -558,9 +563,9 @@ async function changePage(action: () => Promise<boolean>) {
 }
 
 async function toggleRecoveryOnly() {
-  recoveryOnly.value = !recoveryOnly.value;
-  clearDetail();
-  await changePage(executionPager.first);
+  await router.replace({
+    query: recoveryOnly.value ? {} : { attention: "recovery" },
+  });
 }
 async function inspect(id: string) {
   if (!session.authenticated) return;
@@ -690,6 +695,10 @@ async function copyRawResponse(attemptId: string) {
 }
 async function loadSelected() {
   await load(true);
+  if (recoveryOnly.value || unknownOnly.value) {
+    await nextTick();
+    document.getElementById("executions")?.scrollIntoView({ block: "start" });
+  }
   const executionId = route.query.executionId;
   if (typeof executionId === "string") await inspect(executionId);
 }
@@ -700,7 +709,11 @@ async function recover(action: "retry" | "close") {
     !window.confirm(
       action === "retry"
         ? "确认创建一条新的恢复执行？原执行历史会保留。"
-        : "确认人工关闭这条失败执行？",
+        : detail.value.deliveries.some(
+              (delivery) => delivery.status === "unknown",
+            )
+          ? "此消息可能已经发送，请先核对对应聊天。关闭后将不再显示待处理告警，但发送结果仍保留为未知，不会重新发送。确认关闭？"
+          : "确认人工关闭这条失败执行？",
     )
   )
     return;
@@ -725,6 +738,16 @@ async function recover(action: "retry" | "close") {
   }
 }
 watch(
+  () => route.query.attention,
+  async () => {
+    clearDetail();
+    executionPager.clear();
+    await changePage(executionPager.first);
+    await nextTick();
+    document.getElementById("executions")?.scrollIntoView({ block: "start" });
+  },
+);
+watch(
   () => route.query.executionId,
   (executionId) => {
     if (typeof executionId === "string") void inspect(executionId);
@@ -746,7 +769,11 @@ watch(
       applicationRoot?.setAttribute("inert", "");
       document.body.style.overflow = "hidden";
       await nextTick();
-      detailDialog.value?.focus();
+      detailDialog.value?.focus({ preventScroll: true });
+      if (unknownOnly.value)
+        document
+          .getElementById("execution-outbound")
+          ?.scrollIntoView({ block: "start" });
       return;
     }
     document.body.style.overflow = pageOverflowBeforeDetail;
@@ -1107,11 +1134,24 @@ function contextSnapshotValue(
           <div>
             <p class="card-kicker">EXECUTION TRACE</p>
             <h1>工作流执行</h1>
+            <p v-if="unknownOnly" class="keyline">
+              待处理未知发送：仅显示存在未知发送且尚未关闭的执行。请核对聊天后在详情中人工关闭；关闭不代表发送成功。
+            </p>
+            <p v-else-if="recoveryOnly" class="keyline">
+              待恢复执行：仅显示等待重试、失败及死信记录，已关闭记录不再列入。
+            </p>
             <p class="keyline">
               回复缓存命中仅统计 ai-chat 对话请求；图片摘要等辅助请求不计入。
             </p>
           </div>
           <div class="row-actions">
+            <button
+              v-if="unknownOnly || recoveryOnly"
+              class="button secondary"
+              @click="router.replace({ query: {} })"
+            >
+              查看全部执行
+            </button>
             <button
               class="button tiny"
               :class="recoveryOnly ? 'primary' : 'secondary'"
@@ -1141,7 +1181,15 @@ function contextSnapshotValue(
             </thead>
             <tbody>
               <tr v-if="!executions.length">
-                <td colspan="6" class="empty-cell">暂无执行</td>
+                <td colspan="6" class="empty-cell">
+                  {{
+                    unknownOnly
+                      ? "暂无待处理未知发送"
+                      : recoveryOnly
+                        ? "暂无待恢复执行"
+                        : "暂无执行"
+                  }}
+                </td>
               </tr>
               <tr v-for="item in executions" :key="item.id">
                 <td>
@@ -2005,8 +2053,17 @@ function contextSnapshotValue(
                 本次执行没有工具调用。
               </div>
             </section>
-            <section>
+            <section id="execution-outbound">
               <h3>出站发送</h3>
+              <p
+                v-if="
+                  detail.status === 'closed' &&
+                  detail.deliveries.some((item) => item.status === 'unknown')
+                "
+                class="keyline"
+              >
+                执行已人工关闭；发送结果仍未知，不再自动重试，也不再计入待处理告警。
+              </p>
               <article
                 v-for="item in detail.deliveries"
                 :key="item.id"

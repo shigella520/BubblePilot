@@ -1210,6 +1210,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async listExecutions(options: {
     limit: number;
     statuses?: readonly WorkflowExecutionStatus[];
+    attention?: "unknown-outbound";
     cursor: { timestamp: Date; id: string } | null;
   }): Promise<readonly WorkflowExecutionRecord[]> {
     const statuses = options.statuses ?? [];
@@ -1220,12 +1221,17 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
            $2::timestamptz IS NULL
            OR (e.created_at, e.id) < ($2::timestamptz, $3::uuid)
          )
+         AND ($5::text IS NULL OR (e.status <> 'closed' AND EXISTS (
+           SELECT 1 FROM outbound_deliveries d
+           WHERE d.execution_id = e.id AND d.status = 'unknown'
+         )))
        ORDER BY e.created_at DESC, e.id DESC LIMIT $4`,
       [
         statuses,
         options.cursor?.timestamp.toISOString() ?? null,
         options.cursor?.id ?? null,
         options.limit,
+        options.attention ?? null,
       ],
     );
     return result.rows.map(executionRecord);
@@ -1322,9 +1328,10 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       ),
       this.pool.query<{ sending: string; unknown: string }>(
         `SELECT
-           COUNT(*) FILTER (WHERE status = 'sending') AS sending,
-           COUNT(*) FILTER (WHERE status = 'unknown') AS unknown
-         FROM outbound_deliveries`,
+           COUNT(*) FILTER (WHERE d.status = 'sending') AS sending,
+           COUNT(*) FILTER (WHERE d.status = 'unknown' AND e.status IS DISTINCT FROM 'closed') AS unknown
+         FROM outbound_deliveries d
+         LEFT JOIN workflow_executions e ON e.id = d.execution_id`,
       ),
     ]);
     const execution = executions.rows[0];

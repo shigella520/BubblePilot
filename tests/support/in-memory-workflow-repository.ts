@@ -718,6 +718,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   listExecutions(options: {
     limit: number;
     statuses?: readonly WorkflowExecutionStatus[];
+    attention?: "unknown-outbound";
     cursor: { timestamp: Date; id: string } | null;
   }): Promise<readonly WorkflowExecutionRecord[]> {
     const statuses = options.statuses ?? [];
@@ -727,6 +728,13 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
         .filter(
           (execution) =>
             (statuses.length === 0 || statuses.includes(execution.status)) &&
+            (options.attention === undefined ||
+              (execution.status !== "closed" &&
+                [...this.deliveries.values()].some(
+                  (delivery) =>
+                    delivery.executionId === execution.id &&
+                    delivery.status === "unknown",
+                ))) &&
             (cursorTimestamp === undefined ||
               execution.createdAt < cursorTimestamp ||
               (execution.createdAt === cursorTimestamp &&
@@ -796,7 +804,9 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
           (delivery) => delivery.status === "sending",
         ).length,
         unknown: [...this.deliveries.values()].filter(
-          (delivery) => delivery.status === "unknown",
+          (delivery) =>
+            delivery.status === "unknown" &&
+            this.executions.get(delivery.executionId)?.status !== "closed",
         ).length,
       },
       oldestDeadLetterAt: deadLetters[0]?.createdAt ?? null,

@@ -2138,6 +2138,12 @@ paths:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
         - in: query
+          name: attention
+          description: unknown-outbound 仅返回存在未知出站发送且执行未关闭的记录，与 status 条件取交集，筛选后分页。
+          schema:
+            type: string
+            enum: [unknown-outbound]
+        - in: query
           name: status
           description: 逗号分隔的执行状态；最多八种，用于恢复队列等受控筛选。
           schema:

@@ -125,6 +125,7 @@ const workflowExecutionStatusSchema = z.enum([
 ]);
 
 const executionListQuerySchema = pageQuerySchema.extend({
+  attention: z.enum(["unknown-outbound"]).optional(),
   status: z.string().min(1).max(200).optional(),
 });
 
@@ -3130,6 +3131,7 @@ export function buildApplication(
         const executions = await workflowRepository.listExecutions({
           limit: query.limit + 1,
           statuses: executionStatuses(query.status),
+          ...(query.attention ? { attention: query.attention } : {}),
           cursor: decodeCursor(query.cursor),
         });
         return cursorPage(executions, query.limit, (execution) => ({
