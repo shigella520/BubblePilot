@@ -52,6 +52,8 @@ BubblePilot 接收 BlueBubbles 的新訊息，只在你指定的聊天中保存�
 - **圖片可由原生多模態模型理解**：在全域安全限制內暫時讀取目前附件、卡片主圖和有限歷史圖片，失敗時明確降級為文字。
 - **資料保存在自己的實例**：PostgreSQL 是訊息、設定、執行和稽核記錄的權威來源。
 
+升級至 **2.0.0** 前請閱讀[升級說明](doc/部署与运维.md#从-120-升级到-200)：本版本永久移除聊天 AI 摘要及相關資料，保留原文雙視窗。舊 PostgreSQL Alpine 部署切換至 pgvector 時需要邏輯備份與新磁碟區還原，不可直接替換映像沿用舊磁碟區。
+
 ## 核心能力
 
 | 場景             | BubblePilot 提供的能力                                                    |
@@ -209,7 +211,7 @@ SENSITIVE_OPERATION_PASSWORD_HASH='scrypt$...'
 - `MONITORED_CHAT_IDS`：已知 Chat GUID 時可提前填入，多個值用逗號分隔；留空時先用 Webhook 發現聊天，再到管理端開啟監聽。
 - `MESSAGE_RETENTION_DAYS`：正文與附件中繼資料預設保留 90 天；`0` 表示明確接受永久保留風險。
 - `ENABLE_WEB_SEARCH`：預設 `false`，作為部署層級的安全總開關。開啟後，重試、逾時、結果數與失敗後備統一在 AI 頁面的「聯網搜尋全域設定」管理，儲存後立即生效。
-- `BUBBLEPILOT_IMAGE`：原始碼部署由 Compose 本機建置；正式部署可固定為 `ghcr.io/shigella520/bubblepilot:1.2.0`，不要長期使用 `dev` 或 `latest`。
+- `BUBBLEPILOT_IMAGE`：原始碼部署由 Compose 本機建置；正式部署可固定為 `ghcr.io/shigella520/bubblepilot:2.0.0`，不要長期使用 `dev` 或 `latest`。
 
 ### 4. 啟動並檢查服務
 
