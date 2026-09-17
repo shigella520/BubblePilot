@@ -29,5 +29,10 @@ export interface AgentBudgetSnapshot {
   toolDurationMs: number;
   finalizingDueToBudget: boolean;
   reasons: AgentBudgetReason[];
+  citationHandling?: {
+    invalidResponses: number;
+    correctionAttempts: number;
+    finalAction: "corrected" | "markers-removed" | "failed";
+  };
   outcome: "completed" | "budget-completed" | "failed";
 }

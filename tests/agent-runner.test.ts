@@ -831,7 +831,14 @@ describe("AgentRunner", () => {
     expect(call).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({
       status: "succeeded",
-      text: "这件事我还没找到能确认的线索，你记得大概是哪次聊的吗？",
+      text: "Bad",
+      agentBudget: {
+        citationHandling: {
+          invalidResponses: 2,
+          correctionAttempts: 1,
+          finalAction: "markers-removed",
+        },
+      },
     });
   });
 });

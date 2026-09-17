@@ -7,7 +7,11 @@ import type {
   AiRouteSuccess,
   AiToolCall,
 } from "../modules/ai/ai-types.js";
-import type { MemoryService } from "../modules/memory/memory-service.js";
+import {
+  MemorySession,
+  stripHistoricalCitationMarkers,
+  type MemoryService,
+} from "../modules/memory/memory-service.js";
 import { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
 import { InMemoryAgentSettingsRepository } from "./support/in-memory-agent-settings-repository.js";
 const request: AiRouteRequest = {
@@ -285,5 +289,141 @@ describe("AgentRunner shared quota integration", () => {
       code: "AI_AGENT_TOOL_LIMIT_EXCEEDED",
       agentBudget: { modelTurns: 2, toolCalls: 1, outcome: "failed" },
     });
+  });
+});
+
+describe("citation delivery preserves the user's task", () => {
+  it.each(["web", "history", "mixed"])(
+    "preserves the answer after invalid citations in %s results",
+    async (mode) => {
+      const calls = [
+        ...(mode !== "history"
+          ? [call(1, "web_search", '{"query":"fictional service"}')]
+          : []),
+        ...(mode !== "web" ? [call(2)] : []),
+      ];
+      const answer = "虚构方案：提供部署服务；公开资料需进一步核实 [M999]。";
+      const f = fixture((_, turn) =>
+        turn === 1 ? response(calls) : response([], answer),
+      );
+      // Use the production renderer with no registered sources: M999 is never valid.
+      const renderer = new MemorySession(f.memory, {} as never);
+      f.memory.session = () =>
+        Promise.resolve({
+          execute: f.execute,
+          validate: () => Promise.resolve(true),
+          render: renderer.render.bind(renderer),
+          references: () => [],
+        } as never);
+      const result = await new AgentRunner(
+        f.routing,
+        f.search,
+        undefined,
+        undefined,
+        undefined,
+        f.memory,
+      ).run(request);
+      expect(result).toMatchObject({
+        status: "succeeded",
+        text: "虚构方案：提供部署服务；公开资料需进一步核实。",
+        agentBudget: {
+          modelTurns: 3,
+          toolCalls: calls.length,
+          citationHandling: {
+            invalidResponses: 2,
+            correctionAttempts: 1,
+            finalAction: "markers-removed",
+          },
+        },
+      });
+      const correction = f.requests[2]!;
+      expect(correction.tools).toBeUndefined();
+      expect(JSON.stringify(correction.messages)).toContain(
+        "preserving the original user task",
+      );
+      expect(JSON.stringify(correction.messages)).not.toContain(
+        "Use only relevant historical evidence",
+      );
+    },
+  );
+
+  it("delivers a corrected answer and records the correction", async () => {
+    const f = fixture((_, turn) =>
+      response([], turn === 1 ? "虚构建议 [M999]" : "虚构建议"),
+    );
+    const renderer = new MemorySession(f.memory, {} as never);
+    f.memory.session = () =>
+      Promise.resolve({
+        validate: () => Promise.resolve(true),
+        render: renderer.render.bind(renderer),
+      } as never);
+    const result = await new AgentRunner(
+      f.routing,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.memory,
+    ).run({ ...request, webSearch: "disabled" });
+    expect(result).toMatchObject({
+      status: "succeeded",
+      text: "虚构建议",
+      agentBudget: {
+        modelTurns: 2,
+        citationHandling: {
+          invalidResponses: 1,
+          correctionAttempts: 1,
+          finalAction: "corrected",
+        },
+      },
+    });
+  });
+
+  it.each(["", "[M999]", "not-json"])(
+    "fails explicitly instead of inventing a historical reply for %s",
+    async (answer) => {
+      const f = fixture(() => response([], answer));
+      const renderer = new MemorySession(f.memory, {} as never);
+      f.memory.session = () =>
+        Promise.resolve({
+          validate: () => Promise.resolve(true),
+          render: renderer.render.bind(renderer),
+        } as never);
+      const result = await new AgentRunner(
+        f.routing,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        f.memory,
+      ).run({
+        ...request,
+        webSearch: "disabled",
+        outputFormat: answer === "not-json" ? "json" : "text",
+      });
+      expect(result).toMatchObject({
+        status: "failed",
+        code: "AI_OUTPUT_FORMAT_INVALID",
+      });
+      expect(f.requests.length).toBeLessThanOrEqual(2);
+    },
+  );
+
+  it("strips markers from nested JSON strings without damaging structure or URLs", () => {
+    const input = {
+      answer: "虚构答案 [M999]",
+      items: ["来源 [M1]", 3],
+      url: "https://example.test/reference",
+    };
+    expect(
+      JSON.parse(
+        stripHistoricalCitationMarkers(JSON.stringify(input), "json")!,
+      ),
+    ).toEqual({
+      answer: "虚构答案",
+      items: ["来源", 3],
+      url: input.url,
+    });
+    expect(stripHistoricalCitationMarkers("{broken", "json")).toBeNull();
   });
 });

@@ -12,6 +12,11 @@ interface Budget {
   toolCalls: number;
   toolOutputCharacters: number;
   toolDurationMs: number;
+  citationHandling?: {
+    invalidResponses: number;
+    correctionAttempts: number;
+    finalAction: string;
+  };
   outcome: string;
   reasons: string[];
 }
@@ -60,6 +65,17 @@ const reasonLabels: Record<string, string> = {
         {{ budget.settings.maxToolOutputCharacters }} 字符 · 工具耗时
         {{ (budget.toolDurationMs / 1000).toFixed(2) }} /
         {{ budget.settings.maxToolDurationMs / 1000 }} 秒
+      </p>
+      <p v-if="budget.citationHandling">
+        引用处理：异常 {{ budget.citationHandling.invalidResponses }} 次 · 修正
+        {{ budget.citationHandling.correctionAttempts }} 次 ·
+        {{
+          budget.citationHandling.finalAction === "markers-removed"
+            ? "已移除无法验证的引用标记，保留回答内容"
+            : budget.citationHandling.finalAction === "corrected"
+              ? "模型已修正引用格式"
+              : "回答格式处理失败"
+        }}（不代表事实核验通过）
       </p>
       <p v-if="budget.reasons?.length">
         收尾原因：{{

@@ -893,25 +893,33 @@ export class MemorySession {
   render(text: string, outputFormat: "text" | "json" = "text"): string | null {
     const refs = [...text.matchAll(/\[(M\d+)\]/gu)].map((m) => m[1] ?? "");
     if (refs.some((ref) => !this.evidence.has(ref))) return null;
-    // Sources remain available in protected execution details, not chat prose.
-    // A search can return irrelevant evidence; an honest uncertainty answer
-    // must not be forced to cite it merely because candidates exist.
-    const replace = (value: string) =>
-      value.replace(/[ \t]*\[(M\d+)\]/gu, "").trim();
-    const transform = (value: unknown): unknown => {
-      if (typeof value === "string") return replace(value);
-      if (Array.isArray(value)) return value.map(transform);
-      if (value && typeof value === "object")
-        return Object.fromEntries(
-          Object.entries(value).map(([key, item]) => [key, transform(item)]),
-        );
-      return value;
-    };
-    if (outputFormat === "text") return replace(text);
-    try {
-      return JSON.stringify(transform(JSON.parse(text)));
-    } catch {
-      return null;
-    }
+    return stripHistoricalCitationMarkers(text, outputFormat);
+  }
+}
+
+/** Remove internal markers only; never infer whether the answer is factually supported. */
+export function stripHistoricalCitationMarkers(
+  text: string,
+  outputFormat: "text" | "json" = "text",
+): string | null {
+  // Sources remain available in protected execution details, not chat prose.
+  // A search can return irrelevant evidence; an honest uncertainty answer
+  // must not be forced to cite it merely because candidates exist.
+  const replace = (value: string) =>
+    value.replace(/[ \t]*\[(M\d+)\]/gu, "").trim();
+  const transform = (value: unknown): unknown => {
+    if (typeof value === "string") return replace(value);
+    if (Array.isArray(value)) return value.map(transform);
+    if (value && typeof value === "object")
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [key, transform(item)]),
+      );
+    return value;
+  };
+  if (outputFormat === "text") return replace(text);
+  try {
+    return JSON.stringify(transform(JSON.parse(text)));
+  } catch {
+    return null;
   }
 }
