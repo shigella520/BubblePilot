@@ -12,7 +12,6 @@ import AdminDetailDialog from "./AdminDetailDialog.vue";
 import CursorPagination from "./CursorPagination.vue";
 import DismissibleMessage from "./DismissibleMessage.vue";
 import { RefreshCw } from "@lucide/vue";
-import SensitiveUnlock from "./SensitiveUnlock.vue";
 const props = defineProps<{
   mode: "settings" | "chat" | "jobs";
   embedded?: boolean;
@@ -515,7 +514,6 @@ onBeforeUnmount(() => {
       AI
       根据问题自行查找已授权聊天中的历史记录，无需添加工作流节点。可检索范围受消息保留期限限制。
     </p>
-    <SensitiveUnlock v-if="!embedded || mode === 'settings' || fixedChatId" />
     <DismissibleMessage
       v-if="error && !selectedJob"
       error

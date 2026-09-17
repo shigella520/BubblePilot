@@ -29,7 +29,6 @@ import {
 import { useRoute } from "vue-router";
 
 import CursorPagination from "../components/CursorPagination.vue";
-import SensitiveUnlock from "../components/SensitiveUnlock.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import AiUsageChart from "../components/AiUsageChart.vue";
 import { useCursorPager } from "../composables/useCursorPager";
@@ -939,7 +938,6 @@ function contextSnapshotValue(
         @close="message = ''"
         >{{ message }}</DismissibleMessage
       >
-      <SensitiveUnlock />
       <section id="ai-usage" class="admin-panel ai-usage-panel">
         <div class="panel-head">
           <div>

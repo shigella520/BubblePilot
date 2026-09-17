@@ -11,7 +11,6 @@ import {
 } from "@lucide/vue";
 import { onMounted, reactive, ref } from "vue";
 
-import SensitiveUnlock from "../components/SensitiveUnlock.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { apiRequest, errorMessage, jsonBody } from "../services/api";
 import { useSessionStore } from "../stores/session";
@@ -152,7 +151,6 @@ onMounted(load);
     </aside>
 
     <div class="admin-workspace">
-      <SensitiveUnlock />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"

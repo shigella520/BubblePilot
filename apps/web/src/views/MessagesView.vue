@@ -18,7 +18,6 @@ import {
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import CursorPagination from "../components/CursorPagination.vue";
-import SensitiveUnlock from "../components/SensitiveUnlock.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { useCursorPager } from "../composables/useCursorPager";
 import {
@@ -786,7 +785,10 @@ async function downloadExport(job: DataExportJob) {
 watch(
   () => session.sensitiveActive,
   (active) => {
-    if (active) return;
+    if (active) {
+      void search();
+      return;
+    }
     messagePager.clear();
     exportPreview.value = null;
     exportConfirmed.value = false;
@@ -823,7 +825,6 @@ onBeforeUnmount(() =>
       </div>
     </aside>
     <div class="admin-workspace">
-      <SensitiveUnlock @verified="search" />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"
