@@ -241,6 +241,7 @@ export interface WorkflowRepository {
     staleRetryBefore: Date,
   ): Promise<ExecutionRecoveryClaim>;
   closeExecution(executionId: string): Promise<ExecutionCloseResult>;
+  closeRecoveryQueue(): Promise<{ closedCount: number }>;
   markExecutionRunning(executionId: string, nodeId: string): Promise<void>;
   recordContextSnapshot?(
     executionId: string,

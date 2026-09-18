@@ -513,6 +513,15 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     });
   }
 
+  async closeRecoveryQueue(): Promise<{ closedCount: number }> {
+    let closedCount = 0;
+    for (const execution of [...this.executions.values()]) {
+      if ((await this.closeExecution(execution.id)).status === "ok")
+        closedCount++;
+    }
+    return { closedCount };
+  }
+
   closeExecution(executionId: string): Promise<ExecutionCloseResult> {
     const execution = this.executions.get(executionId);
     if (execution === undefined) {

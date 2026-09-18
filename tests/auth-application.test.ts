@@ -95,6 +95,7 @@ describe("Web admin authentication", () => {
         }),
       retryExecution: () => Promise.resolve({ status: "not-found" }),
       closeExecution: () => Promise.resolve({ status: "not-found" }),
+      closeRecoveryQueue: () => Promise.resolve({ closedCount: 0 }),
       runtimeStatus: () => ({
         active: 0,
         queued: 0,
@@ -151,6 +152,45 @@ describe("Web admin authentication", () => {
 
   afterEach(async () => {
     await application.close();
+  });
+
+  it("requires sensitive authorization and audits bulk recovery closure", async () => {
+    const url = "/api/v1/executions/recovery/close";
+    expect((await application.inject({ method: "POST", url })).statusCode).toBe(
+      401,
+    );
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    const headers = { cookie, origin: "http://localhost" };
+    expect(
+      (await application.inject({ method: "POST", url, headers })).statusCode,
+    ).toBe(403);
+    expect(authRepository.auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: "execution.bulk-close",
+        outcome: "denied",
+      }),
+    );
+    const unlock = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/sensitive",
+      headers,
+      payload: { password: sensitivePassword },
+    });
+    expect(unlock.statusCode).toBe(200);
+    const result = await application.inject({ method: "POST", url, headers });
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toEqual({ data: { closedCount: 0 } });
+    expect(authRepository.auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: "execution.bulk-close",
+        outcome: "succeeded",
+      }),
+    );
   });
 
   it("audits Agent settings updates without requiring a sensitive-operation unlock", async () => {

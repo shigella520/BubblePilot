@@ -2233,6 +2233,35 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/executions/recovery/close:
+    post:
+      operationId: closeRecoveryQueue
+      description: 敏感操作并审计；原子关闭请求执行时整个恢复队列的 retrying、failed、dead-lettered 记录，不受分页限制。保留轨迹及 unknown 出站结果，不重发；运行中任务不受影响。重复操作可返回零条。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 返回本次实际关闭条数。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [closedCount]
+                    properties:
+                      closedCount:
+                        type: integer
+                        minimum: 0
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/close:
     post:
       operationId: closeExecution

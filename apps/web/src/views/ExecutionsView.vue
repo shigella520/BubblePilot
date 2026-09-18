@@ -702,6 +702,34 @@ async function loadSelected() {
   const executionId = route.query.executionId;
   if (typeof executionId === "string") await inspect(executionId);
 }
+async function closeRecoveryQueue() {
+  if (!session.sensitiveActive || recoveryBusy.value || !recoveryOnly.value)
+    return;
+  if (
+    !window.confirm(
+      "确认批量关闭整个恢复队列中的待恢复任务？范围包含所有分页中的等待重试、失败和死信记录；正在执行的任务不受影响。关闭后停止重试、不重发消息，保留执行历史。发送结果未知的记录也会关闭并退出待处理告警，但不代表发送成功，请先核对聊天。",
+    )
+  )
+    return;
+  recoveryBusy.value = true;
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    const result = await apiRequest<{ closedCount: number }>(
+      "/api/v1/executions/recovery/close",
+      { method: "POST" },
+    );
+    clearDetail();
+    const refreshed = await executionPager.first().catch(() => false);
+    message.value = `已批量关闭 ${result.closedCount} 条任务。${refreshed ? "" : "列表刷新失败，请手动刷新。"}`;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    recoveryBusy.value = false;
+  }
+}
+
 async function recover(action: "retry" | "close") {
   if (detail.value === null || !session.sensitiveActive || recoveryBusy.value)
     return;
@@ -1145,6 +1173,25 @@ function contextSnapshotValue(
             </p>
           </div>
           <div class="row-actions">
+            <button
+              v-if="recoveryOnly"
+              class="button secondary"
+              :disabled="
+                !session.sensitiveActive ||
+                recoveryBusy ||
+                busy ||
+                !executions.length
+              "
+              :aria-busy="recoveryBusy"
+              :title="
+                session.sensitiveActive
+                  ? '关闭整个恢复队列，包含所有分页'
+                  : '请先在顶栏解锁敏感操作'
+              "
+              @click="closeRecoveryQueue"
+            >
+              <XCircle :size="16" />{{ recoveryBusy ? "关闭中…" : "批量关闭" }}
+            </button>
             <button
               v-if="unknownOnly || recoveryOnly"
               class="button secondary"

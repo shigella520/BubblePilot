@@ -3406,6 +3406,27 @@ export function buildApplication(
     );
 
     application.post(
+      "/api/v1/executions/recovery/close",
+      {
+        preHandler: requireSensitive(
+          "execution.bulk-close",
+          "workflow-execution",
+        ),
+      },
+      async () => {
+        const result = await options.workflow?.engine.closeRecoveryQueue();
+        if (result === undefined) {
+          throw new ApplicationError(
+            "EXECUTION_RECOVERY_UNAVAILABLE",
+            "Workflow recovery is unavailable.",
+            503,
+          );
+        }
+        return { data: result };
+      },
+    );
+
+    application.post(
       "/api/v1/executions/:executionId/close",
       {
         preHandler: requireSensitive("execution.close", "workflow-execution"),

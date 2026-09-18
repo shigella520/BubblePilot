@@ -42,6 +42,7 @@ export interface MessageAutomation {
     staleRetryBefore: Date,
   ): Promise<ExecutionRecoveryClaim>;
   closeExecution(executionId: string): Promise<ExecutionCloseResult>;
+  closeRecoveryQueue(): Promise<{ closedCount: number }>;
   runtimeStatus(): WorkflowGateStatus;
 }
 
@@ -170,6 +171,10 @@ export class WorkflowEngine implements MessageAutomation {
       await this.run(claim.execution, claim.trigger, claim.envelope);
       return claim;
     }, isolationKey);
+  }
+
+  closeRecoveryQueue(): Promise<{ closedCount: number }> {
+    return this.repository.closeRecoveryQueue();
   }
 
   closeExecution(executionId: string): Promise<ExecutionCloseResult> {

@@ -979,6 +979,18 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     }
   }
 
+  async closeRecoveryQueue(): Promise<{ closedCount: number }> {
+    // One statement closes the visible queue atomically. PostgreSQL rechecks
+    // eligibility after concurrent updates; running executions are excluded.
+    const result = await this.pool.query(
+      `UPDATE workflow_executions
+       SET status = 'closed', current_node_id = NULL, next_retry_at = NULL,
+           completed_at = COALESCE(completed_at, NOW())
+       WHERE status IN ('retrying', 'failed', 'dead-lettered')`,
+    );
+    return { closedCount: result.rowCount ?? 0 };
+  }
+
   async closeExecution(executionId: string): Promise<ExecutionCloseResult> {
     const updated = await this.pool.query<IdentifierRow>(
       `UPDATE workflow_executions
