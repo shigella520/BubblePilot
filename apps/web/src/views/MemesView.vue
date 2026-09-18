@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
+import { UploadCloud, ImagePlus, X, Check, LoaderCircle } from "@lucide/vue";
 import { apiRequest } from "../services/api";
 import { apiUpload } from "../services/upload";
 interface Meme {
@@ -34,6 +35,23 @@ const name = ref(""),
   summary = ref(""),
   active = ref(true),
   file = ref<File | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const previewUrl = ref("");
+const dragging = ref(false);
+function releasePreview() {
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
+  previewUrl.value = "";
+}
+watch(file, (value) => {
+  releasePreview();
+  if (value) previewUrl.value = URL.createObjectURL(value);
+});
+watch(modal, (value) => {
+  if (!value) {
+    file.value = null;
+    dragging.value = false;
+  }
+});
 const labels: Record<string, string> = {
   pending: "等待摘要",
   processing: "摘要生成中",
@@ -186,11 +204,36 @@ async function remove() {
     modal.value = false;
   });
 }
+function chooseFiles(files: FileList | null | undefined) {
+  if (busy.value || !files?.length) return;
+  if (files.length !== 1) {
+    error.value = "每次请选择一张图片。";
+    return;
+  }
+  const candidate = files[0];
+  if (
+    !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(
+      candidate.type,
+    )
+  ) {
+    error.value = "请选择 JPEG、PNG、静态 WebP 或 GIF 图片。";
+    return;
+  }
+  if (candidate.size > 10 * 1024 * 1024) {
+    error.value = "图片超过 10 MiB，请选择更小的文件。";
+    return;
+  }
+  error.value = "";
+  file.value = candidate;
+}
 function pick(event: Event) {
-  file.value = (event.target as HTMLInputElement).files?.[0] ?? null;
+  const input = event.target as HTMLInputElement;
+  chooseFiles(input.files);
+  input.value = "";
 }
 function drop(event: DragEvent) {
-  if (!busy.value) file.value = event.dataTransfer?.files[0] ?? null;
+  dragging.value = false;
+  chooseFiles(event.dataTransfer?.files);
 }
 onMounted(() => {
   void load();
@@ -200,6 +243,7 @@ onMounted(() => {
 });
 onUnmounted(() => {
   sequence++;
+  releasePreview();
   clearInterval(timer);
 });
 </script>
@@ -210,7 +254,9 @@ onUnmounted(() => {
         <h1>表情包</h1>
         <p>全局共享表情库。上传后自动生成摘要，在 AI 节点中按需启用。</p>
       </div>
-      <button class="button primary" @click="open(null)">上传表情</button>
+      <button class="button primary" @click="open(null)">
+        <ImagePlus :size="18" aria-hidden="true" />上传表情
+      </button>
     </header>
     <form
       class="meme-filters"
@@ -287,7 +333,27 @@ onUnmounted(() => {
         aria-modal="true"
         aria-labelledby="meme-title"
       >
-        <h2 id="meme-title">{{ editing ? "编辑表情" : "上传表情" }}</h2>
+        <header class="meme-dialog-heading">
+          <div>
+            <h2 id="meme-title">{{ editing ? "编辑表情" : "上传表情" }}</h2>
+            <p>
+              {{
+                editing
+                  ? "完善素材信息，让 AI 更容易找到它。"
+                  : "收藏一个表情，让聊天多一点趣味。"
+              }}
+            </p>
+          </div>
+          <button
+            type="button"
+            class="meme-close"
+            aria-label="关闭表情弹窗"
+            :disabled="busy"
+            @click="modal = false"
+          >
+            <X :size="20" />
+          </button>
+        </header>
         <p v-if="error" role="alert">{{ error }}</p>
         <form @submit.prevent="save">
           <template v-if="editing"
@@ -303,39 +369,101 @@ onUnmounted(() => {
               {{ play ? "停止播放" : "播放 GIF" }}
             </button></template
           >
-          <div v-else class="meme-drop" @dragover.prevent @drop.prevent="drop">
+          <div
+            v-else
+            class="meme-drop"
+            :class="{ 'is-dragging': dragging, 'has-file': file }"
+            @dragover.prevent="dragging = !busy"
+            @dragleave.self="dragging = false"
+            @drop.prevent="drop"
+          >
             <input
+              ref="fileInput"
+              class="meme-file-input"
               type="file"
+              tabindex="-1"
+              aria-label="选择表情图片"
               accept="image/jpeg,image/png,image/webp,image/gif"
               :disabled="busy"
               @change="pick"
             />
-            <p>
-              {{
-                file?.name ||
-                "选择或拖入一张图片，最大 10 MiB；不支持动态 WebP。"
-              }}
-            </p>
-            <progress v-if="busy" :value="progress" max="100" /><span
-              v-if="busy"
-              >{{ progress }}%
-              {{ progress === 100 ? "正在处理图片…" : "" }}</span
+            <template v-if="file">
+              <img
+                class="meme-upload-preview"
+                :src="previewUrl"
+                alt="待上传表情预览"
+              />
+              <div class="meme-file-info">
+                <Check :size="16" aria-hidden="true" /><strong>{{
+                  file.name
+                }}</strong
+                ><span>{{
+                  file.size < 1024 * 1024
+                    ? `${Math.max(1, Math.round(file.size / 1024))} KiB`
+                    : `${(file.size / 1024 / 1024).toFixed(2)} MiB`
+                }}</span>
+              </div>
+            </template>
+            <template v-else>
+              <div class="meme-upload-icon">
+                <UploadCloud
+                  :size="30"
+                  :stroke-width="1.6"
+                  aria-hidden="true"
+                />
+              </div>
+              <strong>{{
+                dragging ? "松开鼠标，添加这张表情" : "把表情拖到这里"
+              }}</strong>
+              <span class="meme-drop-subtitle"
+                >也可以从设备中选择一张喜欢的图片</span
+              >
+            </template>
+            <button
+              type="button"
+              class="button secondary meme-choose"
+              :disabled="busy"
+              @click="fileInput?.click()"
             >
+              <ImagePlus :size="18" aria-hidden="true" />{{
+                file ? "重新选择" : "选择图片"
+              }}
+            </button>
+            <small>JPEG、PNG、静态 WebP、GIF · 最大 10 MiB</small>
+            <div
+              v-if="busy"
+              class="meme-upload-progress"
+              role="status"
+              aria-live="polite"
+            >
+              <progress :value="progress" max="100" aria-label="图片上传进度" />
+              <span>{{
+                progress === 100
+                  ? "上传完成，正在处理图片…"
+                  : `正在上传 ${progress}%`
+              }}</span>
+            </div>
           </div>
           <label
-            >名称<input
+            ><span>名称 <span class="meme-field-hint">必填</span></span
+            ><input
               v-model="name"
               required
               maxlength="120"
+              placeholder="例如：小狗跳舞"
               :disabled="busy" /></label
           ><label
             >描述<textarea
               v-model="description"
               maxlength="2000"
+              placeholder="描述表情的含义或适用场景，例如：开心到跳起来"
               :disabled="busy"
             /></label
           ><label
-            >标签（逗号分隔）<input v-model="tags" :disabled="busy"
+            >标签（逗号分隔）<input
+              v-model="tags"
+              placeholder="例如：开心，兴奋，卖萌"
+              :disabled="busy"
           /></label>
           <template v-if="editing"
             ><label
@@ -385,7 +513,10 @@ onUnmounted(() => {
               </button>
             </div></template
           >
-          <footer class="meme-filters">
+          <p v-if="!editing" class="meme-summary-hint">
+            上传后自动生成 AI 摘要；名称、描述和标签帮助 AI 理解与检索表情。
+          </p>
+          <footer class="meme-dialog-actions">
             <button
               class="button secondary"
               type="button"
@@ -393,8 +524,18 @@ onUnmounted(() => {
               @click="modal = false"
             >
               取消</button
-            ><button class="button primary" :disabled="busy">
-              {{ busy ? "处理中…" : "保存" }}</button
+            ><button
+              class="button primary"
+              :disabled="busy || (!editing && !file)"
+            >
+              <LoaderCircle
+                v-if="busy"
+                :size="18"
+                class="meme-spinner"
+                aria-hidden="true"
+              />
+              <UploadCloud v-else-if="!editing" :size="18" aria-hidden="true" />
+              {{ busy ? "处理中…" : editing ? "保存修改" : "上传表情" }}</button
             ><button
               v-if="editing"
               type="button"
@@ -502,5 +643,152 @@ onUnmounted(() => {
 }
 .meme-filters {
   margin-top: 20px;
+}
+</style>
+
+<style scoped>
+.meme-dialog-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.meme-dialog-heading h2 {
+  margin: 0 0 8px;
+}
+.meme-dialog-heading p,
+.meme-summary-hint {
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+}
+.meme-close {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #e5e7eb;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.meme-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 26px 18px;
+  background: #f8fafc;
+  border: 1.5px dashed #cbd5e1;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+  text-align: center;
+}
+.meme-drop.is-dragging {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.meme-upload-icon {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  color: #2563eb;
+  background: #eaf1ff;
+}
+.meme-drop-subtitle,
+.meme-drop small {
+  color: #64748b;
+  font-size: 12px;
+}
+.meme-file-input {
+  display: none;
+}
+.meme-upload-preview {
+  width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+.meme-file-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  font-size: 12px;
+  color: #64748b;
+}
+.meme-file-info strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #334155;
+}
+.meme-file-info span {
+  white-space: nowrap;
+}
+.meme-file-info svg {
+  color: #059669;
+  flex-shrink: 0;
+}
+.meme-dialog .meme-choose {
+  background: white;
+  border: 1px solid #dbe2ea;
+  min-height: 40px;
+}
+.meme-upload-progress {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+}
+.meme-upload-progress progress {
+  width: 100%;
+  accent-color: #2563eb;
+}
+.meme-field-hint {
+  color: #9ca3af;
+  font-size: 11px;
+}
+.meme-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid #e5e7eb;
+  flex-wrap: wrap;
+}
+.meme-spinner {
+  animation: meme-spin 1s linear infinite;
+}
+@keyframes meme-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .meme-spinner {
+    animation: none;
+  }
+}
+@media (max-width: 600px) {
+  .meme-dialog {
+    padding: 20px;
+  }
+  .meme-overlay {
+    padding: 12px;
+  }
+  .meme-drop {
+    padding: 20px 12px;
+  }
 }
 </style>

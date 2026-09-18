@@ -46,6 +46,21 @@ describe("meme tool scope", () => {
     await select.execute('{"id":null}', f.context);
     expect(f.session.selection()).toBeNull();
   });
+  it("browses with an empty query and allows selecting the returned candidate", async () => {
+    const f = fixture();
+    const output = await f.registry
+      .get("search_memes")!
+      .execute('{"query":"  ","limit":2}', f.context);
+    expect(f.repo.search).toHaveBeenCalledWith("", 2);
+    expect(JSON.parse(output)).toMatchObject({
+      status: "ok",
+      results: [{ id: asset.id }],
+    });
+    await f.registry
+      .get("select_meme")!
+      .execute(JSON.stringify({ id: asset.id }), f.context);
+    expect(f.session.selection()?.id).toBe(asset.id);
+  });
   it("does not register candidates excluded by content budget", async () => {
     const f = fixture();
     const output = await f.registry

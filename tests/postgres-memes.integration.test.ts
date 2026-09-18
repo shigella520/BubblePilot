@@ -1,3 +1,4 @@
+import type { MemeAsset } from "../modules/memes/meme-types.js";
 import { randomUUID } from "node:crypto";
 import { describe, it, expect, afterAll, vi } from "vitest";
 import { PostgresMemeRepository } from "../modules/memes/postgres-meme-repository.js";
@@ -61,6 +62,54 @@ describe.runIf(!!url)("meme persistence and independent delivery", () => {
     expect((await repo.search(hash, 5))[0]?.id).toBe(a.asset.id);
     expect(await repo.remove(a.asset.id, adopted!.version)).toBe(true);
     expect(await repo.search(hash, 5)).toEqual([]);
+  });
+  it("matches literal short words and browses enabled assets with a stable bounded order", async () => {
+    const made: MemeAsset[] = [];
+    for (const label of ["虚构小狗跳舞", "虚构猫咪招手", "虚构已停用"]) {
+      made.push(
+        (
+          await repo.create({
+            name: label,
+            description: "",
+            tags: [],
+            mimeType: "image/png",
+            size: 1,
+            width: 1,
+            height: 1,
+            hash: randomUUID(),
+            storageKey: randomUUID(),
+          })
+        ).asset,
+      );
+    }
+    try {
+      const disabled = made[2]!;
+      await repo.edit(disabled.id, {
+        name: disabled.name,
+        description: "",
+        tags: [],
+        enabled: false,
+        expectedVersion: disabled.version,
+      });
+      expect(
+        (await repo.search("虚构小狗跳舞 不存在的词", 5)).some(
+          (a: MemeAsset) => a.id === made[0]!.id,
+        ),
+      ).toBe(true);
+      expect(
+        (await repo.search("虚构小狗奔跑", 5)).some(
+          (a: MemeAsset) => a.id === made[0]!.id,
+        ),
+      ).toBe(false);
+      const browsed = await repo.search("", 2);
+      expect(browsed.map((a) => a.id)).toEqual([made[1]!.id, made[0]!.id]);
+      expect((await repo.search("", 2)).map((a) => a.id)).toEqual(
+        browsed.map((a) => a.id),
+      );
+    } finally {
+      for (const a of made)
+        await repo.remove(a.id, (await repo.get(a.id))!.version);
+    }
   });
   it("persists both parts before sending, retries only failed image and closes unknown without resending", async () => {
     const suffix = randomUUID();

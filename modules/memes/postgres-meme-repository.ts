@@ -176,7 +176,13 @@ export class PostgresMemeRepository implements MemeRepository {
     const words = [
       ...new Set(query.toLowerCase().trim().split(/\s+/u).filter(Boolean)),
     ].slice(0, 20);
-    if (!words.length) return [];
+    if (!words.length)
+      return (
+        await this.pool.query<MemeAsset>(
+          `SELECT ${columns} FROM meme_assets WHERE deleted_at IS NULL AND enabled ORDER BY created_at DESC,id LIMIT $1`,
+          [limit],
+        )
+      ).rows;
     return (
       await this.pool.query<MemeAsset>(
         `SELECT ${columns} FROM meme_assets a WHERE deleted_at IS NULL AND enabled AND EXISTS(SELECT 1 FROM unnest($1::text[]) w WHERE position(w in lower(name || ' ' || tags::text || ' ' || description || ' ' || coalesce(summary,'')))>0) ORDER BY (SELECT sum((CASE WHEN position(w in lower(name))>0 THEN 8 ELSE 0 END)+(CASE WHEN EXISTS(SELECT 1 FROM jsonb_array_elements_text(tags) t WHERE position(w in lower(t))>0) THEN 8 ELSE 0 END)+(CASE WHEN position(w in lower(description))>0 THEN 2 ELSE 0 END)+(CASE WHEN position(w in lower(coalesce(summary,'')))>0 THEN 1 ELSE 0 END)) FROM unnest($1::text[]) w) DESC,(SELECT count(*) FROM unnest($1::text[]) w WHERE position(w in lower(name || ' ' || tags::text || ' ' || description || ' ' || coalesce(summary,'')))>0) DESC,id LIMIT $2`,
