@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MemeDeliveries from "../components/MemeDeliveries.vue";
 import {
   AlertTriangle,
   Bot,
@@ -296,6 +297,7 @@ onMounted(load);
         </span>
       </div>
     </section>
+    <section class="panel"><MemeDeliveries /></section>
     <section class="admin-panel">
       <div class="panel-head">
         <div>

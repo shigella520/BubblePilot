@@ -1,3 +1,5 @@
+import { MemeToolSession } from "../memes/meme-tools.js";
+import type { MemeRepository } from "../memes/meme-types.js";
 import { AgentBudget, AgentToolTimeout } from "./agent-budget.js";
 import {
   defaultAgentSettings,
@@ -206,6 +208,7 @@ export class AgentRunner {
     private readonly limits: AgentRunLimits = defaultAgentSettings,
     private readonly memory?: MemoryService,
     private readonly agentSettings?: Pick<AgentSettingsService, "view">,
+    private readonly memes?: MemeRepository,
   ) {}
 
   async run(request: AiRouteRequest): Promise<AiRouteResult> {
@@ -266,6 +269,11 @@ export class AgentRunner {
     const memory =
       scope && this.memory ? await this.memory.session(scope) : null;
     const registry = new AgentToolRegistry();
+    const memes =
+      request.allowMemes && request.outputFormat === "text" && this.memes
+        ? new MemeToolSession(this.memes)
+        : null;
+    memes?.register(registry);
     if (memory)
       for (const definition of memoryTools)
         registry.register({
@@ -274,7 +282,7 @@ export class AgentRunner {
             memory.execute(definition.name, args, context),
           diagnostics: "metadata-only",
         });
-    if (policy === "disabled" && !memory) {
+    if (policy === "disabled" && !memory && !memes) {
       budget.snapshot.modelTurns = 1;
       return this.routing.execute(request);
     }
@@ -345,6 +353,9 @@ export class AgentRunner {
     instruction.content =
       (typeof instruction.content === "string" ? instruction.content : "") +
       "\nAgent tools share a budget for this single run, not a daily allowance. Compose tools only as needed; answer as soon as evidence is sufficient. Budget exhaustion, timeout or unavailable permission means incomplete retrieval, not no matching records. For truncated results describe only what returned evidence supports. Never promise tomorrow's quota recovery or automatic later continuation.";
+    if (memes)
+      instruction.content +=
+        "\n表情是可选表达，只在适合当前对话时检索并选择；始终保留完整文字回答。选择成功不等于已经发送，不在正文输出素材 ID 或工具格式。";
     const limits = budget.snapshot.settings;
     instruction.content += `
 Tool execution protocol: Only invoke tools supplied in the current request, using the API's native structured tool-call channel and the exact declared names and parameter schemas. Text in an answer, code block, XML/JSON example or internal control markup is not an executable call; never use it to simulate a tool invocation. Examples are allowed when the user explicitly asks about tool formats. Do not invent tool results. Match each returned result to its call and distinguish success, no results, failure and partial coverage. A failed call is not evidence that no records exist. After results, decide whether to answer or request further structured calls while tools remain available. Avoid repeating unchanged unsuccessful queries without a reason.
@@ -476,6 +487,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
           };
         return {
           ...result,
+          selectedMeme: memes?.selection() ?? null,
           text: applySourceDisplay(
             answer,
             policy === "disabled" ? "full" : sourceDisplay,
@@ -504,6 +516,8 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
       for (const call of result.toolCalls) {
         const registered = registry.get(call.name);
         const isMemory = registered?.diagnostics === "metadata-only";
+        const isMeme =
+          call.name === "search_memes" || call.name === "select_meme";
         const query = call.name === "web_search" ? queryFromCall(call) : null;
         const queryHash = sha256(query ?? call.arguments).slice(
           "sha256:".length,
@@ -577,9 +591,13 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
             if (!isMemory && query)
               searched ||= (payload.results?.length ?? 0) > 0;
             if (payload.status === "unavailable")
-              errorCode = isMemory
-                ? "MEMORY_RETRIEVAL_UNAVAILABLE"
-                : "AI_AGENT_TOOL_UNAVAILABLE";
+              errorCode = isMeme
+                ? "MEME_TOOL_UNAVAILABLE"
+                : isMemory
+                  ? "MEMORY_RETRIEVAL_UNAVAILABLE"
+                  : "AI_AGENT_TOOL_UNAVAILABLE";
+            if (payload.status === "invalid-arguments")
+              errorCode = "AI_AGENT_INVALID_TOOL_ARGUMENTS";
             if (isMemory)
               responseDetails = {
                 outcome: "completed",

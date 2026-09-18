@@ -153,6 +153,8 @@ interface NodeExecutionRow {
 }
 
 interface DeliveryRow {
+  kind: "text" | "meme";
+  closed_at: Date | null;
   id: string;
   execution_id: string;
   node_id: string;
@@ -334,6 +336,8 @@ function nodeExecutionRecord(row: NodeExecutionRow): NodeExecutionRecord {
 
 function deliveryRecord(row: DeliveryRow): OutboundDeliveryRecord {
   return {
+    kind: row.kind ?? "text",
+    closedAt: row.closed_at?.toISOString() ?? null,
     id: row.id,
     executionId: row.execution_id,
     nodeId: row.node_id,
@@ -1235,7 +1239,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
          )
          AND ($5::text IS NULL OR (e.status <> 'closed' AND EXISTS (
            SELECT 1 FROM outbound_deliveries d
-           WHERE d.execution_id = e.id AND d.status = 'unknown'
+           WHERE d.execution_id = e.id AND d.status = 'unknown' AND d.closed_at IS NULL AND d.kind = 'text'
          )))
        ORDER BY e.created_at DESC, e.id DESC LIMIT $4`,
       [
@@ -1341,7 +1345,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       this.pool.query<{ sending: string; unknown: string }>(
         `SELECT
            COUNT(*) FILTER (WHERE d.status = 'sending') AS sending,
-           COUNT(*) FILTER (WHERE d.status = 'unknown' AND e.status IS DISTINCT FROM 'closed') AS unknown
+           COUNT(*) FILTER (WHERE d.status = 'unknown' AND d.closed_at IS NULL AND d.kind = 'text' AND e.status IS DISTINCT FROM 'closed') AS unknown
          FROM outbound_deliveries d
          LEFT JOIN workflow_executions e ON e.id = d.execution_id`,
       ),

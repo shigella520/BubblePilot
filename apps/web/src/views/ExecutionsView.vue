@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MemeDeliveries from "../components/MemeDeliveries.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
 import MemorySources from "../components/MemorySources.vue";
@@ -108,6 +109,7 @@ interface ExecutionDetail extends Execution {
     outputSummary: unknown;
   }>;
   deliveries: Array<{
+    kind?: "text" | "meme";
     id: string;
     nodeId: string;
     status: string;
@@ -116,7 +118,7 @@ interface ExecutionDetail extends Execution {
   }>;
   aiProviderAttempts: Array<{
     id: string;
-    purpose: "workflow-reply" | "image-summary";
+    purpose: "workflow-reply" | "image-summary" | "meme-summary";
     routeTraceId: string | null;
     routePhase: AiRouteTrace["phase"];
     nodeId: string;
@@ -498,6 +500,7 @@ function cacheDivergenceReasonLabel(reason: string | null): string {
 function providerAttemptPurpose(
   item: ExecutionDetail["aiProviderAttempts"][number],
 ) {
+  if (item.purpose === "meme-summary") return "表情包摘要";
   if (item.purpose === "image-summary") return "图片摘要";
   const nodeType = detail.value?.nodes.find(
     (node) => node.nodeId === item.nodeId,
@@ -2102,6 +2105,10 @@ function contextSnapshotValue(
             </section>
             <section id="execution-outbound">
               <h3>出站发送</h3>
+              <MemeDeliveries
+                :execution-id="detail.id"
+                :sensitive-active="session.sensitiveActive"
+              />
               <p
                 v-if="
                   detail.status === 'closed' &&
@@ -2112,7 +2119,9 @@ function contextSnapshotValue(
                 执行已人工关闭；发送结果仍未知，不再自动重试，也不再计入待处理告警。
               </p>
               <article
-                v-for="item in detail.deliveries"
+                v-for="item in detail.deliveries.filter(
+                  (delivery) => delivery.kind !== 'meme',
+                )"
                 :key="item.id"
                 class="trace-item"
               >

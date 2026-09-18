@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type {
   DeliveryResult,
+  SendAttachmentCommand,
   ReplyGateway,
   SendReplyCommand,
 } from "./reply-gateway.js";
@@ -31,6 +32,74 @@ export class BlueBubblesRestReplyGateway implements ReplyGateway {
 
   constructor(private readonly options: BlueBubblesRestReplyGatewayOptions) {
     this.fetchImplementation = options.fetchImplementation ?? fetch;
+  }
+
+  async sendAttachment(
+    command: SendAttachmentCommand,
+  ): Promise<DeliveryResult> {
+    const endpoint = new URL(
+      "/api/v1/message/attachment",
+      `${this.options.serverUrl}/`,
+    );
+    endpoint.searchParams.set("password", this.options.accessToken);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.options.timeoutMs);
+    try {
+      const form = new FormData();
+      form.set("chatGuid", command.providerChatId);
+      form.set("method", "apple-script");
+      form.set("tempGuid", command.providerTempGuid);
+      form.set("name", command.filename);
+      form.set(
+        "attachment",
+        new Blob([new Uint8Array(command.bytes)], { type: command.mimeType }),
+        command.filename,
+      );
+      const response = await this.fetchImplementation(endpoint, {
+        method: "POST",
+        headers: { "x-bubblepilot-correlation-id": command.correlationId },
+        body: form,
+        signal: controller.signal,
+      });
+      if (!response.ok)
+        return {
+          status: response.status >= 500 ? "unknown" : "failed",
+          code: `BLUEBUBBLES_HTTP_${response.status}`,
+          summary: `Attachment request returned HTTP ${response.status}.`,
+          retryable: response.status === 429,
+        };
+      const parsed = z
+        .object({
+          data: z.object({
+            guid: z.string().min(1),
+            error: z.number().optional(),
+          }),
+        })
+        .safeParse(await response.json());
+      if (!parsed.success)
+        return {
+          status: "unknown",
+          code: "BLUEBUBBLES_ATTACHMENT_RESULT_UNKNOWN",
+          summary: "Attachment receipt could not be confirmed.",
+        };
+      if (parsed.data.data.error && parsed.data.data.error !== 0)
+        return {
+          status: "failed",
+          code: "BLUEBUBBLES_ATTACHMENT_REJECTED",
+          summary: "The attachment was rejected by the gateway.",
+          retryable: false,
+        };
+      return { status: "confirmed", providerMessageId: parsed.data.data.guid };
+    } catch {
+      return {
+        status: "unknown",
+        code: "BLUEBUBBLES_ATTACHMENT_RESULT_UNKNOWN",
+        summary:
+          "Attachment delivery could not be confirmed; do not resend without checking.",
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async sendReply(command: SendReplyCommand): Promise<DeliveryResult> {

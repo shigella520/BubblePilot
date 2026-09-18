@@ -137,6 +137,9 @@ function configVisible(item: any): boolean {
       </div>
       <button type="button" @click="emit('close')">×</button>
     </div>
+    <RouterLink v-if="node.data.block.type === 'ai-chat'" to="/memes"
+      >管理表情包库</RouterLink
+    >
     <label
       >节点名称<input
         :value="node.data.label"

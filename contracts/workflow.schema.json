@@ -913,6 +913,9 @@
                           }
                         ]
                       },
+                      "allowMemes": {
+                        "type": "boolean"
+                      },
                       "webSearch": {
                         "type": "string",
                         "enum": ["disabled", "auto", "required"]

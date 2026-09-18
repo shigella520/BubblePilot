@@ -1,3 +1,5 @@
+import type { MemeDeliveryService } from "../memes/meme-delivery-service.js";
+import { z } from "zod";
 import {
   maxReplyCharacters,
   resolveGenerationPolicy,
@@ -1195,6 +1197,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
         temperature: node.config.temperature,
         maxOutputCharacters: generationPolicy.maxOutputCharacters,
         outputFormat: node.config.outputFormat,
+        allowMemes: node.config.allowMemes ?? false,
         ...(node.config.webSearch === undefined
           ? {}
           : { webSearch: node.config.webSearch }),
@@ -1259,6 +1262,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
       nextNodeId: node.onSuccess,
       outputSummary: {
         ...this.routing.outputSummary(result),
+        selectedMeme: result.selectedMeme ?? null,
         ...(result.agentBudget ? { agentBudget: result.agentBudget } : {}),
         outputVariable: node.config.outputVariable,
         imageInputCount: preparedImages?.selectedCount ?? 0,
@@ -1268,6 +1272,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
       },
       outputs: {
         text: result.text,
+        meme: result.selectedMeme ?? null,
         ...(node.config.outputFormat === "json" ? { json: jsonOutput } : {}),
       },
     };
@@ -1295,6 +1300,7 @@ class ReplyNodeHandler extends BaseNodeHandler {
   constructor(
     private readonly repository: WorkflowRepository,
     private readonly gateway: ReplyGateway,
+    private readonly memeDelivery?: MemeDeliveryService,
   ) {
     super();
   }
@@ -1319,6 +1325,50 @@ class ReplyNodeHandler extends BaseNodeHandler {
       inputText === undefined ? node.config.text : contextText(inputText),
       context,
     );
+    const selected = resolveInput(node, "meme", context);
+    if (selected !== undefined && selected !== null) {
+      const meme = z
+        .object({
+          id: z.string().uuid(),
+          name: z.string(),
+          hash: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .parse(selected);
+      if (!this.memeDelivery || node.config.replyToSourceMessage)
+        throw new WorkflowExecutionError(
+          "MEME_SEND_UNAVAILABLE",
+          "Meme reply is unavailable.",
+          false,
+        );
+      const sent = await this.memeDelivery.deliver(
+        {
+          executionId: context.executionId,
+          nodeId: node.id,
+          chatId: context.envelope.chat.providerChatId,
+          text,
+          meme,
+        },
+        context.correlationId,
+      );
+      if (sent.text.status !== "confirmed")
+        throw new WorkflowExecutionError(
+          sent.text.code,
+          sent.text.summary,
+          sent.text.status === "failed" && sent.text.retryable,
+          sent.text.status === "unknown",
+        );
+      return {
+        status: "succeeded",
+        nextNodeId: node.onSuccess,
+        outputSummary: {
+          deliveryId: sent.textId,
+          deliveryStatus: "confirmed",
+          memeDeliveryId: sent.memeId,
+          memeDeliveryStatus: sent.image?.status,
+          selectedMeme: meme,
+        },
+      };
+    }
     const idempotencyKey = `${context.executionId}:${node.id}`;
     const claimed = await this.repository.claimDelivery({
       executionId: context.executionId,
@@ -1462,6 +1512,7 @@ export function createDefaultNodeRegistry(
     archive: ArchiveRepository;
     aiRouting: AiRoutingService;
     aiAgent?: AgentRunner;
+    memeDelivery?: MemeDeliveryService;
     imageInput?: NativeImageInputService;
     conversationContext?: ConversationContextService;
     imageSummaries?: ImageSummaryRepository;
@@ -1493,7 +1544,9 @@ export function createDefaultNodeRegistry(
       ),
     );
   }
-  registry.register(new ReplyNodeHandler(repository, gateway));
+  registry.register(
+    new ReplyNodeHandler(repository, gateway, capabilities?.memeDelivery),
+  );
   registry.register(new EndNodeHandler());
   return registry;
 }

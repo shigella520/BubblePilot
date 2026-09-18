@@ -131,3 +131,10 @@ correlationId
 已完成或忽略事件重投返回 `duplicate`。处于 `evaluation-pending` 的事件允许重投继续调度，但不会重复执行或回复。
 
 供应商字段变化必须先更新虚构 Fixture、Webhook Schema 和适配器测试，再调整内部映射；业务模块不能直接兼容 BlueBubbles 原始 JSON。当前测试覆盖一对一、群聊、附件、自身消息、重复投递、监听过滤、无效 Payload、错误 Secret、未支持事件、REST 回复结果和 PostgreSQL 唯一约束。
+
+
+### 表情包附件发送
+
+表情发送使用 `POST /api/v1/message/attachment` multipart：chatGuid、method=apple-script、稳定tempGuid、name、attachment原文件。正文仍通过文本接口先发送；不调用 attachment/upload，不传 selectedMessageGuid、partIndex、subject、effect。表情能力不修改实例发送配置，不依赖 Private API，不支持原生引用组合。
+
+附件HTTP200还需可解析的消息GUID及无非零错误码，响应缺失、网络超时和服务端5xx按结果未知处理，不能盲目重试。429可单独重试图片。一次HTTP成功不保证所有客户端动画效果；GIF动画须在接收端独立验收。

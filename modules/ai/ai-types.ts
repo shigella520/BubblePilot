@@ -1,3 +1,4 @@
+import type { SelectedMeme } from "../memes/meme-types.js";
 import type { AgentBudgetSnapshot } from "./agent-settings-types.js";
 import { z } from "zod";
 
@@ -312,7 +313,7 @@ export interface AiRouteTraceRecordInput {
   id: string;
   executionId: string | null;
   backgroundOperationId: string | null;
-  purpose: "workflow-reply" | "image-summary";
+  purpose: "workflow-reply" | "image-summary" | "meme-summary";
   nodeId: string;
   routeId: string;
   routeName: string | null;
@@ -505,7 +506,7 @@ export type AiCallResult =
 
 export interface AiAttemptRecordInput {
   executionId: string | null;
-  purpose: "workflow-reply" | "image-summary";
+  purpose: "workflow-reply" | "image-summary" | "meme-summary";
   backgroundOperationId: string | null;
   routeTraceId?: string | null;
   routePhase?: AiRouteTracePhase;
@@ -587,6 +588,7 @@ export interface AiUsageReport {
 }
 
 export interface AiRouteSuccess {
+  selectedMeme?: SelectedMeme | null;
   agentBudget?: AgentBudgetSnapshot;
   status: "succeeded";
   text: string;
@@ -614,6 +616,7 @@ export interface AiRouteFailure {
 export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 
 export interface AiRouteRequest {
+  allowMemes?: boolean;
   executionId: string | null;
   nodeId: string;
   memoryEvent?: { provider: string; messageId: string; timeZone?: string };
@@ -632,7 +635,7 @@ export interface AiRouteRequest {
   agentTurn?: number;
   promptTraceKey?: string;
   sessionAffinityKey?: string;
-  purpose?: "workflow-reply" | "image-summary";
+  purpose?: "workflow-reply" | "image-summary" | "meme-summary";
   backgroundOperationId?: string;
   allowImageDegrade?: boolean;
 }

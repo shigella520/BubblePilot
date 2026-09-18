@@ -146,10 +146,14 @@ const aiChatNodeSchema = z.object({
         )
         .optional(),
       temperature: z.number().min(0).max(2).nullable().default(null),
+      allowMemes: z.boolean().optional(),
       webSearch: z.enum(["disabled", "auto", "required"]).optional(),
       webSearchSources: z.enum(["full", "compact", "hidden"]).default("full"),
       outputFormat: z.enum(["text", "json"]).default("text"),
       outputVariable: variableNameSchema.default("aiReply"),
+    })
+    .refine((config) => !config.allowMemes || config.outputFormat === "text", {
+      message: "Memes require text output",
     })
     .refine(
       (config) =>
@@ -384,6 +388,26 @@ function validateSemantics(definition: WorkflowDefinition): void {
           `Node '${node.id}' text template contains invalid template syntax.`,
         );
       }
+    }
+    if (node.type === "reply" && node.inputs?.meme) {
+      const meme = node.inputs.meme,
+        text = node.inputs.text;
+      const source =
+        meme.kind === "output" ? nodes.get(meme.blockId) : undefined;
+      if (
+        meme.kind !== "output" ||
+        meme.port !== "meme" ||
+        source?.type !== "ai-chat" ||
+        !source.config.allowMemes ||
+        source.config.outputFormat !== "text" ||
+        text?.kind !== "output" ||
+        text.port !== "text" ||
+        text.blockId !== source.id ||
+        node.config.replyToSourceMessage
+      )
+        throw new Error(
+          "Meme reply must bind text and meme from the same enabled text AI node, without native reply.",
+        );
     }
     for (const [inputName, reference] of Object.entries(node.inputs ?? {})) {
       if (reference.kind !== "output") continue;

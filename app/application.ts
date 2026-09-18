@@ -1,3 +1,6 @@
+import type { MemeDeliveryService } from "../modules/memes/meme-delivery-service.js";
+import { registerMemeRoutes } from "../modules/memes/meme-routes.js";
+import type { MemeService } from "../modules/memes/meme-service.js";
 import {
   type BotIdentityService,
   botIdentityUpdateSchema,
@@ -329,6 +332,8 @@ const triggerPreviewBodySchema = z.object({
 });
 
 export interface ApplicationOptions {
+  memes?: MemeService;
+  memeDelivery?: MemeDeliveryService;
   botIdentity?: BotIdentityService;
   memory?: MemoryService;
   logger?: boolean;
@@ -644,6 +649,8 @@ export function buildApplication(
   );
   application.addHook("onReady", () => {
     options.memory?.start();
+    options.memes?.start();
+    options.memeDelivery?.start();
     options.messageRetention?.start();
     options.imageSummary?.worker.start();
   });
@@ -942,6 +949,91 @@ export function buildApplication(
       await requireAdmin(request);
       sensitiveAudits.set(request, { action, targetType });
     };
+
+  if (options.memes)
+    registerMemeRoutes(
+      application,
+      options.memes,
+      requireAdmin,
+      requireAuditedAdmin,
+    );
+
+  if (options.memeDelivery) {
+    const deliveries = options.memeDelivery;
+    application.get(
+      "/api/v1/meme-deliveries",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const input = z
+          .object({ executionId: z.string().uuid().optional() })
+          .parse(request.query);
+        return { data: await deliveries.list(input.executionId) };
+      },
+    );
+    application.get(
+      "/api/v1/meme-deliveries/:id/thumbnail",
+      { preHandler: requireAdmin },
+      async (request, reply) => {
+        const { id } = z
+          .object({ id: z.string().uuid() })
+          .parse(request.params);
+        const bytes = await deliveries.thumbnail(id);
+        if (!bytes)
+          throw new ApplicationError(
+            "MEME_PREVIEW_UNAVAILABLE",
+            "表情预览已不可用。",
+            404,
+          );
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .type("image/png")
+          .send(bytes);
+      },
+    );
+    application.post(
+      "/api/v1/meme-deliveries/:id/retry",
+      {
+        preHandler: requireSensitive(
+          "meme.delivery.retry",
+          "outbound-delivery",
+        ),
+      },
+      async (request) => {
+        const { id } = z
+          .object({ id: z.string().uuid() })
+          .parse(request.params);
+        const result = await deliveries.retry(id, request.id);
+        if (!result)
+          throw new ApplicationError(
+            "MEME_DELIVERY_CONFLICT",
+            "图片不可重试，请刷新状态。",
+            409,
+          );
+        return { data: result };
+      },
+    );
+    application.post(
+      "/api/v1/meme-deliveries/:id/close",
+      {
+        preHandler: requireSensitive(
+          "meme.delivery.close",
+          "outbound-delivery",
+        ),
+      },
+      async (request) => {
+        const { id } = z
+          .object({ id: z.string().uuid() })
+          .parse(request.params);
+        if (!(await deliveries.close(id)))
+          throw new ApplicationError(
+            "MEME_DELIVERY_CONFLICT",
+            "图片无需关闭，请刷新状态。",
+            409,
+          );
+        return { data: { closed: true } };
+      },
+    );
+  }
 
   const memory = (): MemoryService => {
     if (!options.memory)
@@ -3483,6 +3575,9 @@ export function buildApplication(
   application.addHook("onClose", async () => {
     await options.memory?.stop();
     await options.imageSummary?.worker.stop();
+    await options.memeDelivery?.stop();
+    await options.memes?.stop();
+    await options.memes?.repository.close();
     await options.messageRetention?.stop();
     await Promise.all([
       repository.close(),

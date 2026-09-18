@@ -1,7 +1,7 @@
 export type ActionBlockCategory =
   "control" | "data" | "context" | "ai" | "message" | "observe";
 export type ActionValueType =
-  "string" | "number" | "boolean" | "json" | "messages" | "delivery";
+  "string" | "number" | "boolean" | "json" | "messages" | "delivery" | "meme";
 
 export interface ActionPortDefinition {
   name: string;
@@ -251,6 +251,12 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
     ],
     outputs: [
       {
+        name: "meme",
+        label: "已选表情",
+        type: "meme",
+        description: "模型选择的可选表情，必须与本节点文字一起连接发送节点。",
+      },
+      {
         name: "text",
         label: "文本输出",
         type: "string",
@@ -264,6 +270,13 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
       },
     ],
     config: [
+      {
+        name: "allowMemes",
+        label: "允许使用表情包",
+        type: "boolean",
+        visibleWhen: { field: "outputFormat", equals: "text" },
+        description: "可额外选择一张全局表情库中的表情，仍保留文字回复。",
+      },
       {
         name: "providerRouteId",
         label: "Provider 路由",
@@ -336,6 +349,12 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
     description: "向当前聊天发送文本消息。",
     category: "message",
     inputs: [
+      {
+        name: "meme",
+        label: "可选表情",
+        type: "meme",
+        description: "连接同一 AI 节点的已选表情输出。",
+      },
       {
         name: "text",
         label: "消息文本",
