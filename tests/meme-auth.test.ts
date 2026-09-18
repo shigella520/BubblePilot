@@ -55,6 +55,20 @@ it("meme management needs login but no sensitive grant; production retry still n
     start: vi.fn(),
     stop: vi.fn(),
     repository: {
+      listCollections: vi
+        .fn()
+        .mockResolvedValue({ items: [], total: 0, unclassified: 0 }),
+      createCollection: vi
+        .fn()
+        .mockResolvedValue({ id: asset.id, name: "虚构合集", version: 1 }),
+      editCollection: vi
+        .fn()
+        .mockResolvedValue({ id: asset.id, name: "虚构合集", version: 2 }),
+      removeCollection: vi.fn().mockResolvedValue(true),
+      selection: vi
+        .fn()
+        .mockResolvedValue([{ id: asset.id, expectedVersion: 1 }]),
+      batch: vi.fn().mockResolvedValue([{ id: asset.id, status: "succeeded" }]),
       get: vi.fn().mockResolvedValue(asset),
       edit: vi.fn().mockResolvedValue({ ...asset, version: 2 }),
       remove: vi.fn().mockResolvedValue(true),
@@ -88,6 +102,16 @@ it("meme management needs login but no sensitive grant; production retry still n
         })
       ).statusCode,
     ).toBe(401);
+    for (const path of [
+      "/api/v1/meme-collections",
+      "/api/v1/memes/selection",
+      "/api/v1/memes/batch",
+    ]) {
+      expect(
+        (await app.inject({ method: "POST", url: path, payload: {} }))
+          .statusCode,
+      ).toBe(401);
+    }
     const login = await app.inject({
       method: "POST",
       url: "/api/v1/auth/session",
@@ -95,6 +119,79 @@ it("meme management needs login but no sensitive grant; production retry still n
     });
     const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join("; ");
     const headers = { cookie, origin: "http://localhost" };
+    const requests = [
+      { method: "GET" as const, url: "/api/v1/meme-collections" },
+      {
+        method: "POST" as const,
+        url: "/api/v1/meme-collections",
+        payload: { name: "虚构合集" },
+      },
+      {
+        method: "PUT" as const,
+        url: `/api/v1/meme-collections/${asset.id}`,
+        payload: { name: "虚构合集", expectedVersion: 1 },
+      },
+      {
+        method: "DELETE" as const,
+        url: `/api/v1/meme-collections/${asset.id}`,
+        payload: { expectedVersion: 2 },
+      },
+      {
+        method: "POST" as const,
+        url: "/api/v1/memes/selection",
+        payload: { collection: "unclassified" },
+      },
+      {
+        method: "POST" as const,
+        url: "/api/v1/memes/batch",
+        payload: {
+          items: [{ id: asset.id, expectedVersion: 1 }],
+          action: { type: "move", collectionId: null },
+        },
+      },
+    ];
+    for (const request of requests)
+      expect((await app.inject({ ...request, headers })).statusCode).toBe(200);
+    for (const action of [
+      "meme.collection.create",
+      "meme.collection.update",
+      "meme.collection.delete",
+      "meme.batch",
+    ])
+      expect(authRepository.auditEvents.some((e) => e.action === action)).toBe(
+        true,
+      );
+    for (const payload of [
+      { name: "未分类" },
+      { name: "  " },
+      { name: "全部表情" },
+    ])
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/v1/meme-collections",
+            headers,
+            payload,
+          })
+        ).statusCode,
+      ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/memes/batch",
+          headers,
+          payload: {
+            items: Array.from({ length: 101 }, () => ({
+              id: asset.id,
+              expectedVersion: 1,
+            })),
+            action: { type: "delete" },
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
     const edit = await app.inject({
       method: "PUT",
       url: `/api/v1/memes/${asset.id}`,

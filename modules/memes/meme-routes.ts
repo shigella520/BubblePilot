@@ -1,3 +1,8 @@
+import {
+  collectionSchema,
+  memeFilterSchema,
+  memeBatchSchema,
+} from "./meme-collection-types.js";
 import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -14,7 +19,7 @@ export function registerMemeRoutes(
   ) => (request: FastifyRequest) => Promise<void>,
 ) {
   app.register(multipart, {
-    limits: { fileSize: memeLimits.fileBytes, files: 1, fields: 3, parts: 4 },
+    limits: { fileSize: memeLimits.fileBytes, files: 1, fields: 4, parts: 5 },
   });
   const id = (request: FastifyRequest) =>
     z.object({ id: z.string().uuid() }).parse(request.params).id;
@@ -35,9 +40,75 @@ export function registerMemeRoutes(
     void _key;
     return rest;
   };
+  app.get("/api/v1/meme-collections", { preHandler: admin }, async () => ({
+    data: await service.repository.listCollections(),
+  }));
+  app.post(
+    "/api/v1/meme-collections",
+    { preHandler: audit("meme.collection.create", "meme-collection") },
+    async (request) => ({
+      data: await service.repository.createCollection(
+        collectionSchema.parse(request.body),
+      ),
+    }),
+  );
+  app.put(
+    "/api/v1/meme-collections/:id",
+    { preHandler: audit("meme.collection.update", "meme-collection") },
+    async (request) => {
+      const updated = await service.repository.editCollection(
+        id(request),
+        collectionSchema
+          .extend({ expectedVersion: z.number().int().positive() })
+          .parse(request.body),
+      );
+      if (!updated) throw conflict();
+      return { data: updated };
+    },
+  );
+  app.delete(
+    "/api/v1/meme-collections/:id",
+    { preHandler: audit("meme.collection.delete", "meme-collection") },
+    async (request) => {
+      const { expectedVersion } = z
+        .object({ expectedVersion: z.number().int().positive() })
+        .parse(request.body);
+      if (
+        !(await service.repository.removeCollection(
+          id(request),
+          expectedVersion,
+        ))
+      )
+        throw conflict();
+      return { data: { deleted: true } };
+    },
+  );
+  app.post(
+    "/api/v1/memes/selection",
+    { preHandler: admin },
+    async (request) => ({
+      data: {
+        items: await service.repository.selection(
+          memeFilterSchema.parse(request.body),
+        ),
+      },
+    }),
+  );
+  app.post(
+    "/api/v1/memes/batch",
+    { preHandler: audit("meme.batch", "meme") },
+    async (request) => ({
+      data: {
+        items: await service.repository.batch(
+          memeBatchSchema.parse(request.body),
+        ),
+      },
+    }),
+  );
   app.get("/api/v1/memes", { preHandler: admin }, async (request) => {
     const input = z
       .object({
+        collection: memeFilterSchema.shape.collection,
         query: z.string().max(200).optional(),
         enabled: z.enum(["true", "false"]).optional(),
         status: z
@@ -74,6 +145,7 @@ export function registerMemeRoutes(
         throw new ApplicationError("MEME_TAGS_INVALID", "标签格式无效。", 400);
       }
       const result = await service.upload(bytes, {
+        collectionId: fields.collectionId ? fields.collectionId : null,
         name: fields.name,
         description: fields.description ?? "",
         tags,

@@ -6,6 +6,7 @@ import type { MemeAsset, MemeRepository } from "../modules/memes/meme-types.js";
 const asset = {
   id: "11111111-1111-4111-8111-111111111111",
   name: "测试开心",
+  collectionName: "虚构笑脸系列",
   description: "虚构笑脸",
   tags: ["开心"],
   summary: null,
@@ -54,7 +55,7 @@ describe("meme tool scope", () => {
     expect(f.repo.search).toHaveBeenCalledWith("", 2);
     expect(JSON.parse(output)).toMatchObject({
       status: "ok",
-      results: [{ id: asset.id }],
+      results: [{ id: asset.id, collectionName: "虚构笑脸系列" }],
     });
     await f.registry
       .get("select_meme")!

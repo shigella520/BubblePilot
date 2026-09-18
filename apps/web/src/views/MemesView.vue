@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import {
   UploadCloud,
   ImagePlus,
@@ -11,10 +11,32 @@ import {
   Sparkles,
   RefreshCw,
   Trash2,
+  Folder,
+  FolderPlus,
+  Settings2,
 } from "@lucide/vue";
+import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
+import {
+  submitMemeBatch,
+  reconcileMemeBatch,
+  type SelectionItem,
+  type BatchAction,
+  type BatchResult,
+} from "../services/meme-batch";
 import { apiRequest } from "../services/api";
 import { apiUpload } from "../services/upload";
+interface Collection {
+  id: string;
+  name: string;
+  description: string;
+  coverMemeId: string | null;
+  effectiveCoverMemeId: string | null;
+  count: number;
+  version: number;
+}
 interface Meme {
+  collectionId: string | null;
+  collectionName: string | null;
   id: string;
   name: string;
   description: string;
@@ -46,6 +68,325 @@ const name = ref(""),
   summary = ref(""),
   active = ref(true),
   file = ref<File | null>(null);
+const route = useRoute(),
+  router = useRouter();
+const collections = ref<Collection[]>([]),
+  collection = ref("all"),
+  collectionTotal = ref(0),
+  unclassified = ref(0),
+  collectionError = ref("");
+const assetCollection = ref(""),
+  collectionModal = ref(false),
+  collectionEditing = ref<Collection | null>(null),
+  collectionName = ref(""),
+  collectionDescription = ref(""),
+  collectionCover = ref("");
+const selected = ref<Map<string, number>>(new Map()),
+  selecting = ref(false),
+  bulkBusy = ref(false),
+  stopBatch = ref(false),
+  bulkResults = ref<BatchResult[]>([]),
+  bulkTotal = ref(0),
+  bulkTarget = ref(""),
+  lastAction = ref<BatchAction | null>(null);
+const loadedFilters = ref("");
+const filtersPending = computed(
+  () => loadedFilters.value !== JSON.stringify(filters()),
+);
+const currentCollection = computed(() =>
+  collections.value.find((c) => c.id === collection.value),
+);
+const collectionTitle = computed(() =>
+  collection.value === "all"
+    ? "全部表情"
+    : collection.value === "unclassified"
+      ? "未分类"
+      : (currentCollection.value?.name ?? "合集"),
+);
+const bulkFailures = computed(() =>
+  bulkResults.value.filter((r) => r.status !== "succeeded"),
+);
+const bulkSucceeded = computed(
+  () => bulkResults.value.filter((r) => r.status === "succeeded").length,
+);
+let restoring = false;
+function restoreFilters() {
+  restoring = true;
+  collection.value =
+    typeof route.query.collection === "string" ? route.query.collection : "all";
+  query.value = String(route.query.query ?? "");
+  enabled.value = ["true", "false"].includes(String(route.query.enabled))
+    ? String(route.query.enabled)
+    : "";
+  status.value = ["pending", "processing", "succeeded", "failed"].includes(
+    String(route.query.status),
+  )
+    ? String(route.query.status)
+    : "";
+  page.value = Math.max(0, Math.floor(Number(route.query.page) || 1) - 1);
+  selected.value.clear();
+  restoring = false;
+}
+restoreFilters();
+function filters() {
+  return {
+    query: query.value,
+    collection: collection.value,
+    ...(enabled.value ? { enabled: enabled.value === "true" } : {}),
+    ...(status.value ? { status: status.value } : {}),
+  };
+}
+function syncUrl() {
+  void router.replace({
+    path: "/memes",
+    query: {
+      collection: collection.value,
+      ...(query.value ? { query: query.value } : {}),
+      ...(enabled.value ? { enabled: enabled.value } : {}),
+      ...(status.value ? { status: status.value } : {}),
+      ...(page.value ? { page: String(page.value + 1) } : {}),
+    },
+  });
+}
+watch(
+  [collection, query, enabled, status],
+  () => {
+    if (!restoring) {
+      page.value = 0;
+      selected.value.clear();
+    }
+  },
+  { flush: "sync" },
+);
+watch(
+  () => route.query,
+  () => {
+    const next = {
+      collection: String(route.query.collection ?? "all"),
+      query: String(route.query.query ?? ""),
+      enabled: String(route.query.enabled ?? ""),
+      status: String(route.query.status ?? ""),
+      page: Math.max(0, Number(route.query.page ?? 1) - 1),
+    };
+    if (
+      next.collection !== collection.value ||
+      next.query !== query.value ||
+      next.enabled !== enabled.value ||
+      next.status !== status.value ||
+      next.page !== page.value
+    ) {
+      restoreFilters();
+      void load();
+    }
+  },
+);
+let collectionSequence = 0;
+async function loadCollections() {
+  const seq = ++collectionSequence;
+  try {
+    const result = await apiRequest<{
+      items: Collection[];
+      total: number;
+      unclassified: number;
+    }>("/api/v1/meme-collections");
+    if (seq !== collectionSequence) return;
+    collections.value = result.items;
+    collectionTotal.value = result.total;
+    unclassified.value = result.unclassified;
+    collectionError.value = "";
+  } catch (e) {
+    if (seq === collectionSequence)
+      collectionError.value = e instanceof Error ? e.message : "合集加载失败";
+  }
+}
+function chooseCollection(id: string) {
+  if (bulkBusy.value) return;
+  collection.value = id;
+  void load();
+}
+function editCollection(item: Collection | null) {
+  collectionEditing.value = item;
+  collectionName.value = item?.name ?? "";
+  collectionDescription.value = item?.description ?? "";
+  collectionCover.value = item?.coverMemeId ?? "";
+  collectionModal.value = true;
+  error.value = "";
+}
+async function saveCollection() {
+  await perform(async () => {
+    const item = collectionEditing.value;
+    await apiRequest("/api/v1/meme-collections" + (item ? "/" + item.id : ""), {
+      method: item ? "PUT" : "POST",
+      body: JSON.stringify({
+        name: collectionName.value,
+        description: collectionDescription.value,
+        coverMemeId: collectionCover.value || null,
+        ...(item ? { expectedVersion: item.version } : {}),
+      }),
+    });
+    collectionModal.value = false;
+  });
+}
+async function deleteCollection() {
+  const item = collectionEditing.value;
+  if (!item) return;
+  await loadCollections();
+  if (collectionError.value) {
+    error.value = collectionError.value;
+    return;
+  }
+  const fresh = collections.value.find((c) => c.id === item.id);
+  if (!fresh) {
+    error.value = "合集已不存在，请刷新。";
+    return;
+  }
+  if (
+    !window.confirm(
+      `删除合集“${fresh.name}”？其中 ${fresh.count} 张表情将移入未分类，图片和启用状态不变。`,
+    )
+  )
+    return;
+  await perform(async () => {
+    await apiRequest("/api/v1/meme-collections/" + item.id, {
+      method: "DELETE",
+      body: JSON.stringify({ expectedVersion: item.version }),
+    });
+    collectionModal.value = false;
+    if (collection.value === item.id) collection.value = "unclassified";
+  });
+}
+async function setCover() {
+  const item = editing.value,
+    c = collections.value.find((c) => c.id === item?.collectionId);
+  if (!item || !c) return;
+  await perform(async () => {
+    await apiRequest("/api/v1/meme-collections/" + c.id, {
+      method: "PUT",
+      body: JSON.stringify({
+        name: c.name,
+        description: c.description,
+        coverMemeId: item.id,
+        expectedVersion: c.version,
+      }),
+    });
+  });
+}
+function toggleSelection(item: Meme) {
+  if (filtersPending.value) return;
+  if (selected.value.has(item.id)) selected.value.delete(item.id);
+  else if (selected.value.size < 5000)
+    selected.value.set(item.id, item.version);
+  else error.value = "最多选择 5000 张，请缩小范围。";
+}
+function selectPage() {
+  if (filtersPending.value) return;
+  for (const item of items.value) {
+    if (selected.value.size >= 5000) break;
+    selected.value.set(item.id, item.version);
+  }
+}
+async function selectAll() {
+  if (selecting.value || bulkBusy.value || filtersPending.value) return;
+  selecting.value = true;
+  const scope = JSON.stringify(filters());
+  try {
+    const data = await apiRequest<{ items: SelectionItem[] }>(
+      "/api/v1/memes/selection",
+      { method: "POST", body: scope },
+    );
+    if (scope === JSON.stringify(filters()))
+      selected.value = new Map(
+        data.items.map((i) => [i.id, i.expectedVersion]),
+      );
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "选择失败";
+  } finally {
+    selecting.value = false;
+  }
+}
+async function runBatch(action: BatchAction, retry = false) {
+  if (bulkBusy.value || bulkFailures.value.some((r) => r.status === "unknown"))
+    return;
+  let targets: SelectionItem[] = retry
+    ? bulkFailures.value
+        .filter((r) => r.status !== "unknown")
+        .map((r) => ({ id: r.id, expectedVersion: 0 }))
+    : [...selected.value].map(([id, expectedVersion]) => ({
+        id,
+        expectedVersion,
+      }));
+  if (!targets.length) return;
+  if (
+    !window.confirm(
+      `${action.type === "delete" ? "删除" : action.type === "move" ? "移动" : action.enabled ? "启用" : "停用"}所选的 ${targets.length} 张表情？${action.type === "delete" ? "删除后退出检索，历史投递记录保留。" : ""}`,
+    )
+  )
+    return;
+  bulkBusy.value = true;
+  stopBatch.value = false;
+  error.value = "";
+  lastAction.value = action;
+  bulkResults.value = [];
+  bulkTotal.value = targets.length;
+  try {
+    if (retry) {
+      const fresh: SelectionItem[] = [];
+      for (const item of targets) {
+        if (stopBatch.value) break;
+        try {
+          const data = await apiRequest<Meme>("/api/v1/memes/" + item.id, {
+            signal: AbortSignal.timeout(10000),
+          });
+          fresh.push({ id: item.id, expectedVersion: data.version });
+        } catch {
+          bulkResults.value.push({ id: item.id, status: "unknown" });
+        }
+      }
+      targets = fresh;
+    }
+    for (
+      let offset = 0;
+      offset < targets.length && !stopBatch.value;
+      offset += 100
+    ) {
+      const results = await submitMemeBatch(
+        targets.slice(offset, offset + 100),
+        action,
+      );
+      bulkResults.value.push(...results);
+      for (const result of results)
+        if (result.status === "succeeded") selected.value.delete(result.id);
+      if (results.some((r) => r.status === "unknown")) {
+        stopBatch.value = true;
+        error.value = "部分结果暂无法核对，已停止后续批次。请先核对结果。";
+      }
+    }
+  } finally {
+    bulkBusy.value = false;
+    await load();
+    await loadCollections();
+  }
+}
+async function checkUnknown() {
+  if (!lastAction.value || bulkBusy.value) return;
+  bulkBusy.value = true;
+  try {
+    const unknown = bulkResults.value.filter((r) => r.status === "unknown");
+    const checked = await reconcileMemeBatch(
+      unknown.map((r) => ({ id: r.id, expectedVersion: 0 })),
+      lastAction.value,
+    );
+    bulkResults.value = bulkResults.value.map(
+      (r) => checked.find((c) => c.id === r.id) ?? r,
+    );
+    for (const r of checked)
+      if (r.status === "succeeded") selected.value.delete(r.id);
+  } finally {
+    bulkBusy.value = false;
+    await load();
+    await loadCollections();
+  }
+}
 const fileInput = ref<HTMLInputElement | null>(null);
 const previewUrl = ref("");
 const dragging = ref(false);
@@ -77,10 +418,14 @@ function summaryErrorMessage(code: string | null) {
 let sequence = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
 async function load(background = false) {
+  if (!background) syncUrl();
+  if (background && filtersPending.value) return;
+  const scope = JSON.stringify(filters());
   const seq = ++sequence;
   if (!background) loading.value = true;
   try {
     const params = new URLSearchParams({
+      collection: collection.value,
       query: query.value,
       offset: String(page.value * 24),
       limit: "24",
@@ -90,7 +435,18 @@ async function load(background = false) {
     const result = await apiRequest<{ items: Meme[]; total: number }>(
       `/api/v1/memes?${params}`,
     );
-    if (seq === sequence) {
+    if (
+      seq === sequence &&
+      scope === JSON.stringify(filters()) &&
+      (!background || selected.value.size === 0)
+    ) {
+      const lastPage = Math.max(0, Math.ceil(result.total / 24) - 1);
+      if (page.value > lastPage) {
+        page.value = lastPage;
+        await load();
+        return;
+      }
+      loadedFilters.value = scope;
       items.value = result.items;
       total.value = result.total;
       error.value = "";
@@ -103,7 +459,15 @@ async function load(background = false) {
   }
 }
 function open(item: Meme | null) {
+  if (bulkBusy.value) return;
   editing.value = item;
+  assetCollection.value =
+    item?.collectionId ??
+    (item
+      ? ""
+      : ["all", "unclassified"].includes(collection.value)
+        ? ""
+        : collection.value);
   name.value = item?.name ?? "";
   description.value = item?.description ?? "";
   tags.value = item?.tags.join("，") ?? "";
@@ -122,6 +486,7 @@ async function perform(action: () => Promise<unknown>) {
   try {
     await action();
     await load();
+    await loadCollections();
   } catch (e) {
     error.value = e instanceof Error ? e.message : "操作失败，请重试。";
   } finally {
@@ -131,6 +496,7 @@ async function perform(action: () => Promise<unknown>) {
 async function save() {
   await perform(async () => {
     const data = {
+      collectionId: assetCollection.value || null,
       name: name.value,
       description: description.value,
       tags: tags.value
@@ -144,7 +510,7 @@ async function save() {
         body: JSON.stringify({
           ...data,
           enabled: active.value,
-          ...(summary.value !== editing.value.summary
+          ...(summary.value !== (editing.value.summary ?? "")
             ? { summary: summary.value }
             : {}),
           expectedVersion: editing.value.version,
@@ -153,6 +519,7 @@ async function save() {
     } else {
       if (!file.value) throw new Error("请选择图片。");
       const form = new FormData();
+      form.set("collectionId", data.collectionId ?? "");
       form.set("name", data.name);
       form.set("description", data.description);
       form.set("tags", JSON.stringify(data.tags));
@@ -168,7 +535,10 @@ async function refreshEditing() {
   if (
     (name.value !== item.name ||
       description.value !== item.description ||
-      summary.value !== (item.summary ?? "")) &&
+      summary.value !== (item.summary ?? "") ||
+      tags.value !== item.tags.join("，") ||
+      active.value !== item.enabled ||
+      assetCollection.value !== (item.collectionId ?? "")) &&
     !window.confirm("刷新会丢弃未保存的修改，继续？")
   )
     return;
@@ -246,13 +616,40 @@ function drop(event: DragEvent) {
   dragging.value = false;
   chooseFiles(event.dataTransfer?.files);
 }
+function protectBatch(event: BeforeUnloadEvent) {
+  if (bulkBusy.value) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+}
+onBeforeRouteLeave(() => {
+  if (bulkBusy.value) {
+    error.value = "批量操作仍在处理，请先停止后续批次并等待当前请求核对完成。";
+    return false;
+  }
+  return true;
+});
 onMounted(() => {
   void load();
+  void loadCollections();
+  window.addEventListener("beforeunload", protectBatch);
   timer = setInterval(() => {
-    if (!modal.value && !busy.value && !loading.value) void load(true);
+    if (
+      !modal.value &&
+      !collectionModal.value &&
+      !busy.value &&
+      !loading.value &&
+      !bulkBusy.value &&
+      !selecting.value &&
+      selected.value.size === 0
+    ) {
+      void load(true);
+      void loadCollections();
+    }
   }, 5000);
 });
 onUnmounted(() => {
+  window.removeEventListener("beforeunload", protectBatch);
   sequence++;
   releasePreview();
   clearInterval(timer);
@@ -269,77 +666,402 @@ onUnmounted(() => {
         <ImagePlus :size="18" aria-hidden="true" />上传表情
       </button>
     </header>
-    <form
-      class="meme-filters"
-      @submit.prevent="
-        page = 0;
-        load();
-      "
-    >
-      <input
-        v-model="query"
-        placeholder="搜索名称或标签"
-        aria-label="搜索名称或标签"
-      /><select v-model="enabled" aria-label="启用状态">
-        <option value="">全部启用状态</option>
-        <option value="true">已启用</option>
-        <option value="false">已停用</option></select
-      ><select v-model="status" aria-label="摘要状态">
-        <option value="">全部摘要状态</option>
-        <option v-for="(label, key) in labels" :key="key" :value="key">
-          {{ label }}
-        </option></select
-      ><button class="button secondary meme-query" :disabled="loading">
-        <LoaderCircle
-          v-if="loading"
-          :size="16"
-          class="meme-spinner"
-          aria-hidden="true"
-        />{{ loading ? "查询中" : "查询" }}
-      </button>
-    </form>
-    <p v-if="error" role="alert">{{ error }}</p>
-
-    <div class="meme-grid" :aria-busy="loading">
-      <button
-        v-for="item in items"
-        :key="item.id"
-        class="meme-card"
-        @click="open(item)"
-      >
-        <img
-          :src="`/api/v1/memes/${item.id}/thumbnail`"
-          :alt="item.name"
-          loading="lazy"
-        /><strong>{{ item.name }}</strong
-        ><span>{{ item.tags.join(" · ") || "无标签" }}</span
-        ><small
-          >{{ item.enabled ? "已启用" : "已停用" }} ·
-          {{ labels[item.summaryStatus] }}</small
+    <div class="meme-library-layout">
+      <aside class="meme-collections" aria-label="表情合集">
+        <div class="meme-collections-heading">
+          <strong>我的合集</strong
+          ><button
+            class="meme-close"
+            aria-label="新建合集"
+            :disabled="bulkBusy"
+            @click="editCollection(null)"
+          >
+            <FolderPlus :size="18" />
+          </button>
+        </div>
+        <p v-if="collectionError" role="alert">
+          {{ collectionError }}
+          <button class="button secondary" @click="loadCollections">
+            重试
+          </button>
+        </p>
+        <nav class="meme-collection-desktop">
+          <button
+            :class="{ active: collection === 'all' }"
+            :disabled="bulkBusy"
+            @click="chooseCollection('all')"
+          >
+            <Folder :size="18" /><span>全部表情</span
+            ><small>{{ collectionTotal }}</small>
+          </button>
+          <button
+            :class="{ active: collection === 'unclassified' }"
+            :disabled="bulkBusy"
+            @click="chooseCollection('unclassified')"
+          >
+            <Folder :size="18" /><span>未分类</span
+            ><small>{{ unclassified }}</small>
+          </button>
+          <button
+            v-for="c in collections"
+            :key="c.id"
+            :class="{ active: collection === c.id }"
+            :disabled="bulkBusy"
+            @click="chooseCollection(c.id)"
+          >
+            <img
+              v-if="c.effectiveCoverMemeId"
+              :src="`/api/v1/memes/${c.effectiveCoverMemeId}/thumbnail`"
+              alt=""
+              loading="lazy"
+            /><Folder v-else :size="18" /><span>{{ c.name }}</span
+            ><small>{{ c.count }}</small>
+          </button>
+        </nav>
+        <select
+          class="meme-collection-mobile"
+          aria-label="选择合集"
+          :value="collection"
+          :disabled="bulkBusy"
+          @change="chooseCollection(($event.target as HTMLSelectElement).value)"
         >
-      </button>
+          <option value="all">全部表情（{{ collectionTotal }}）</option>
+          <option value="unclassified">未分类（{{ unclassified }}）</option>
+          <option v-for="c in collections" :key="c.id" :value="c.id">
+            {{ c.name }}（{{ c.count }}）
+          </option>
+        </select>
+      </aside>
+      <section class="meme-library-content" :aria-label="collectionTitle">
+        <div class="meme-collection-title">
+          <div>
+            <h2>{{ collectionTitle }}</h2>
+            <p v-if="currentCollection?.description">
+              {{ currentCollection.description }}
+            </p>
+          </div>
+          <button
+            v-if="currentCollection"
+            class="button secondary"
+            :disabled="bulkBusy"
+            @click="editCollection(currentCollection)"
+          >
+            <Settings2 :size="16" />管理合集
+          </button>
+        </div>
+        <form
+          class="meme-filters"
+          @submit.prevent="
+            page = 0;
+            load();
+          "
+        >
+          <input
+            v-model="query"
+            :disabled="bulkBusy"
+            placeholder="搜索名称或标签"
+            aria-label="搜索名称或标签"
+          /><select
+            v-model="enabled"
+            :disabled="bulkBusy"
+            aria-label="启用状态"
+          >
+            <option value="">全部启用状态</option>
+            <option value="true">已启用</option>
+            <option value="false">已停用</option></select
+          ><select v-model="status" :disabled="bulkBusy" aria-label="摘要状态">
+            <option value="">全部摘要状态</option>
+            <option v-for="(label, key) in labels" :key="key" :value="key">
+              {{ label }}
+            </option></select
+          ><button
+            class="button secondary meme-query"
+            :disabled="loading || bulkBusy"
+          >
+            <LoaderCircle
+              v-if="loading"
+              :size="16"
+              class="meme-spinner"
+              aria-hidden="true"
+            />{{ loading ? "查询中" : "查询" }}
+          </button>
+        </form>
+        <p v-if="error" role="alert">{{ error }}</p>
+
+        <p v-if="filtersPending && !loading">
+          筛选条件已更改，请先查询再选择素材。
+        </p>
+        <div class="meme-selection-bar">
+          <button
+            class="button secondary"
+            :disabled="loading || filtersPending || bulkBusy || !items.length"
+            @click="selectPage"
+          >
+            选择当前页
+          </button>
+          <button
+            class="button secondary"
+            :disabled="
+              loading || filtersPending || bulkBusy || selecting || !total
+            "
+            @click="selectAll"
+          >
+            {{ selecting ? "正在选择…" : `选择筛选结果全部 ${total} 张` }}
+          </button>
+          <span>已选 {{ selected.size }} 张</span
+          ><button
+            v-if="selected.size"
+            class="button secondary"
+            :disabled="bulkBusy"
+            @click="selected.clear()"
+          >
+            清空
+          </button>
+        </div>
+        <div
+          v-if="selected.size || bulkResults.length || bulkBusy"
+          class="meme-bulk-panel"
+        >
+          <div class="meme-bulk-controls">
+            <select
+              v-model="bulkTarget"
+              aria-label="批量移动目标"
+              :disabled="bulkBusy"
+            >
+              <option value="">未分类</option>
+              <option v-for="c in collections" :key="c.id" :value="c.id">
+                {{ c.name }}
+              </option></select
+            ><button
+              class="button secondary"
+              :disabled="
+                bulkBusy ||
+                !selected.size ||
+                bulkFailures.some((r) => r.status === 'unknown')
+              "
+              @click="
+                runBatch({ type: 'move', collectionId: bulkTarget || null })
+              "
+            >
+              移动到</button
+            ><button
+              class="button secondary"
+              :disabled="
+                bulkBusy ||
+                !selected.size ||
+                bulkFailures.some((r) => r.status === 'unknown')
+              "
+              @click="runBatch({ type: 'enable', enabled: true })"
+            >
+              启用</button
+            ><button
+              class="button secondary"
+              :disabled="
+                bulkBusy ||
+                !selected.size ||
+                bulkFailures.some((r) => r.status === 'unknown')
+              "
+              @click="runBatch({ type: 'enable', enabled: false })"
+            >
+              停用</button
+            ><button
+              class="button secondary meme-delete"
+              :disabled="
+                bulkBusy ||
+                !selected.size ||
+                bulkFailures.some((r) => r.status === 'unknown')
+              "
+              @click="runBatch({ type: 'delete' })"
+            >
+              删除
+            </button>
+          </div>
+          <div v-if="bulkTotal" role="status" class="meme-bulk-progress">
+            已处理 {{ bulkResults.length }} / {{ bulkTotal }} · 成功
+            {{ bulkSucceeded }} · 失败
+            {{ bulkFailures.filter((r) => r.status !== "unknown").length }} ·
+            待核对
+            {{ bulkFailures.filter((r) => r.status === "unknown").length }} ·
+            未开始 {{ Math.max(0, bulkTotal - bulkResults.length)
+            }}<span v-if="stopBatch"> · 已停止后续批次</span>
+          </div>
+          <button
+            v-if="bulkBusy"
+            class="button secondary"
+            :disabled="stopBatch"
+            @click="stopBatch = true"
+          >
+            停止后续批次
+          </button>
+          <template v-else-if="bulkFailures.length"
+            ><button
+              v-if="bulkFailures.some((r) => r.status === 'unknown')"
+              class="button secondary"
+              @click="checkUnknown"
+            >
+              核对未知结果</button
+            ><button
+              v-if="
+                lastAction && bulkFailures.some((r) => r.status !== 'unknown')
+              "
+              class="button secondary"
+              :disabled="bulkFailures.some((r) => r.status === 'unknown')"
+              @click="runBatch(lastAction, true)"
+            >
+              刷新并重试失败项
+            </button>
+            <details>
+              <summary>查看未完成项</summary>
+              <ul>
+                <li v-for="r in bulkFailures" :key="r.id">
+                  {{ r.id }} ·
+                  {{
+                    r.status === "unknown"
+                      ? "结果待核对"
+                      : r.status === "missing"
+                        ? "素材不存在"
+                        : "版本或状态已变化"
+                  }}
+                </li>
+              </ul>
+            </details></template
+          >
+        </div>
+        <div class="meme-grid" :aria-busy="loading">
+          <article
+            v-for="item in items"
+            :key="item.id"
+            class="meme-card"
+            :class="{ 'is-selected': selected.has(item.id) }"
+          >
+            <label class="meme-card-select"
+              ><input
+                type="checkbox"
+                :checked="selected.has(item.id)"
+                :disabled="bulkBusy || filtersPending || loading"
+                :aria-label="`选择 ${item.name}`"
+                @change="toggleSelection(item)" /></label
+            ><button
+              class="meme-card-open"
+              :disabled="bulkBusy"
+              @click="open(item)"
+            >
+              <img
+                :src="`/api/v1/memes/${item.id}/thumbnail`"
+                :alt="item.name"
+                loading="lazy"
+              /><strong>{{ item.name }}</strong
+              ><span>{{ item.tags.join(" · ") || "无标签" }}</span
+              ><small
+                >{{ item.enabled ? "已启用" : "已停用" }} ·
+                {{ labels[item.summaryStatus] }}</small
+              >
+            </button>
+          </article>
+        </div>
+        <p v-if="!loading && !items.length">暂无匹配表情。</p>
+        <footer class="meme-filters">
+          <button
+            :disabled="page === 0 || loading || bulkBusy"
+            @click="
+              page--;
+              load();
+            "
+          >
+            上一页</button
+          ><span>共 {{ total }} 张 · 第 {{ page + 1 }} 页</span
+          ><button
+            :disabled="(page + 1) * 24 >= total || loading || bulkBusy"
+            @click="
+              page++;
+              load();
+            "
+          >
+            下一页
+          </button>
+        </footer>
+      </section>
     </div>
-    <p v-if="!loading && !items.length">暂无匹配表情。</p>
-    <footer class="meme-filters">
-      <button
-        :disabled="page === 0 || loading"
-        @click="
-          page--;
-          load();
-        "
+    <div
+      v-if="collectionModal"
+      class="meme-overlay"
+      @click.self="!busy && (collectionModal = false)"
+    >
+      <section
+        class="meme-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="collection-title"
       >
-        上一页</button
-      ><span>共 {{ total }} 张 · 第 {{ page + 1 }} 页</span
-      ><button
-        :disabled="(page + 1) * 24 >= total || loading"
-        @click="
-          page++;
-          load();
-        "
-      >
-        下一页
-      </button>
-    </footer>
+        <header class="meme-dialog-heading">
+          <div>
+            <h2 id="collection-title">
+              {{ collectionEditing ? "管理合集" : "新建合集" }}
+            </h2>
+            <p>按系列整理表情，标签继续用于情绪和场景检索。</p>
+          </div>
+          <button
+            class="meme-close"
+            aria-label="关闭合集弹窗"
+            :disabled="busy"
+            @click="collectionModal = false"
+          >
+            <X :size="20" />
+          </button>
+        </header>
+        <p v-if="error" role="alert">{{ error }}</p>
+        <form @submit.prevent="saveCollection">
+          <label
+            >合集名称<input
+              v-model="collectionName"
+              required
+              maxlength="120"
+              :disabled="busy"
+              placeholder="例如：什么猫" /></label
+          ><label
+            >说明<textarea
+              v-model="collectionDescription"
+              maxlength="2000"
+              :disabled="busy"
+              placeholder="简短说明这个系列的特点"
+            /></label
+          ><label v-if="collectionEditing"
+            >封面<select v-model="collectionCover" :disabled="busy">
+              <option value="">自动使用最早加入的表情</option>
+              <option
+                v-if="collectionEditing.coverMemeId"
+                :value="collectionEditing.coverMemeId"
+              >
+                保留指定封面
+              </option>
+            </select></label
+          >
+          <p class="meme-summary-hint">
+            可在合集内任一表情的编辑弹窗中将其设为封面。
+          </p>
+          <footer class="meme-dialog-actions">
+            <button
+              v-if="collectionEditing"
+              type="button"
+              class="button secondary meme-delete"
+              :disabled="busy"
+              @click="deleteCollection"
+            >
+              删除合集</button
+            ><button
+              type="button"
+              class="button secondary"
+              :disabled="busy"
+              @click="collectionModal = false"
+            >
+              取消</button
+            ><button class="button primary" :disabled="busy">
+              {{ busy ? "保存中…" : "保存" }}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
     <div
       v-if="modal"
       class="meme-overlay"
@@ -500,6 +1222,25 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="meme-editor-fields">
+            <label
+              >所属合集<select v-model="assetCollection" :disabled="busy">
+                <option value="">未分类</option>
+                <option v-for="c in collections" :key="c.id" :value="c.id">
+                  {{ c.name }}
+                </option>
+              </select></label
+            ><button
+              v-if="
+                editing?.collectionId &&
+                assetCollection === editing.collectionId
+              "
+              type="button"
+              class="button secondary"
+              :disabled="busy"
+              @click="setCover"
+            >
+              将此表情设为合集封面
+            </button>
             <label
               ><span>名称 <span class="meme-field-hint">必填</span></span
               ><input
@@ -1048,5 +1789,194 @@ onUnmounted(() => {
 .meme-grid {
   min-height: 240px;
   align-content: start;
+}
+</style>
+
+<style scoped>
+.meme-library-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.meme-library-content {
+  min-width: 0;
+}
+.meme-collections {
+  position: sticky;
+  top: 110px;
+  background: #ffffffa6;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 14px;
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+}
+.meme-collections-heading,
+.meme-collection-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.meme-collection-title h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.meme-collection-title p {
+  font-size: 13px;
+  color: #64748b;
+}
+.meme-collection-desktop {
+  display: grid;
+  gap: 6px;
+}
+.meme-collection-desktop button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.meme-collection-desktop button.active {
+  background: #eaf0ff;
+  color: #254eae;
+}
+.meme-collection-desktop button:hover {
+  background: #f1f5f9;
+}
+.meme-collection-desktop button span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.meme-collection-desktop img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.meme-collection-desktop svg {
+  flex-shrink: 0;
+}
+.meme-collection-desktop small {
+  color: #64748b;
+}
+.meme-collection-mobile {
+  display: none;
+}
+.meme-selection-bar,
+.meme-bulk-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.meme-selection-bar {
+  font-size: 12px;
+}
+.meme-selection-bar .button,
+.meme-bulk-panel .button {
+  font-size: 12px;
+  padding: 8px 12px;
+}
+.meme-bulk-panel {
+  padding: 16px;
+  background: #f1f5fc;
+  border: 1px solid #dae3f3;
+  border-radius: 14px;
+  margin-bottom: 16px;
+}
+.meme-bulk-controls select {
+  width: auto;
+  max-width: 220px;
+}
+.meme-bulk-progress {
+  font-size: 13px;
+  line-height: 1.8;
+  margin: 10px 0;
+}
+.meme-bulk-panel details {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.meme-bulk-panel ul {
+  max-height: 160px;
+  overflow: auto;
+}
+.meme-card {
+  position: relative;
+  padding: 0;
+  display: block;
+  overflow: hidden;
+}
+.meme-card.is-selected {
+  border-color: #6383d2;
+  box-shadow: 0 0 0 1px #6383d2;
+}
+.meme-card-open {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.meme-card-select {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 5px;
+  background: #ffffffdb;
+  border-radius: 7px;
+}
+.meme-card-select input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #2563eb;
+}
+.meme-delete {
+  color: #b24444 !important;
+}
+@media (max-width: 760px) {
+  .meme-library-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .meme-collections {
+    position: static;
+    max-height: none;
+  }
+  .meme-collection-desktop {
+    display: none;
+  }
+  .meme-collection-mobile {
+    display: block;
+  }
+  .meme-page {
+    padding: 16px;
+  }
+  .meme-selection-bar {
+    gap: 6px;
+  }
+  .meme-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
 }
 </style>

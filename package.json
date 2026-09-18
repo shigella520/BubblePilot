@@ -37,7 +37,8 @@
     "memory:benchmark": "tsx app/benchmark-memory.ts",
     "bot:evaluate": "tsx app/evaluate-bot-identity.ts",
     "agent:evaluate": "tsx app/evaluate-agent.ts",
-    "chat:benchmark": "tsx app/benchmark-chat-queries.ts"
+    "chat:benchmark": "tsx app/benchmark-chat-queries.ts",
+    "memes:organize": "tsx app/organize-memes.ts"
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.1",

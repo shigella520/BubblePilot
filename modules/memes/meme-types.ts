@@ -1,3 +1,7 @@
+import type {
+  MemeCollectionRepository,
+  MemeFilter,
+} from "./meme-collection-types.js";
 import { z } from "zod";
 export const memeLimits = Object.freeze({
   fileBytes: 10 * 1024 * 1024,
@@ -10,6 +14,7 @@ export const memeLimits = Object.freeze({
   leaseMs: 600_000,
 });
 export const memeMetadataSchema = z.object({
+  collectionId: z.string().uuid().nullable().optional(),
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).default(""),
   tags: z.array(z.string().trim().min(1).max(40)).max(20).default([]),
@@ -21,6 +26,8 @@ export const memeEditSchema = memeMetadataSchema.extend({
 });
 export type MemeMetadata = z.infer<typeof memeMetadataSchema>;
 export interface MemeAsset extends MemeMetadata {
+  collectionName?: string | null;
+  summaryInputVersion?: number;
   id: string;
   summary: string | null;
   summaryManual: boolean;
@@ -50,16 +57,16 @@ export interface MemeSummaryJob {
   owner: string;
   attempt: number;
   baseVersion: number;
+  inputVersion?: number | null;
   candidate: boolean;
 }
-export interface MemeRepository {
-  list(input: {
-    query?: string;
-    enabled?: boolean;
-    status?: string;
-    offset: number;
-    limit: number;
-  }): Promise<{ items: MemeAsset[]; total: number }>;
+export interface MemeRepository extends MemeCollectionRepository {
+  list(
+    input: MemeFilter & {
+      offset: number;
+      limit: number;
+    },
+  ): Promise<{ items: MemeAsset[]; total: number }>;
   get(id: string): Promise<MemeAsset | null>;
   create(
     input: MemeMetadata &

@@ -1,16 +1,23 @@
 import { randomUUID } from "node:crypto";
-import type { Pool } from "pg";
+import {
+  PostgresMemeCollections,
+  membershipLock,
+  validateCollection,
+  memeWhere,
+} from "./postgres-meme-collections.js";
 import { createPostgresPool } from "../shared/postgres-pool.js";
 import type {
   MemeAsset,
   MemeRepository,
   MemeSummaryJob,
 } from "./meme-types.js";
-const columns = `id,name,description,tags,summary,summary_manual AS "summaryManual",candidate_summary AS "candidateSummary",summary_status AS "summaryStatus",summary_error AS "summaryError",enabled,mime_type AS "mimeType",size,width,height,hash,storage_key AS "storageKey",version,created_at::text AS "createdAt",updated_at::text AS "updatedAt",deleted_at::text AS "deletedAt"`;
-export class PostgresMemeRepository implements MemeRepository {
-  readonly pool: Pool;
+const columns = `collection_id AS "collectionId",(SELECT name FROM meme_collections WHERE id=meme_assets.collection_id) AS "collectionName",summary_input_version AS "summaryInputVersion",id,name,description,tags,summary,summary_manual AS "summaryManual",candidate_summary AS "candidateSummary",summary_status AS "summaryStatus",summary_error AS "summaryError",enabled,mime_type AS "mimeType",size,width,height,hash,storage_key AS "storageKey",version,created_at::text AS "createdAt",updated_at::text AS "updatedAt",deleted_at::text AS "deletedAt"`;
+export class PostgresMemeRepository
+  extends PostgresMemeCollections
+  implements MemeRepository
+{
   constructor(databaseUrl: string, timeoutMs?: number) {
-    this.pool = createPostgresPool(databaseUrl, 3, timeoutMs);
+    super(createPostgresPool(databaseUrl, 3, timeoutMs));
   }
   async get(id: string) {
     return (
@@ -23,14 +30,9 @@ export class PostgresMemeRepository implements MemeRepository {
     );
   }
   async list(input: Parameters<MemeRepository["list"]>[0]) {
-    const values = [
-      input.query ?? "",
-      input.enabled ?? null,
-      input.status ?? null,
-    ];
-    const where = `deleted_at IS NULL AND ($1='' OR position(lower($1) in lower(name || ' ' || tags::text))>0) AND ($2::boolean IS NULL OR enabled=$2) AND ($3::text IS NULL OR summary_status=$3)`;
+    const { values, where } = memeWhere(input);
     const items = await this.pool.query<MemeAsset>(
-      `SELECT ${columns} FROM meme_assets WHERE ${where} ORDER BY created_at DESC,id LIMIT $4 OFFSET $5`,
+      `SELECT ${columns} FROM meme_assets WHERE ${where} ORDER BY created_at DESC,id LIMIT $5 OFFSET $6`,
       [...values, input.limit, input.offset],
     );
     const total = await this.pool.query<{ total: string }>(
@@ -43,6 +45,7 @@ export class PostgresMemeRepository implements MemeRepository {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      await client.query(membershipLock);
       // Serialize equal hashes, including concurrent duplicate uploads.
       await client.query(
         "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
@@ -56,9 +59,10 @@ export class PostgresMemeRepository implements MemeRepository {
         await client.query("COMMIT");
         return { asset: old.rows[0], created: false };
       }
+      await validateCollection(client, input.collectionId);
       const id = randomUUID();
       const result = await client.query<MemeAsset>(
-        `INSERT INTO meme_assets(id,name,description,tags,mime_type,size,width,height,hash,storage_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING ${columns}`,
+        `INSERT INTO meme_assets(id,name,description,tags,mime_type,size,width,height,hash,storage_key,collection_id,collection_joined_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,CASE WHEN $11::uuid IS NULL THEN NULL ELSE now() END) RETURNING ${columns}`,
         [
           id,
           input.name,
@@ -70,10 +74,11 @@ export class PostgresMemeRepository implements MemeRepository {
           input.height,
           input.hash,
           input.storageKey,
+          input.collectionId ?? null,
         ],
       );
       await client.query(
-        "INSERT INTO meme_summary_jobs(id,meme_id,base_version) VALUES($1,$2,1)",
+        "INSERT INTO meme_summary_jobs(id,meme_id,base_version,input_version) VALUES($1,$2,1,1)",
         [randomUUID(), id],
       );
       await client.query("COMMIT");
@@ -86,22 +91,36 @@ export class PostgresMemeRepository implements MemeRepository {
     }
   }
   async edit(id: string, input: Parameters<MemeRepository["edit"]>[1]) {
-    return (
-      (
-        await this.pool.query<MemeAsset>(
-          `UPDATE meme_assets SET name=$3,description=$4,tags=$5,summary=CASE WHEN $6::text IS NULL THEN summary ELSE $6 END,summary_manual=summary_manual OR $6::text IS NOT NULL,enabled=coalesce($7,enabled),version=version+1,updated_at=now() WHERE id=$1 AND version=$2 AND deleted_at IS NULL RETURNING ${columns}`,
-          [
-            id,
-            input.expectedVersion,
-            input.name,
-            input.description,
-            JSON.stringify(input.tags),
-            input.summary ?? null,
-            input.enabled ?? null,
-          ],
-        )
-      ).rows[0] ?? null
-    );
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(membershipLock);
+      await validateCollection(client, input.collectionId);
+      const result = await client.query<MemeAsset>(
+        `UPDATE meme_assets SET summary_input_version=summary_input_version+CASE WHEN name IS DISTINCT FROM $3 OR description IS DISTINCT FROM $4 OR tags IS DISTINCT FROM $5::jsonb OR $6::text IS NOT NULL THEN 1 ELSE 0 END,
+        name=$3,description=$4,tags=$5,summary=CASE WHEN $6::text IS NULL THEN summary ELSE $6 END,summary_manual=summary_manual OR $6::text IS NOT NULL,enabled=coalesce($7,enabled),
+        collection_joined_at=CASE WHEN NOT $8 OR collection_id IS NOT DISTINCT FROM $9::uuid THEN collection_joined_at WHEN $9::uuid IS NULL THEN NULL ELSE now() END,
+        collection_id=CASE WHEN $8 THEN $9::uuid ELSE collection_id END,version=version+1,updated_at=now() WHERE id=$1 AND version=$2 AND deleted_at IS NULL RETURNING ${columns}`,
+        [
+          id,
+          input.expectedVersion,
+          input.name,
+          input.description,
+          JSON.stringify(input.tags),
+          input.summary ?? null,
+          input.enabled ?? null,
+          input.collectionId !== undefined,
+          input.collectionId ?? null,
+        ],
+      );
+      await client.query("COMMIT");
+      return result.rows[0] ?? null;
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
   }
   async remove(id: string, version: number) {
     return (
@@ -117,8 +136,11 @@ export class PostgresMemeRepository implements MemeRepository {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const updated = await client.query(
-        "UPDATE meme_assets SET summary_status='pending',summary_error=NULL,version=version+1,updated_at=now() WHERE id=$1 AND version=$2 AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM meme_summary_jobs WHERE meme_id=$1 AND status IN ('pending','processing')) RETURNING version",
+      const updated = await client.query<{
+        version: number;
+        summary_input_version: number;
+      }>(
+        "UPDATE meme_assets SET summary_status='pending',summary_error=NULL,version=version+1,updated_at=now() WHERE id=$1 AND version=$2 AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM meme_summary_jobs WHERE meme_id=$1 AND status IN ('pending','processing')) RETURNING version,summary_input_version",
         [id, version],
       );
       if (!updated.rowCount) {
@@ -126,8 +148,14 @@ export class PostgresMemeRepository implements MemeRepository {
         return false;
       }
       await client.query(
-        "INSERT INTO meme_summary_jobs(id,meme_id,base_version,candidate) VALUES($1,$2,$3,$4)",
-        [randomUUID(), id, version + 1, candidate],
+        "INSERT INTO meme_summary_jobs(id,meme_id,base_version,candidate,input_version) VALUES($1,$2,$3,$4,$5)",
+        [
+          randomUUID(),
+          id,
+          version + 1,
+          candidate,
+          updated.rows[0]!.summary_input_version,
+        ],
       );
       await client.query("COMMIT");
       return true;
@@ -142,7 +170,7 @@ export class PostgresMemeRepository implements MemeRepository {
     return (
       (
         await this.pool.query<MemeAsset>(
-          `UPDATE meme_assets SET summary=candidate_summary,candidate_summary=NULL,summary_manual=true,version=version+1,updated_at=now() WHERE id=$1 AND version=$2 AND deleted_at IS NULL AND candidate_summary IS NOT NULL RETURNING ${columns}`,
+          `UPDATE meme_assets SET summary=candidate_summary,candidate_summary=NULL,summary_manual=true,summary_input_version=summary_input_version+1,version=version+1,updated_at=now() WHERE id=$1 AND version=$2 AND deleted_at IS NULL AND candidate_summary IS NOT NULL RETURNING ${columns}`,
           [id, version],
         )
       ).rows[0] ?? null
@@ -154,15 +182,22 @@ export class PostgresMemeRepository implements MemeRepository {
       "WITH exhausted AS (UPDATE meme_summary_jobs SET status='failed',lease_owner=NULL WHERE status='processing' AND lease_until<now() AND attempt>=3 RETURNING meme_id) UPDATE meme_assets SET summary_status='failed',summary_error='MEME_SUMMARY_LEASE_EXHAUSTED' WHERE id IN (SELECT meme_id FROM exhausted)",
     );
     const result = await this.pool.query<MemeSummaryJob>(
-      `WITH picked AS (SELECT j.id FROM meme_summary_jobs j JOIN meme_assets a ON a.id=j.meme_id WHERE a.deleted_at IS NULL AND j.attempt<3 AND ((j.status='pending' AND j.next_attempt_at<=now()) OR (j.status='processing' AND j.lease_until<now())) ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1), claimed AS (UPDATE meme_summary_jobs SET status='processing',attempt=attempt+1,lease_owner=$1,lease_until=now()+interval '10 minutes' WHERE id IN (SELECT id FROM picked) RETURNING id,meme_id,attempt,base_version,candidate), marked AS (UPDATE meme_assets SET summary_status='processing' WHERE id IN(SELECT meme_id FROM claimed)) SELECT id,meme_id AS "memeId",$1::text AS owner,attempt,base_version AS "baseVersion",candidate FROM claimed`,
+      `WITH picked AS (SELECT j.id FROM meme_summary_jobs j JOIN meme_assets a ON a.id=j.meme_id WHERE a.deleted_at IS NULL AND j.attempt<3 AND ((j.status='pending' AND j.next_attempt_at<=now()) OR (j.status='processing' AND j.lease_until<now())) ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1), claimed AS (UPDATE meme_summary_jobs SET status='processing',attempt=attempt+1,lease_owner=$1,lease_until=now()+interval '10 minutes' WHERE id IN (SELECT id FROM picked) RETURNING id,meme_id,attempt,base_version,input_version,candidate), marked AS (UPDATE meme_assets SET summary_status='processing' WHERE id IN(SELECT meme_id FROM claimed)) SELECT id,meme_id AS "memeId",$1::text AS owner,attempt,base_version AS "baseVersion",input_version AS "inputVersion",candidate FROM claimed`,
       [owner],
     );
     return result.rows[0] ?? null;
   }
   async complete(job: MemeSummaryJob, summary: string) {
     const result = await this.pool.query(
-      `WITH finished AS (UPDATE meme_summary_jobs SET status='succeeded',lease_owner=NULL WHERE id=$1 AND lease_owner=$2 AND status='processing' AND lease_until>now() RETURNING meme_id) UPDATE meme_assets SET summary=CASE WHEN NOT $4 AND NOT summary_manual AND version=$5 THEN $3 ELSE summary END,candidate_summary=CASE WHEN $4 OR summary_manual OR version<>$5 THEN $3 ELSE candidate_summary END,summary_status='succeeded',summary_error=NULL,version=version+1,updated_at=now() WHERE id IN(SELECT meme_id FROM finished) AND deleted_at IS NULL`,
-      [job.id, job.owner, summary, job.candidate, job.baseVersion],
+      `WITH finished AS (UPDATE meme_summary_jobs SET status='succeeded',lease_owner=NULL WHERE id=$1 AND lease_owner=$2 AND status='processing' AND lease_until>now() RETURNING meme_id) UPDATE meme_assets SET summary=CASE WHEN NOT $4 AND NOT summary_manual AND (CASE WHEN $6::int IS NULL THEN version=$5 ELSE summary_input_version=$6 END) THEN $3 ELSE summary END,candidate_summary=CASE WHEN $4 OR summary_manual OR (CASE WHEN $6::int IS NULL THEN version<>$5 ELSE summary_input_version<>$6 END) THEN $3 ELSE candidate_summary END,summary_status='succeeded',summary_error=NULL,version=version+1,updated_at=now() WHERE id IN(SELECT meme_id FROM finished) AND deleted_at IS NULL`,
+      [
+        job.id,
+        job.owner,
+        summary,
+        job.candidate,
+        job.baseVersion,
+        job.inputVersion ?? null,
+      ],
     );
     return result.rowCount === 1;
   }
@@ -185,7 +220,7 @@ export class PostgresMemeRepository implements MemeRepository {
       ).rows;
     return (
       await this.pool.query<MemeAsset>(
-        `SELECT ${columns} FROM meme_assets a WHERE deleted_at IS NULL AND enabled AND EXISTS(SELECT 1 FROM unnest($1::text[]) w WHERE position(w in lower(name || ' ' || tags::text || ' ' || description || ' ' || coalesce(summary,'')))>0) ORDER BY (SELECT sum((CASE WHEN position(w in lower(name))>0 THEN 8 ELSE 0 END)+(CASE WHEN EXISTS(SELECT 1 FROM jsonb_array_elements_text(tags) t WHERE position(w in lower(t))>0) THEN 8 ELSE 0 END)+(CASE WHEN position(w in lower(description))>0 THEN 2 ELSE 0 END)+(CASE WHEN position(w in lower(coalesce(summary,'')))>0 THEN 1 ELSE 0 END)) FROM unnest($1::text[]) w) DESC,(SELECT count(*) FROM unnest($1::text[]) w WHERE position(w in lower(name || ' ' || tags::text || ' ' || description || ' ' || coalesce(summary,'')))>0) DESC,id LIMIT $2`,
+        `SELECT ${columns} FROM meme_assets WHERE deleted_at IS NULL AND enabled AND EXISTS(SELECT 1 FROM unnest($1::text[]) w WHERE position(w in lower(name || ' ' || tags::text || ' ' || description || ' ' || coalesce(summary,'') || ' ' || coalesce((SELECT name FROM meme_collections WHERE id=meme_assets.collection_id),'')))>0) ORDER BY (SELECT sum((CASE WHEN position(w in lower(name))>0 THEN 8 ELSE 0 END)+(CASE WHEN EXISTS(SELECT 1 FROM jsonb_array_elements_text(tags) t WHERE position(w in lower(t))>0) THEN 8 ELSE 0 END)+(CASE WHEN position(w in lower(description))>0 THEN 2 ELSE 0 END)+(CASE WHEN position(w in lower(coalesce(summary,'')))>0 THEN 1 ELSE 0 END)+(CASE WHEN position(w in lower(coalesce((SELECT name FROM meme_collections WHERE id=meme_assets.collection_id),'')))>0 THEN 2 ELSE 0 END)) FROM unnest($1::text[]) w) DESC,(SELECT count(*) FROM unnest($1::text[]) w WHERE position(w in lower(name || ' ' || tags::text || ' ' || description || ' ' || coalesce(summary,'') || ' ' || coalesce((SELECT name FROM meme_collections WHERE id=meme_assets.collection_id),'')))>0) DESC,id LIMIT $2`,
         [words, limit],
       )
     ).rows;
