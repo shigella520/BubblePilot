@@ -250,7 +250,14 @@ paths:
   /api/v1/memes:
     get:
       operationId: getapiv1memes
-      description: 分页查询表情包；query、enabled、status、collection（all/unclassified/UUID）、offset、limit。素材返回 collectionId、collectionName。
+      parameters:
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [newest, oldest, most-used, least-used, recently-used]
+            default: newest
+      description: 分页查询表情包；query、enabled、status、collection（all/unclassified/UUID）、offset、limit。素材返回 collectionId、collectionName、usageCount（累计成功确认次数）、lastUsedAt（可空确认时间）。列表和详情均包含统计，升级前已清理投递无法补算。
       security:
         - sessionAuth: []
         - bearerAuth: []

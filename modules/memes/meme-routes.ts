@@ -7,7 +7,7 @@ import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ApplicationError } from "../../app/errors.js";
-import { memeEditSchema, memeLimits } from "./meme-types.js";
+import { memeEditSchema, memeLimits, memeSortSchema } from "./meme-types.js";
 import type { MemeService } from "./meme-service.js";
 export function registerMemeRoutes(
   app: FastifyInstance,
@@ -114,6 +114,7 @@ export function registerMemeRoutes(
         status: z
           .enum(["pending", "processing", "succeeded", "failed"])
           .optional(),
+        sort: memeSortSchema.default("newest"),
         offset: z.coerce.number().int().min(0).default(0),
         limit: z.coerce.number().int().min(1).max(100).default(24),
       })

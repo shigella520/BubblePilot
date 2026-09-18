@@ -3,6 +3,14 @@ import type {
   MemeFilter,
 } from "./meme-collection-types.js";
 import { z } from "zod";
+export const memeSortSchema = z.enum([
+  "newest",
+  "oldest",
+  "most-used",
+  "least-used",
+  "recently-used",
+]);
+export type MemeSort = z.infer<typeof memeSortSchema>;
 export const memeLimits = Object.freeze({
   fileBytes: 10 * 1024 * 1024,
   pixels: 20_000_000,
@@ -26,6 +34,8 @@ export const memeEditSchema = memeMetadataSchema.extend({
 });
 export type MemeMetadata = z.infer<typeof memeMetadataSchema>;
 export interface MemeAsset extends MemeMetadata {
+  usageCount: number;
+  lastUsedAt: string | null;
   collectionName?: string | null;
   summaryInputVersion?: number;
   id: string;
@@ -63,6 +73,7 @@ export interface MemeSummaryJob {
 export interface MemeRepository extends MemeCollectionRepository {
   list(
     input: MemeFilter & {
+      sort?: MemeSort;
       offset: number;
       limit: number;
     },

@@ -55,6 +55,7 @@ it("meme management needs login but no sensitive grant; production retry still n
     start: vi.fn(),
     stop: vi.fn(),
     repository: {
+      list: vi.fn().mockResolvedValue({ items: [], total: 0 }),
       listCollections: vi
         .fn()
         .mockResolvedValue({ items: [], total: 0, unclassified: 0 }),
@@ -119,6 +120,35 @@ it("meme management needs login but no sensitive grant; production retry still n
     });
     const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join("; ");
     const headers = { cookie, origin: "http://localhost" };
+    for (const sort of [
+      "newest",
+      "oldest",
+      "most-used",
+      "least-used",
+      "recently-used",
+    ]) {
+      expect(
+        (
+          await app.inject({
+            method: "GET",
+            url: "/api/v1/memes?sort=" + sort,
+            headers,
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(memes.repository.list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sort }),
+      );
+    }
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/v1/memes?sort=invalid",
+          headers,
+        })
+      ).statusCode,
+    ).toBe(400);
     const requests = [
       { method: "GET" as const, url: "/api/v1/meme-collections" },
       {

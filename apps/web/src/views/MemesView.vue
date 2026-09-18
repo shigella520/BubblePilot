@@ -43,6 +43,8 @@ interface Meme {
   tags: string[];
   summary: string | null;
   candidateSummary: string | null;
+  usageCount: number;
+  lastUsedAt: string | null;
   summaryStatus: string;
   summaryError: string | null;
   enabled: boolean;
@@ -91,7 +93,8 @@ const selected = ref<Map<string, number>>(new Map()),
   lastAction = ref<BatchAction | null>(null);
 const loadedFilters = ref("");
 const filtersPending = computed(
-  () => loadedFilters.value !== JSON.stringify(filters()),
+  () =>
+    loadedFilters.value !== JSON.stringify({ ...filters(), sort: sort.value }),
 );
 const currentCollection = computed(() =>
   collections.value.find((c) => c.id === collection.value),
@@ -109,9 +112,22 @@ const bulkFailures = computed(() =>
 const bulkSucceeded = computed(
   () => bulkResults.value.filter((r) => r.status === "succeeded").length,
 );
+const sortOptions = {
+  newest: "最新上传",
+  oldest: "最早上传",
+  "most-used": "使用最多",
+  "least-used": "使用最少",
+  "recently-used": "最近使用",
+};
+const sort = ref("newest");
+function readSort() {
+  const value = String(route.query.sort ?? "newest");
+  return Object.hasOwn(sortOptions, value) ? value : "newest";
+}
 let restoring = false;
 function restoreFilters() {
   restoring = true;
+  sort.value = readSort();
   collection.value =
     typeof route.query.collection === "string" ? route.query.collection : "all";
   query.value = String(route.query.query ?? "");
@@ -141,6 +157,7 @@ function syncUrl() {
     path: "/memes",
     query: {
       collection: collection.value,
+      sort: sort.value,
       ...(query.value ? { query: query.value } : {}),
       ...(enabled.value ? { enabled: enabled.value } : {}),
       ...(status.value ? { status: status.value } : {}),
@@ -149,7 +166,7 @@ function syncUrl() {
   });
 }
 watch(
-  [collection, query, enabled, status],
+  [collection, query, enabled, status, sort],
   () => {
     if (!restoring) {
       page.value = 0;
@@ -169,6 +186,7 @@ watch(
       page: Math.max(0, Number(route.query.page ?? 1) - 1),
     };
     if (
+      readSort() !== sort.value ||
       next.collection !== collection.value ||
       next.query !== query.value ||
       next.enabled !== enabled.value ||
@@ -288,13 +306,13 @@ function selectPage() {
 async function selectAll() {
   if (selecting.value || bulkBusy.value || filtersPending.value) return;
   selecting.value = true;
-  const scope = JSON.stringify(filters());
+  const scope = JSON.stringify({ ...filters(), sort: sort.value });
   try {
     const data = await apiRequest<{ items: SelectionItem[] }>(
       "/api/v1/memes/selection",
-      { method: "POST", body: scope },
+      { method: "POST", body: JSON.stringify(filters()) },
     );
-    if (scope === JSON.stringify(filters()))
+    if (scope === JSON.stringify({ ...filters(), sort: sort.value }))
       selected.value = new Map(
         data.items.map((i) => [i.id, i.expectedVersion]),
       );
@@ -420,7 +438,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 async function load(background = false) {
   if (!background) syncUrl();
   if (background && filtersPending.value) return;
-  const scope = JSON.stringify(filters());
+  const scope = JSON.stringify({ ...filters(), sort: sort.value });
   const seq = ++sequence;
   if (!background) loading.value = true;
   try {
@@ -429,6 +447,7 @@ async function load(background = false) {
       query: query.value,
       offset: String(page.value * 24),
       limit: "24",
+      sort: sort.value,
     });
     if (enabled.value) params.set("enabled", enabled.value);
     if (status.value) params.set("status", status.value);
@@ -437,7 +456,7 @@ async function load(background = false) {
     );
     if (
       seq === sequence &&
-      scope === JSON.stringify(filters()) &&
+      scope === JSON.stringify({ ...filters(), sort: sort.value }) &&
       (!background || selected.value.size === 0)
     ) {
       const lastPage = Math.max(0, Math.ceil(result.total / 24) - 1);
@@ -774,6 +793,15 @@ onUnmounted(() => {
             <option v-for="(label, key) in labels" :key="key" :value="key">
               {{ label }}
             </option></select
+          ><select
+            v-model="sort"
+            :disabled="bulkBusy"
+            aria-label="排序"
+            @change="load()"
+          >
+            <option v-for="(label, key) in sortOptions" :key="key" :value="key">
+              {{ label }}
+            </option></select
           ><button
             class="button secondary meme-query"
             :disabled="loading || bulkBusy"
@@ -786,6 +814,10 @@ onUnmounted(() => {
             />{{ loading ? "查询中" : "查询" }}
           </button>
         </form>
+        <p class="meme-summary-hint">
+          使用次数为 BlueBubbles
+          确认发送成功的累计次数，不代表已读；升级前已清理的投递无法补算。
+        </p>
         <p v-if="error" role="alert">{{ error }}</p>
 
         <p v-if="filtersPending && !loading">
@@ -956,6 +988,7 @@ onUnmounted(() => {
                 >{{ item.enabled ? "已启用" : "已停用" }} ·
                 {{ labels[item.summaryStatus] }}</small
               >
+              <small>已使用 {{ item.usageCount }} 次</small>
             </button>
           </article>
         </div>
@@ -1262,6 +1295,17 @@ onUnmounted(() => {
                 placeholder="例如：开心，兴奋，卖萌"
                 :disabled="busy"
             /></label>
+            <p v-if="editing">
+              已使用 {{ editing.usageCount }} 次 ·
+              {{
+                editing.usageCount === 0
+                  ? "尚未使用"
+                  : editing.lastUsedAt
+                    ? "最近使用：" +
+                      new Date(editing.lastUsedAt).toLocaleString()
+                    : "未记录使用时间"
+              }}
+            </p>
             <section v-if="editing" class="meme-summary-panel">
               <div class="meme-summary-heading">
                 <h3><Sparkles :size="17" aria-hidden="true" />AI 摘要</h3>

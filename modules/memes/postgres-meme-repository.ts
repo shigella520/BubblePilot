@@ -11,7 +11,14 @@ import type {
   MemeRepository,
   MemeSummaryJob,
 } from "./meme-types.js";
-const columns = `collection_id AS "collectionId",(SELECT name FROM meme_collections WHERE id=meme_assets.collection_id) AS "collectionName",summary_input_version AS "summaryInputVersion",id,name,description,tags,summary,summary_manual AS "summaryManual",candidate_summary AS "candidateSummary",summary_status AS "summaryStatus",summary_error AS "summaryError",enabled,mime_type AS "mimeType",size,width,height,hash,storage_key AS "storageKey",version,created_at::text AS "createdAt",updated_at::text AS "updatedAt",deleted_at::text AS "deletedAt"`;
+const orders = {
+  newest: "created_at DESC,id",
+  oldest: "created_at ASC,id",
+  "most-used": "usage_count DESC,created_at DESC,id",
+  "least-used": "usage_count ASC,created_at DESC,id",
+  "recently-used": "last_used_at DESC NULLS LAST,created_at DESC,id",
+} as const;
+const columns = `usage_count::float8 AS "usageCount",last_used_at::text AS "lastUsedAt",collection_id AS "collectionId",(SELECT name FROM meme_collections WHERE id=meme_assets.collection_id) AS "collectionName",summary_input_version AS "summaryInputVersion",id,name,description,tags,summary,summary_manual AS "summaryManual",candidate_summary AS "candidateSummary",summary_status AS "summaryStatus",summary_error AS "summaryError",enabled,mime_type AS "mimeType",size,width,height,hash,storage_key AS "storageKey",version,created_at::text AS "createdAt",updated_at::text AS "updatedAt",deleted_at::text AS "deletedAt"`;
 export class PostgresMemeRepository
   extends PostgresMemeCollections
   implements MemeRepository
@@ -32,7 +39,7 @@ export class PostgresMemeRepository
   async list(input: Parameters<MemeRepository["list"]>[0]) {
     const { values, where } = memeWhere(input);
     const items = await this.pool.query<MemeAsset>(
-      `SELECT ${columns} FROM meme_assets WHERE ${where} ORDER BY created_at DESC,id LIMIT $5 OFFSET $6`,
+      `SELECT ${columns} FROM meme_assets WHERE ${where} ORDER BY ${orders[input.sort ?? "newest"]} LIMIT $5 OFFSET $6`,
       [...values, input.limit, input.offset],
     );
     const total = await this.pool.query<{ total: string }>(

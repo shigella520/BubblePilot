@@ -233,6 +233,7 @@ describe.runIf(!!url)("meme persistence and independent delivery", () => {
       "unknown",
     );
 
+    expect((await repo.get(image.asset.id))?.usageCount).toBe(0);
     const countBefore = gateway.sendAttachment.mock.calls.length;
     await delivery.deliver(input, "fixture");
     expect(gateway.sendReply).toHaveBeenCalledTimes(1);
@@ -287,9 +288,24 @@ describe.runIf(!!url)("meme persistence and independent delivery", () => {
         (d) => d.id === resumable.memeId,
       )?.status,
     ).toBe("confirmed");
+    expect((await repo.get(image.asset.id))?.usageCount).toBe(1);
     const afterRecovery = gateway.sendAttachment.mock.calls.length;
     await delivery.recover();
     expect(gateway.sendAttachment).toHaveBeenCalledTimes(afterRecovery);
+    expect((await repo.get(image.asset.id))?.usageCount).toBe(1);
+    const late = await delivery.plan({ ...input, nodeId: "late-confirmation" });
+    gateway.sendAttachment.mockImplementationOnce(async () => {
+      await repo.pool.query(
+        "UPDATE outbound_deliveries SET send_lease_until=now()-interval '1 second' WHERE id=$1",
+        [late.memeId],
+      );
+      return { status: "confirmed", providerMessageId: "fixture-late" };
+    });
+    await delivery.deliver(
+      { ...input, nodeId: "late-confirmation" },
+      "fixture",
+    );
+    expect((await repo.get(image.asset.id))?.usageCount).toBe(1);
     await repo.pool.query("DELETE FROM meme_summary_jobs WHERE meme_id=$1", [
       image.asset.id,
     ]);
