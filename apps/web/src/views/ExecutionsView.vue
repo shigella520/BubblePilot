@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { memeToolLabel } from "../utils/meme-tool-diagnostics";
 import MemeDeliveries from "../components/MemeDeliveries.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
@@ -2049,7 +2050,11 @@ function contextSnapshotValue(
                 <Search :size="17" />
                 <div>
                   <strong>{{ item.toolName }} · {{ item.status }}</strong>
-                  <p>
+                  <p v-if="memeToolLabel(item.toolName, item.responseDetails)">
+                    {{ item.durationMs }} ms ·
+                    {{ memeToolLabel(item.toolName, item.responseDetails) }}
+                  </p>
+                  <p v-else>
                     {{ item.durationMs }} ms · 结果
                     {{ item.resultCount ?? "—" }} 条
                   </p>

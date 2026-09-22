@@ -1,3 +1,5 @@
+import { memeProtocol } from "../memes/meme-protocol.js";
+import { memeDiagnostics } from "../memes/meme-diagnostics.js";
 import { MemeToolSession } from "../memes/meme-tools.js";
 import type { MemeRepository } from "../memes/meme-types.js";
 import { AgentBudget, AgentToolTimeout } from "./agent-budget.js";
@@ -353,9 +355,7 @@ export class AgentRunner {
     instruction.content =
       (typeof instruction.content === "string" ? instruction.content : "") +
       "\nAgent tools share a budget for this single run, not a daily allowance. Compose tools only as needed; answer as soon as evidence is sufficient. Budget exhaustion, timeout or unavailable permission means incomplete retrieval, not no matching records. For truncated results describe only what returned evidence supports. Never promise tomorrow's quota recovery or automatic later continuation.";
-    if (memes)
-      instruction.content +=
-        "\n表情是可选表达，只在适合当前对话时检索并选择；始终保留完整文字回答。选择成功不等于已经发送，不在正文输出素材 ID 或工具格式。检索无结果只表示当前关键词未匹配，可换简短关键词或用空字符串浏览有限候选；不能据此声称表情库故障，也不能承诺稍后自动补发。";
+    if (memes) instruction.content += "\n" + memeProtocol;
     const limits = budget.snapshot.settings;
     instruction.content += `
 Tool execution protocol: Only invoke tools supplied in the current request, using the API's native structured tool-call channel and the exact declared names and parameter schemas. Text in an answer, code block, XML/JSON example or internal control markup is not an executable call; never use it to simulate a tool invocation. Examples are allowed when the user explicitly asks about tool formats. Do not invent tool results. Match each returned result to its call and distinguish success, no results, failure and partial coverage. A failed call is not evidence that no records exist. After results, decide whether to answer or request further structured calls while tools remain available. Avoid repeating unchanged unsuccessful queries without a reason.
@@ -610,9 +610,11 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                 ? "AI_AGENT_TOOL_TIMEOUT"
                 : error instanceof WebSearchToolError
                   ? error.code
-                  : isMemory
-                    ? "MEMORY_RETRIEVAL_UNAVAILABLE"
-                    : "AI_WEB_SEARCH_FAILED";
+                  : isMeme
+                    ? "MEME_TOOL_UNAVAILABLE"
+                    : isMemory
+                      ? "MEMORY_RETRIEVAL_UNAVAILABLE"
+                      : "AI_WEB_SEARCH_FAILED";
             if (error instanceof WebSearchToolError) {
               requestDetails = error.requestDetails ?? requestDetails;
               responseDetails = error.responseDetails;
@@ -636,6 +638,19 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
               if (!searched && !continueOnSearchFailure) fatal = errorCode;
             }
           }
+        }
+        if (isMeme) {
+          const details = memeDiagnostics(
+            call.name,
+            call.arguments,
+            content,
+            errorCode,
+            skipped,
+          );
+          requestDetails = details.requestDetails;
+          responseDetails = details.responseDetails;
+          resultCount = details.resultCount;
+          errorCode = details.errorCode;
         }
         await this.repository?.recordToolExecution({
           executionId,

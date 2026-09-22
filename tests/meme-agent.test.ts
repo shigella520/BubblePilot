@@ -1,3 +1,4 @@
+import type { AiRepository } from "../modules/ai/ai-repository.js";
 import { it, expect, vi } from "vitest";
 import { AgentRunner } from "../modules/ai/agent-runner.js";
 import type { AiRoutingService } from "../modules/ai/ai-routing-service.js";
@@ -124,5 +125,173 @@ it("registers meme tools without web/history, shares calls, commits selection on
         selectedMeme: { id: asset.id },
       });
     }
+  }
+});
+
+it("injects guidance only when enabled and records distinct accepted outcomes", async () => {
+  const { memeProtocol } = await import("../modules/memes/meme-protocol.js");
+  type RecordInput = Parameters<AiRepository["recordToolExecution"]>[0];
+  for (const enabled of [false, true]) {
+    const records: RecordInput[] = [];
+    let turn = 0;
+    const execute = vi.fn((req: AiRouteRequest): Promise<AiRouteResult> => {
+      expect(
+        req.messages.some(
+          (m) =>
+            typeof m.content === "string" && m.content.includes(memeProtocol),
+        ),
+      ).toBe(enabled);
+      if (!enabled) {
+        expect(req.tools?.some((t) => t.name === "search_memes") ?? false).toBe(
+          false,
+        );
+        return Promise.resolve(answer());
+      }
+      turn++;
+      if (turn === 1)
+        return Promise.resolve({
+          ...answer(),
+          toolCalls: [
+            {
+              id: "1",
+              name: "select_meme",
+              arguments: JSON.stringify({ id: asset.id }),
+            },
+            { id: "2", name: "search_memes", arguments: '{"query":""}' },
+            { id: "3", name: "search_memes", arguments: '{"query":""}' },
+            {
+              id: "4",
+              name: "select_meme",
+              arguments: JSON.stringify({ id: asset.id }),
+            },
+            { id: "5", name: "select_meme", arguments: '{"id":null}' },
+          ],
+        });
+      return Promise.resolve(answer());
+    });
+    const library = {
+      search: vi.fn().mockResolvedValue([asset]),
+      get: vi.fn().mockResolvedValue(asset),
+    } as unknown as MemeRepository;
+    const recorder = {
+      recordToolExecution: (r: RecordInput) => {
+        records.push(r);
+        return Promise.resolve();
+      },
+    } as unknown as AiRepository;
+    const result = await new AgentRunner(
+      { execute } as unknown as AiRoutingService,
+      undefined,
+      recorder,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      library,
+    ).run({ ...request, allowMemes: enabled });
+    if (enabled) {
+      expect(result.agentBudget?.toolCalls).toBe(5);
+      expect(result).toMatchObject({ selectedMeme: null });
+      expect(records.map((r) => r.responseDetails?.outcome)).toEqual([
+        "invalid-selection",
+        "ok",
+        "ok",
+        "selected",
+        "cleared",
+      ]);
+      expect(records.map((r) => r.resultCount)).toEqual([
+        null,
+        1,
+        1,
+        null,
+        null,
+      ]);
+      expect(records[0]?.status).toBe("failed");
+      expect(
+        JSON.stringify(
+          records.map((r) => [r.requestDetails, r.responseDetails]),
+        ),
+      ).not.toContain("retrievalId");
+    } else expect(records).toHaveLength(0);
+  }
+});
+
+it("records budget skips and isolates late selection from diagnostics and final result", async () => {
+  type RecordInput = Parameters<AiRepository["recordToolExecution"]>[0];
+  vi.useFakeTimers();
+  try {
+    const records: RecordInput[] = [];
+    let turn = 0;
+    let resolveGet: (value: MemeAsset) => void = () => {
+      throw new Error("not started");
+    };
+    const pending = new Promise<MemeAsset>((resolve) => {
+      resolveGet = resolve;
+    });
+    const execute = vi.fn((): Promise<AiRouteResult> =>
+      Promise.resolve(
+        ++turn === 1
+          ? {
+              ...answer(),
+              toolCalls: [
+                {
+                  id: "1",
+                  name: "search_memes",
+                  arguments: '{"query":"开心"}',
+                },
+                {
+                  id: "2",
+                  name: "select_meme",
+                  arguments: JSON.stringify({ id: asset.id }),
+                },
+                {
+                  id: "3",
+                  name: "search_memes",
+                  arguments: '{"query":"开心"}',
+                },
+              ],
+            }
+          : answer(),
+      ),
+    );
+    const recorder = {
+      recordToolExecution: (r: RecordInput) => {
+        records.push(r);
+        return Promise.resolve();
+      },
+    } as unknown as AiRepository;
+    const library = {
+      search: vi.fn().mockResolvedValue([asset]),
+      get: () => pending,
+    } as unknown as MemeRepository;
+    const run = new AgentRunner(
+      { execute } as unknown as AiRoutingService,
+      undefined,
+      recorder,
+      undefined,
+      {
+        maxToolCalls: 10,
+        maxToolOutputCharacters: 24000,
+        maxToolDurationMs: 5000,
+      },
+      undefined,
+      undefined,
+      library,
+    ).run(request);
+    await vi.advanceTimersByTimeAsync(5001);
+    const result = await run;
+    expect(records.map((r) => r.responseDetails?.outcome)).toEqual([
+      "ok",
+      "timeout",
+      "budget-exhausted",
+    ]);
+    expect(records[1]?.resultCount).toBeNull();
+    expect(result).toMatchObject({ selectedMeme: null });
+    const snapshot = JSON.stringify(records);
+    resolveGet(asset);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(JSON.stringify(records)).toBe(snapshot);
+  } finally {
+    vi.useRealTimers();
   }
 });
