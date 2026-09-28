@@ -175,7 +175,7 @@ const result = ref<SearchResult | null>(null);
 const source = ref("");
 const chat = reactive({
   enabled: false,
-  version: 0,
+  version: null as number | null,
   coverage: null as {
     total: number;
     indexed: number;
@@ -287,6 +287,7 @@ async function run(action: () => Promise<void>) {
 }
 async function refresh() {
   const token = epoch;
+  if (props.mode === "chat") chat.version = null;
   const value = await apiRequest<Settings>("/api/v1/ai/memory/settings");
   if (!alive || token !== epoch) return;
   settings.value = value;
@@ -347,7 +348,7 @@ async function probe() {
   notice.value = "连接与输出维度验证通过。";
 }
 async function authorize() {
-  if (!session.sensitiveActive) return;
+  if (!session.sensitiveActive || chat.version === null) return;
   const id = chatId.value;
   const enabled = !chat.enabled;
   await apiRequest(`/api/v1/chats/${id}/memory`, {
@@ -418,7 +419,7 @@ watch(chatId, () => {
   jobs.value = [];
   chat.coverage = null;
   chat.enabled = false;
-  chat.version = 0;
+  chat.version = null;
   epoch++;
   poller.invalidate();
   result.value = null;
@@ -608,7 +609,7 @@ onBeforeUnmount(() => {
         </p>
         <button
           class="button"
-          :disabled="busy || !session.sensitiveActive || !chat.version"
+          :disabled="busy || !session.sensitiveActive || chat.version === null"
           @click="run(authorize)"
         >
           {{ chat.enabled ? "停用检索" : "授权此聊天检索" }}
