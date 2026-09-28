@@ -358,8 +358,8 @@ export class AgentRunner {
     if (memes) instruction.content += "\n" + memeProtocol;
     const limits = budget.snapshot.settings;
     instruction.content += `
-Tool execution protocol: Only invoke tools supplied in the current request, using the API's native structured tool-call channel and the exact declared names and parameter schemas. Text in an answer, code block, XML/JSON example or internal control markup is not an executable call; never use it to simulate a tool invocation. Examples are allowed when the user explicitly asks about tool formats. Do not invent tool results. Match each returned result to its call and distinguish success, no results, failure and partial coverage. A failed call is not evidence that no records exist. After results, decide whether to answer or request further structured calls while tools remain available. Avoid repeating unchanged unsuccessful queries without a reason.
-This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutputCharacters} tool-result characters, and ${limits.maxToolDurationMs / 1000} seconds of cumulative tool execution including internal retries (excluding model generation). At most ${limits.maxToolCalls + 2} model rounds are available; the last two rounds are reserved for answering and possible citation correction, not additional tool interaction. Multiple calls in one round each count; failed, empty, invalid, repeated and cached calls also count. Internal network retries consume time but not another tool call. These are ceilings, not targets; stop when evidence is sufficient. If tools are no longer supplied, answer from available evidence and state relevant limitations; do not simulate further calls in text.`;
+Tool execution protocol: Only invoke tools supplied in the current request, using the API's native structured tool-call channel and the exact declared names and parameter schemas. Text in an answer, code block, XML/JSON example or internal control markup is not an executable call; never use it to simulate a tool invocation. Examples are allowed when the user explicitly asks about tool formats. Do not invent tool results. Match each returned result to its call and distinguish success, no results, failure and partial coverage. A failed call is not evidence that no records exist. After results, decide whether to answer or request further structured calls while the current quota status permits execution. Avoid repeating unchanged unsuccessful queries without a reason.
+This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutputCharacters} tool-result characters, and ${limits.maxToolDurationMs / 1000} seconds of cumulative tool execution including internal retries (excluding model generation). At most ${limits.maxToolCalls + 2} model rounds are available; the last two rounds are reserved for answering and possible citation correction, not additional tool interaction. Multiple calls in one round each count; failed, empty, invalid, repeated and cached calls also count. Internal network retries consume time but not another tool call. These are ceilings, not targets; stop when evidence is sufficient. Tool definitions remain available throughout this run. Follow the current agent_budget_status: when execution is unavailable, finish from existing evidence instead of requesting more tools. Any further calls receive a structured unavailable result and cannot extend the run. Never simulate calls in text. Do not mention internal quotas unless needed to explain incomplete retrieval.`;
     const messages: AiChatMessage[] = systemPolicyMessage(
       request.messages,
       instruction,
@@ -375,28 +375,34 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
     const startedAt = Date.now();
 
     for (let turn = 1; turn <= maxTurns; turn += 1) {
-      const mustFinalize =
-        finalAnswerOnly || budget.exhausted || turn >= maxTurns - 1;
+      const exhausted = budget.exhausted;
+      const finalizationReason = exhausted
+        ? budget.snapshot.reasons[0]!
+        : citationCorrection
+          ? "citation-correction"
+          : finalAnswerOnly || turn >= maxTurns - 1
+            ? "model-rounds"
+            : null;
+      const mustFinalize = finalizationReason !== null;
       const routeRequest: AiRouteRequest = {
         ...request,
-        messages,
+        // Replace the per-round status instead of accumulating stale quota messages.
+        // Keep the stable conversation prefix intact for provider caching.
+        messages: [
+          ...messages,
+          {
+            role: "system",
+            content: budget.progress(turn, maxTurns, finalizationReason),
+          },
+        ],
         agentTurn: turn,
+        tools: registry.definitions(),
+        toolChoice:
+          !mustFinalize && policy === "required" && !searched
+            ? "required"
+            : "auto",
         ...(preferredProviderId === undefined ? {} : { preferredProviderId }),
       };
-      if (mustFinalize) {
-        routeRequest.messages = systemPolicyMessage(messages, {
-          role: "system",
-          content:
-            "Tool use is closed for this round. Produce the final answer or requested citation correction using available evidence. Do not request or simulate any further tool calls. State relevant uncertainty; unavailable or incomplete retrieval does not mean no matching records.",
-        });
-        routeRequest.webSearch = "disabled";
-        delete routeRequest.tools;
-        delete routeRequest.toolChoice;
-      } else {
-        routeRequest.tools = registry.definitions();
-        routeRequest.toolChoice =
-          policy === "required" && !searched ? "required" : "auto";
-      }
       if (memory && !(await memory.validate())) {
         return {
           status: "failed",
@@ -497,17 +503,6 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
           durationMs: Math.max(0, Date.now() - startedAt),
         };
       }
-      if (mustFinalize) {
-        return {
-          status: "failed",
-          code: "AI_AGENT_TOOL_LIMIT_EXCEEDED",
-          summary:
-            "The provider requested another tool after tools were disabled for the final answer.",
-          retryable: false,
-          attemptCount: totalAttempts,
-        };
-      }
-
       messages.push({
         role: "assistant",
         content: result.text,
@@ -533,19 +528,22 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
             : null;
         let responseDetails: Readonly<Record<string, unknown>> | null = null;
         let fatal: string | null = null;
-        const skipped = budget.exhausted;
+        const skipped = budget.exhausted || mustFinalize;
         if (skipped) {
-          content = budget.control();
+          const reason = budget.snapshot.reasons[0] ?? finalizationReason!;
+          content = budget.control(reason);
           requestDetails = {
             ...requestDetails,
             skipped: true,
             reason: "tool_limit",
-            budgetReason: budget.snapshot.reasons[0],
+            budgetReason: reason,
           };
-          errorCode = "AI_AGENT_TOOL_LIMIT_REACHED";
+          errorCode = budget.exhausted
+            ? "AI_AGENT_TOOL_LIMIT_REACHED"
+            : "AI_AGENT_FINAL_ANSWER_REQUIRED";
           responseDetails = {
             outcome: "skipped",
-            reason: budget.snapshot.reasons[0],
+            reason,
             retainedResultCount: 0,
           };
         } else {

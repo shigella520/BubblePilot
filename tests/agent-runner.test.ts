@@ -116,6 +116,36 @@ async function setup(answer?: string) {
 }
 
 describe("AgentRunner", () => {
+  it("keeps application tools stable even when the provider also supports hosted search", async () => {
+    const { repository, client, routing, search, request } = await setup();
+    const provider = [...repository.providers.values()][0]!;
+    provider.capabilities = { functionCalling: true, hostedWebSearch: true };
+    await repository.updateProviderCapabilityProbe(provider.id, {
+      functionCalling: "verified",
+      hostedWebSearch: "verified",
+      checkedAt: new Date(0).toISOString(),
+    });
+    const result = await new AgentRunner(
+      routing,
+      search,
+      repository,
+      undefined,
+      {
+        maxToolCalls: 1,
+        maxToolOutputCharacters: 24000,
+        maxToolDurationMs: 60000,
+      },
+    ).run(request);
+    expect(result.status).toBe("succeeded");
+    expect(client.requests).toHaveLength(2);
+    expect(client.requests[0]?.tools?.map((t) => t.name)).toContain(
+      "web_search",
+    );
+    expect(client.requests[1]?.tools).toEqual(client.requests[0]?.tools);
+    expect(client.requests.every((r) => r.webSearch === undefined)).toBe(true);
+    expect(client.requests[1]?.toolChoice).toBe("auto");
+  });
+
   it("executes a required local search and continues the same provider", async () => {
     const { repository, client, routing, search, request } = await setup();
     const result = await new AgentRunner(routing, search, repository).run({
@@ -214,7 +244,9 @@ describe("AgentRunner", () => {
     expect(client.requests[1]?.tools?.map((tool) => tool.name)).toContain(
       "web_search",
     );
-    const failedToolMessage = client.requests[1]?.messages.at(-1);
+    const failedToolMessage = client.requests[1]?.messages
+      .filter((m) => m.role === "tool")
+      .at(-1);
     expect(failedToolMessage?.role).toBe("tool");
     expect(failedToolMessage?.content).toContain('"status":"failed"');
     expect(repository.toolExecutions).toMatchObject([
@@ -560,8 +592,10 @@ describe("AgentRunner", () => {
     expect(searchCalls).toBe(3);
     expect(scriptedClient.requests).toHaveLength(3);
     expect(scriptedClient.requests[2]?.webSearch).toBeUndefined();
-    expect(scriptedClient.requests[2]?.tools).toBeUndefined();
-    expect(scriptedClient.requests[2]?.toolChoice).toBeUndefined();
+    expect(scriptedClient.requests[2]?.tools).toEqual(
+      scriptedClient.requests[0]?.tools,
+    );
+    expect(scriptedClient.requests[2]?.toolChoice).toBe("auto");
     expect(repository.toolExecutions).toMatchObject([
       { status: "succeeded", resultCount: 1 },
       { status: "succeeded", resultCount: 1 },

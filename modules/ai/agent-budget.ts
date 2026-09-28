@@ -44,14 +44,45 @@ export class AgentBudget {
       this.exhaust("tool-duration");
     return s.finalizingDueToBudget;
   }
-  control() {
+  progress(turn: number, maxTurns: number, finalizationReason: string | null) {
+    const s = this.snapshot;
+    return `<agent_budget_status>${JSON.stringify({
+      scope: "current-agent-run",
+      modelRound: turn,
+      maxModelRounds: maxTurns,
+      modelRoundsAfterThis: maxTurns - turn,
+      toolCalls: {
+        used: s.toolCalls,
+        limit: s.settings.maxToolCalls,
+        remaining: Math.max(0, s.settings.maxToolCalls - s.toolCalls),
+      },
+      toolOutputCharacters: {
+        used: s.toolOutputCharacters,
+        limit: s.settings.maxToolOutputCharacters,
+        remaining: this.remainingCharacters,
+      },
+      toolDurationMs: {
+        used: s.toolDurationMs,
+        limit: s.settings.maxToolDurationMs,
+        remaining: Math.max(0, s.settings.maxToolDurationMs - s.toolDurationMs),
+      },
+      toolExecutionAvailable: finalizationReason === null,
+      finalizationReason,
+      guidance: finalizationReason
+        ? "Finish the answer in this round using available evidence. Tool schemas remain visible for protocol stability, but further calls will not execute. Remaining numeric capacity does not override this state (whole results may not fit). Do not simulate calls in text. Incomplete retrieval does not mean no records."
+        : "Use tools only when needed. Choose focused queries and modest result counts; leave room for follow-up retrieval. Each call in a batch shares the remaining budget. Answer immediately when evidence is sufficient; do not spend quota just because it remains.",
+    })}</agent_budget_status>`;
+  }
+  control(reason: string = this.snapshot.reasons[0] ?? "tool-output") {
     return JSON.stringify({
       status: "unavailable",
-      errorCode: "AI_AGENT_TOOL_LIMIT_REACHED",
-      reason: this.snapshot.reasons[0] ?? "tool-output",
+      errorCode: this.snapshot.finalizingDueToBudget
+        ? "AI_AGENT_TOOL_LIMIT_REACHED"
+        : "AI_AGENT_FINAL_ANSWER_REQUIRED",
+      reason,
       budgetScope: "current-agent-run",
       guidance:
-        "This run's budget is exhausted. Answer from available evidence, disclose incompleteness. This is not a daily quota; do not promise automatic continuation. Unavailable does not mean no matching records.",
+        "This run is finalizing; this call was not executed. Answer now from available evidence, disclose incompleteness. This is not a daily quota; do not promise automatic continuation. Unavailable does not mean no matching records.",
     });
   }
   async execute<T>(
