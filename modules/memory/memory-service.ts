@@ -1,3 +1,6 @@
+import type { HistoricalImageCandidate } from "../ai/chat-image-session.js";
+import { isImageAttachment } from "../ai/image-reference.js";
+import { sha256 } from "../../app/canonical-json.js";
 import { executionPolicy } from "../ai/execution-policy.js";
 import { authorLabel } from "../identity/bot-identity.js";
 import { z } from "zod";
@@ -305,6 +308,7 @@ export class MemorySession {
     string,
     { fingerprint: string; position: ChatPosition }
   >();
+  imagesEnabled = false;
   private operationContext?: AgentToolContext;
   private elapsed = 0;
   constructor(
@@ -370,6 +374,23 @@ export class MemorySession {
             `${m.sentAt} sender_id=${m.senderId} author=${m.author ? authorLabel(m.author) : "unknown"}\n${m.text}`,
         )
         .join("\n"),
+      ...(this.imagesEnabled
+        ? {
+            images: messages.flatMap((m) =>
+              (m.attachments ?? []).flatMap((a, i) =>
+                isImageAttachment(a)
+                  ? [
+                      {
+                        image_ref: `I${sha256(this.id + m.id + ":" + i).slice(-24)}`,
+                        messageId: m.id,
+                        attachmentIndex: i,
+                      },
+                    ]
+                  : [],
+              ),
+            ),
+          }
+        : {}),
       messageIds: messages.map((m) => m.id),
       dates: messages.map((m) => m.sentAt),
       senderIds: messages.map((m) => m.senderId),
@@ -767,6 +788,7 @@ export class MemorySession {
     }
     // Each operation owns a staging map. Timed-out work cannot modify the live session.
     const staged = new MemorySession(this.service, this.scope, this.id);
+    staged.imagesEnabled = this.imagesEnabled;
     staged.evidence = new Map(this.evidence);
     staged.cursors = new Map(this.cursors);
     staged.operationContext = context;
@@ -886,6 +908,25 @@ export class MemorySession {
         if (current?.hash !== m.hash) return false;
       }
     return true;
+  }
+  imageCandidates(): HistoricalImageCandidate[] {
+    return [...this.evidence.values()].flatMap((entry) =>
+      (entry.item.images ?? []).flatMap((image) => {
+        const message = entry.messages.find((m) => m.id === image.messageId);
+        return message?.providerMessageId
+          ? [
+              {
+                image_ref: image.image_ref,
+                providerMessageId: message.providerMessageId,
+                attachmentIndex: image.attachmentIndex,
+                attachmentId:
+                  message.attachments?.[image.attachmentIndex]
+                    ?.providerAttachmentId ?? "",
+              },
+            ]
+          : [];
+      }),
+    );
   }
   references(): string[] {
     return [...this.evidence.keys()];

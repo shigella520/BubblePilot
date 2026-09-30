@@ -1,3 +1,4 @@
+import { ChatImageSourceRepository } from "../modules/ai/chat-image-source.js";
 import { MemeDeliveryService } from "../modules/memes/meme-delivery-service.js";
 import { PostgresMemeRepository } from "../modules/memes/postgres-meme-repository.js";
 import { LocalMemeFileStore } from "../modules/memes/file-store.js";
@@ -227,6 +228,8 @@ const nativeImageInput = new NativeImageInputService(
   imageInputSettings,
   blueBubblesSettings,
   aiRepository,
+  undefined,
+  new ChatImageSourceRepository(memoryService.repository.pool),
 );
 const imageSummaryWorker = new ImageSummaryWorker(
   imageSummaryRepository,

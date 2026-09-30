@@ -193,6 +193,47 @@ describe("Web admin authentication", () => {
     );
   });
 
+  it("protects execution image previews and source text with login and step-up", async () => {
+    const base =
+      "/api/v1/executions/11111111-1111-4111-8111-111111111111/image-inputs/22222222-2222-4222-8222-222222222222";
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    for (const suffix of ["preview", "source"]) {
+      expect(
+        (await application.inject({ method: "GET", url: `${base}/${suffix}` }))
+          .statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await application.inject({
+            method: "GET",
+            url: `${base}/${suffix}`,
+            headers: { cookie },
+          })
+        ).statusCode,
+      ).toBe(403);
+    }
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/sensitive",
+      headers: { cookie },
+      payload: { password: sensitivePassword },
+    });
+    expect(
+      (
+        await application.inject({
+          method: "GET",
+          url: `${base}/preview`,
+          headers: { cookie },
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+
   it("audits Agent settings updates without requiring a sensitive-operation unlock", async () => {
     const login = await application.inject({
       method: "POST",

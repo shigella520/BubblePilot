@@ -138,3 +138,7 @@ correlationId
 表情发送使用 `POST /api/v1/message/attachment` multipart：chatGuid、method=apple-script、稳定tempGuid、name、attachment原文件。正文仍通过文本接口先发送；不调用 attachment/upload，不传 selectedMessageGuid、partIndex、subject、effect。表情能力不修改实例发送配置，不依赖 Private API，不支持原生引用组合。
 
 附件HTTP200还需可解析的消息GUID及无非零错误码，响应缺失、网络超时和服务端5xx按结果未知处理，不能盲目重试。429可单独重试图片。一次HTTP成功不保证所有客户端动画效果；GIF动画须在接收端独立验收。
+
+### Agent 看图读取
+
+`view_chat_image` 复用附件下载服务，以 `original=false` 获取网关的兼容图片版本；“查看图片”不承诺原始分辨率或原文件。只接收运行内已授权附件引用，不开放任意 URL。下载超时受图片设置和 Agent 剩余工具时间双重限制，源失效或取消后的迟到响应不交给模型。网关成功返回图片与模型正确理解图片是不同的验收项目。

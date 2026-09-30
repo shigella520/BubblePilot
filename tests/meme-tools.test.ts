@@ -53,7 +53,9 @@ describe("meme tool scope", () => {
       .get("search_memes")!
       .execute('{"query":"  ","limit":2}', f.context);
     expect(f.repo.search).toHaveBeenCalledWith("", 2);
-    expect(JSON.parse(output)).toMatchObject({
+    expect(
+      JSON.parse(typeof output === "string" ? output : output.text),
+    ).toMatchObject({
       status: "ok",
       results: [{ id: asset.id, collectionName: "虚构笑脸系列" }],
     });
@@ -67,7 +69,9 @@ describe("meme tool scope", () => {
     const output = await f.registry
       .get("search_memes")!
       .execute('{"query":"开心"}', { ...f.context, maxOutputCharacters: 70 });
-    expect(JSON.parse(output)).toMatchObject({ status: "unavailable" });
+    expect(
+      JSON.parse(typeof output === "string" ? output : output.text),
+    ).toMatchObject({ status: "unavailable" });
     expect(
       await f.registry
         .get("select_meme")!

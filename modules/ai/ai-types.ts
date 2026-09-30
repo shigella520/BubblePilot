@@ -1,3 +1,5 @@
+import type { ChatImageSession } from "./chat-image-session.js";
+import type { ChatImageScope } from "./chat-image-source.js";
 import type { SelectedMeme } from "../memes/meme-types.js";
 import type { AgentBudgetSnapshot } from "./agent-settings-types.js";
 import { z } from "zod";
@@ -343,7 +345,29 @@ export interface AiTextContentPart {
   text: string;
 }
 
+export interface ImageInputDiagnostic {
+  version: 1;
+  imageRef: string;
+  messageId: string;
+  providerMessageId: string;
+  attachmentIndex: number;
+  scope: ChatImageScope;
+  historical: boolean;
+  trigger: "automatic" | "tool";
+  toolCallId: string | null;
+  round: number;
+  contentHash: string;
+  width: number | null;
+  height: number | null;
+  processingVersion: "bluebubbles-compatible-original-false";
+}
+export interface ImageRequestManifest {
+  version: 1;
+  dispatched: boolean;
+  images: { imageInputId: string; contentHash: string }[];
+}
 export interface AiImageContentPart {
+  imageInput?: { imageInputId: string; contentHash: string };
   type: "image";
   dataUrl: string;
   detail: "low" | "high" | "auto";
@@ -449,6 +473,7 @@ export interface AiRequestTrace {
 }
 
 export interface AiCallDiagnostics {
+  imageInputs?: ImageRequestManifest | null;
   clientRequestId: string | null;
   providerRequestId: string | null;
   httpStatus: number | null;
@@ -616,6 +641,7 @@ export interface AiRouteFailure {
 export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 
 export interface AiRouteRequest {
+  imageSession?: ChatImageSession | undefined;
   allowMemes?: boolean;
   executionId: string | null;
   nodeId: string;
@@ -661,6 +687,8 @@ export interface AiToolExecutionView extends AiToolExecutionRecordInput {
 }
 
 export interface AiImageInputRecordInput {
+  id?: string;
+  diagnostics?: ImageInputDiagnostic | null;
   executionId: string;
   nodeId: string;
   source: "attachment" | "link-preview";

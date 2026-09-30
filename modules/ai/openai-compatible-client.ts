@@ -887,6 +887,17 @@ export class OpenAiCompatibleClient implements AiClient {
       requestBody,
       requestTrace,
     );
+    initialDiagnostics.imageInputs = {
+      version: 1,
+      dispatched: false,
+      images: request.messages.flatMap((m) =>
+        typeof m.content === "string"
+          ? []
+          : m.content.flatMap((p) =>
+              p.type === "image" && p.imageInput ? [p.imageInput] : [],
+            ),
+      ),
+    };
     const secret = resolveProviderSecret(provider, this.secrets);
     if (!isProviderSecretConfigured(provider, this.secrets)) {
       return failure({
@@ -914,6 +925,7 @@ export class OpenAiCompatibleClient implements AiClient {
       provider.requestTimeoutMs,
     );
     try {
+      initialDiagnostics.imageInputs.dispatched = true;
       const response = await this.fetchImplementation(endpoint, {
         method: "POST",
         headers: {

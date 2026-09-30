@@ -3366,6 +3366,147 @@ export function buildApplication(
     );
 
     application.get(
+      "/api/v1/executions/:executionId/image-inputs/:imageInputId/source",
+      {
+        preHandler: requireSensitive(
+          "message.content.view",
+          "workflow-execution",
+        ),
+      },
+      async (request, reply) => {
+        reply.header("Cache-Control", "no-store");
+        const parameters = z
+          .object({
+            executionId: z.string().uuid(),
+            imageInputId: z.string().uuid(),
+          })
+          .parse(request.params);
+        const execution = await workflowRepository.getExecution(
+          parameters.executionId,
+        );
+        const image = execution
+          ? (
+              await options.ai?.repository.listImageInputs(
+                parameters.executionId,
+              )
+            )?.find((item) => item.id === parameters.imageInputId)
+          : undefined;
+        const diagnostic = image?.diagnostics;
+        const source =
+          diagnostic?.version === 1
+            ? await options.imageSummary?.imageInput.sources?.resolve(
+                diagnostic.scope,
+                diagnostic.providerMessageId,
+                diagnostic.attachmentIndex,
+                diagnostic.historical,
+              )
+            : null;
+        const archived =
+          source &&
+          source.messageId === diagnostic?.messageId &&
+          sha256(source.attachment.providerAttachmentId) === image?.sourceHash
+            ? await repository.findMessage(source.messageId)
+            : null;
+        if (!archived || archived.contentRedactedAt !== null)
+          throw new ApplicationError(
+            "EXECUTION_IMAGE_SOURCE_UNAVAILABLE",
+            "The image source is no longer available.",
+            404,
+          );
+        const current = diagnostic
+          ? await options.imageSummary?.imageInput.sources?.resolve(
+              diagnostic.scope,
+              diagnostic.providerMessageId,
+              diagnostic.attachmentIndex,
+              diagnostic.historical,
+            )
+          : null;
+        if (
+          !current ||
+          current.messageId !== archived.id ||
+          sha256(current.attachment.providerAttachmentId) !== image?.sourceHash
+        )
+          throw new ApplicationError(
+            "EXECUTION_IMAGE_SOURCE_UNAVAILABLE",
+            "The source is no longer available.",
+            404,
+          );
+        await requireSensitive(
+          "message.content.view",
+          "workflow-execution",
+        )(request);
+        return {
+          data: {
+            messageId: archived.id,
+            sentAt: archived.sentAt,
+            senderId: archived.senderId,
+            body: archived.body,
+          },
+        };
+      },
+    );
+
+    application.get(
+      "/api/v1/executions/:executionId/image-inputs/:imageInputId/preview",
+      {
+        preHandler: requireSensitive(
+          "execution.ai-request.view",
+          "workflow-execution",
+        ),
+      },
+      async (request, reply) => {
+        reply
+          .header("Cache-Control", "no-store")
+          .header("X-Content-Type-Options", "nosniff");
+        const parameters = z
+          .object({
+            executionId: z.string().uuid(),
+            imageInputId: z.string().uuid(),
+          })
+          .parse(request.params);
+        const execution = await workflowRepository.getExecution(
+          parameters.executionId,
+        );
+        const image = execution
+          ? (
+              await options.ai?.repository.listImageInputs(
+                parameters.executionId,
+              )
+            )?.find((item) => item.id === parameters.imageInputId)
+          : undefined;
+        const loaded =
+          image?.diagnostics && image.status === "succeeded"
+            ? await options.imageSummary?.imageInput.preview(
+                image.diagnostics,
+                image.sourceHash,
+              )
+            : null;
+        if (!loaded)
+          throw new ApplicationError(
+            "EXECUTION_IMAGE_UNAVAILABLE",
+            "The recorded image cannot be restored: source access, content or hash is unavailable.",
+            404,
+          );
+        // Recheck the sensitive session after potentially slow gateway IO.
+        await requireSensitive(
+          "execution.ai-request.view",
+          "workflow-execution",
+        )(request);
+        if (reply.sent) return;
+        const match = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.+)$/u.exec(
+          loaded.part.dataUrl,
+        );
+        if (!match)
+          throw new ApplicationError(
+            "EXECUTION_IMAGE_UNAVAILABLE",
+            "Image data is unavailable.",
+            404,
+          );
+        return reply.type(match[1]!).send(Buffer.from(match[2]!, "base64"));
+      },
+    );
+
+    application.get(
       "/api/v1/executions/:executionId/ai-attempts/:attemptId/raw-request",
       {
         preHandler: requireSensitive(

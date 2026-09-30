@@ -141,6 +141,7 @@ interface AttemptRow {
   cached_prompt_tokens: number | null;
   cache_write_prompt_tokens: number | null;
   cache_miss_prompt_tokens: number | null;
+  image_inputs: AiCallDiagnostics["imageInputs"] | null;
   request_trace: AiCallDiagnostics["requestTrace"] | null;
   created_at: Date;
 }
@@ -329,6 +330,7 @@ function attemptView(row: AttemptRow): AiProviderAttemptView {
             cachedPromptTokens: row.cached_prompt_tokens,
             cacheWritePromptTokens: row.cache_write_prompt_tokens,
             cacheMissPromptTokens: row.cache_miss_prompt_tokens,
+            imageInputs: row.image_inputs ?? null,
             requestTrace: row.request_trace ?? null,
           },
     createdAt: row.created_at.toISOString(),
@@ -1179,12 +1181,12 @@ export class PostgresAiRepository implements AiRepository {
          prompt_tokens, completion_tokens, reasoning_tokens, total_tokens,
          cached_prompt_tokens, cache_write_prompt_tokens,
          cache_miss_prompt_tokens, request_trace, purpose,
-         background_operation_id, route_trace_id, route_phase
+         background_operation_id, route_trace_id, route_phase, image_inputs
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
          $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
          $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34,
-         $35, $36, $37, $38, $39, $40, $41, $42, $43
+         $35, $36, $37, $38, $39, $40, $41, $42, $43, $44
        )`,
       [
         randomUUID(),
@@ -1232,6 +1234,9 @@ export class PostgresAiRepository implements AiRepository {
         input.backgroundOperationId,
         input.routeTraceId ?? null,
         input.routePhase ?? "standard",
+        input.diagnostics?.imageInputs
+          ? JSON.stringify(input.diagnostics.imageInputs)
+          : null,
       ],
     );
   }
@@ -1544,10 +1549,10 @@ export class PostgresAiRepository implements AiRepository {
       `INSERT INTO ai_image_inputs (
          id, execution_id, node_id, source, source_hash, host_name, status,
          declared_mime_type, actual_mime_type, bytes, duration_ms, detail,
-         error_code
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+         error_code, diagnostics
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [
-        randomUUID(),
+        input.id ?? randomUUID(),
         input.executionId,
         input.nodeId,
         input.source,
@@ -1560,6 +1565,7 @@ export class PostgresAiRepository implements AiRepository {
         input.durationMs,
         input.detail,
         input.errorCode,
+        input.diagnostics ? JSON.stringify(input.diagnostics) : null,
       ],
     );
   }
@@ -1582,6 +1588,7 @@ export class PostgresAiRepository implements AiRepository {
       duration_ms: number;
       detail: "low" | "high" | "auto";
       error_code: string | null;
+      diagnostics: AiImageInputRecordInput["diagnostics"];
       created_at: Date;
     }>(
       `SELECT * FROM ai_image_inputs
@@ -1591,6 +1598,7 @@ export class PostgresAiRepository implements AiRepository {
     );
     return result.rows.map((row) => ({
       id: row.id,
+      diagnostics: row.diagnostics ?? null,
       executionId: row.execution_id,
       nodeId: row.node_id,
       source: row.source,

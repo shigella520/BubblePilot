@@ -2,6 +2,12 @@
 import { computed } from "vue";
 const props = defineProps<{ summary: unknown }>();
 interface Budget {
+  images?: {
+    count: { used: number; limit: number };
+    bytes: { used: number; limit: number };
+    automatic: number;
+    tool: number;
+  };
   settings: {
     version: number;
     maxToolCalls: number;
@@ -65,6 +71,12 @@ const reasonLabels: Record<string, string> = {
         {{ budget.settings.maxToolOutputCharacters }} 字符 · 工具耗时
         {{ (budget.toolDurationMs / 1000).toFixed(2) }} /
         {{ budget.settings.maxToolDurationMs / 1000 }} 秒
+      </p>
+      <p v-if="budget.images">
+        图片 {{ budget.images.count.used }} / {{ budget.images.count.limit }} 张
+        · {{ budget.images.bytes.used }} /
+        {{ budget.images.bytes.limit }} B（自动
+        {{ budget.images.automatic }}，工具追加 {{ budget.images.tool }}）
       </p>
       <p v-if="budget.citationHandling">
         引用处理：异常 {{ budget.citationHandling.invalidResponses }} 次 · 修正

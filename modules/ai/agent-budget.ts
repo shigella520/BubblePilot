@@ -47,6 +47,7 @@ export class AgentBudget {
   progress(turn: number, maxTurns: number, finalizationReason: string | null) {
     const s = this.snapshot;
     return `<agent_budget_status>${JSON.stringify({
+      images: s.images,
       scope: "current-agent-run",
       modelRound: turn,
       maxModelRounds: maxTurns,

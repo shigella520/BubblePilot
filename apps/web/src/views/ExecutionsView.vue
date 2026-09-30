@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ExecutionImageResult from "../components/ExecutionImageResult.vue";
 import { memeToolLabel } from "../utils/meme-tool-diagnostics";
 import MemeDeliveries from "../components/MemeDeliveries.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
@@ -37,6 +38,34 @@ import { useCursorPager } from "../composables/useCursorPager";
 import { apiPageRequest, apiRequest, errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
 
+function scrollToImage(id: string) {
+  document
+    .getElementById(`image-input-${id}`)
+    ?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function imageToolLabel(details: Record<string, unknown> | null) {
+  if (!details?.status) return "未记录详细结果";
+  if (details.status === "loaded") return "图片已加载（不代表模型已识别）";
+  if (details.status === "already-loaded") return "复用已加载图片";
+  const reasons: Record<string, string> = {
+    "image-budget": "图片额度不足",
+    "tool-output": "工具内容预算不足",
+    "tool-calls": "工具次数用尽",
+    "tool-duration": "工具时间用尽",
+    "image-capability-unavailable": "当前路由无可用看图能力",
+    "source-unavailable": "来源权限失效或已清理",
+    "reference-unavailable": "图片引用不可用",
+    "invalid-arguments": "参数错误",
+    "attachment-missing": "附件已缺失",
+    "unsupported-image": "不支持的图片格式",
+    "image-too-large": "图片超过大小限制",
+    "download-timeout": "图片下载超时",
+    "download-failed": "图片下载失败",
+  };
+  const reason =
+    typeof details.reason === "string" ? details.reason : "unavailable";
+  return `图片未加载：${reasons[reason] ?? reason}`;
+}
 interface Execution {
   id: string;
   providerChatId: string | null;
@@ -143,6 +172,11 @@ interface ExecutionDetail extends Execution {
     rawResponse?: { status: "available" | "unavailable" };
     rawRequest: { status: "available" | "unavailable" };
     diagnostics: {
+      imageInputs?: {
+        version: 1;
+        dispatched: boolean;
+        images: { imageInputId: string; contentHash: string }[];
+      } | null;
       clientRequestId: string | null;
       providerRequestId: string | null;
       httpStatus: number | null;
@@ -211,6 +245,16 @@ interface ExecutionDetail extends Execution {
     createdAt: string;
   }>;
   aiImageInputs: Array<{
+    diagnostics?: {
+      imageRef: string;
+      messageId: string;
+      trigger: string;
+      toolCallId: string | null;
+      round: number;
+      width: number | null;
+      height: number | null;
+      contentHash: string;
+    } | null;
     id: string;
     nodeId: string;
     source: "attachment" | "link-preview";
@@ -1673,6 +1717,22 @@ function contextSnapshotValue(
               >
                 <Route :size="17" />
                 <div>
+                  <p v-if="item.diagnostics?.imageInputs">
+                    {{
+                      item.diagnostics.imageInputs.dispatched
+                        ? "已发起请求"
+                        : "未发起请求"
+                    }}
+                    · 图片 {{ item.diagnostics.imageInputs.images.length }} 张
+                    <a
+                      v-for="image in item.diagnostics.imageInputs.images"
+                      :key="image.imageInputId"
+                      :href="`#image-input-${image.imageInputId}`"
+                      @click.prevent="scrollToImage(image.imageInputId)"
+                      >查看关联图片
+                    </a>
+                  </p>
+                  <p v-else>未记录图片关联信息</p>
                   <div class="provider-attempt-heading">
                     <strong>{{ item.providerName }} · {{ item.model }}</strong>
                     <span class="provider-attempt-purpose">{{
@@ -2005,12 +2065,19 @@ function contextSnapshotValue(
               <h3>AI 图片输入</h3>
               <article
                 v-for="item in detail.aiImageInputs"
+                :id="`image-input-${item.id}`"
                 :key="item.id"
                 class="trace-item"
               >
                 <Image :size="17" />
                 <div>
                   <strong>{{ item.source }} · {{ item.status }}</strong>
+                  <ExecutionImageResult
+                    :execution-id="detail.id"
+                    :image-id="item.id"
+                    :diagnostic="item.diagnostics"
+                    :attempts="detail.aiProviderAttempts"
+                  />
                   <p>
                     {{ item.durationMs }} ms · {{ item.bytes ?? "—" }} B ·
                     {{
@@ -2050,6 +2117,13 @@ function contextSnapshotValue(
                 <Search :size="17" />
                 <div>
                   <strong>{{ item.toolName }} · {{ item.status }}</strong>
+                  <p v-if="item.toolName === 'view_chat_image'">
+                    {{ imageToolLabel(item.responseDetails) }} ·
+                    {{ item.durationMs }} ms
+                    <span v-if="item.responseDetails?.image_ref">
+                      · {{ item.responseDetails.image_ref }}</span
+                    >
+                  </p>
                   <p v-if="memeToolLabel(item.toolName, item.responseDetails)">
                     {{ item.durationMs }} ms ·
                     {{ memeToolLabel(item.toolName, item.responseDetails) }}

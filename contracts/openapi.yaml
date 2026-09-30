@@ -6,6 +6,53 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/executions/{executionId}/image-inputs/{imageInputId}/source:
+    get:
+      operationId: viewExecutionImageSource
+      description: 管理员且敏感解锁后读取图片来源原文；复核来源范围与清理状态，响应 no-store。
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+        - name: imageInputId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: 当前可读取的来源消息 ID、时间、发送者及正文。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/executions/{executionId}/image-inputs/{imageInputId}/preview:
+    get:
+      operationId: previewExecutionImage
+      description: 管理员且敏感解锁后查看当时图片；重新校验来源授权、清理状态和内容哈希。no-store，不保存永久图片副本。
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+        - name: imageInputId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: 经校验的兼容图片版本
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/gif: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/meme-collections:
     get:
       operationId: listMemeCollections

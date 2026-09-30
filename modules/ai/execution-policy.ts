@@ -7,7 +7,11 @@ export const executionPolicy = {
     maxTokens: 8_192,
   },
   legacy: { maxCharacters: 4_000, maxTokens: 1_024 },
-  image: { targetCharacters: 500, maxTokens: 2_048 },
+  image: {
+    targetCharacters: 500,
+    maxTokens: 2_048,
+    maxInputPixels: 40_000_000,
+  },
   search: { limit: 8, maxLimit: 20, candidates: 40 },
   excerpt: { surrounding: 8, maxSurrounding: 20 },
 } as const;

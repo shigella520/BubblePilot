@@ -1,6 +1,7 @@
 import type { MessageAuthor } from "../identity/bot-identity.js";
 import { contentHash, type MemoryMessage } from "./chunking.js";
 export interface MessageRow {
+  provider_message_id?: string;
   id: string;
   message_index: string;
   sent_at: Date | string;
@@ -24,6 +25,10 @@ export function memoryMessage(row: MessageRow): MemoryMessage {
     .join("\n");
   return {
     id: row.id,
+    ...(row.provider_message_id
+      ? { providerMessageId: row.provider_message_id }
+      : {}),
+    attachments: Array.isArray(row.attachments) ? row.attachments : [],
     index: Number(row.message_index),
     sentAt: sentAt.toISOString(),
     senderId: row.sender_id ?? (row.is_from_me ? "Bot" : "unknown"),
@@ -48,5 +53,5 @@ export function memoryMessage(row: MessageRow): MemoryMessage {
     ),
   };
 }
-export const messageColumns = `m.id,m.message_index,m.sent_at,m.sender_id,m.is_from_me,bot_message_author(m.id) AS author,m.body,m.attachments,m.link_previews,
+export const messageColumns = `m.id,m.provider_message_id,m.message_index,m.sent_at,m.sender_id,m.is_from_me,bot_message_author(m.id) AS author,m.body,m.attachments,m.link_previews,
  (SELECT string_agg(s.summary,E'\n' ORDER BY s.id) FROM message_image_summaries s WHERE s.message_id=m.id AND s.status='succeeded') images`;
