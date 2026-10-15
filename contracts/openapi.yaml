@@ -1910,7 +1910,7 @@ paths:
   /api/v1/workflows/import:
     post:
       operationId: importWorkflowManifest
-      description: 二次验证后创建新工作流或不可变候选版本；不会自动发布或启用。
+      description: 管理员登录后创建新工作流或不可变候选版本，无需敏感操作二次验证，保留审计；不会自动发布或启用。
       security:
         - bearerAuth: []
         - sessionAuth: []

@@ -16,6 +16,8 @@ import BotIdentityPanel from "../components/workflow/BotIdentityPanel.vue";
 import WorkflowEditor from "../components/workflow/WorkflowEditor.vue";
 import { apiAllPages, apiRequest, errorMessage } from "../services/api";
 
+import { selectWorkflowVersion } from "../utils/workflow-version";
+
 const route = useRoute();
 const router = useRouter();
 const workflowId = computed(() => String(route.params.workflowId ?? ""));
@@ -83,13 +85,13 @@ const versionDefinition = async () => {
     `/api/v1/workflows/${workflowId.value}/versions`,
   );
   const requestedVersion = Number(route.query.version);
-  const candidate =
-    (Number.isInteger(requestedVersion) && requestedVersion > 0
-      ? versions.find((item) => item.version === requestedVersion)
-      : undefined) ??
-    versions.find((item) => item.version === publishedVersion.value) ??
-    versions.find((item) => item.status === "validated") ??
-    versions[0];
+  const candidate = selectWorkflowVersion(
+    versions,
+    publishedVersion.value,
+    Number.isInteger(requestedVersion) && requestedVersion > 0
+      ? requestedVersion
+      : undefined,
+  );
   if (candidate) {
     workflowName.value = candidate.workflowName;
     definition.value = candidate.definition;
@@ -228,6 +230,11 @@ function markDirty() {
 
 async function exportCurrentVersion() {
   if (isNew.value || candidateVersion.value === null) return;
+  if (saveState.value !== "saved") {
+    message.value = "请先保存画布修改，再导出，避免导出旧版本。";
+    messageIsError.value = true;
+    return;
+  }
   try {
     const manifest = await apiRequest<Record<string, unknown>>(
       `/api/v1/workflows/${workflowId.value}/versions/${candidateVersion.value}/export`,

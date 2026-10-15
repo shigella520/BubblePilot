@@ -21,6 +21,11 @@ import { parseTriggerConditions } from "../modules/workflow/trigger-matcher.js";
 import { parseWorkflowDefinition } from "../modules/workflow/workflow-definition.js";
 import { newMessageWebhook } from "./fixtures/bluebubbles.js";
 
+import {
+  exportWorkflowManifest,
+  importWorkflowManifest,
+} from "../modules/workflow/workflow-manifest.js";
+
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 
 class ConfirmingReplyGateway implements ReplyGateway {
@@ -48,6 +53,97 @@ describe.runIf(testDatabaseUrl !== undefined)(
 
     afterAll(async () => {
       await Promise.all([repository.close(), archive.close()]);
+    });
+
+    it("retains exported message and text bindings through import persistence and reload", async () => {
+      const routeId = randomUUID();
+      const catalog = {
+        aiRoutes: [
+          {
+            id: routeId,
+            name: "Fictional route",
+            capabilities: ["text" as const, "function-calling" as const],
+          },
+        ],
+        chats: [],
+      };
+      const definition = parseWorkflowDefinition({
+        schemaVersion: "1",
+        name: "Fictional linked workflow",
+        startNodeId: "load-context",
+        nodes: [
+          {
+            id: "load-context",
+            type: "load-context",
+            version: 1,
+            config: {},
+            onSuccess: "ai",
+          },
+          {
+            id: "ai",
+            type: "ai-chat",
+            version: 1,
+            inputs: {
+              messages: {
+                kind: "output",
+                blockId: "load-context",
+                port: "messages",
+              },
+            },
+            config: {
+              providerRouteId: routeId,
+              systemPrompt: "Fictional prompt",
+              promptTemplate: "{{message.text}}",
+            },
+            onSuccess: "reply",
+          },
+          {
+            id: "reply",
+            type: "reply",
+            version: 1,
+            inputs: { text: { kind: "output", blockId: "ai", port: "text" } },
+            config: { text: "{{variables.aiReply}}" },
+            onSuccess: "done",
+          },
+          {
+            id: "done",
+            type: "end",
+            version: 1,
+            config: { result: "succeeded" },
+          },
+        ],
+      });
+      const source = await repository.createWorkflow(
+        definition.name,
+        definition,
+      );
+      const manifest = exportWorkflowManifest({
+        definition: source.definition,
+        mode: "portable",
+        catalog,
+      });
+      manifest.metadata.name = "Fictional renamed workflow";
+      manifest.spec.nodes.find(
+        (node) => node.id === "ai",
+      )!.config.systemPrompt = "Edited fictional prompt";
+      const imported = importWorkflowManifest({
+        manifest: JSON.parse(JSON.stringify(manifest)),
+        catalog,
+      });
+      expect(imported.issues).toEqual([]);
+      const restored = parseWorkflowDefinition(imported.definition);
+      const created = await repository.createWorkflow(restored.name, restored);
+      const reloaded = await repository.getWorkflowVersion(
+        created.workflowId,
+        created.version,
+      );
+      expect(reloaded?.definition).toEqual(restored);
+      expect(
+        reloaded?.definition.nodes.find((node) => node.id === "ai")?.inputs,
+      ).toEqual(definition.nodes[1]?.inputs);
+      expect(
+        reloaded?.definition.nodes.find((node) => node.id === "reply")?.inputs,
+      ).toEqual(definition.nodes[2]?.inputs);
     });
 
     it("persists a published workflow, execution trace and idempotent delivery", async () => {

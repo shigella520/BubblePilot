@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { workflowDataEdges } from "../../utils/workflow-data-edges";
 import { isCanvasShortcut } from "../../utils/keyboard-scope";
 import { executionPolicy } from "../../../../../modules/ai/execution-policy";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unused-expressions */
@@ -635,18 +636,8 @@ function hydrate(definition: any) {
           kind,
           type: "workflow",
         });
-    for (const [port, reference] of Object.entries(item.inputs ?? {}))
-      if ((reference as any)?.kind === "output")
-        result.push({
-          id: `${(reference as any).blockId}-${item.id}-${port}`,
-          source: (reference as any).blockId,
-          sourceHandle: `output:${(reference as any).port}`,
-          target: item.id,
-          targetHandle: `input:${port}`,
-          kind: "data",
-          type: "workflow",
-        });
   }
+  result.push(...workflowDataEdges(sourceNodes));
   edges.value = result;
   ensureControlEdgeSpacing();
   hydratedDefinition.value = JSON.stringify(definition);

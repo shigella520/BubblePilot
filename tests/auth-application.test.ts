@@ -154,6 +154,99 @@ describe("Web admin authentication", () => {
     await application.close();
   });
 
+  it("allows signed-in workflow imports without step-up and retains audit and unpublished candidate state", async () => {
+    const manifest = {
+      kind: "BubblePilotWorkflow",
+      apiVersion: "bubblepilot.io/v1",
+      metadata: { name: "Fictional signed-in import", description: "" },
+      spec: {
+        maxSteps: 1,
+        startNodeId: "done",
+        nodes: [
+          {
+            id: "done",
+            type: "end",
+            version: 1,
+            config: { result: "succeeded" },
+          },
+        ],
+      },
+      bindings: { aiRoutes: {}, chats: {} },
+    };
+    const url = "/api/v1/workflows/import";
+    expect(
+      (await application.inject({ method: "POST", url, payload: {} }))
+        .statusCode,
+    ).toBe(401);
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const headers = {
+      cookie: login.cookies.map((c) => `${c.name}=${c.value}`).join("; "),
+      origin: "http://localhost",
+    };
+    const preview = await application.inject({
+      method: "POST",
+      url: `${url}/preview`,
+      headers,
+      payload: { manifest },
+    });
+    expect(preview.statusCode).toBe(200);
+    const previewToken = preview.json<{ data: { previewToken: string } }>().data
+      .previewToken;
+    const created = await application.inject({
+      method: "POST",
+      url,
+      headers,
+      payload: { manifest, previewToken, mode: "create" },
+    });
+    expect(created.statusCode).toBe(201);
+    const imported = created.json<{
+      data: { workflowId: string; workflowVersion: number; status: string };
+    }>().data;
+    expect(imported.status).toBe("validated");
+    const nextVersion = await application.inject({
+      method: "POST",
+      url,
+      headers,
+      payload: {
+        manifest,
+        previewToken,
+        mode: "new-version",
+        targetWorkflowId: imported.workflowId,
+      },
+    });
+    expect(nextVersion.statusCode).toBe(201);
+    expect(authRepository.grants.size).toBe(0);
+    expect(
+      authRepository.auditEvents.filter(
+        (e) => e.action === "workflow.import" && e.outcome === "succeeded",
+      ),
+    ).toHaveLength(2);
+    const workflows = await application.inject({
+      method: "GET",
+      url: "/api/v1/workflows",
+      headers,
+    });
+    expect(
+      workflows.json<{
+        data: Array<{
+          id: string;
+          status: string;
+          publishedVersion: number | null;
+        }>;
+      }>().data,
+    ).toContainEqual(
+      expect.objectContaining({
+        id: imported.workflowId,
+        status: "draft",
+        publishedVersion: null,
+      }),
+    );
+  });
+
   it("requires sensitive authorization and audits bulk recovery closure", async () => {
     const url = "/api/v1/executions/recovery/close";
     expect((await application.inject({ method: "POST", url })).statusCode).toBe(
