@@ -24,6 +24,17 @@ export type DeliveryResult =
       summary: string;
     };
 
+export interface SendAttachmentCommand {
+  providerChatId: string;
+  providerTempGuid: string;
+  idempotencyKey: string;
+  correlationId: string;
+  filename: string;
+  mimeType: string;
+  bytes: Buffer;
+}
+
 export interface ReplyGateway {
+  sendAttachment?(command: SendAttachmentCommand): Promise<DeliveryResult>;
   sendReply(command: SendReplyCommand): Promise<DeliveryResult>;
 }

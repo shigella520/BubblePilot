@@ -37,13 +37,16 @@
     "memory:benchmark": "tsx app/benchmark-memory.ts",
     "bot:evaluate": "tsx app/evaluate-bot-identity.ts",
     "agent:evaluate": "tsx app/evaluate-agent.ts",
-    "chat:benchmark": "tsx app/benchmark-chat-queries.ts"
+    "chat:benchmark": "tsx app/benchmark-chat-queries.ts",
+    "memes:organize": "tsx app/organize-memes.ts"
   },
   "dependencies": {
+    "@fastify/multipart": "^10.1.1",
     "@fastify/static": "10.1.2",
     "cheerio": "1.1.2",
-    "fastify": "^5.12.1",
+    "fastify": "^5.12.5",
     "pg": "^8.16.3",
+    "sharp": "^0.35.5",
     "zod": "^4.1.5"
   },
   "devDependencies": {

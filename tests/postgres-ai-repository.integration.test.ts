@@ -261,6 +261,16 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       retryable: null,
       fallbackAllowed: null,
       diagnostics: {
+        imageInputs: {
+          version: 1,
+          dispatched: true,
+          images: [
+            {
+              imageInputId: diagnosticExecutionId,
+              contentHash: "fixture-image-hash",
+            },
+          ],
+        },
         clientRequestId: `${diagnosticExecutionId}:ai-node:1:1`,
         providerRequestId: "provider-request-fictional",
         httpStatus: 200,
@@ -320,6 +330,16 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       {
         executionId: diagnosticExecutionId,
         diagnostics: {
+          imageInputs: {
+            version: 1,
+            dispatched: true,
+            images: [
+              {
+                imageInputId: diagnosticExecutionId,
+                contentHash: "fixture-image-hash",
+              },
+            ],
+          },
           providerRequestId: "provider-request-fictional",
           requestHash: "request-hash-fictional",
           requestMessageCount: 3,
@@ -490,6 +510,27 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       },
     ]);
     await repository.recordImageInput({
+      id: diagnosticExecutionId,
+      diagnostics: {
+        version: 1,
+        imageRef: "I-fixture",
+        messageId: diagnosticExecutionId,
+        providerMessageId: "fixture-message",
+        attachmentIndex: 0,
+        scope: {
+          provider: "bluebubbles",
+          providerChatId: "fixture-chat",
+          triggerMessageId: "fixture-trigger",
+        },
+        historical: true,
+        trigger: "tool",
+        toolCallId: "fixture-tool",
+        round: 2,
+        contentHash: "fixture-image-hash",
+        width: 1,
+        height: 1,
+        processingVersion: "bluebubbles-compatible-original-false",
+      },
       executionId: diagnosticExecutionId,
       nodeId: "ai-node",
       source: "link-preview",
@@ -509,6 +550,14 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
       {
         executionId: diagnosticExecutionId,
         nodeId: "ai-node",
+        id: diagnosticExecutionId,
+        diagnostics: {
+          version: 1,
+          imageRef: "I-fixture",
+          trigger: "tool",
+          round: 2,
+          contentHash: "fixture-image-hash",
+        },
         source: "link-preview",
         sourceHash: "b".repeat(64),
         hostName: "images.example.test",

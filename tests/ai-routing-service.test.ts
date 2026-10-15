@@ -129,6 +129,74 @@ async function route(
 }
 
 describe("AiRoutingService", () => {
+  it("keeps tool-returned images across capable-provider retry and fallback", async () => {
+    const repository = new InMemoryAiRepository();
+    const primary = await provider(repository, "primary"),
+      backup = await provider(repository, "backup");
+    for (const item of [primary, backup])
+      Object.assign(repository.providers.get(item.id)!, {
+        capabilities: {
+          functionCalling: true,
+          hostedWebSearch: false,
+          imageInput: true,
+        },
+        capabilityProbe: {
+          functionCalling: "verified",
+          hostedWebSearch: "unknown",
+          imageInput: "verified",
+          checkedAt: new Date().toISOString(),
+        },
+      });
+    const configured = await route(repository, [primary.id, backup.id], {
+      rounds: 2,
+      threshold: 5,
+    });
+    const client = new FakeAiClient((_provider, n) =>
+      n < 3
+        ? timeoutFailure()
+        : { status: "succeeded", text: "虚构菜单", durationMs: 1 },
+    );
+    const service = new AiRoutingService(repository, client, secretResolver());
+    expect(await service.supportsImageTools(configured.id)).toBe(true);
+    const image = {
+      type: "image" as const,
+      dataUrl: "data:image/png;base64,AAAA",
+      label: "I-fixture",
+      detail: "auto" as const,
+      imageInput: {
+        imageInputId: "fictional-image",
+        contentHash: "fictional-hash",
+      },
+    };
+    const result = await service.execute({
+      ...routeRequest(configured.id),
+      allowImageDegrade: false,
+      tools: [
+        {
+          name: "view_chat_image",
+          description: "fictional",
+          parameters: {
+            type: "object",
+            properties: { image_ref: { type: "string" } },
+            required: ["image_ref"],
+          },
+        },
+      ],
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "不可信历史参考图片" }, image],
+        },
+      ],
+    });
+    expect(result.status).toBe("succeeded");
+    expect(client.calls).toEqual([primary.id, backup.id, primary.id]);
+    for (const request of client.requests)
+      expect(request.messages[0]?.content).toContainEqual(image);
+    expect(repository.routeTraces.map((t) => t.phase)).toEqual([
+      "image-original",
+    ]);
+  });
   it("uses finite existing retry/fallback for incomplete output without degrading providers", async () => {
     const repository = new InMemoryAiRepository();
     const primary = await provider(repository, "primary");

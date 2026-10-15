@@ -95,6 +95,7 @@ describe("Web admin authentication", () => {
         }),
       retryExecution: () => Promise.resolve({ status: "not-found" }),
       closeExecution: () => Promise.resolve({ status: "not-found" }),
+      closeRecoveryQueue: () => Promise.resolve({ closedCount: 0 }),
       runtimeStatus: () => ({
         active: 0,
         queued: 0,
@@ -151,6 +152,86 @@ describe("Web admin authentication", () => {
 
   afterEach(async () => {
     await application.close();
+  });
+
+  it("requires sensitive authorization and audits bulk recovery closure", async () => {
+    const url = "/api/v1/executions/recovery/close";
+    expect((await application.inject({ method: "POST", url })).statusCode).toBe(
+      401,
+    );
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    const headers = { cookie, origin: "http://localhost" };
+    expect(
+      (await application.inject({ method: "POST", url, headers })).statusCode,
+    ).toBe(403);
+    expect(authRepository.auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: "execution.bulk-close",
+        outcome: "denied",
+      }),
+    );
+    const unlock = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/sensitive",
+      headers,
+      payload: { password: sensitivePassword },
+    });
+    expect(unlock.statusCode).toBe(200);
+    const result = await application.inject({ method: "POST", url, headers });
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toEqual({ data: { closedCount: 0 } });
+    expect(authRepository.auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: "execution.bulk-close",
+        outcome: "succeeded",
+      }),
+    );
+  });
+
+  it("protects execution image previews and source text with login and step-up", async () => {
+    const base =
+      "/api/v1/executions/11111111-1111-4111-8111-111111111111/image-inputs/22222222-2222-4222-8222-222222222222";
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const cookie = login.cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    for (const suffix of ["preview", "source"]) {
+      expect(
+        (await application.inject({ method: "GET", url: `${base}/${suffix}` }))
+          .statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await application.inject({
+            method: "GET",
+            url: `${base}/${suffix}`,
+            headers: { cookie },
+          })
+        ).statusCode,
+      ).toBe(403);
+    }
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/sensitive",
+      headers: { cookie },
+      payload: { password: sensitivePassword },
+    });
+    expect(
+      (
+        await application.inject({
+          method: "GET",
+          url: `${base}/preview`,
+          headers: { cookie },
+        })
+      ).statusCode,
+    ).toBe(404);
   });
 
   it("audits Agent settings updates without requiring a sensitive-operation unlock", async () => {

@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 
+import MemesView from "./views/MemesView.vue";
 import AiView from "./views/AiView.vue";
 import AutomationView from "./views/AutomationView.vue";
 import WorkflowCanvasView from "./views/WorkflowCanvasView.vue";
@@ -21,6 +22,7 @@ export default createRouter({
     { path: "/automation", component: AutomationView },
     { path: "/automation/new", component: WorkflowCanvasView },
     { path: "/automation/:workflowId", component: WorkflowCanvasView },
+    { path: "/memes", component: MemesView },
     { path: "/ai", component: AiView },
     { path: "/executions", component: ExecutionsView },
     { path: "/settings", component: SettingsView },

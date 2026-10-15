@@ -1,3 +1,6 @@
+import type { MemeDeliveryService } from "../modules/memes/meme-delivery-service.js";
+import { registerMemeRoutes } from "../modules/memes/meme-routes.js";
+import type { MemeService } from "../modules/memes/meme-service.js";
 import {
   type BotIdentityService,
   botIdentityUpdateSchema,
@@ -329,6 +332,8 @@ const triggerPreviewBodySchema = z.object({
 });
 
 export interface ApplicationOptions {
+  memes?: MemeService;
+  memeDelivery?: MemeDeliveryService;
   botIdentity?: BotIdentityService;
   memory?: MemoryService;
   logger?: boolean;
@@ -644,6 +649,8 @@ export function buildApplication(
   );
   application.addHook("onReady", () => {
     options.memory?.start();
+    options.memes?.start();
+    options.memeDelivery?.start();
     options.messageRetention?.start();
     options.imageSummary?.worker.start();
   });
@@ -942,6 +949,91 @@ export function buildApplication(
       await requireAdmin(request);
       sensitiveAudits.set(request, { action, targetType });
     };
+
+  if (options.memes)
+    registerMemeRoutes(
+      application,
+      options.memes,
+      requireAdmin,
+      requireAuditedAdmin,
+    );
+
+  if (options.memeDelivery) {
+    const deliveries = options.memeDelivery;
+    application.get(
+      "/api/v1/meme-deliveries",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const input = z
+          .object({ executionId: z.string().uuid().optional() })
+          .parse(request.query);
+        return { data: await deliveries.list(input.executionId) };
+      },
+    );
+    application.get(
+      "/api/v1/meme-deliveries/:id/thumbnail",
+      { preHandler: requireAdmin },
+      async (request, reply) => {
+        const { id } = z
+          .object({ id: z.string().uuid() })
+          .parse(request.params);
+        const bytes = await deliveries.thumbnail(id);
+        if (!bytes)
+          throw new ApplicationError(
+            "MEME_PREVIEW_UNAVAILABLE",
+            "表情预览已不可用。",
+            404,
+          );
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .type("image/png")
+          .send(bytes);
+      },
+    );
+    application.post(
+      "/api/v1/meme-deliveries/:id/retry",
+      {
+        preHandler: requireSensitive(
+          "meme.delivery.retry",
+          "outbound-delivery",
+        ),
+      },
+      async (request) => {
+        const { id } = z
+          .object({ id: z.string().uuid() })
+          .parse(request.params);
+        const result = await deliveries.retry(id, request.id);
+        if (!result)
+          throw new ApplicationError(
+            "MEME_DELIVERY_CONFLICT",
+            "图片不可重试，请刷新状态。",
+            409,
+          );
+        return { data: result };
+      },
+    );
+    application.post(
+      "/api/v1/meme-deliveries/:id/close",
+      {
+        preHandler: requireSensitive(
+          "meme.delivery.close",
+          "outbound-delivery",
+        ),
+      },
+      async (request) => {
+        const { id } = z
+          .object({ id: z.string().uuid() })
+          .parse(request.params);
+        if (!(await deliveries.close(id)))
+          throw new ApplicationError(
+            "MEME_DELIVERY_CONFLICT",
+            "图片无需关闭，请刷新状态。",
+            409,
+          );
+        return { data: { closed: true } };
+      },
+    );
+  }
 
   const memory = (): MemoryService => {
     if (!options.memory)
@@ -3274,6 +3366,147 @@ export function buildApplication(
     );
 
     application.get(
+      "/api/v1/executions/:executionId/image-inputs/:imageInputId/source",
+      {
+        preHandler: requireSensitive(
+          "message.content.view",
+          "workflow-execution",
+        ),
+      },
+      async (request, reply) => {
+        reply.header("Cache-Control", "no-store");
+        const parameters = z
+          .object({
+            executionId: z.string().uuid(),
+            imageInputId: z.string().uuid(),
+          })
+          .parse(request.params);
+        const execution = await workflowRepository.getExecution(
+          parameters.executionId,
+        );
+        const image = execution
+          ? (
+              await options.ai?.repository.listImageInputs(
+                parameters.executionId,
+              )
+            )?.find((item) => item.id === parameters.imageInputId)
+          : undefined;
+        const diagnostic = image?.diagnostics;
+        const source =
+          diagnostic?.version === 1
+            ? await options.imageSummary?.imageInput.sources?.resolve(
+                diagnostic.scope,
+                diagnostic.providerMessageId,
+                diagnostic.attachmentIndex,
+                diagnostic.historical,
+              )
+            : null;
+        const archived =
+          source &&
+          source.messageId === diagnostic?.messageId &&
+          sha256(source.attachment.providerAttachmentId) === image?.sourceHash
+            ? await repository.findMessage(source.messageId)
+            : null;
+        if (!archived || archived.contentRedactedAt !== null)
+          throw new ApplicationError(
+            "EXECUTION_IMAGE_SOURCE_UNAVAILABLE",
+            "The image source is no longer available.",
+            404,
+          );
+        const current = diagnostic
+          ? await options.imageSummary?.imageInput.sources?.resolve(
+              diagnostic.scope,
+              diagnostic.providerMessageId,
+              diagnostic.attachmentIndex,
+              diagnostic.historical,
+            )
+          : null;
+        if (
+          !current ||
+          current.messageId !== archived.id ||
+          sha256(current.attachment.providerAttachmentId) !== image?.sourceHash
+        )
+          throw new ApplicationError(
+            "EXECUTION_IMAGE_SOURCE_UNAVAILABLE",
+            "The source is no longer available.",
+            404,
+          );
+        await requireSensitive(
+          "message.content.view",
+          "workflow-execution",
+        )(request);
+        return {
+          data: {
+            messageId: archived.id,
+            sentAt: archived.sentAt,
+            senderId: archived.senderId,
+            body: archived.body,
+          },
+        };
+      },
+    );
+
+    application.get(
+      "/api/v1/executions/:executionId/image-inputs/:imageInputId/preview",
+      {
+        preHandler: requireSensitive(
+          "execution.ai-request.view",
+          "workflow-execution",
+        ),
+      },
+      async (request, reply) => {
+        reply
+          .header("Cache-Control", "no-store")
+          .header("X-Content-Type-Options", "nosniff");
+        const parameters = z
+          .object({
+            executionId: z.string().uuid(),
+            imageInputId: z.string().uuid(),
+          })
+          .parse(request.params);
+        const execution = await workflowRepository.getExecution(
+          parameters.executionId,
+        );
+        const image = execution
+          ? (
+              await options.ai?.repository.listImageInputs(
+                parameters.executionId,
+              )
+            )?.find((item) => item.id === parameters.imageInputId)
+          : undefined;
+        const loaded =
+          image?.diagnostics && image.status === "succeeded"
+            ? await options.imageSummary?.imageInput.preview(
+                image.diagnostics,
+                image.sourceHash,
+              )
+            : null;
+        if (!loaded)
+          throw new ApplicationError(
+            "EXECUTION_IMAGE_UNAVAILABLE",
+            "The recorded image cannot be restored: source access, content or hash is unavailable.",
+            404,
+          );
+        // Recheck the sensitive session after potentially slow gateway IO.
+        await requireSensitive(
+          "execution.ai-request.view",
+          "workflow-execution",
+        )(request);
+        if (reply.sent) return;
+        const match = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.+)$/u.exec(
+          loaded.part.dataUrl,
+        );
+        if (!match)
+          throw new ApplicationError(
+            "EXECUTION_IMAGE_UNAVAILABLE",
+            "Image data is unavailable.",
+            404,
+          );
+        return reply.type(match[1]!).send(Buffer.from(match[2]!, "base64"));
+      },
+    );
+
+    application.get(
       "/api/v1/executions/:executionId/ai-attempts/:attemptId/raw-request",
       {
         preHandler: requireSensitive(
@@ -3406,6 +3639,27 @@ export function buildApplication(
     );
 
     application.post(
+      "/api/v1/executions/recovery/close",
+      {
+        preHandler: requireSensitive(
+          "execution.bulk-close",
+          "workflow-execution",
+        ),
+      },
+      async () => {
+        const result = await options.workflow?.engine.closeRecoveryQueue();
+        if (result === undefined) {
+          throw new ApplicationError(
+            "EXECUTION_RECOVERY_UNAVAILABLE",
+            "Workflow recovery is unavailable.",
+            503,
+          );
+        }
+        return { data: result };
+      },
+    );
+
+    application.post(
       "/api/v1/executions/:executionId/close",
       {
         preHandler: requireSensitive("execution.close", "workflow-execution"),
@@ -3462,6 +3716,9 @@ export function buildApplication(
   application.addHook("onClose", async () => {
     await options.memory?.stop();
     await options.imageSummary?.worker.stop();
+    await options.memeDelivery?.stop();
+    await options.memes?.stop();
+    await options.memes?.repository.close();
     await options.messageRetention?.stop();
     await Promise.all([
       repository.close(),

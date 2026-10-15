@@ -166,3 +166,7 @@ export async function downloadFile(
     filename: match?.[1] ?? "bubblepilot-export.jsonl",
   };
 }
+
+export function notifySessionInvalidation(): void {
+  sessionInvalidationHandler?.();
+}

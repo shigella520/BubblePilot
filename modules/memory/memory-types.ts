@@ -73,6 +73,7 @@ export interface MemoryScope {
   generation: Generation;
 }
 export interface Evidence {
+  images?: { image_ref: string; messageId: string; attachmentIndex: number }[];
   authors?: MessageAuthor[];
   ref: string;
   text: string;

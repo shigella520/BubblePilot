@@ -177,6 +177,11 @@ it("persists failed Agent budget metadata in the node JSON snapshot", async () =
     finalizingDueToBudget: true,
     reasons: ["tool-calls"],
     outcome: "failed",
+    citationHandling: {
+      invalidResponses: 2,
+      correctionAttempts: 1,
+      finalAction: "failed",
+    },
   };
   const registry = new NodeRegistry();
   registry.register({

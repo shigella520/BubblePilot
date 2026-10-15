@@ -1,3 +1,7 @@
+import {
+  allToolDefinitions,
+  assertStrictSchema,
+} from "./support/tool-schema-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { AiRawRequestStore } from "../modules/ai/ai-raw-request-store.js";
@@ -31,6 +35,185 @@ const request = {
 };
 
 describe("OpenAiCompatibleClient", () => {
+  it.each(["chat-completions", "responses"] as const)(
+    "sends all tools through strict %s schema validation",
+    async (apiKind) => {
+      const definitions = allToolDefinitions();
+      const rawSearch = definitions.find((t) => t.name === "search_memes")!;
+      // This is the original upstream rejection: limit is declared but not required.
+      expect(() => assertStrictSchema(rawSearch.parameters)).toThrow();
+      let accepted = 0;
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+        const body = JSON.parse(
+          typeof init?.body === "string" ? init.body : "null",
+        ) as {
+          tools: Array<{
+            strict?: boolean;
+            parameters?: unknown;
+            function?: { strict: boolean; parameters: unknown };
+          }>;
+        };
+        for (const entry of body.tools) {
+          const definition = entry.function ?? entry;
+          expect(definition.strict).toBe(true);
+          assertStrictSchema(definition.parameters);
+          accepted++;
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              apiKind === "responses"
+                ? { output_text: "OK" }
+                : {
+                    choices: [
+                      { message: { content: "OK" }, finish_reason: "stop" },
+                    ],
+                  },
+            ),
+          ),
+        );
+      });
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional-secret" }),
+        fetcher,
+      );
+      expect(
+        await client.call(
+          { ...provider, apiKind },
+          { ...request, tools: definitions },
+        ),
+      ).toMatchObject({ status: "succeeded" });
+      expect(accepted).toBe(definitions.length);
+      expect(rawSearch.parameters.required).toEqual(["query"]);
+    },
+  );
+
+  it.each(["chat-completions", "responses"] as const)(
+    "rejects unsupported %s tool schemas locally without a network request",
+    async (apiKind) => {
+      const fetcher = vi.fn<typeof fetch>();
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional-secret" }),
+        fetcher,
+      );
+      expect(
+        await client.call(
+          { ...provider, apiKind },
+          {
+            ...request,
+            tools: [
+              {
+                name: "fictional",
+                description: "test",
+                parameters: {
+                  type: "object",
+                  properties: { x: { $ref: "#/missing" } },
+                },
+              },
+            ],
+          },
+        ),
+      ).toMatchObject({
+        status: "failed",
+        category: "configuration",
+        code: "AI_TOOL_SCHEMA_INVALID",
+        retryable: false,
+        fallbackAllowed: false,
+        countsForDegrade: false,
+        summary: "Invalid strict tool schema: fictional at /properties/x/$ref",
+      });
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["chat-completions", "responses"] as const)(
+    "carries tool images and records actual %s dispatch without serializing metadata",
+    async (apiKind) => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify(
+            apiKind === "responses"
+              ? { output_text: "虚构价格 20 元" }
+              : {
+                  choices: [
+                    {
+                      message: { content: "虚构价格 20 元" },
+                      finish_reason: "stop",
+                    },
+                  ],
+                },
+          ),
+        ),
+      );
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional-secret" }),
+        fetcher,
+      );
+      const input = {
+        ...request,
+        messages: [
+          ...request.messages,
+          {
+            role: "assistant" as const,
+            content: "",
+            toolCalls: [
+              {
+                id: "look",
+                name: "view_chat_image",
+                arguments: '{"image_ref":"I-fictional"}',
+              },
+            ],
+          },
+          {
+            role: "tool" as const,
+            toolCallId: "look",
+            content: '{"status":"loaded"}',
+          },
+          {
+            role: "user" as const,
+            content: [
+              { type: "text" as const, text: "Untrusted historical reference" },
+              {
+                type: "image" as const,
+                label: "I-fictional",
+                dataUrl: "data:image/png;base64,AAAA",
+                detail: "auto" as const,
+                imageInput: {
+                  imageInputId: "image-record",
+                  contentHash: "fictional-hash",
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const result = await client.call({ ...provider, apiKind }, input);
+      expect(result.diagnostics?.imageInputs).toEqual({
+        version: 1,
+        dispatched: true,
+        images: [
+          { imageInputId: "image-record", contentHash: "fictional-hash" },
+        ],
+      });
+      const body = fetcher.mock.calls[0]?.[1]?.body as string;
+      expect(body).toContain("data:image/png;base64,AAAA");
+      expect(body).not.toContain("imageInputId");
+      expect(body).not.toContain("fictional-hash");
+      fetcher.mockRejectedValueOnce(new Error("connection"));
+      expect(
+        (await client.call({ ...provider, apiKind }, input)).diagnostics
+          ?.imageInputs?.dispatched,
+      ).toBe(true);
+      const missing = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({}),
+        fetcher,
+      );
+      expect(
+        (await missing.call({ ...provider, apiKind }, input)).diagnostics
+          ?.imageInputs?.dispatched,
+      ).toBe(false);
+    },
+  );
   it.each([
     [
       "chat-completions",

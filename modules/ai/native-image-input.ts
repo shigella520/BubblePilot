@@ -1,3 +1,9 @@
+import type { ImageInputDiagnostic } from "./ai-types.js";
+import { executionPolicy } from "./execution-policy.js";
+import { randomUUID } from "node:crypto";
+import sharp from "sharp";
+import { ChatImageSession } from "./chat-image-session.js";
+import type { ChatImageSourceRepository } from "./chat-image-source.js";
 import { sha256 } from "../../app/canonical-json.js";
 import type { ContextMessage } from "../archive/archive-repository.js";
 import type { BlueBubblesSettingsService } from "../integrations/bluebubbles/settings-service.js";
@@ -47,6 +53,7 @@ export interface PreparedImageInputItem {
 }
 
 export interface PreparedImageInput {
+  settings?: ImageInputRuntimeSettings;
   parts: readonly AiImageContentPart[];
   items: readonly PreparedImageInputItem[];
   selectedCount: number;
@@ -204,17 +211,24 @@ export class NativeImageInputService {
     private readonly blueBubbles: BlueBubblesSettingsService,
     private readonly repository?: Pick<AiRepository, "recordImageInput">,
     private readonly fetchImplementation: typeof fetch = fetch,
+    readonly sources?: ChatImageSourceRepository,
   ) {}
 
-  async loadForSummary(source: ImageSummarySource): Promise<
+  async loadForSummary(
+    source: ImageSummarySource,
+    options?: { settings: ImageInputRuntimeSettings; signal?: AbortSignal },
+  ): Promise<
     | {
         status: "succeeded";
         part: AiImageContentPart;
         contentHash: string;
+        bytes: number;
+        width: number | null;
+        height: number | null;
       }
     | { status: "failed"; errorCode: string; retryable: boolean }
   > {
-    const settings = await this.settings.resolve();
+    const settings = options?.settings ?? (await this.settings.resolve());
     let body: Buffer;
     try {
       if (source.sourceType === "attachment") {
@@ -236,7 +250,9 @@ export class NativeImageInputService {
           endpoint.searchParams.set("original", "false");
           const response = await this.fetchImplementation(endpoint, {
             headers: { accept: "image/*" },
-            signal: controller.signal,
+            signal: options?.signal
+              ? AbortSignal.any([controller.signal, options.signal])
+              : controller.signal,
           });
           if (!response.ok)
             throw new ImageInputError(
@@ -261,7 +277,16 @@ export class NativeImageInputService {
       const mimeType = imageMime(body);
       if (mimeType === null)
         throw new ImageInputError("AI_IMAGE_INVALID_CONTENT");
+      options?.signal?.throwIfAborted();
+      const metadata = await sharp(body, {
+        limitInputPixels: executionPolicy.image.maxInputPixels,
+        animated: false,
+      }).metadata();
+      options?.signal?.throwIfAborted();
       return {
+        bytes: body.length,
+        width: metadata.width ?? null,
+        height: metadata.height ?? null,
         status: "succeeded",
         part: {
           type: "image",
@@ -297,6 +322,60 @@ export class NativeImageInputService {
           (httpStatus !== null && httpStatus >= 500),
       };
     }
+  }
+
+  async preview(diagnostic: ImageInputDiagnostic, sourceHash?: string) {
+    if (!this.sources || diagnostic.version !== 1) return null;
+    const source = await this.sources.resolve(
+      diagnostic.scope,
+      diagnostic.providerMessageId,
+      diagnostic.attachmentIndex,
+      diagnostic.historical,
+    );
+    if (
+      !source ||
+      source.messageId !== diagnostic.messageId ||
+      (sourceHash &&
+        sha256(source.attachment.providerAttachmentId) !== sourceHash)
+    )
+      return null;
+    const loaded = await this.loadForSummary({
+      sourceType: "attachment",
+      sourceKey: source.attachment.providerAttachmentId,
+      attachmentRef: diagnostic.imageRef,
+      attachment: source.attachment,
+    });
+    if (
+      loaded.status !== "succeeded" ||
+      loaded.contentHash !== diagnostic.contentHash
+    )
+      return null;
+    const current = await this.sources.resolve(
+      diagnostic.scope,
+      diagnostic.providerMessageId,
+      diagnostic.attachmentIndex,
+      diagnostic.historical,
+    );
+    return current?.attachment.providerAttachmentId ===
+      source.attachment.providerAttachmentId
+      ? loaded
+      : null;
+  }
+
+  createSession(input: {
+    executionId: string;
+    nodeId: string;
+    envelope: MessageEnvelope;
+    history: readonly ContextMessage[];
+    prepared: PreparedImageInput;
+  }): ChatImageSession | undefined {
+    if (
+      !this.sources ||
+      !input.prepared.settings?.enabled ||
+      !input.prepared.settings.includeAttachments
+    )
+      return undefined;
+    return new ChatImageSession(input, this, this.sources, this.repository);
   }
 
   async prepare(input: {
@@ -346,10 +425,27 @@ export class NativeImageInputService {
         candidate.preview.imageUrl !== null
           ? hostName(candidate.preview.imageUrl)
           : null;
+      const imageInputId = randomUUID();
+      let diagnostic: ImageInputDiagnostic | null = null;
       let body: Buffer | null = null;
       let actualMimeType: string | null = null;
       let errorCode: string | null = null;
       try {
+        if (
+          candidate.source === "attachment" &&
+          this.sources &&
+          !(await this.sources.resolve(
+            {
+              provider: input.envelope.provider,
+              providerChatId: input.envelope.chat.providerChatId,
+              triggerMessageId: input.envelope.message.providerMessageId,
+            },
+            candidate.providerMessageId,
+            Number(candidate.reference.split(":").at(-1)) - 1,
+            false,
+          ))
+        )
+          throw new ImageInputError("AI_IMAGE_SOURCE_UNAVAILABLE");
         if (candidate.source === "attachment") {
           if (blueBubblesSettings === null)
             throw new ImageInputError("AI_IMAGE_BLUEBUBBLES_UNAVAILABLE");
@@ -399,8 +495,53 @@ export class NativeImageInputService {
           skippedCount += 1;
           errorCode = "AI_IMAGE_TOTAL_BYTES_EXCEEDED";
         } else {
+          if (candidate.source === "attachment" && this.sources) {
+            const attachmentIndex =
+              Number(candidate.reference.split(":").at(-1)) - 1;
+            const scope = {
+              provider: input.envelope.provider,
+              providerChatId: input.envelope.chat.providerChatId,
+              triggerMessageId: input.envelope.message.providerMessageId,
+            };
+            const source = await this.sources.resolve(
+              scope,
+              candidate.providerMessageId,
+              attachmentIndex,
+              false,
+            );
+            if (
+              !source ||
+              source.attachment.providerAttachmentId !==
+                candidate.attachment.providerAttachmentId
+            )
+              throw new ImageInputError("AI_IMAGE_SOURCE_UNAVAILABLE");
+            const metadata = await sharp(body, {
+              limitInputPixels: executionPolicy.image.maxInputPixels,
+              animated: false,
+            }).metadata();
+            diagnostic = {
+              version: 1,
+              imageRef: candidate.reference,
+              messageId: source.messageId,
+              providerMessageId: source.providerMessageId,
+              attachmentIndex,
+              scope,
+              historical: false,
+              trigger: "automatic",
+              toolCallId: null,
+              round: 1,
+              contentHash: sha256(body.toString("base64")),
+              width: metadata.width ?? null,
+              height: metadata.height ?? null,
+              processingVersion: "bluebubbles-compatible-original-false",
+            };
+          }
           totalBytes += body.length;
           const part: AiImageContentPart = {
+            imageInput: {
+              imageInputId,
+              contentHash: sha256(body.toString("base64")),
+            },
             type: "image",
             dataUrl: `data:${actualMimeType};base64,${body.toString("base64")}`,
             detail: settings.detail,
@@ -425,6 +566,8 @@ export class NativeImageInputService {
                 : "AI_IMAGE_FETCH_FAILED";
       }
       const record: AiImageInputRecordInput = {
+        id: imageInputId,
+        diagnostics: diagnostic,
         executionId: input.executionId,
         nodeId: input.nodeId,
         source: candidate.source,
@@ -454,6 +597,7 @@ export class NativeImageInputService {
     }
 
     return {
+      settings,
       parts,
       items,
       selectedCount: parts.length,

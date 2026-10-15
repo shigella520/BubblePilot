@@ -171,6 +171,24 @@ export class AiRoutingService {
     private readonly enableWebSearch = true,
   ) {}
 
+  async supportsImageTools(routeId: string): Promise<boolean> {
+    const [route, providers] = await Promise.all([
+      this.repository.getRoute(routeId),
+      this.repository.listProviders(),
+    ]);
+    return (
+      !!route?.enabled &&
+      providers.some(
+        (p) =>
+          p.enabled &&
+          (!route.providerIds.length || route.providerIds.includes(p.id)) &&
+          p.capabilities?.imageInput === true &&
+          p.capabilityProbe?.imageInput === "verified" &&
+          supportsLocalTools(p) &&
+          isProviderSecretConfigured(p, this.secrets),
+      )
+    );
+  }
   async execute(request: AiRouteRequest): Promise<AiRouteResult> {
     const withImages = requestHasImages(request);
     const result = await this.executeOnce(
@@ -264,11 +282,7 @@ export class AiRoutingService {
           reason = "secret-missing";
         else if (
           (request.tools?.length ?? 0) > 0 &&
-          !supportsLocalTools(provider) &&
-          (request.tools?.some((tool) => tool.name !== "web_search") ||
-            request.webSearch === undefined ||
-            request.webSearch === "disabled" ||
-            !supportsHostedSearch(provider))
+          !supportsLocalTools(provider)
         )
           reason = "local-tools-unsupported";
         else if (hasImages && provider.capabilities?.imageInput !== true)
@@ -470,7 +484,15 @@ export class AiRoutingService {
           request.webSearch !== undefined &&
           request.webSearch !== "disabled" &&
           supportsHostedSearch(candidate.provider) &&
-          !(request.tools?.some((tool) => tool.name !== "web_search") ?? false);
+          (request.tools?.length ?? 0) === 0;
+        if (request.imageSession && !(await request.imageSession.validate()))
+          return complete({
+            status: "failed",
+            code: "AI_IMAGE_SOURCE_UNAVAILABLE",
+            summary: "Image sources are no longer available.",
+            retryable: false,
+            attemptCount,
+          });
         let result: AiCallResult = await this.client.call(candidate.provider, {
           messages: request.messages,
           maxOutputTokens: request.maxOutputTokens,

@@ -1,3 +1,4 @@
+import type { ImageBudgetView } from "./chat-image-session.js";
 import { z } from "zod";
 export const agentRuntimeSettingsSchema = z.object({
   maxToolCalls: z.number().int().min(1).max(30),
@@ -22,6 +23,7 @@ export const agentSettingsUpdateSchema = agentRuntimeSettingsSchema.extend({
 export type AgentSettingsUpdate = z.infer<typeof agentSettingsUpdateSchema>;
 export type AgentBudgetReason = "tool-calls" | "tool-output" | "tool-duration";
 export interface AgentBudgetSnapshot {
+  images?: ImageBudgetView;
   settings: AgentSettingsView;
   modelTurns: number;
   toolCalls: number;
@@ -29,5 +31,10 @@ export interface AgentBudgetSnapshot {
   toolDurationMs: number;
   finalizingDueToBudget: boolean;
   reasons: AgentBudgetReason[];
+  citationHandling?: {
+    invalidResponses: number;
+    correctionAttempts: number;
+    finalAction: "corrected" | "markers-removed" | "failed";
+  };
   outcome: "completed" | "budget-completed" | "failed";
 }

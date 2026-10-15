@@ -7,7 +7,11 @@ import type {
   AiRouteSuccess,
   AiToolCall,
 } from "../modules/ai/ai-types.js";
-import type { MemoryService } from "../modules/memory/memory-service.js";
+import {
+  MemorySession,
+  stripHistoricalCitationMarkers,
+  type MemoryService,
+} from "../modules/memory/memory-service.js";
 import { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
 import { InMemoryAgentSettingsRepository } from "./support/in-memory-agent-settings-repository.js";
 const request: AiRouteRequest = {
@@ -126,7 +130,7 @@ describe("AgentRunner shared quota integration", () => {
     });
     expect(f.search.search).toHaveBeenCalledTimes(1);
     expect(f.execute).toHaveBeenCalledTimes(1);
-    expect(f.requests[1]?.tools).toBeUndefined();
+    expect(f.requests[1]?.tools).toEqual(f.requests[0]?.tools);
     const outputs = f.requests[1]!.messages.filter((m) => m.role === "tool");
     expect(outputs.map((o) => o.toolCallId)).toEqual(["1", "2", "3", "4", "5"]);
     expect(outputs[3]?.content).toContain("invalid-tool-arguments");
@@ -134,6 +138,94 @@ describe("AgentRunner shared quota integration", () => {
     expect(result.agentBudget?.toolOutputCharacters).toBe(
       outputs.slice(0, 4).reduce((n, o) => n + (o.content as string).length, 0),
     );
+  });
+  it("reports live quotas and rejects later calls without removing schemas", async () => {
+    const f = fixture((_, n) => (n <= 2 ? response([call(n)]) : response()));
+    const result = await new AgentRunner(
+      f.routing,
+      undefined,
+      undefined,
+      undefined,
+      { ...defaultAgentSettings, maxToolCalls: 1 },
+      f.memory,
+    ).run({ ...request, webSearch: "disabled" });
+    expect(result).toMatchObject({
+      status: "succeeded",
+      agentBudget: { toolCalls: 1, modelTurns: 3, outcome: "budget-completed" },
+    });
+    expect(f.execute).toHaveBeenCalledTimes(1);
+    const states = f.requests.map((r) => {
+      const statuses = r.messages.filter(
+        (m) =>
+          typeof m.content === "string" &&
+          m.content.startsWith("<agent_budget_status>"),
+      );
+      expect(statuses).toHaveLength(1);
+      expect(r.tools).toEqual(f.requests[0]?.tools);
+      expect(r.toolChoice).toBe("auto");
+      return JSON.parse(
+        (statuses[0]!.content as string)
+          .replace("<agent_budget_status>", "")
+          .replace("</agent_budget_status>", ""),
+      ) as Record<string, unknown>;
+    });
+    expect(states[0]).toMatchObject({
+      modelRound: 1,
+      maxModelRounds: 3,
+      toolCalls: { used: 0, limit: 1, remaining: 1 },
+      toolExecutionAvailable: true,
+    });
+    expect(states[1]).toMatchObject({
+      modelRound: 2,
+      toolCalls: { used: 1, remaining: 0 },
+      toolExecutionAvailable: false,
+      finalizationReason: "tool-calls",
+    });
+    expect(states[2]!.toolOutputCharacters).toEqual(
+      states[1]!.toolOutputCharacters,
+    );
+    expect(states[2]!.modelRoundsAfterThis).toBe(0);
+    const rejected = f.requests[2]!.messages.find(
+      (m) => m.role === "tool" && m.toolCallId === "2",
+    );
+    expect(JSON.parse(rejected!.content as string)).toMatchObject({
+      status: "unavailable",
+      reason: "tool-calls",
+    });
+  });
+
+  it("does not execute calls during citation correction even with budget remaining", async () => {
+    const f = fixture((_, n) =>
+      n === 1
+        ? response([], "bad")
+        : n === 2
+          ? response([call(1)])
+          : response([], "corrected"),
+    );
+    f.memory.session = () =>
+      Promise.resolve({
+        execute: f.execute,
+        validate: () => Promise.resolve(true),
+        render: (s: string) => (s === "bad" ? null : s),
+      } as never);
+    const result = await new AgentRunner(
+      f.routing,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.memory,
+    ).run({ ...request, webSearch: "disabled" });
+    expect(result).toMatchObject({
+      status: "succeeded",
+      text: "corrected",
+      agentBudget: { toolCalls: 0, outcome: "completed" },
+    });
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(
+      f.requests[2]?.messages.find((m) => m.role === "tool")?.content,
+    ).toContain("citation-correction");
+    expect(f.requests[2]?.tools).toEqual(f.requests[0]?.tools);
   });
   it("allows more than the old per-kind limits and applies settings only to the next run", async () => {
     const settings = new AgentSettingsService(
@@ -148,7 +240,14 @@ describe("AgentRunner shared quota integration", () => {
           maxToolCalls: 1,
           expectedVersion: 0,
         });
-      return count < 7 && r.tools ? response([call(count)]) : response();
+      return count < 7 &&
+        !r.messages.some(
+          (m) =>
+            typeof m.content === "string" &&
+            m.content.includes('"toolExecutionAvailable":false'),
+        )
+        ? response([call(count)])
+        : response();
     });
     const runner = new AgentRunner(
       f.routing,
@@ -177,7 +276,7 @@ describe("AgentRunner shared quota integration", () => {
   });
   it("reserves finalization and exactly one citation correction after exhausting N calls", async () => {
     const f = fixture((r, n) =>
-      r.tools
+      n <= 2
         ? response([call(n)])
         : response([], n === 3 ? "[M99]" : "revised"),
     );
@@ -201,7 +300,14 @@ describe("AgentRunner shared quota integration", () => {
       text: "revised",
       agentBudget: { modelTurns: 4, toolCalls: 2 },
     });
-    expect(f.requests.slice(2).every((r) => !r.tools)).toBe(true);
+    expect(
+      f.requests
+        .slice(2)
+        .every(
+          (r) =>
+            JSON.stringify(r.tools) === JSON.stringify(f.requests[0]?.tools),
+        ),
+    ).toBe(true);
   });
   it("finalizes on character truncation while preserving source JSON", async () => {
     const f = fixture((_, n) => (n === 1 ? response([call(1)]) : response()));
@@ -232,9 +338,9 @@ describe("AgentRunner shared quota integration", () => {
       evidence: [{ ref: "M1" }],
       truncated: true,
     });
-    expect(f.requests[1]?.tools).toBeUndefined();
+    expect(f.requests[1]?.tools).toEqual(f.requests[0]?.tools);
   });
-  it("closes tools after a deadline and still honors required web failure policy", async () => {
+  it("retains tool schemas after a deadline and still honors required web failure policy", async () => {
     vi.useFakeTimers();
     const f = fixture((_, n) =>
       n === 1
@@ -260,7 +366,7 @@ describe("AgentRunner shared quota integration", () => {
         outcome: "budget-completed",
       },
     });
-    expect(f.requests[1]?.tools).toBeUndefined();
+    expect(f.requests[1]?.tools).toEqual(f.requests[0]?.tools);
     f.requests.length = 0;
     const required = runner.run({ ...request, webSearch: "required" });
     await vi.advanceTimersByTimeAsync(5000);
@@ -270,7 +376,7 @@ describe("AgentRunner shared quota integration", () => {
       agentBudget: { outcome: "failed" },
     });
   });
-  it("preserves a snapshot when the provider ignores final tool closure", async () => {
+  it("stops at the round limit when the provider ignores finalization", async () => {
     const f = fixture((_, n) => response([call(n)]));
     const result = await new AgentRunner(
       f.routing,
@@ -282,8 +388,144 @@ describe("AgentRunner shared quota integration", () => {
     ).run({ ...request, webSearch: "disabled" });
     expect(result).toMatchObject({
       status: "failed",
-      code: "AI_AGENT_TOOL_LIMIT_EXCEEDED",
-      agentBudget: { modelTurns: 2, toolCalls: 1, outcome: "failed" },
+      code: "AI_AGENT_TURN_LIMIT_EXCEEDED",
+      agentBudget: { modelTurns: 3, toolCalls: 1, outcome: "failed" },
     });
+  });
+});
+
+describe("citation delivery preserves the user's task", () => {
+  it.each(["web", "history", "mixed"])(
+    "preserves the answer after invalid citations in %s results",
+    async (mode) => {
+      const calls = [
+        ...(mode !== "history"
+          ? [call(1, "web_search", '{"query":"fictional service"}')]
+          : []),
+        ...(mode !== "web" ? [call(2)] : []),
+      ];
+      const answer = "虚构方案：提供部署服务；公开资料需进一步核实 [M999]。";
+      const f = fixture((_, turn) =>
+        turn === 1 ? response(calls) : response([], answer),
+      );
+      // Use the production renderer with no registered sources: M999 is never valid.
+      const renderer = new MemorySession(f.memory, {} as never);
+      f.memory.session = () =>
+        Promise.resolve({
+          execute: f.execute,
+          validate: () => Promise.resolve(true),
+          render: renderer.render.bind(renderer),
+          references: () => [],
+        } as never);
+      const result = await new AgentRunner(
+        f.routing,
+        f.search,
+        undefined,
+        undefined,
+        undefined,
+        f.memory,
+      ).run(request);
+      expect(result).toMatchObject({
+        status: "succeeded",
+        text: "虚构方案：提供部署服务；公开资料需进一步核实。",
+        agentBudget: {
+          modelTurns: 3,
+          toolCalls: calls.length,
+          citationHandling: {
+            invalidResponses: 2,
+            correctionAttempts: 1,
+            finalAction: "markers-removed",
+          },
+        },
+      });
+      const correction = f.requests[2]!;
+      expect(correction.tools).toEqual(f.requests[0]?.tools);
+      expect(JSON.stringify(correction.messages)).toContain(
+        "preserving the original user task",
+      );
+      expect(JSON.stringify(correction.messages)).not.toContain(
+        "Use only relevant historical evidence",
+      );
+    },
+  );
+
+  it("delivers a corrected answer and records the correction", async () => {
+    const f = fixture((_, turn) =>
+      response([], turn === 1 ? "虚构建议 [M999]" : "虚构建议"),
+    );
+    const renderer = new MemorySession(f.memory, {} as never);
+    f.memory.session = () =>
+      Promise.resolve({
+        validate: () => Promise.resolve(true),
+        render: renderer.render.bind(renderer),
+      } as never);
+    const result = await new AgentRunner(
+      f.routing,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.memory,
+    ).run({ ...request, webSearch: "disabled" });
+    expect(result).toMatchObject({
+      status: "succeeded",
+      text: "虚构建议",
+      agentBudget: {
+        modelTurns: 2,
+        citationHandling: {
+          invalidResponses: 1,
+          correctionAttempts: 1,
+          finalAction: "corrected",
+        },
+      },
+    });
+  });
+
+  it.each(["", "[M999]", "not-json"])(
+    "fails explicitly instead of inventing a historical reply for %s",
+    async (answer) => {
+      const f = fixture(() => response([], answer));
+      const renderer = new MemorySession(f.memory, {} as never);
+      f.memory.session = () =>
+        Promise.resolve({
+          validate: () => Promise.resolve(true),
+          render: renderer.render.bind(renderer),
+        } as never);
+      const result = await new AgentRunner(
+        f.routing,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        f.memory,
+      ).run({
+        ...request,
+        webSearch: "disabled",
+        outputFormat: answer === "not-json" ? "json" : "text",
+      });
+      expect(result).toMatchObject({
+        status: "failed",
+        code: "AI_OUTPUT_FORMAT_INVALID",
+      });
+      expect(f.requests.length).toBeLessThanOrEqual(2);
+    },
+  );
+
+  it("strips markers from nested JSON strings without damaging structure or URLs", () => {
+    const input = {
+      answer: "虚构答案 [M999]",
+      items: ["来源 [M1]", 3],
+      url: "https://example.test/reference",
+    };
+    expect(
+      JSON.parse(
+        stripHistoricalCitationMarkers(JSON.stringify(input), "json")!,
+      ),
+    ).toEqual({
+      answer: "虚构答案",
+      items: ["来源", 3],
+      url: input.url,
+    });
+    expect(stripHistoricalCitationMarkers("{broken", "json")).toBeNull();
   });
 });

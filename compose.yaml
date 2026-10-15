@@ -25,7 +25,10 @@ services:
     env_file:
       - path: .env
         required: false
+    volumes:
+      - bubblepilot-memes:/app/data/memes
     environment:
+      MEME_STORAGE_PATH: /app/data/memes
       NODE_ENV: production
       APP_HOST: 0.0.0.0
       APP_PORT: 8080
@@ -88,6 +91,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  bubblepilot-memes:
   bubblepilot-postgres:
 
 configs:

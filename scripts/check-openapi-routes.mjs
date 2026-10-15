@@ -4,7 +4,13 @@ import { dirname, resolve } from "node:path";
 import { parse } from "yaml";
 
 const contractPath = "contracts/openapi.yaml";
-const applicationSource = await readFile("app/application.ts", "utf8");
+const applicationSource =
+  (await readFile("app/application.ts", "utf8")) +
+  "\n" +
+  (await readFile("modules/memes/meme-routes.ts", "utf8")).replaceAll(
+    "app.",
+    "application.",
+  );
 const openApiSource = await readFile(contractPath, "utf8");
 
 /**

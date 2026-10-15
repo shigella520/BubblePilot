@@ -1,3 +1,4 @@
+import { strictToolParameters, ToolSchemaError } from "./tool-schema.js";
 import { z } from "zod";
 
 import { hashJson, sha256 } from "../../app/canonical-json.js";
@@ -831,11 +832,29 @@ export class OpenAiCompatibleClient implements AiClient {
         durationMs: elapsed(startedAt),
       });
     }
+    let tools: AiChatRequest["tools"];
+    try {
+      tools = request.tools?.map((tool) => ({
+        ...tool,
+        parameters: strictToolParameters(tool),
+      }));
+    } catch (error) {
+      if (!(error instanceof ToolSchemaError)) throw error;
+      return failure({
+        category: "configuration",
+        code: "AI_TOOL_SCHEMA_INVALID",
+        summary: error.message,
+        retryable: false,
+        fallbackAllowed: false,
+        countsForDegrade: false,
+        durationMs: elapsed(startedAt),
+      });
+    }
     if (provider.apiKind === "chat-completions") {
       payload.messages = chatMessages(request.messages);
       payload.max_tokens = request.maxOutputTokens;
-      if (request.tools !== undefined) {
-        payload.tools = request.tools.map((tool) => ({
+      if (tools !== undefined) {
+        payload.tools = tools.map((tool) => ({
           type: "function",
           function: {
             name: tool.name,
@@ -860,8 +879,8 @@ export class OpenAiCompatibleClient implements AiClient {
         if (request.webSearch === "required") {
           payload.tool_choice = "required";
         }
-      } else if (request.tools !== undefined) {
-        payload.tools = request.tools.map((tool) => ({
+      } else if (tools !== undefined) {
+        payload.tools = tools.map((tool) => ({
           type: "function",
           name: tool.name,
           description: tool.description,
@@ -887,6 +906,17 @@ export class OpenAiCompatibleClient implements AiClient {
       requestBody,
       requestTrace,
     );
+    initialDiagnostics.imageInputs = {
+      version: 1,
+      dispatched: false,
+      images: request.messages.flatMap((m) =>
+        typeof m.content === "string"
+          ? []
+          : m.content.flatMap((p) =>
+              p.type === "image" && p.imageInput ? [p.imageInput] : [],
+            ),
+      ),
+    };
     const secret = resolveProviderSecret(provider, this.secrets);
     if (!isProviderSecretConfigured(provider, this.secrets)) {
       return failure({
@@ -914,6 +944,7 @@ export class OpenAiCompatibleClient implements AiClient {
       provider.requestTimeoutMs,
     );
     try {
+      initialDiagnostics.imageInputs.dispatched = true;
       const response = await this.fetchImplementation(endpoint, {
         method: "POST",
         headers: {

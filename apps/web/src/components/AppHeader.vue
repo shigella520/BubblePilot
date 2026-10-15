@@ -57,6 +57,7 @@ async function logout() {
       <RouterLink to="/"><LayoutDashboard :size="16" />概览</RouterLink>
       <RouterLink to="/messages"><MessagesSquare :size="16" />消息</RouterLink>
       <RouterLink to="/automation"><Boxes :size="16" />自动化</RouterLink>
+      <RouterLink to="/memes"><Boxes :size="16" />表情包</RouterLink>
       <RouterLink to="/ai"><Bot :size="16" />AI 服务</RouterLink>
       <RouterLink to="/executions"
         ><ShieldCheck :size="16" />执行与审计</RouterLink

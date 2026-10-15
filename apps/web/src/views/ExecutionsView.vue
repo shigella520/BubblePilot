@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import ExecutionImageResult from "../components/ExecutionImageResult.vue";
+import { memeToolLabel } from "../utils/meme-tool-diagnostics";
+import MemeDeliveries from "../components/MemeDeliveries.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
 import MemorySources from "../components/MemorySources.vue";
@@ -35,6 +38,34 @@ import { useCursorPager } from "../composables/useCursorPager";
 import { apiPageRequest, apiRequest, errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
 
+function scrollToImage(id: string) {
+  document
+    .getElementById(`image-input-${id}`)
+    ?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function imageToolLabel(details: Record<string, unknown> | null) {
+  if (!details?.status) return "未记录详细结果";
+  if (details.status === "loaded") return "图片已加载（不代表模型已识别）";
+  if (details.status === "already-loaded") return "复用已加载图片";
+  const reasons: Record<string, string> = {
+    "image-budget": "图片额度不足",
+    "tool-output": "工具内容预算不足",
+    "tool-calls": "工具次数用尽",
+    "tool-duration": "工具时间用尽",
+    "image-capability-unavailable": "当前路由无可用看图能力",
+    "source-unavailable": "来源权限失效或已清理",
+    "reference-unavailable": "图片引用不可用",
+    "invalid-arguments": "参数错误",
+    "attachment-missing": "附件已缺失",
+    "unsupported-image": "不支持的图片格式",
+    "image-too-large": "图片超过大小限制",
+    "download-timeout": "图片下载超时",
+    "download-failed": "图片下载失败",
+  };
+  const reason =
+    typeof details.reason === "string" ? details.reason : "unavailable";
+  return `图片未加载：${reasons[reason] ?? reason}`;
+}
 interface Execution {
   id: string;
   providerChatId: string | null;
@@ -108,6 +139,7 @@ interface ExecutionDetail extends Execution {
     outputSummary: unknown;
   }>;
   deliveries: Array<{
+    kind?: "text" | "meme";
     id: string;
     nodeId: string;
     status: string;
@@ -116,7 +148,7 @@ interface ExecutionDetail extends Execution {
   }>;
   aiProviderAttempts: Array<{
     id: string;
-    purpose: "workflow-reply" | "image-summary";
+    purpose: "workflow-reply" | "image-summary" | "meme-summary";
     routeTraceId: string | null;
     routePhase: AiRouteTrace["phase"];
     nodeId: string;
@@ -140,6 +172,11 @@ interface ExecutionDetail extends Execution {
     rawResponse?: { status: "available" | "unavailable" };
     rawRequest: { status: "available" | "unavailable" };
     diagnostics: {
+      imageInputs?: {
+        version: 1;
+        dispatched: boolean;
+        images: { imageInputId: string; contentHash: string }[];
+      } | null;
       clientRequestId: string | null;
       providerRequestId: string | null;
       httpStatus: number | null;
@@ -208,6 +245,16 @@ interface ExecutionDetail extends Execution {
     createdAt: string;
   }>;
   aiImageInputs: Array<{
+    diagnostics?: {
+      imageRef: string;
+      messageId: string;
+      trigger: string;
+      toolCallId: string | null;
+      round: number;
+      width: number | null;
+      height: number | null;
+      contentHash: string;
+    } | null;
     id: string;
     nodeId: string;
     source: "attachment" | "link-preview";
@@ -498,6 +545,7 @@ function cacheDivergenceReasonLabel(reason: string | null): string {
 function providerAttemptPurpose(
   item: ExecutionDetail["aiProviderAttempts"][number],
 ) {
+  if (item.purpose === "meme-summary") return "表情包摘要";
   if (item.purpose === "image-summary") return "图片摘要";
   const nodeType = detail.value?.nodes.find(
     (node) => node.nodeId === item.nodeId,
@@ -702,6 +750,34 @@ async function loadSelected() {
   const executionId = route.query.executionId;
   if (typeof executionId === "string") await inspect(executionId);
 }
+async function closeRecoveryQueue() {
+  if (!session.sensitiveActive || recoveryBusy.value || !recoveryOnly.value)
+    return;
+  if (
+    !window.confirm(
+      "确认批量关闭整个恢复队列中的待恢复任务？范围包含所有分页中的等待重试、失败和死信记录；正在执行的任务不受影响。关闭后停止重试、不重发消息，保留执行历史。发送结果未知的记录也会关闭并退出待处理告警，但不代表发送成功，请先核对聊天。",
+    )
+  )
+    return;
+  recoveryBusy.value = true;
+  message.value = "";
+  messageIsError.value = false;
+  try {
+    const result = await apiRequest<{ closedCount: number }>(
+      "/api/v1/executions/recovery/close",
+      { method: "POST" },
+    );
+    clearDetail();
+    const refreshed = await executionPager.first().catch(() => false);
+    message.value = `已批量关闭 ${result.closedCount} 条任务。${refreshed ? "" : "列表刷新失败，请手动刷新。"}`;
+  } catch (cause) {
+    message.value = errorMessage(cause);
+    messageIsError.value = true;
+  } finally {
+    recoveryBusy.value = false;
+  }
+}
+
 async function recover(action: "retry" | "close") {
   if (detail.value === null || !session.sensitiveActive || recoveryBusy.value)
     return;
@@ -1145,6 +1221,25 @@ function contextSnapshotValue(
             </p>
           </div>
           <div class="row-actions">
+            <button
+              v-if="recoveryOnly"
+              class="button secondary"
+              :disabled="
+                !session.sensitiveActive ||
+                recoveryBusy ||
+                busy ||
+                !executions.length
+              "
+              :aria-busy="recoveryBusy"
+              :title="
+                session.sensitiveActive
+                  ? '关闭整个恢复队列，包含所有分页'
+                  : '请先在顶栏解锁敏感操作'
+              "
+              @click="closeRecoveryQueue"
+            >
+              <XCircle :size="16" />{{ recoveryBusy ? "关闭中…" : "批量关闭" }}
+            </button>
             <button
               v-if="unknownOnly || recoveryOnly"
               class="button secondary"
@@ -1622,6 +1717,22 @@ function contextSnapshotValue(
               >
                 <Route :size="17" />
                 <div>
+                  <p v-if="item.diagnostics?.imageInputs">
+                    {{
+                      item.diagnostics.imageInputs.dispatched
+                        ? "已发起请求"
+                        : "未发起请求"
+                    }}
+                    · 图片 {{ item.diagnostics.imageInputs.images.length }} 张
+                    <a
+                      v-for="image in item.diagnostics.imageInputs.images"
+                      :key="image.imageInputId"
+                      :href="`#image-input-${image.imageInputId}`"
+                      @click.prevent="scrollToImage(image.imageInputId)"
+                      >查看关联图片
+                    </a>
+                  </p>
+                  <p v-else>未记录图片关联信息</p>
                   <div class="provider-attempt-heading">
                     <strong>{{ item.providerName }} · {{ item.model }}</strong>
                     <span class="provider-attempt-purpose">{{
@@ -1954,12 +2065,19 @@ function contextSnapshotValue(
               <h3>AI 图片输入</h3>
               <article
                 v-for="item in detail.aiImageInputs"
+                :id="`image-input-${item.id}`"
                 :key="item.id"
                 class="trace-item"
               >
                 <Image :size="17" />
                 <div>
                   <strong>{{ item.source }} · {{ item.status }}</strong>
+                  <ExecutionImageResult
+                    :execution-id="detail.id"
+                    :image-id="item.id"
+                    :diagnostic="item.diagnostics"
+                    :attempts="detail.aiProviderAttempts"
+                  />
                   <p>
                     {{ item.durationMs }} ms · {{ item.bytes ?? "—" }} B ·
                     {{
@@ -1999,7 +2117,18 @@ function contextSnapshotValue(
                 <Search :size="17" />
                 <div>
                   <strong>{{ item.toolName }} · {{ item.status }}</strong>
-                  <p>
+                  <p v-if="item.toolName === 'view_chat_image'">
+                    {{ imageToolLabel(item.responseDetails) }} ·
+                    {{ item.durationMs }} ms
+                    <span v-if="item.responseDetails?.image_ref">
+                      · {{ item.responseDetails.image_ref }}</span
+                    >
+                  </p>
+                  <p v-if="memeToolLabel(item.toolName, item.responseDetails)">
+                    {{ item.durationMs }} ms ·
+                    {{ memeToolLabel(item.toolName, item.responseDetails) }}
+                  </p>
+                  <p v-else>
                     {{ item.durationMs }} ms · 结果
                     {{ item.resultCount ?? "—" }} 条
                   </p>
@@ -2055,6 +2184,10 @@ function contextSnapshotValue(
             </section>
             <section id="execution-outbound">
               <h3>出站发送</h3>
+              <MemeDeliveries
+                :execution-id="detail.id"
+                :sensitive-active="session.sensitiveActive"
+              />
               <p
                 v-if="
                   detail.status === 'closed' &&
@@ -2065,7 +2198,9 @@ function contextSnapshotValue(
                 执行已人工关闭；发送结果仍未知，不再自动重试，也不再计入待处理告警。
               </p>
               <article
-                v-for="item in detail.deliveries"
+                v-for="item in detail.deliveries.filter(
+                  (delivery) => delivery.kind !== 'meme',
+                )"
                 :key="item.id"
                 class="trace-item"
               >

@@ -6,6 +6,646 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/executions/{executionId}/image-inputs/{imageInputId}/source:
+    get:
+      operationId: viewExecutionImageSource
+      description: 管理员且敏感解锁后读取图片来源原文；复核来源范围与清理状态，响应 no-store。
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+        - name: imageInputId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: 当前可读取的来源消息 ID、时间、发送者及正文。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/executions/{executionId}/image-inputs/{imageInputId}/preview:
+    get:
+      operationId: previewExecutionImage
+      description: 管理员且敏感解锁后查看当时图片；重新校验来源授权、清理状态和内容哈希。no-store，不保存永久图片副本。
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+        - name: imageInputId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: 经校验的兼容图片版本
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/gif: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/meme-collections:
+    get:
+      operationId: listMemeCollections
+      description: 按名称列出合集、封面与未删除素材数量；停用素材计数。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/MemeCollection"
+                      total:
+                        type: integer
+                      unclassified:
+                        type: integer
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createMemeCollection
+      description: 新建合集；管理员认证和审计，无敏感解锁。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemeCollectionWrite"
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/MemeCollection"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/meme-collections/{id}:
+    put:
+      operationId: editMemeCollection
+      description: 修改合集；指定封面必须为当前成员。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: &a1
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/MemeCollectionWrite"
+                - required:
+                    - expectedVersion
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/MemeCollection"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteMemeCollection
+      description: 删除分类并将成员移至未分类，素材与启用状态保留。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: *a1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - expectedVersion
+              properties:
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      deleted:
+                        type: boolean
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/memes/selection:
+    post:
+      operationId: selectMemeAssets
+      description: 固定当前筛选结果的 ID 与版本；超过5000拒绝，不能当作部分全选。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemeFilter"
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        maxItems: 5000
+                        items:
+                          $ref: "#/components/schemas/MemeSelectionItem"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/memes/batch:
+    post:
+      operationId: batchMemeAssets
+      description: 每批最多100张，按版本逐项移动、启停或逻辑删除；同批不得重复ID。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemeBatchRequest"
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/MemeBatchResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/meme-deliveries/{id}/thumbnail:
+    get:
+      operationId: getMemeDeliveryThumbnail
+      description: 已授权管理员读取投递所引用的素材缩略图，素材逻辑删除后仍可读取尚未回收的文件。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 静态 PNG 缩略图。
+        "404":
+          $ref: "#/components/responses/Error"
+  /api/v1/memes:
+    get:
+      operationId: getapiv1memes
+      parameters:
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [newest, oldest, most-used, least-used, recently-used]
+            default: newest
+      description: 分页查询表情包；query、enabled、status、collection（all/unclassified/UUID）、offset、limit。素材返回 collectionId、collectionName、usageCount（累计成功确认次数）、lastUsedAt（可空确认时间）。列表和详情均包含统计，升级前已清理投递无法补算。
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: postapiv1memes
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, name]
+              properties:
+                collectionId:
+                  {
+                    type: string,
+                    description: 合集UUID；省略或空字符串表示未分类，重复文件不移动已有素材。,
+                  }
+                file: { type: string, format: binary }
+                name: { type: string, minLength: 1, maxLength: 120 }
+                description: { type: string, maxLength: 2000 }
+                tags:
+                  { type: string, description: JSON 字符串数组，最多20个标签。 }
+      description: 上传单张图片（multipart，file/name/description/tags），按内容哈希去重
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/memes/{id}:
+    get:
+      operationId: getapiv1memesid
+      description: 读取素材元数据
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putapiv1memesid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, name]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                name: { type: string, minLength: 1, maxLength: 120 }
+                description: { type: string, maxLength: 2000, default: "" }
+                tags:
+                  type: array
+                  maxItems: 20
+                  items: { type: string, minLength: 1, maxLength: 40 }
+                collectionId:
+                  {
+                    type: [string, "null"],
+                    format: uuid,
+                    description: 省略保留归属；null移入未分类。,
+                  }
+                summary: { type: string, maxLength: 2400 }
+                enabled: { type: boolean }
+      description: 修改素材，expectedVersion 并发校验
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteapiv1memesid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+      description: 逻辑删除素材，expectedVersion 并发校验
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/memes/{id}/thumbnail:
+    get:
+      operationId: getapiv1memesidthumbnail
+      description: 鉴权读取 PNG 首帧缩略图
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/memes/{id}/file:
+    get:
+      operationId: getapiv1memesidfile
+      description: 鉴权读取原文件
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/memes/{id}/summary:
+    post:
+      operationId: postapiv1memesidsummary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                candidate: { type: boolean, default: true }
+      description: 提交摘要任务，expectedVersion 必填；candidate 默认 true
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/memes/{id}/summary/adopt:
+    post:
+      operationId: postapiv1memesidsummaryadopt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+      description: 采用候选摘要，expectedVersion 必填
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/meme-deliveries:
+    get:
+      operationId: getapiv1memedeliveries
+      description: 查询表情投递；executionId 可选，未提供时返回未关闭待处理项
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/meme-deliveries/{id}/retry:
+    post:
+      operationId: postapiv1memedeliveriesidretry
+      description: 敏感验证：仅重试明确失败且允许重试的图片
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/meme-deliveries/{id}/close:
+    post:
+      operationId: postapiv1memedeliveriesidclose
+      description: 敏感验证：关闭图片跟进，保留原始结果
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 操作成功，返回 data；图片接口返回图片字节。
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/v1/workflows/{workflowId}/bot-identity:
     get:
       operationId: getapiv1workflowsworkflowIdbotidentity
@@ -2170,7 +2810,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: 执行、节点尝试、含用途和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；接口不返回完整 Prompt、聊天正文、AI 输出、Secret、原图或原始响应体。
+          description: 执行、节点尝试、含用途和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；接口不返回完整 Prompt、聊天正文、AI 输出、Secret、原图或原始响应体。 表情工具可选 version=1、kind=meme 诊断描述候选数量、截断、选择或受控失败；select_meme 的 resultCount 为 null，选择成功不代表已发送。旧诊断缺失不反推结果。
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/ai-attempts/{attemptId}/raw-request:
@@ -2232,6 +2872,35 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
         "409":
+          $ref: "#/components/responses/Error"
+  /api/v1/executions/recovery/close:
+    post:
+      operationId: closeRecoveryQueue
+      description: 敏感操作并审计；原子关闭请求执行时整个恢复队列的 retrying、failed、dead-lettered 记录，不受分页限制。保留轨迹及 unknown 出站结果，不重发；运行中任务不受影响。重复操作可返回零条。
+      security:
+        - bearerAuth: []
+        - sessionAuth: []
+      responses:
+        "200":
+          description: 返回本次实际关闭条数。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [closedCount]
+                    properties:
+                      closedCount:
+                        type: integer
+                        minimum: 0
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "503":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/close:
     post:
@@ -2327,6 +2996,148 @@ components:
         type: integer
         minimum: 1
   schemas:
+    MemeCollection:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - version
+        - count
+        - coverMemeId
+        - effectiveCoverMemeId
+      properties:
+        id: &a2
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        version: &a1
+          type: integer
+          minimum: 1
+        count:
+          type: integer
+          minimum: 0
+        coverMemeId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        effectiveCoverMemeId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+    MemeCollectionWrite:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: 去首尾空白、不重名，不可使用全部表情或未分类
+        description:
+          type: string
+          maxLength: 2000
+          default: ""
+        coverMemeId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        expectedVersion: *a1
+    MemeFilter:
+      type: object
+      properties:
+        query:
+          type: string
+          maxLength: 200
+        enabled:
+          type: boolean
+        status:
+          type: string
+          enum:
+            - pending
+            - processing
+            - succeeded
+            - failed
+        collection:
+          type: string
+          default: all
+          description: all、unclassified 或合集 UUID
+    MemeSelectionItem:
+      type: object
+      required:
+        - id
+        - expectedVersion
+      properties:
+        id: *a2
+        expectedVersion: *a1
+    MemeBatchAction:
+      oneOf:
+        - type: object
+          required:
+            - type
+            - collectionId
+          properties:
+            type:
+              const: move
+            collectionId:
+              type:
+                - string
+                - "null"
+              format: uuid
+        - type: object
+          required:
+            - type
+            - enabled
+          properties:
+            type:
+              const: enable
+            enabled:
+              type: boolean
+        - type: object
+          required:
+            - type
+          properties:
+            type:
+              const: delete
+    MemeBatchRequest:
+      type: object
+      required:
+        - items
+        - action
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/MemeSelectionItem"
+        action:
+          $ref: "#/components/schemas/MemeBatchAction"
+    MemeBatchResult:
+      type: object
+      required:
+        - id
+        - status
+      properties:
+        id: *a2
+        status:
+          type: string
+          enum:
+            - succeeded
+            - conflict
+            - missing
+        version: *a1
     MemorySettingsInput:
       type: object
       required:

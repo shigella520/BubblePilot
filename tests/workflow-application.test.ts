@@ -1019,6 +1019,73 @@ describe("workflow application", () => {
     ]);
   });
 
+  it("closes the entire recovery queue, preserves unknown delivery evidence and excludes active/completed tasks", async () => {
+    gateway.results.push({
+      status: "unknown",
+      code: "BLUEBUBBLES_REPLY_TIMEOUT",
+      summary: "Fictional timeout.",
+    });
+    await configureWorkflow();
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+      payload: newMessageWebhook({ text: "/ping batch" }),
+    });
+    const source = [...workflows.executions.values()][0]!;
+    for (let index = 0; index < 15; index++) {
+      const id = `fictional-batch-${index}`;
+      workflows.executions.set(id, {
+        ...structuredClone(source),
+        id,
+        status: index % 2 ? "failed" : "retrying",
+        nextRetryAt: new Date().toISOString(),
+      });
+    }
+    for (const status of [
+      "running",
+      "succeeded",
+      "closed",
+      "created",
+    ] as const) {
+      workflows.executions.set(`fictional-${status}`, {
+        ...structuredClone(source),
+        id: `fictional-${status}`,
+        status,
+      });
+    }
+    const request = {
+      method: "POST" as const,
+      url: "/api/v1/executions/recovery/close",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    };
+    const closed = await application.inject(request);
+    expect(closed.statusCode).toBe(200);
+    expect(closed.json()).toEqual({ data: { closedCount: 16 } });
+    expect((await application.inject(request)).json()).toEqual({
+      data: { closedCount: 0 },
+    });
+    expect(gateway.commands).toHaveLength(1);
+    expect(await workflows.getExecution(source.id)).toMatchObject({
+      status: "closed",
+      deliveries: [{ status: "unknown" }],
+    });
+    for (let index = 0; index < 15; index++) {
+      expect(
+        workflows.executions.get(`fictional-batch-${index}`),
+      ).toMatchObject({
+        status: "closed",
+        nextRetryAt: null,
+        currentNodeId: null,
+      });
+    }
+    for (const status of ["running", "succeeded", "created"]) {
+      expect(workflows.executions.get(`fictional-${status}`)?.status).toBe(
+        status,
+      );
+    }
+  });
+
   it("dead-letters an unknown reply result without sending again", async () => {
     gateway.results.push({
       status: "unknown",
@@ -1279,7 +1346,7 @@ describe("workflow application", () => {
 
     const closed = await application.inject({
       method: "POST",
-      url: `/api/v1/executions/${executionId}/close`,
+      url: "/api/v1/executions/recovery/close",
       headers: { authorization: `Bearer ${apiAccessToken}` },
     });
     expect(closed.statusCode).toBe(200);

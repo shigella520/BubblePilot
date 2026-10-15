@@ -41,6 +41,7 @@ const environmentSchema = z
     APP_HOST: z.string().min(1).default("0.0.0.0"),
     APP_PORT: z.coerce.number().int().min(1).max(65_535).default(8080),
     DATABASE_URL: z.string().min(1),
+    MEME_STORAGE_PATH: z.string().min(1).default("./data/memes"),
     DATABASE_QUERY_TIMEOUT_MS: z.coerce
       .number()
       .int()
@@ -164,6 +165,7 @@ export interface AppConfig {
   nodeEnv: "development" | "test" | "production";
   host: string;
   port: number;
+  memeStoragePath?: string;
   databaseUrl: string;
   databaseQueryTimeoutMs: number;
   apiAccessToken: string;
@@ -216,6 +218,7 @@ export function loadConfig(
     nodeEnv: parsed.NODE_ENV,
     host: parsed.APP_HOST,
     port: parsed.APP_PORT,
+    memeStoragePath: parsed.MEME_STORAGE_PATH,
     databaseUrl: parsed.DATABASE_URL,
     databaseQueryTimeoutMs: parsed.DATABASE_QUERY_TIMEOUT_MS,
     apiAccessToken: parsed.API_ACCESS_TOKEN,

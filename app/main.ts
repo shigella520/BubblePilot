@@ -1,3 +1,8 @@
+import { ChatImageSourceRepository } from "../modules/ai/chat-image-source.js";
+import { MemeDeliveryService } from "../modules/memes/meme-delivery-service.js";
+import { PostgresMemeRepository } from "../modules/memes/postgres-meme-repository.js";
+import { LocalMemeFileStore } from "../modules/memes/file-store.js";
+import { MemeService } from "../modules/memes/meme-service.js";
 import { BotIdentityService } from "../modules/identity/bot-identity-service.js";
 import { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
 import { PostgresAgentSettingsRepository } from "../modules/ai/postgres-agent-settings-repository.js";
@@ -166,6 +171,16 @@ const aiManagement = new AiManagementService(
 const memoryService = new MemoryService(
   new MemoryRepository(config.databaseUrl, config.settingsEncryptionKey),
 );
+const memeRepository = new PostgresMemeRepository(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
+const memeService = new MemeService(
+  memeRepository,
+  new LocalMemeFileStore(config.memeStoragePath ?? "./data/memes"),
+  aiRepository,
+  aiRouting,
+);
 const aiAgent = new AgentRunner(
   aiRouting,
   webSearchTool,
@@ -174,6 +189,7 @@ const aiAgent = new AgentRunner(
   undefined,
   memoryService,
   agentSettings,
+  memeRepository,
 );
 const imageSummaryRepository = new PostgresImageSummaryRepository(
   config.databaseUrl,
@@ -212,6 +228,8 @@ const nativeImageInput = new NativeImageInputService(
   imageInputSettings,
   blueBubblesSettings,
   aiRepository,
+  undefined,
+  new ChatImageSourceRepository(memoryService.repository.pool),
 );
 const imageSummaryWorker = new ImageSummaryWorker(
   imageSummaryRepository,
@@ -222,12 +240,19 @@ const imageSummaryWorker = new ImageSummaryWorker(
     nativeImageInput,
   ),
 );
+const memeDelivery = new MemeDeliveryService(
+  memeRepository.pool,
+  memeService,
+  replyGateway,
+  new SettingsCipher(config.settingsEncryptionKey),
+);
 const workflowEngine = new WorkflowEngine(
   workflowRepository,
   createDefaultNodeRegistry(workflowRepository, replyGateway, {
     archive: repository,
     aiRouting,
     aiAgent,
+    memeDelivery,
     imageInput: nativeImageInput,
     conversationContext,
     contextSettings,
@@ -244,6 +269,8 @@ const workflowDispatcher = new InProcessWorkflowExecutionDispatcher(
 );
 const application = buildApplication(config, repository, {
   auth: authService,
+  memes: memeService,
+  memeDelivery,
   memory: memoryService,
   botIdentity,
   ai: {

@@ -625,7 +625,7 @@ export class InMemoryAiRepository implements AiRepository {
   recordImageInput(input: AiImageInputRecordInput): Promise<void> {
     this.imageInputs.push({
       ...cloned(input),
-      id: randomUUID(),
+      id: input.id ?? randomUUID(),
       createdAt: this.timestamp(),
     });
     return Promise.resolve();
