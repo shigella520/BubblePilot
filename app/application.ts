@@ -2724,7 +2724,7 @@ export function buildApplication(
 
     application.post(
       "/api/v1/workflows/import",
-      { preHandler: requireSensitive("workflow.import", "workflow") },
+      { preHandler: requireAuditedAdmin("workflow.import", "workflow") },
       async (request, reply) => {
         const body = workflowManifestImportBodySchema.parse(request.body);
         const catalog = await workflowBindingCatalog();
