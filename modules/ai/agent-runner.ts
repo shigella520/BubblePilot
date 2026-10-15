@@ -1,3 +1,4 @@
+import { restoreToolArguments } from "./tool-schema.js";
 import { chatImageProtocol } from "./chat-image-session.js";
 import { memeProtocol } from "../memes/meme-protocol.js";
 import { memeDiagnostics } from "../memes/meme-diagnostics.js";
@@ -36,7 +37,7 @@ import type { WebSearchSettingsService } from "./web-search-settings-service.js"
 
 export type AgentRunLimits = AgentRuntimeSettings;
 
-const webSearchDefinition: AiToolDefinition = {
+export const webSearchDefinition: AiToolDefinition = {
   name: "web_search",
   description:
     "Search the public web when the answer depends on current, recent, changing, or otherwise unverified information. Keep queries short and focused. Do not use site: unless the user requires results from that exact website; if a search returns no results, retry once with fewer constraints.",
@@ -542,8 +543,17 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         content: result.text,
         toolCalls: result.toolCalls,
       });
-      for (const call of result.toolCalls) {
-        const registered = registry.get(call.name);
+      for (const originalCall of result.toolCalls) {
+        const registered = registry.get(originalCall.name);
+        const call = registered
+          ? {
+              ...originalCall,
+              arguments: restoreToolArguments(
+                registered.definition.parameters,
+                originalCall.arguments,
+              ),
+            }
+          : originalCall;
         const isMemory = registered?.diagnostics === "metadata-only";
         const isMeme =
           call.name === "search_memes" || call.name === "select_meme";

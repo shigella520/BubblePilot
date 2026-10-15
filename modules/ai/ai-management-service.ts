@@ -1,3 +1,4 @@
+import type { AiToolDefinition } from "./ai-types.js";
 import type { AiClient } from "./openai-compatible-client.js";
 import type { WebSearchTool } from "./web-search-tool.js";
 import type { ImageInputSettingsService } from "./image-input-settings-service.js";
@@ -93,6 +94,16 @@ function imageProbeAnswerVerified(result: AiCallResult): boolean {
   ];
   return colors.filter(Boolean).length === 3;
 }
+
+export const capabilityProbeTool: AiToolDefinition = {
+  name: "capability_probe",
+  description: "A harmless tool used only to verify function calling.",
+  parameters: {
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  },
+};
 
 async function probeWithRetry(
   client: AiClient,
@@ -254,18 +265,7 @@ export class AiManagementService {
         ],
         maxOutputTokens: 128,
         temperature: 0,
-        tools: [
-          {
-            name: "capability_probe",
-            description:
-              "A harmless tool used only to verify function calling.",
-            parameters: {
-              type: "object",
-              properties: {},
-              additionalProperties: false,
-            },
-          },
-        ],
+        tools: [capabilityProbeTool],
         toolChoice: "required",
       });
       totalDurationMs += functionProbe.durationMs;

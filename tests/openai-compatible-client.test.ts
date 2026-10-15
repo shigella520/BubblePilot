@@ -1,3 +1,7 @@
+import {
+  allToolDefinitions,
+  assertStrictSchema,
+} from "./support/tool-schema-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { AiRawRequestStore } from "../modules/ai/ai-raw-request-store.js";
@@ -31,6 +35,97 @@ const request = {
 };
 
 describe("OpenAiCompatibleClient", () => {
+  it.each(["chat-completions", "responses"] as const)(
+    "sends all tools through strict %s schema validation",
+    async (apiKind) => {
+      const definitions = allToolDefinitions();
+      const rawSearch = definitions.find((t) => t.name === "search_memes")!;
+      // This is the original upstream rejection: limit is declared but not required.
+      expect(() => assertStrictSchema(rawSearch.parameters)).toThrow();
+      let accepted = 0;
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+        const body = JSON.parse(
+          typeof init?.body === "string" ? init.body : "null",
+        ) as {
+          tools: Array<{
+            strict?: boolean;
+            parameters?: unknown;
+            function?: { strict: boolean; parameters: unknown };
+          }>;
+        };
+        for (const entry of body.tools) {
+          const definition = entry.function ?? entry;
+          expect(definition.strict).toBe(true);
+          assertStrictSchema(definition.parameters);
+          accepted++;
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              apiKind === "responses"
+                ? { output_text: "OK" }
+                : {
+                    choices: [
+                      { message: { content: "OK" }, finish_reason: "stop" },
+                    ],
+                  },
+            ),
+          ),
+        );
+      });
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional-secret" }),
+        fetcher,
+      );
+      expect(
+        await client.call(
+          { ...provider, apiKind },
+          { ...request, tools: definitions },
+        ),
+      ).toMatchObject({ status: "succeeded" });
+      expect(accepted).toBe(definitions.length);
+      expect(rawSearch.parameters.required).toEqual(["query"]);
+    },
+  );
+
+  it.each(["chat-completions", "responses"] as const)(
+    "rejects unsupported %s tool schemas locally without a network request",
+    async (apiKind) => {
+      const fetcher = vi.fn<typeof fetch>();
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional-secret" }),
+        fetcher,
+      );
+      expect(
+        await client.call(
+          { ...provider, apiKind },
+          {
+            ...request,
+            tools: [
+              {
+                name: "fictional",
+                description: "test",
+                parameters: {
+                  type: "object",
+                  properties: { x: { $ref: "#/missing" } },
+                },
+              },
+            ],
+          },
+        ),
+      ).toMatchObject({
+        status: "failed",
+        category: "configuration",
+        code: "AI_TOOL_SCHEMA_INVALID",
+        retryable: false,
+        fallbackAllowed: false,
+        countsForDegrade: false,
+        summary: "Invalid strict tool schema: fictional at /properties/x/$ref",
+      });
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["chat-completions", "responses"] as const)(
     "carries tool images and records actual %s dispatch without serializing metadata",
     async (apiKind) => {

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/unbound-method -- Repository methods are Vitest spies. */
 import type { AiRepository } from "../modules/ai/ai-repository.js";
 import { it, expect, vi } from "vitest";
 import { AgentRunner } from "../modules/ai/agent-runner.js";
@@ -157,7 +158,11 @@ it("injects guidance only when enabled and records distinct accepted outcomes", 
               name: "select_meme",
               arguments: JSON.stringify({ id: asset.id }),
             },
-            { id: "2", name: "search_memes", arguments: '{"query":""}' },
+            {
+              id: "2",
+              name: "search_memes",
+              arguments: '{"query":"","limit":null}',
+            },
             { id: "3", name: "search_memes", arguments: '{"query":""}' },
             {
               id: "4",
@@ -199,6 +204,12 @@ it("injects guidance only when enabled and records distinct accepted outcomes", 
         "selected",
         "cleared",
       ]);
+      expect(records[1]?.queryHash).toBe(records[2]?.queryHash);
+      expect(library.search).toHaveBeenCalledWith("", 5);
+      expect(
+        execute.mock.calls[1]?.[0].messages.find((m) => m.role === "assistant")
+          ?.toolCalls?.[1]?.arguments,
+      ).toBe('{"query":"","limit":null}');
       expect(records.map((r) => r.resultCount)).toEqual([
         null,
         1,
