@@ -157,7 +157,7 @@ onMounted(load);
       message
     }}</DismissibleMessage>
     <section class="metric-grid">
-      <RouterLink to="/messages" class="metric-card tone-blue"
+      <RouterLink to="/messages#monitoring" class="metric-card tone-blue"
         ><MessagesSquare :size="23" /><span>监听中的聊天</span
         ><strong>{{ counts.chats }}</strong
         ><em>搜索与监听范围</em></RouterLink
@@ -167,12 +167,12 @@ onMounted(load);
         ><strong>{{ counts.workflows }}</strong
         ><em>版本、触发器与发布</em></RouterLink
       >
-      <RouterLink to="/ai" class="metric-card tone-lilac"
+      <RouterLink to="/ai#providers" class="metric-card tone-lilac"
         ><Bot :size="23" /><span>AI Provider</span
         ><strong>{{ counts.providers }}</strong
         ><em>Retry、Fallback 与降级</em></RouterLink
       >
-      <RouterLink to="/executions" class="metric-card tone-mint"
+      <RouterLink to="/executions#executions" class="metric-card tone-mint"
         ><PlayCircle :size="23" /><span>最近执行</span
         ><strong>{{ counts.executions }}</strong
         ><em>节点与发送轨迹</em></RouterLink
@@ -244,7 +244,7 @@ onMounted(load);
       </div>
       <div v-if="operations" class="runtime-summary-grid">
         <RouterLink
-          to="/executions?attention=recovery"
+          to="/executions?attention=recovery#executions"
           class="runtime-summary-item"
         >
           <span>死信 / 等待重试</span>
@@ -255,7 +255,7 @@ onMounted(load);
           <em>卡住 {{ operations.workflow.executions.staleRetrying }}</em>
         </RouterLink>
         <RouterLink
-          to="/executions?attention=unknown-outbound"
+          to="/executions?attention=unknown-outbound#executions"
           class="runtime-summary-item"
         >
           <span>未知出站结果</span>
@@ -273,7 +273,7 @@ onMounted(load);
             {{ operations.executionGate.queueCapacity }}</em
           >
         </div>
-        <RouterLink to="/ai" class="runtime-summary-item">
+        <RouterLink to="/ai#providers" class="runtime-summary-item">
           <span>降级 Provider</span>
           <strong>{{ operations.aiProviders.degraded }}</strong>
           <em>共 {{ operations.aiProviders.configured }} 个 Provider</em>
@@ -304,7 +304,9 @@ onMounted(load);
           <p class="card-kicker">RECENT RUNS</p>
           <h2>最近执行</h2>
         </div>
-        <RouterLink class="state-badge" to="/executions">查看全部</RouterLink>
+        <RouterLink class="state-badge" to="/executions#executions"
+          >查看全部</RouterLink
+        >
       </div>
       <div class="table-shell">
         <table>

@@ -8,7 +8,7 @@ const props = defineProps<{ workflowId: string }>();
 const router = useRouter();
 async function openChatManagement() {
   close();
-  await router.push("/messages");
+  await router.push("/messages#monitoring");
 }
 
 interface Identity {

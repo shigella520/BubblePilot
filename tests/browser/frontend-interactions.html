@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>虚构前端交互验收</title>
+  </head>
+  <body>
+    <pre id="results">运行中</pre>
+    <div id="fixture"></div>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h, nextTick } from "vue";
+      import { createRouter, createWebHashHistory } from "vue-router";
+      import Navigation from "/src/components/SectionNavigation.vue";
+      import { isCanvasShortcut } from "/src/utils/keyboard-scope.ts";
+      import { pageScrollPosition } from "/src/utils/scroll-policy.ts";
+      import "/src/styles/base.css";
+      const results = [];
+      function check(label, condition) {
+        results.push(`${condition ? "PASS" : "FAIL"} ${label}`);
+        document.querySelector("#results").textContent = results.join("\n");
+      }
+      const fixture = document.querySelector("#fixture");
+      let accepted;
+      fixture.addEventListener(
+        "keydown",
+        (e) => (accepted = isCanvasShortcut(e)),
+      );
+      for (const markup of [
+        "<textarea></textarea>",
+        "<input>",
+        "<select></select>",
+        '<div contenteditable="true"><span>文字</span></div>',
+        '<div role="dialog"><span>弹窗</span></div>',
+        "<button>按钮</button>",
+      ]) {
+        fixture.innerHTML = markup;
+        for (const key of ["z", "c", "v", "Backspace"]) {
+          fixture.querySelector("span")?.focus();
+          (
+            fixture.querySelector("span") ?? fixture.firstElementChild
+          ).dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key,
+              metaKey: true,
+              bubbles: true,
+              composed: true,
+            }),
+          );
+          check(
+            `${markup.split(">")[0]}> ${key} 不作用画布`,
+            accepted === false,
+          );
+        }
+      }
+      fixture.innerHTML = '<div tabindex="0"></div>';
+      fixture.firstElementChild.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "z",
+          metaKey: true,
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      check("画布可以撤销", accepted === true);
+      fixture.firstElementChild.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "z",
+          isComposing: true,
+          bubbles: true,
+        }),
+      );
+      check("中文输入法期间不操作画布", accepted === false);
+      check(
+        "查询参数变化不回页首",
+        pageScrollPosition({ path: "/ai", hash: "" }, { path: "/ai" }, null) ===
+          false,
+      );
+      check(
+        "页面切换回页首",
+        pageScrollPosition(
+          { path: "/ai", hash: "" },
+          { path: "/messages" },
+          null,
+        ).top === 0,
+      );
+      check(
+        "后退恢复滚动",
+        pageScrollPosition(
+          { path: "/ai", hash: "" },
+          { path: "/messages" },
+          { top: 123, left: 0 },
+        ).top === 123,
+      );
+      fixture.remove();
+      const router = createRouter({
+        history: createWebHashHistory(),
+        routes: [
+          { path: "/:pathMatch(.*)*", component: { render: () => null } },
+        ],
+        scrollBehavior: pageScrollPosition,
+      });
+      await router.replace("/ai?keep=yes");
+      const icon = { render: () => h("span", "◆") };
+      createApp({
+        render: () =>
+          h("main", { class: "split-admin-page" }, [
+            h("aside", { class: "admin-sidebar" }, [
+              h(Navigation, {
+                items: [
+                  { id: "third", label: "第三模块", icon },
+                  { id: "first", label: "第一模块", icon },
+                  { id: "second", label: "第二模块", icon },
+                ],
+              }),
+            ]),
+            h(
+              "div",
+              { class: "admin-workspace" },
+              ["first", "second", "third"].map((id) =>
+                h(
+                  "section",
+                  { id, style: "height:900px;scroll-margin-top:96px" },
+                  [h("h2", id)],
+                ),
+              ),
+            ),
+          ]),
+      })
+        .use(router)
+        .mount("#app");
+      await nextTick();
+      await new Promise((r) => setTimeout(r, 200));
+      check(
+        "导航按页面实际顺序排列",
+        document.querySelector("nav button").getAttribute("aria-controls") ===
+          "first",
+      );
+      document.querySelector('[aria-controls="second"]').click();
+      await new Promise((r) => setTimeout(r, 1000));
+      check(
+        "点击导航保留原查询参数",
+        router.currentRoute.value.query.keep === "yes",
+      );
+      check(
+        "点击导航写入模块锚点",
+        router.currentRoute.value.hash === "#second",
+      );
+      check(
+        "导航定位到模块且留出顶栏",
+        Math.abs(
+          document.querySelector("#second").getBoundingClientRect().top - 96,
+        ) < 3,
+      );
+      check(
+        "滑块当前模块同步",
+        document
+          .querySelector('[aria-current="location"]')
+          .getAttribute("aria-controls") === "second",
+      );
+
+      // Simulate independently loaded panels changing the target's offset.
+      document.documentElement.style.overflowAnchor = "none";
+      document.querySelector("#first").style.height = "1250px";
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      check(
+        "异步内容增高后仍对齐目标模块",
+        Math.abs(
+          document.querySelector("#second").getBoundingClientRect().top - 96,
+        ) < 3,
+      );
+      window.dispatchEvent(new WheelEvent("wheel", { deltaY: -200 }));
+      window.scrollBy({ top: -200, behavior: "instant" });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const manualPosition = window.scrollY;
+      document.querySelector("#first").style.height = "1450px";
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      check(
+        "手动滚动后不被异步加载拉回",
+        Math.abs(window.scrollY - manualPosition) < 3,
+      );
+    </script>
+  </body>
+</html>
