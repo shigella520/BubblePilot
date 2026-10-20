@@ -1,0 +1,18 @@
+use_default_settings:
+  engines:
+    keep_only: [deepseek-search]
+server:
+  secret_key: CHANGE_ME_BEFORE_START
+  limiter: false
+search:
+  formats: [html, json]
+outgoing:
+  request_timeout: 8.0
+  max_request_timeout: 12.0
+engines:
+  - name: deepseek-search
+    engine: bubblepilot_deepseek
+    api_key_file: /run/secrets/deepseek_api_key
+    result_count: 10
+    timeout: 8.0
+    disabled: false

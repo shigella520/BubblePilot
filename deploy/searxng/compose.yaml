@@ -1,0 +1,24 @@
+# Standalone private test stack. Copy files to the NAS stack directory.
+name: searxng-deepseek-test
+services:
+  searxng:
+    image: searxng/searxng@sha256:ad273460b12390ab1ad9c6ea630dafed39045ab0b9096a85ca31f5246517c670
+    restart: "no"
+    volumes:
+      - ./settings.example.yml:/etc/searxng/settings.yml:ro
+      - ./bubblepilot_deepseek.py:/usr/local/searxng/searx/engines/bubblepilot_deepseek.py:ro
+    secrets:
+      - deepseek_api_key
+    healthcheck:
+      test: [CMD, wget, -qO-, http://127.0.0.1:8080/healthz]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: 2m
+        max-file: "1"
+secrets:
+  deepseek_api_key:
+    file: ./deepseek-api-key.local
