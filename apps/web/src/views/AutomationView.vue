@@ -15,10 +15,11 @@ import {
   ToggleLeft,
   Trash2,
   Upload,
-  X,
 } from "@lucide/vue";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { selectWorkflowVersion } from "../utils/workflow-version";
+import AdminDetailDialog from "../components/AdminDetailDialog.vue";
 import WorkflowEditor from "../components/workflow/WorkflowEditor.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 
@@ -231,11 +232,19 @@ const importOpen = ref(false);
 const importJson = ref("");
 const importPreview = ref<ImportPreview | null>(null);
 const importBusy = ref(false);
+const importError = ref("");
+const importFilename = ref("");
+const importFileInput = ref<HTMLInputElement | null>(null);
 const importMode = ref<"create" | "new-version">("create");
 const importTargetWorkflowId = ref("");
 const importSelections = reactive<Record<string, string>>({});
 
+function closeImport() {
+  if (!importBusy.value) importOpen.value = false;
+}
 function openImport() {
+  importError.value = "";
+  importFilename.value = "";
   importOpen.value = true;
   importPreview.value = null;
   importJson.value = "";
@@ -245,13 +254,27 @@ function openImport() {
 }
 
 async function loadImportFile(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0];
-  if (!file) return;
-  importJson.value = await file.text();
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file || importBusy.value) return;
+  importBusy.value = true;
+  importError.value = "";
   importPreview.value = null;
+  try {
+    importJson.value = await file.text();
+    importFilename.value = file.name;
+  } catch (cause) {
+    importError.value = errorMessage(cause);
+  } finally {
+    input.value = "";
+    importBusy.value = false;
+  }
 }
 
 async function previewImport() {
+  if (importBusy.value) return;
+  importError.value = "";
+  importPreview.value = null;
   importBusy.value = true;
   try {
     const manifest = parseJsonObject(importJson.value);
@@ -268,15 +291,20 @@ async function previewImport() {
       }
     }
   } catch (cause) {
-    message.value = errorMessage(cause);
-    messageIsError.value = true;
+    importError.value = errorMessage(cause);
   } finally {
     importBusy.value = false;
   }
 }
 
 async function commitImport() {
-  if (!importPreview.value?.valid || !importPreview.value.previewToken) return;
+  if (
+    importBusy.value ||
+    !importPreview.value?.valid ||
+    !importPreview.value.previewToken
+  )
+    return;
+  importError.value = "";
   importBusy.value = true;
   try {
     const result = await apiRequest<{
@@ -299,8 +327,7 @@ async function commitImport() {
       `/automation/${result.workflowId}?version=${result.workflowVersion}`,
     );
   } catch (cause) {
-    message.value = errorMessage(cause);
-    messageIsError.value = true;
+    importError.value = errorMessage(cause);
   } finally {
     importBusy.value = false;
   }
@@ -316,12 +343,10 @@ async function exportWorkflow(
     const workflowVersions = await apiRequest<WorkflowVersion[]>(
       `/api/v1/workflows/${workflow.id}/versions`,
     );
-    const version =
-      workflowVersions.find((item) => item.status === "validated") ??
-      workflowVersions.find(
-        (item) => item.version === workflow.publishedVersion,
-      ) ??
-      workflowVersions[0];
+    const version = selectWorkflowVersion(
+      workflowVersions,
+      workflow.publishedVersion,
+    );
     if (!version) throw new Error("该工作流没有可导出的版本。");
     const manifest = await apiRequest<Record<string, unknown>>(
       `/api/v1/workflows/${workflow.id}/versions/${version.version}/export?mode=${mode}`,
@@ -1246,148 +1271,160 @@ onMounted(load);
           </table>
         </div>
       </section>
-      <div
+      <AdminDetailDialog
         v-if="importOpen"
-        class="workflow-import-backdrop"
-        @click.self="importOpen = false"
+        title="导入工作流"
+        @close="closeImport"
       >
-        <section
-          class="workflow-import-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-label="导入工作流"
-        >
-          <div class="panel-head">
+        <div class="workflow-import-dialog" :aria-busy="importBusy">
+          <p class="panel-description">
+            选择工作流 JSON
+            文件，或粘贴内容进行预览校验。导入后为候选版本，不会自动启用。
+          </p>
+          <DismissibleMessage
+            v-if="importError"
+            error
+            @close="importError = ''"
+            >{{ importError }}</DismissibleMessage
+          >
+          <div class="workflow-import-file">
+            <FileJson :size="28" aria-hidden="true" />
             <div>
-              <p class="card-kicker">AI FRIENDLY IMPORT</p>
-              <h2>导入工作流</h2>
+              <strong>{{ importFilename || "选择工作流文件" }}</strong
+              ><small>支持 .bubblepilot-workflow.json 或 .json 文件</small>
             </div>
-            <button
-              class="icon-button"
-              type="button"
-              title="关闭"
-              @click="importOpen = false"
-            >
-              <X :size="18" />
-            </button>
-          </div>
-          <label class="workflow-import-file">
-            <span>上传 .bubblepilot-workflow.json</span>
             <input
+              ref="importFileInput"
               type="file"
               accept="application/json,.json"
+              hidden
+              :disabled="importBusy"
               @change="loadImportFile"
             />
-          </label>
-          <label>
-            <span>或粘贴 Manifest JSON</span>
-            <textarea
-              v-model="importJson"
-              rows="13"
-              spellcheck="false"
-              @input="importPreview = null"
-            ></textarea>
-          </label>
-          <div class="form-actions">
             <button
-              class="button secondary"
               type="button"
-              :disabled="!importJson || importBusy"
-              @click="previewImport"
+              class="button secondary"
+              :disabled="importBusy"
+              @click="importFileInput?.click()"
             >
-              <FileJson :size="16" />{{ importBusy ? "校验中…" : "预览并校验" }}
+              <Upload :size="16" />{{
+                importFilename ? "重新选择" : "选择文件"
+              }}
             </button>
           </div>
-          <template v-if="importPreview">
-            <div v-if="importPreview.summary" class="workflow-import-summary">
-              <strong>{{ importPreview.summary.name }}</strong>
-              <span>{{ importPreview.summary.nodeCount }} 个节点</span>
-              <p v-if="importPreview.summary.description">
-                {{ importPreview.summary.description }}
-              </p>
-            </div>
-            <div
-              v-if="importPreview.errors.length"
-              class="workflow-import-issues"
-            >
-              <article
-                v-for="issue in importPreview.errors"
-                :key="`${issue.path}:${issue.code}`"
-              >
-                <code>{{ issue.path || "/" }}</code>
-                <strong>{{ issue.message }}</strong>
-                <span>{{ issue.suggestion }}</span>
-              </article>
-            </div>
-            <div
-              v-if="importPreview.bindings.length"
-              class="workflow-import-bindings"
-            >
-              <label
-                v-for="binding in importPreview.bindings"
-                :key="binding.ref"
-              >
-                <span
-                  >{{ binding.kind === "aiRoute" ? "AI 路由" : "聊天" }} ·
-                  {{ binding.name }}</span
-                >
-                <select
-                  v-model="importSelections[binding.ref]"
-                  @change="previewImport"
-                >
-                  <option value="">请选择绑定</option>
-                  <option
-                    v-for="candidate in binding.candidates"
-                    :key="candidate.id"
-                    :value="candidate.id"
-                  >
-                    {{ candidate.name
-                    }}{{
-                      candidate.capabilities.length
-                        ? ` · ${candidate.capabilities.join(", ")}`
-                        : ""
-                    }}
-                  </option>
-                </select>
-              </label>
-            </div>
-            <div v-if="importPreview.valid" class="workflow-import-commit">
-              <label
-                ><span>导入方式</span
-                ><select v-model="importMode">
-                  <option value="create">创建新工作流</option>
-                  <option value="new-version">添加到已有工作流</option>
-                </select></label
-              >
-              <label v-if="importMode === 'new-version'"
-                ><span>目标工作流</span
-                ><select v-model="importTargetWorkflowId">
-                  <option value="">请选择</option>
-                  <option
-                    v-for="workflow in workflows"
-                    :key="workflow.id"
-                    :value="workflow.id"
-                  >
-                    {{ workflow.name }}
-                  </option>
-                </select></label
-              >
-              <p>导入只创建候选版本，不会自动发布或启用。</p>
+          <fieldset class="workflow-import-fields" :disabled="importBusy">
+            <label>
+              <span>或粘贴 Manifest JSON</span>
+              <textarea
+                v-model="importJson"
+                rows="13"
+                spellcheck="false"
+                @input="importPreview = null"
+              ></textarea>
+            </label>
+            <div class="form-actions">
               <button
-                class="button primary"
+                class="button secondary"
                 type="button"
-                :disabled="
-                  importBusy ||
-                  (importMode === 'new-version' && !importTargetWorkflowId)
-                "
-                @click="commitImport"
+                :disabled="!importJson || importBusy"
+                @click="previewImport"
               >
-                <Upload :size="16" />{{ importBusy ? "导入中…" : "确认导入" }}
+                <FileJson :size="16" />{{
+                  importBusy ? "校验中…" : "预览并校验"
+                }}
               </button>
             </div>
-          </template>
-        </section>
-      </div>
+            <template v-if="importPreview">
+              <div v-if="importPreview.summary" class="workflow-import-summary">
+                <strong>{{ importPreview.summary.name }}</strong>
+                <span>{{ importPreview.summary.nodeCount }} 个节点</span>
+                <p v-if="importPreview.summary.description">
+                  {{ importPreview.summary.description }}
+                </p>
+              </div>
+              <div
+                v-if="importPreview.errors.length"
+                class="workflow-import-issues"
+              >
+                <article
+                  v-for="issue in importPreview.errors"
+                  :key="`${issue.path}:${issue.code}`"
+                >
+                  <code>{{ issue.path || "/" }}</code>
+                  <strong>{{ issue.message }}</strong>
+                  <span>{{ issue.suggestion }}</span>
+                </article>
+              </div>
+              <div
+                v-if="importPreview.bindings.length"
+                class="workflow-import-bindings"
+              >
+                <label
+                  v-for="binding in importPreview.bindings"
+                  :key="binding.ref"
+                >
+                  <span
+                    >{{ binding.kind === "aiRoute" ? "AI 路由" : "聊天" }} ·
+                    {{ binding.name }}</span
+                  >
+                  <select
+                    v-model="importSelections[binding.ref]"
+                    @change="previewImport"
+                  >
+                    <option value="">请选择绑定</option>
+                    <option
+                      v-for="candidate in binding.candidates"
+                      :key="candidate.id"
+                      :value="candidate.id"
+                    >
+                      {{ candidate.name
+                      }}{{
+                        candidate.capabilities.length
+                          ? ` · ${candidate.capabilities.join(", ")}`
+                          : ""
+                      }}
+                    </option>
+                  </select>
+                </label>
+              </div>
+              <div v-if="importPreview.valid" class="workflow-import-commit">
+                <label
+                  ><span>导入方式</span
+                  ><select v-model="importMode">
+                    <option value="create">创建新工作流</option>
+                    <option value="new-version">添加到已有工作流</option>
+                  </select></label
+                >
+                <label v-if="importMode === 'new-version'"
+                  ><span>目标工作流</span
+                  ><select v-model="importTargetWorkflowId">
+                    <option value="">请选择</option>
+                    <option
+                      v-for="workflow in workflows"
+                      :key="workflow.id"
+                      :value="workflow.id"
+                    >
+                      {{ workflow.name }}
+                    </option>
+                  </select></label
+                >
+                <p>导入只创建候选版本，不会自动发布或启用。</p>
+                <button
+                  class="button primary"
+                  type="button"
+                  :disabled="
+                    importBusy ||
+                    (importMode === 'new-version' && !importTargetWorkflowId)
+                  "
+                  @click="commitImport"
+                >
+                  <Upload :size="16" />{{ importBusy ? "导入中…" : "确认导入" }}
+                </button>
+              </div>
+            </template>
+          </fieldset>
+        </div>
+      </AdminDetailDialog>
       <section v-show="false" id="triggers" class="admin-panel">
         <div class="panel-head">
           <div>

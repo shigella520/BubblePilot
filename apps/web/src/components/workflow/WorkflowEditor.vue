@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { workflowDataEdges } from "../../utils/workflow-data-edges";
+import { isCanvasShortcut } from "../../utils/keyboard-scope";
 import { executionPolicy } from "../../../../../modules/ai/execution-policy";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unused-expressions */
-import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { nextTick, ref, watch } from "vue";
 import { VueFlow, type Connection, useVueFlow } from "@vue-flow/core";
 import { MarkerType } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
@@ -634,18 +636,8 @@ function hydrate(definition: any) {
           kind,
           type: "workflow",
         });
-    for (const [port, reference] of Object.entries(item.inputs ?? {}))
-      if ((reference as any)?.kind === "output")
-        result.push({
-          id: `${(reference as any).blockId}-${item.id}-${port}`,
-          source: (reference as any).blockId,
-          sourceHandle: `output:${(reference as any).port}`,
-          target: item.id,
-          targetHandle: `input:${port}`,
-          kind: "data",
-          type: "workflow",
-        });
   }
+  result.push(...workflowDataEdges(sourceNodes));
   edges.value = result;
   ensureControlEdgeSpacing();
   hydratedDefinition.value = JSON.stringify(definition);
@@ -700,7 +692,19 @@ watch(
   },
   { deep: true },
 );
+function focusCanvas(event: PointerEvent) {
+  const target = event.target;
+  if (
+    !(target instanceof Element) ||
+    target.closest(
+      'input, textarea, select, button, a, [contenteditable], [role="textbox"], [role="dialog"]',
+    )
+  )
+    return;
+  stageElement.value?.focus({ preventScroll: true });
+}
 function onKeydown(event: KeyboardEvent) {
+  if (!isCanvasShortcut(event)) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
     event.preventDefault();
     event.shiftKey ? redo() : undo();
@@ -709,31 +713,31 @@ function onKeydown(event: KeyboardEvent) {
     (event.metaKey || event.ctrlKey) &&
     event.key.toLowerCase() === "c" &&
     selected.value
-  )
+  ) {
+    event.preventDefault();
     copiedNode.value = JSON.parse(JSON.stringify(selected.value));
+  }
   if (
     (event.metaKey || event.ctrlKey) &&
     event.key.toLowerCase() === "v" &&
     copiedNode.value
-  )
+  ) {
+    event.preventDefault();
     addBlock(copiedNode.value.data.block, {
       x: copiedNode.value.position.x + 40,
       y: copiedNode.value.position.y + 40,
     });
+  }
   if (event.key === "Delete" || event.key === "Backspace") {
-    const target = event.target as HTMLElement | null;
-    if (target?.matches("input, textarea, select, [contenteditable='true']"))
-      return;
+    event.preventDefault();
     if (selectedEdgeId.value) deleteEdge(selectedEdgeId.value);
     else removeSelected();
   }
 }
-window.addEventListener("keydown", onKeydown);
-onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 </script>
 
 <template>
-  <div class="workflow-editor-v2">
+  <div class="workflow-editor-v2" @keydown="onKeydown">
     <div class="workflow-toolbar">
       <button class="button secondary" type="button" @click="openCreator()">
         ＋ 添加动作</button
@@ -761,7 +765,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         保存
       </button>
     </div>
-    <div ref="stageElement" class="workflow-stage">
+    <div
+      ref="stageElement"
+      class="workflow-stage"
+      tabindex="-1"
+      @pointerdown="focusCanvas"
+    >
       <NodeCreator
         :blocks="props.blocks"
         :open="creatorOpen"
@@ -774,6 +783,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         v-model:edges="edges"
         class="workflow-flow"
         fit-view-on-init
+        :delete-key-code="null"
         selection-on-drag
         :multi-selection-key-code="'Shift'"
         :connection-line-options="{ markerEnd: MarkerType.ArrowClosed }"

@@ -64,6 +64,30 @@ describe.runIf(!!url)("meme persistence and independent delivery", () => {
     expect(await repo.search(hash, 5)).toEqual([]);
   });
   it("matches literal short words and browses enabled assets with a stable bounded order", async () => {
+    // Empty-query browsing is global: isolate it from concurrent collection and
+    // usage fixtures rather than assuming our inserts are always the newest.
+    const schema = `meme_browse_${randomUUID().replaceAll("-", "")}`;
+    await repo.pool.query(`CREATE SCHEMA ${schema}`);
+    const isolatedUrl = new URL(url!);
+    isolatedUrl.searchParams.set("options", `-c search_path=${schema}`);
+    const isolated = new PostgresMemeRepository(isolatedUrl.toString());
+    try {
+      for (const table of [
+        "meme_collections",
+        "meme_assets",
+        "meme_summary_jobs",
+      ]) {
+        await repo.pool.query(
+          `CREATE TABLE ${schema}.${table} (LIKE public.${table} INCLUDING ALL)`,
+        );
+      }
+      await checkBrowse(isolated);
+    } finally {
+      await isolated.close();
+      await repo.pool.query(`DROP SCHEMA ${schema} CASCADE`);
+    }
+  });
+  async function checkBrowse(repo: PostgresMemeRepository) {
     const made: MemeAsset[] = [];
     for (const label of ["虚构小狗跳舞", "虚构猫咪招手", "虚构已停用"]) {
       made.push(
@@ -110,7 +134,7 @@ describe.runIf(!!url)("meme persistence and independent delivery", () => {
       for (const a of made)
         await repo.remove(a.id, (await repo.get(a.id))!.version);
     }
-  });
+  }
   it("persists both parts before sending, retries only failed image and closes unknown without resending", async () => {
     const suffix = randomUUID();
     const image = await repo.create({

@@ -48,7 +48,9 @@ describe.runIf(!!url)("chat image archive authorization", () => {
   afterAll(async () => {
     await memory?.close();
     await pool?.end();
-    await admin.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
+    // Pool.end() can resolve before sockets close; let PostgreSQL wait for disconnect
+    // instead of forcibly terminating clients that are still shutting down.
+    await admin.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
     await admin.end();
   });
   async function fixture() {

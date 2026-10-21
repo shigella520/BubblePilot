@@ -3,16 +3,18 @@ import type { AgentToolContext } from "./agent-budget.js";
 import type { AiToolDefinition } from "./ai-types.js";
 export interface MultimodalToolResult {
   text: string;
+  diagnostics?: Record<string, unknown>;
   /** Commit only after the complete text fits and the operation is still live. */
   commit?: () => AiImageContentPart | null;
 }
 export interface RegisteredAgentTool {
   definition: AiToolDefinition;
+  metadata?: Record<string, unknown>;
   execute(
     argumentsJson: string,
     context: AgentToolContext,
   ): Promise<string | MultimodalToolResult>;
-  diagnostics: "metadata-only" | "web-search";
+  diagnostics: "metadata-only" | "web-search" | "plugin";
 }
 /** Per-execution registry: capabilities are selected by trusted runtime scope. */
 export class AgentToolRegistry {

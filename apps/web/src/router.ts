@@ -1,5 +1,8 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 
+import { pageScrollPosition } from "./utils/scroll-policy";
+
+import PluginsView from "./views/PluginsView.vue";
 import MemesView from "./views/MemesView.vue";
 import AiView from "./views/AiView.vue";
 import AutomationView from "./views/AutomationView.vue";
@@ -12,9 +15,7 @@ import SettingsView from "./views/SettingsView.vue";
 
 export default createRouter({
   history: createWebHashHistory(),
-  scrollBehavior() {
-    return { top: 0 };
-  },
+  scrollBehavior: pageScrollPosition,
   routes: [
     { path: "/login", component: LoginView },
     { path: "/", component: DashboardView },
@@ -22,6 +23,7 @@ export default createRouter({
     { path: "/automation", component: AutomationView },
     { path: "/automation/new", component: WorkflowCanvasView },
     { path: "/automation/:workflowId", component: WorkflowCanvasView },
+    { path: "/plugins", component: PluginsView },
     { path: "/memes", component: MemesView },
     { path: "/ai", component: AiView },
     { path: "/executions", component: ExecutionsView },

@@ -27,7 +27,9 @@ services:
         required: false
     volumes:
       - bubblepilot-memes:/app/data/memes
+      - ${PLUGIN_DATA_DIR:-./data/plugins}:/app/data/plugins
     environment:
+      PLUGIN_STORAGE_PATH: /app/data/plugins
       MEME_STORAGE_PATH: /app/data/memes
       NODE_ENV: production
       APP_HOST: 0.0.0.0

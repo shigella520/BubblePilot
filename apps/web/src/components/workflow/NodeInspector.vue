@@ -1,5 +1,16 @@
 <script setup lang="ts">
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, vue/no-mutating-props */
+import { ref, onMounted } from "vue";
+import { apiRequest } from "../../services/api";
+const plugins = ref<Array<{ id: string; name: string; enabled: boolean }>>([]);
+const pluginError = ref("");
+onMounted(async () => {
+  try {
+    plugins.value = await apiRequest("/api/v1/plugins");
+  } catch {
+    pluginError.value = "插件列表加载失败，请刷新后重试。";
+  }
+});
 import { executionPolicy } from "../../../../../modules/ai/execution-policy";
 import ContextTemplateEditor from "./ContextTemplateEditor.vue";
 
@@ -137,6 +148,29 @@ function configVisible(item: any): boolean {
       </div>
       <button type="button" @click="emit('close')">×</button>
     </div>
+    <section
+      v-if="node.data.block.type === 'ai-chat'"
+      class="plugin-node-config"
+    >
+      <h4>外部插件</h4>
+      <p v-if="pluginError">{{ pluginError }}</p>
+      <label v-for="plugin in plugins" :key="plugin.id"
+        ><input
+          :checked="(props.config.pluginIds ?? []).includes(plugin.id)"
+          type="checkbox"
+          :value="plugin.id"
+          :disabled="!plugin.enabled || props.config.outputFormat === 'json'"
+          @change="
+            props.config.pluginIds = ($event.target as HTMLInputElement).checked
+              ? [...(props.config.pluginIds ?? []), plugin.id]
+              : (props.config.pluginIds ?? []).filter(
+                  (id: string) => id !== plugin.id,
+                )
+          "
+        />{{ plugin.name }}{{ plugin.enabled ? "" : "（停用）" }}</label
+      >
+      <RouterLink to="/plugins">管理插件</RouterLink>
+    </section>
     <RouterLink v-if="node.data.block.type === 'ai-chat'" to="/memes"
       >管理表情包库</RouterLink
     >

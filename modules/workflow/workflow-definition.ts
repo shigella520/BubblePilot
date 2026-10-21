@@ -147,11 +147,16 @@ const aiChatNodeSchema = z.object({
         .optional(),
       temperature: z.number().min(0).max(2).nullable().default(null),
       allowMemes: z.boolean().optional(),
+      pluginIds: z.array(z.string().uuid()).max(10).optional(),
       webSearch: z.enum(["disabled", "auto", "required"]).optional(),
       webSearchSources: z.enum(["full", "compact", "hidden"]).default("full"),
       outputFormat: z.enum(["text", "json"]).default("text"),
       outputVariable: variableNameSchema.default("aiReply"),
     })
+    .refine(
+      (config) => !config.pluginIds?.length || config.outputFormat === "text",
+      { message: "Plugins require text output" },
+    )
     .refine((config) => !config.allowMemes || config.outputFormat === "text", {
       message: "Memes require text output",
     })

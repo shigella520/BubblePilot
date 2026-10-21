@@ -11,6 +11,9 @@ const applicationSource =
     "app.",
     "application.",
   );
+const pluginRouteSource = (
+  await readFile("modules/plugins/plugin-routes.ts", "utf8")
+).replaceAll("app.", "application.");
 const openApiSource = await readFile(contractPath, "utf8");
 
 /**
@@ -64,7 +67,7 @@ function resolvedParameter(value) {
 
 /** @type {Set<string>} */
 const runtimeRoutes = new Set();
-for (const match of applicationSource.matchAll(
+for (const match of (applicationSource + "\n" + pluginRouteSource).matchAll(
   /application\.(get|post|put|patch|delete)\(\s*"([^"]+)"/gu,
 )) {
   const method = match[1];

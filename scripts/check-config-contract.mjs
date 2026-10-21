@@ -37,6 +37,7 @@ const exampleVariables = matches(environmentExample, /^([A-Z][A-Z0-9_]*)=/gmu);
 
 const allowedExampleOnlyVariables = new Set([
   "BUBBLEPILOT_IMAGE",
+  "PLUGIN_DATA_DIR",
   "OPENAI_API_KEY",
   "POSTGRES_DB",
   "POSTGRES_PASSWORD",

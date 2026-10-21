@@ -2645,26 +2645,16 @@ legend {
   font-weight: 700;
 }
 
-.workflow-import-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: grid;
-  place-items: center;
-  padding: 1.5rem;
-  background: rgb(4 12 22 / 58%);
-  backdrop-filter: blur(5px);
-}
-
 .workflow-import-dialog {
-  width: min(780px, 100%);
-  max-height: calc(100vh - 3rem);
-  overflow: auto;
-  padding: 1.25rem;
-  border: 1px solid var(--line-soft);
-  border-radius: 18px;
-  background: var(--surface-raised);
-  box-shadow: 0 24px 80px rgb(0 0 0 / 32%);
+  color: var(--bubblepilot-text);
+}
+.workflow-import-fields {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
 }
 
 .workflow-import-dialog label,
@@ -2681,9 +2671,27 @@ legend {
 }
 
 .workflow-import-file {
-  padding: 0.75rem;
-  border: 1px dashed var(--line-strong);
-  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 20px;
+  border: 1px dashed var(--bubblepilot-accent);
+  border-radius: 16px;
+  background: rgba(10, 132, 255, 0.04);
+}
+.workflow-import-file > div {
+  flex: 1;
+  min-width: 180px;
+  overflow-wrap: anywhere;
+  display: grid;
+  gap: 6px;
+}
+.workflow-import-file small {
+  color: var(--bubblepilot-muted);
+}
+.workflow-import-file input[hidden] {
+  display: none;
 }
 
 .workflow-import-summary,
@@ -2693,15 +2701,15 @@ legend {
   margin-top: 0.9rem;
   padding: 0.75rem;
   border-radius: 10px;
-  background: var(--surface-subtle);
+  background: var(--bubblepilot-bg-soft);
 }
 
 .workflow-import-issues article {
-  border-left: 3px solid var(--danger);
+  border-left: 3px solid var(--bubblepilot-danger);
 }
 
 .workflow-import-issues code {
-  color: var(--danger);
+  color: var(--bubblepilot-danger);
   overflow-wrap: anywhere;
 }
 
@@ -2713,7 +2721,7 @@ legend {
 
 .workflow-import-commit {
   padding-top: 0.9rem;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--bubblepilot-line);
 }
 .execution-detail-header {
   position: relative;

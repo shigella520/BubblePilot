@@ -1,3 +1,5 @@
+import { PluginService } from "../modules/plugins/plugin-service.js";
+import { PluginStorage } from "../modules/plugins/plugin-storage.js";
 import { ChatImageSourceRepository } from "../modules/ai/chat-image-source.js";
 import { MemeDeliveryService } from "../modules/memes/meme-delivery-service.js";
 import { PostgresMemeRepository } from "../modules/memes/postgres-meme-repository.js";
@@ -181,6 +183,12 @@ const memeService = new MemeService(
   aiRepository,
   aiRouting,
 );
+const plugins = new PluginService(
+  config.databaseUrl,
+  new PluginStorage(config.pluginStoragePath ?? "./data/plugins"),
+  config.settingsEncryptionKey,
+);
+await plugins.init();
 const aiAgent = new AgentRunner(
   aiRouting,
   webSearchTool,
@@ -190,6 +198,7 @@ const aiAgent = new AgentRunner(
   memoryService,
   agentSettings,
   memeRepository,
+  plugins,
 );
 const imageSummaryRepository = new PostgresImageSummaryRepository(
   config.databaseUrl,
@@ -270,6 +279,7 @@ const workflowDispatcher = new InProcessWorkflowExecutionDispatcher(
 const application = buildApplication(config, repository, {
   auth: authService,
   memes: memeService,
+  plugins,
   memeDelivery,
   memory: memoryService,
   botIdentity,

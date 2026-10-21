@@ -27,3 +27,6 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# Runtime plugin packages
+data/plugins/

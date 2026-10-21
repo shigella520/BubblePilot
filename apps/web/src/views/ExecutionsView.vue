@@ -2117,6 +2117,20 @@ function contextSnapshotValue(
                 <Search :size="17" />
                 <div>
                   <strong>{{ item.toolName }} · {{ item.status }}</strong>
+                  <p v-if="item.requestDetails?.kind === 'plugin'">
+                    插件
+                    {{
+                      item.responseDetails?.pluginId ??
+                      item.requestDetails?.pluginId
+                    }}
+                    · {{ item.responseDetails?.tool ?? item.toolName }} ·
+                    {{ item.durationMs }} ms<br />版本
+                    {{
+                      item.responseDetails?.revision ??
+                      item.requestDetails?.revision
+                    }}
+                    · {{ item.responseDetails?.outcome ?? item.status }}
+                  </p>
                   <p v-if="item.toolName === 'view_chat_image'">
                     {{ imageToolLabel(item.responseDetails) }} ·
                     {{ item.durationMs }} ms
@@ -2161,7 +2175,13 @@ function contextSnapshotValue(
                     v-if="item.requestDetails || item.responseDetails"
                     class="keyline"
                   >
-                    <summary>搜索请求与返回</summary>
+                    <summary>
+                      {{
+                        item.requestDetails?.kind === "plugin"
+                          ? "插件调用诊断"
+                          : "请求与返回诊断"
+                      }}
+                    </summary>
                     <pre>{{
                       JSON.stringify(
                         {
