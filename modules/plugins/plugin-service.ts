@@ -67,8 +67,11 @@ export class PluginService {
           : await importGit(
               this.storage.root,
               String(source.url),
-              String(source.ref),
+              typeof source.ref === "string" ? source.ref : undefined,
               await this.trustedHosts(),
+              typeof source.directory === "string"
+                ? source.directory
+                : undefined,
             );
         const directories = packageDirectories(data.files);
         if (!directories.length) pluginError("NO_PLUGIN_MANIFEST");
@@ -93,7 +96,11 @@ export class PluginService {
             id,
             JSON.stringify(directories),
             pkg.hash,
-            { ...source, sha: data.sha },
+            {
+              ...source,
+              ...("resolvedSource" in data ? data.resolvedSource : {}),
+              sha: data.sha,
+            },
           ],
         );
       } catch (error) {

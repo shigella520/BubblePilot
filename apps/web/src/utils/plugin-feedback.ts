@@ -7,6 +7,11 @@ const messages: Record<string, string> = {
   INTERRUPTED: "导入因服务重启而中断，请重新导入。",
   PLUGIN_GIT_FAILED:
     "无法读取 Git 仓库。请检查公开 HTTPS 地址、分支及服务器网络，或改用插件 ZIP 包。",
+  PLUGIN_GIT_REF_NOT_FOUND:
+    "未找到链接中的分支或标签，请检查目录链接，或在高级选项指定分支。",
+  PLUGIN_GIT_SOURCE_AMBIGUOUS:
+    "链接的分支与目录有歧义，请用仓库根地址并在高级选项指定分支和目录。",
+  PLUGIN_GIT_DIRECTORY_REQUIRED: "链接指向文件，请提供包含插件清单的目录链接。",
   PLUGIN_GIT_TIMEOUT: "读取仓库超时，请检查服务器网络，或上传插件 ZIP 包。",
   PLUGIN_ARCHIVE_TOO_LARGE:
     "插件来源超过文件数量或体积限制。请仅打包需要的插件目录后上传 ZIP。",

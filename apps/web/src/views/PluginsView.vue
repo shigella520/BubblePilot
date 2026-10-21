@@ -60,6 +60,7 @@ interface ImportTask {
   state: string;
   directories: string[];
   error_code?: string;
+  source?: { url?: string; ref?: string; directory?: string; sha?: string };
 }
 const items = ref<
     Array<{
@@ -77,7 +78,8 @@ const items = ref<
   error = ref(""),
   showImport = ref(false),
   url = ref(""),
-  gitRef = ref("HEAD"),
+  gitRef = ref(""),
+  gitDirectory = ref(""),
   task = ref<ImportTask | null>(null),
   directory = ref(""),
   preview = ref<Package | null>(null),
@@ -185,7 +187,13 @@ async function stage(file?: File) {
         )
       : await apiRequest("/api/v1/plugins/imports", {
           method: "POST",
-          body: JSON.stringify({ url: url.value, ref: gitRef.value }),
+          body: JSON.stringify({
+            url: url.value.trim(),
+            ...(gitRef.value.trim() ? { ref: gitRef.value.trim() } : {}),
+            ...(gitDirectory.value.trim()
+              ? { directory: gitDirectory.value.trim() }
+              : {}),
+          }),
         });
     while (task.value!.state === "loading" && !disposed) {
       await new Promise((resolve) => setTimeout(resolve, 750));
@@ -410,12 +418,28 @@ async function remove() {
       <p>支持公开 HTTPS Git 仓库或 ZIP。不会运行包内代码。</p>
       <fieldset :disabled="busy">
         <label
-          >仓库地址<input
+          >Git 仓库或插件目录链接<input
             v-model="url"
-            placeholder="https://github.com/example/plugins.git" /></label
-        ><label>分支／标签／提交<input v-model="gitRef" /></label
-        ><button :disabled="!url.trim() || !gitRef.trim()" @click="stage()">
-          读取仓库</button
+            placeholder="https://github.com/example/repo/tree/main/plugins/demo"
+        /></label>
+        <p>
+          支持 GitHub tree／blob
+          目录链接，自动识别分支与目录；普通仓库链接仍可选择插件。
+        </p>
+        <details>
+          <summary>高级选项（可选）</summary>
+          <label
+            >分支／标签／提交<input
+              v-model="gitRef"
+              placeholder="自动识别，普通仓库默认为 HEAD"
+          /></label>
+          <label
+            >插件目录<input
+              v-model="gitDirectory"
+              placeholder="普通仓库链接可填，例如 plugins/firecrawl"
+          /></label>
+        </details>
+        <button :disabled="!url.trim()" @click="stage()">读取插件</button
         ><label class="plugin-upload">
           <UploadCloud :size="28" /><strong>选择 ZIP 插件包</strong>
           <span>仅打包插件目录 · 最大 10 MiB</span>
@@ -428,7 +452,11 @@ async function remove() {
           /> </label
         ><progress v-if="progress > 0" :value="progress" max="100" />
         <template v-if="task?.state === 'staged' && task.directories.length"
-          ><label
+          ><p v-if="task.source?.sha">
+            已读取：{{ task.source.url }} · {{ task.source.directory
+            }}<br />提交：{{ task.source.sha }}
+          </p>
+          <label
             >插件目录<select v-model="directory">
               <option v-for="d in task.directories" :key="d">{{ d }}</option>
             </select></label
