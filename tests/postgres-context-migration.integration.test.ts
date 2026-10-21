@@ -173,9 +173,8 @@ describe.runIf(!!url)("chat summary retirement migration", () => {
       );
     } finally {
       await db?.end();
-      await admin.query(
-        `DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`,
-      );
+      // Avoid terminating clients while Pool.end() is still closing their sockets.
+      await admin.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
       await admin.end();
     }
   }, 30000);
