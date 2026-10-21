@@ -131,13 +131,32 @@ describe.runIf(url)("plugin lifecycle and isolated runtime", () => {
         .definitions()
         .find((t) => t.name.startsWith("ext_"))!;
       expect(
-        await registry.get(tool.name)!.execute('{"query":"library"}', ctx),
+        await registry
+          .get(tool.name)!
+          .execute(
+            JSON.stringify({
+              arguments_json: JSON.stringify({ query: "library" }),
+            }),
+            ctx,
+          ),
       ).toMatchObject({ diagnostics: { outcome: "success" } });
       const p = await service.get(pluginId);
       await service.mutate(pluginId, p.version, { enabled: false });
       expect(
-        await registry.get(tool.name)!.execute('{"query":"library"}', ctx),
-      ).toMatchObject({ diagnostics: { outcome: "error" } });
+        await registry
+          .get(tool.name)!
+          .execute(
+            JSON.stringify({
+              arguments_json: JSON.stringify({ query: "library" }),
+            }),
+            ctx,
+          ),
+      ).toMatchObject({
+        diagnostics: {
+          outcome: "error",
+          errorCode: "PLUGIN_PERMISSION_REVOKED",
+        },
+      });
       await service.mutate(pluginId, p.version + 1, { enabled: true });
     } finally {
       await session.close();
