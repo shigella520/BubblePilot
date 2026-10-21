@@ -58,7 +58,17 @@ describe.runIf(url)("shared network settings upgrade", () => {
       } finally {
         await settings?.close();
         await pool?.end();
-        await admin.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+        // Pool.end initiates socket shutdown; wait for PostgreSQL to observe it
+        // before dropping the database, rather than terminating closing clients.
+        for (let attempt = 0; attempt < 40; attempt++) {
+          const active = await admin.query<{ count: number }>(
+            "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=$1",
+            [name],
+          );
+          if (active.rows[0]?.count === 0) break;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        await admin.query(`DROP DATABASE IF EXISTS "${name}"`);
         await admin.end();
       }
     },
