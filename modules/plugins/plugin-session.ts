@@ -1,3 +1,4 @@
+import { mcpModelDefinition, decodeMcpArguments } from "./plugin-schema.js";
 import { pluginFailureGuidance } from "./plugin-guidance.js";
 import type {
   AgentToolRegistry,
@@ -231,8 +232,9 @@ export class PluginSession {
         register(
           name,
           `${p.name}: ${tool.definition.description}`,
-          tool.definition.parameters,
+          mcpModelDefinition(tool.definition).parameters,
           async (args, ctx) => {
+            const mcpArgs = decodeMcpArguments(args);
             await this.check(p, undefined, tool);
             const key = `${p.id}:${tool.server}`;
             let client = this.clients.get(key);
@@ -255,7 +257,7 @@ export class PluginSession {
             }
             const result = await client.call(
               tool,
-              args,
+              mcpArgs,
               ctx.signal,
               ctx.deadline - Date.now(),
             );

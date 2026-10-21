@@ -121,7 +121,9 @@ describe.each(["responses", "chat-completions"] as const)(
                         id: "mcp-call",
                         name: r.tools!.find((t) => t.name.startsWith("ext_"))!
                           .name,
-                        arguments: JSON.stringify({ query: "library" }),
+                        arguments: JSON.stringify({
+                          arguments_json: JSON.stringify({ query: "library" }),
+                        }),
                       },
                     ],
                   }

@@ -509,7 +509,8 @@ async function remove() {
         </button>
         <h3 v-if="tools.length">批准查询类工具</h3>
         <p v-if="tools.length">
-          请确认用途；服务端只读注解不构成权限保证。本轮不支持写入操作。
+          请确认用途；服务端只读注解不构成权限保证。本轮不支持写入操作。 MCP
+          参数通过 JSON 封装传给模型，调用前按服务端原始契约校验。
         </p>
         <label
           v-for="tool in tools"

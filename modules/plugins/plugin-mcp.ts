@@ -1,5 +1,8 @@
 import type { TrustedHostsProvider } from "../shared/network-settings.js";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
+import {
+  McpError,
+  CallToolResultSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
@@ -10,7 +13,9 @@ import {
   StreamableHTTPError,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import Ajv from "ajv";
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import { ApplicationError } from "../../app/errors.js";
+import { compileMcpSchema, mcpSchemaValidator } from "./plugin-schema.js";
 import { safeFetch } from "./plugin-network.js";
 import { digest } from "./plugin-package.js";
 import {
@@ -19,12 +24,25 @@ import {
   type Connection,
   type ApprovedTool,
 } from "./plugin-types.js";
-import { strictToolParameters } from "../ai/tool-schema.js";
-const ajv = new Ajv.default({
-  strict: false,
-  allErrors: false,
-  validateFormats: false,
-});
+function mcpFailure(error: unknown, signal?: AbortSignal): never {
+  if (signal?.aborted) pluginError("MCP_CANCELLED");
+  if (error instanceof ApplicationError) throw error;
+  if (error instanceof UnauthorizedError)
+    pluginError("REMOTE_AUTH_DENIED", 502);
+  if (error instanceof Error && error.name === "TimeoutError")
+    pluginError("MCP_TIMEOUT", 504);
+  if (error instanceof StreamableHTTPError) {
+    if (error.code === 401 || error.code === 403)
+      pluginError("REMOTE_AUTH_DENIED", 502);
+    if (error.code === 402) pluginError("BILLING_REQUIRED", 502);
+    if (error.code === 429) pluginError("RATE_LIMITED", 502);
+  }
+  if (error instanceof McpError) {
+    if (error.code === -32001) pluginError("MCP_TIMEOUT", 504);
+    pluginError("MCP_PROTOCOL_ERROR", 502);
+  }
+  pluginError("MCP_TRANSPORT_ERROR", 502);
+}
 export class PluginMcp {
   constructor(
     private readonly trustedHosts: TrustedHostsProvider = () =>
@@ -32,7 +50,7 @@ export class PluginMcp {
   ) {}
   private readonly client = new Client(
     { name: "bubblepilot", version: "1.0.0" },
-    { capabilities: {} },
+    { capabilities: {}, jsonSchemaValidator: mcpSchemaValidator },
   );
   private transport?: StreamableHTTPClientTransport;
   async connect(connection: Connection, signal?: AbortSignal) {
@@ -70,9 +88,9 @@ export class PluginMcp {
         timeout: pluginLimits.timeoutMs,
         signal: signal ?? AbortSignal.timeout(pluginLimits.timeoutMs),
       });
-    } catch {
+    } catch (error) {
       await this.close();
-      pluginError("MCP_CONNECT_FAILED", 502);
+      mcpFailure(error, signal);
     }
   }
   async discover(
@@ -80,18 +98,28 @@ export class PluginMcp {
     signal?: AbortSignal,
   ): Promise<ApprovedTool[]> {
     const tools: ApprovedTool[] = [];
+    const deadline = Date.now() + pluginLimits.timeoutMs;
+    let pages = 0;
     let cursor: string | undefined;
     const seen = new Set<string>();
     do {
-      const result = await this.client.listTools(cursor ? { cursor } : {}, {
-        timeout: pluginLimits.timeoutMs,
-        ...(signal ? { signal } : {}),
-      });
+      if (signal?.aborted) pluginError("MCP_CANCELLED");
+      if (++pages > pluginLimits.tools || Date.now() >= deadline)
+        pluginError("MCP_TIMEOUT", 504);
+      const result = await this.client
+        .listTools(cursor ? { cursor } : {}, {
+          timeout: Math.max(1, deadline - Date.now()),
+          ...(signal ? { signal } : {}),
+        })
+        .catch((error: unknown) => mcpFailure(error, signal));
+      if (signal?.aborted) pluginError("MCP_CANCELLED");
       for (const tool of result.tools) {
+        if (tool.execution?.taskSupport === "required")
+          pluginError("MCP_TASK_REQUIRED");
         if (
           tool.name.length > 256 ||
           (tool.description?.length ?? 0) > 4096 ||
-          JSON.stringify(tool.inputSchema).length > pluginLimits.textBytes
+          JSON.stringify(tool).length > pluginLimits.textBytes
         )
           pluginError("TOOL_DEFINITION_TOO_LARGE");
         const definition = {
@@ -99,9 +127,18 @@ export class PluginMcp {
           description: tool.description ?? tool.name,
           parameters: tool.inputSchema,
         };
-        strictToolParameters(definition);
-        ajv.compile(tool.inputSchema);
-        tools.push({ server, definition, hash: digest(definition) });
+        compileMcpSchema(tool.inputSchema);
+        if (tool.outputSchema) compileMcpSchema(tool.outputSchema);
+        tools.push({
+          server,
+          definition,
+          ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+          hash: digest(
+            tool.outputSchema
+              ? { definition, outputSchema: tool.outputSchema }
+              : definition,
+          ),
+        });
         if (tools.length > pluginLimits.tools) pluginError("TOO_MANY_TOOLS");
       }
       cursor = result.nextCursor;
@@ -120,32 +157,34 @@ export class PluginMcp {
     signal: AbortSignal,
     timeout: number,
   ) {
-    if (!ajv.validate(tool.definition.parameters, args))
+    if (signal.aborted) pluginError("MCP_CANCELLED");
+    if (!compileMcpSchema(tool.definition.parameters)(args))
       pluginError("INVALID_TOOL_ARGUMENTS");
+    // Validate against the pinned contract below, not the SDK's last-page cache.
+    // Error results need not satisfy a successful outputSchema.
     const result = await this.client
-      .callTool(
+      .request(
         {
-          name: tool.definition.name,
-          arguments: args as Record<string, unknown>,
+          method: "tools/call",
+          params: {
+            name: tool.definition.name,
+            arguments: args as Record<string, unknown>,
+          },
         },
-        undefined,
+        CallToolResultSchema,
         { signal, timeout: Math.max(1, timeout) },
       )
       .catch((error: unknown) => {
-        if (signal.aborted) pluginError("MCP_CANCELLED");
-        if (error instanceof StreamableHTTPError) {
-          if (error.code === 402) pluginError("BILLING_REQUIRED");
-          if (error.code === 429) pluginError("RATE_LIMITED");
-          if (error.code === 401 || error.code === 403)
-            pluginError("REMOTE_AUTH_DENIED");
-        }
-        if (error instanceof McpError) {
-          if (error.code === -32001) pluginError("MCP_TIMEOUT", 504);
-          pluginError("MCP_PROTOCOL_ERROR", 502);
-        }
-        pluginError("MCP_TRANSPORT_ERROR", 502);
+        mcpFailure(error, signal);
       });
-    signal.throwIfAborted();
+    if (signal.aborted) pluginError("MCP_CANCELLED");
+    if (
+      !result.isError &&
+      tool.outputSchema &&
+      (result.structuredContent === undefined ||
+        !compileMcpSchema(tool.outputSchema)(result.structuredContent))
+    )
+      pluginError("MCP_OUTPUT_INVALID", 502);
     const content = result.content;
     if (
       !Array.isArray(content) ||
