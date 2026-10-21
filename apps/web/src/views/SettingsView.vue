@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PluginSettingsPanel from "../components/PluginSettingsPanel.vue";
 import NetworkSettingsPanel from "../components/NetworkSettingsPanel.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import {
@@ -147,6 +148,7 @@ onMounted(load);
         :items="[
           { id: 'bluebubbles', label: 'BlueBubbles', icon: Cable },
           { id: 'network', label: '外部网络', icon: ShieldCheck },
+          { id: 'plugin-budget', label: '插件工具预算', icon: Settings2 },
         ]"
       />
       <div class="sidebar-note">
@@ -313,6 +315,7 @@ onMounted(load);
         </form>
       </section>
       <NetworkSettingsPanel />
+      <PluginSettingsPanel />
     </div>
   </main>
 </template>

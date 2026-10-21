@@ -91,6 +91,33 @@ describe.runIf(url)("plugin lifecycle and isolated runtime", () => {
     );
     await service.mutate(pluginId, p.version, { enabled: true });
   });
+  it("persists runtime catalogue limits and rejects stale settings writes", async () => {
+    const initial = await service.runtimeSettings();
+    expect(initial.catalogueCharacters).toBe(64000);
+    const saved = await service.updateRuntimeSettings({
+      catalogueCharacters: 80000,
+      expectedVersion: initial.version,
+    });
+    try {
+      expect((await service.runtimeSettings()).catalogueCharacters).toBe(80000);
+      await expect(
+        service.updateRuntimeSettings({
+          catalogueCharacters: 90000,
+          expectedVersion: initial.version,
+        }),
+      ).rejects.toMatchObject({ code: "PLUGIN_CONFLICT" });
+      const usage = await service.runtimeUsage();
+      expect(usage.plugins.some((p) => p.id === pluginId)).toBe(true);
+      await expect(
+        service.assertAvailable([pluginId]),
+      ).resolves.toBeUndefined();
+    } finally {
+      await service.updateRuntimeSettings({
+        catalogueCharacters: initial.catalogueCharacters,
+        expectedVersion: saved.version,
+      });
+    }
+  });
   it("persists tool review flags without changing administrator version", async () => {
     const before = await service.get(pluginId);
     await service.markToolReview(pluginId, revision, "test/lookup");
