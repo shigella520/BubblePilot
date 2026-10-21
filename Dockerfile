@@ -28,5 +28,6 @@ RUN apk add --no-cache git
 RUN chmod 0555 ./scripts/docker-entrypoint.sh && mkdir -p /app/data/memes /app/data/plugins && chown -R node:node /app/data
 
 USER node
+RUN node --input-type=module -e "await import('./dist/modules/plugins/plugin-service.js'); await import('./dist/modules/plugins/plugin-session.js');"
 EXPOSE 8080
 ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
