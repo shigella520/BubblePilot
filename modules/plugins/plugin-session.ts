@@ -181,7 +181,12 @@ export class PluginSession {
           await this.check(p, s.id);
           return {
             text,
-            metadata: { pluginId: p.id, revision: p.revision, skill: s.id },
+            metadata: {
+              pluginId: p.id,
+              pluginName: p.name,
+              revision: p.revision,
+              skill: s.id,
+            },
             commit: () => {
               this.loaded.add(String(args.id));
               return null;
@@ -210,6 +215,7 @@ export class PluginSession {
                   }),
                   metadata: {
                     pluginId: p.id,
+                    pluginName: p.name,
                     revision: p.revision,
                     reference: path,
                   },
@@ -266,6 +272,7 @@ export class PluginSession {
               text: JSON.stringify(result),
               metadata: {
                 pluginId: p.id,
+                pluginName: p.name,
                 revision: p.revision,
                 server: tool.server,
                 tool: tool.definition.name,
@@ -276,6 +283,7 @@ export class PluginSession {
           },
           {
             pluginId: p.id,
+            pluginName: p.name,
             revision: p.revision,
             server: tool.server,
             tool: tool.definition.name,
