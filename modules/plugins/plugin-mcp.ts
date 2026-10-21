@@ -1,3 +1,4 @@
+import type { TrustedHostsProvider } from "../shared/network-settings.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -25,6 +26,10 @@ const ajv = new Ajv.default({
   validateFormats: false,
 });
 export class PluginMcp {
+  constructor(
+    private readonly trustedHosts: TrustedHostsProvider = () =>
+      Promise.resolve([]),
+  ) {}
   private readonly client = new Client(
     { name: "bubblepilot", version: "1.0.0" },
     { capabilities: {} },
@@ -53,7 +58,11 @@ export class PluginMcp {
       new URL(connection.url),
       {
         requestInit: { headers },
-        fetch: safeFetch(connection.url, connection.allowPrivate),
+        fetch: safeFetch(
+          connection.url,
+          connection.allowPrivate,
+          this.trustedHosts,
+        ),
       },
     );
     try {

@@ -1,3 +1,4 @@
+import type { NetworkSettings } from "../modules/shared/network-settings.js";
 import { it, expect, vi } from "vitest";
 import { buildApplication } from "../app/application.js";
 import type { AppConfig } from "../app/config.js";
@@ -57,10 +58,19 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
     mutate,
     close: () => Promise.resolve(),
   } as unknown as PluginService;
+  const networkUpdate = vi
+    .fn()
+    .mockResolvedValue({ trustedFakeIpHosts: ["example.test"], version: 2 });
+  const networkSettings = {
+    view: () => Promise.resolve({ trustedFakeIpHosts: [], version: 1 }),
+    update: networkUpdate,
+    close: async () => {},
+  } as unknown as NetworkSettings;
   const app = buildApplication(config, new InMemoryArchiveRepository(), {
     logger: false,
     webRoot: false,
     plugins,
+    networkSettings,
     auth: new AuthService(authRepository, {
       loginPasswordHash,
       sensitiveOperationPasswordHash,
@@ -71,6 +81,10 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
   try {
     expect(
       (await app.inject({ method: "GET", url: "/api/v1/plugins" })).statusCode,
+    ).toBe(401);
+    expect(
+      (await app.inject({ method: "GET", url: "/api/v1/settings/network" }))
+        .statusCode,
     ).toBe(401);
     const login = await app.inject({
       method: "POST",
@@ -83,6 +97,18 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
       (await app.inject({ method: "GET", url: "/api/v1/plugins", headers }))
         .statusCode,
     ).toBe(200);
+    const networkRequest = {
+      method: "PUT" as const,
+      url: "/api/v1/settings/network",
+      headers,
+      payload: { trustedFakeIpHosts: ["example.test"], expectedVersion: 1 },
+    };
+    expect(
+      (await app.inject({ method: "GET", url: networkRequest.url, headers }))
+        .statusCode,
+    ).toBe(200);
+    expect((await app.inject(networkRequest)).statusCode).toBe(403);
+    expect(networkUpdate).not.toHaveBeenCalled();
     const request = {
       method: "PUT" as const,
       url: "/api/v1/plugins/11111111-1111-4111-8111-111111111111",
@@ -111,6 +137,23 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
     ).toBe(200);
     expect((await app.inject(request)).statusCode).toBe(200);
     expect(mutate).toHaveBeenCalledOnce();
+    expect((await app.inject(networkRequest)).statusCode).toBe(200);
+    expect(networkUpdate).toHaveBeenCalledOnce();
+    expect(
+      authRepository.auditEvents.some(
+        (e) => e.action === "network.settings.update",
+      ),
+    ).toBe(true);
+    networkUpdate.mockResolvedValueOnce(null);
+    expect((await app.inject(networkRequest)).statusCode).toBe(409);
+    expect(
+      (
+        await app.inject({
+          ...networkRequest,
+          payload: { trustedFakeIpHosts: ["*"], expectedVersion: 1 },
+        })
+      ).statusCode,
+    ).toBe(400);
     const imported = await app.inject(importRequest);
     expect(imported.statusCode).toBe(200);
     expect(

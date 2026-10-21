@@ -1,27 +1,17 @@
+import { isPublicResourceAddressAllowed } from "../shared/public-network-policy.js";
+import type { TrustedHostsProvider } from "../shared/network-settings.js";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { Agent, fetch as request } from "undici";
 import { pluginError, pluginLimits } from "./plugin-types.js";
 export function privateAddress(address: string): boolean {
-  if (address.includes(":")) {
-    const a = address.toLowerCase();
-    if (a.startsWith("::ffff:")) return privateAddress(a.slice(7));
-    return !/^[23][0-9a-f]{0,3}:/.test(a);
-  }
-  const [a = 0, b = 0] = address.split(".").map(Number);
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && (b === 168 || b === 0)) ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    a >= 224 ||
-    (a === 198 && (b === 18 || b === 19))
-  );
+  return !isPublicResourceAddressAllowed("", address, isIP(address) as 4 | 6);
 }
-export async function resolveTarget(raw: string, allowPrivate: boolean) {
+export async function resolveTarget(
+  raw: string,
+  allowPrivate: boolean,
+  trustedHosts: readonly string[] = [],
+) {
   const url = new URL(raw);
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (
@@ -38,13 +28,23 @@ export async function resolveTarget(raw: string, allowPrivate: boolean) {
     : await lookup(host, { all: true });
   if (
     !addresses.length ||
-    (!allowPrivate && addresses.some((a) => privateAddress(a.address)))
+    (!allowPrivate &&
+      addresses.some(
+        (a) =>
+          !isPublicResourceAddressAllowed(host, a.address, a.family as 4 | 6, {
+            trustedProxyHosts: trustedHosts,
+          }),
+      ))
   )
     pluginError("NETWORK_TARGET_DENIED");
   return { url, host, addresses };
 }
 /** Pin the validated DNS answer in the actual socket lookup. Redirects never forward credentials. */
-export function safeFetch(origin: string, allowPrivate: boolean): typeof fetch {
+export function safeFetch(
+  origin: string,
+  allowPrivate: boolean,
+  trustedHosts: TrustedHostsProvider = () => Promise.resolve([]),
+): typeof fetch {
   return async (input, init) => {
     const target =
       typeof input === "string"
@@ -54,7 +54,11 @@ export function safeFetch(origin: string, allowPrivate: boolean): typeof fetch {
           : input.url;
     if (new URL(target).origin !== new URL(origin).origin)
       pluginError("CROSS_ORIGIN_DENIED");
-    const { addresses } = await resolveTarget(target, allowPrivate);
+    const { addresses } = await resolveTarget(
+      target,
+      allowPrivate,
+      await trustedHosts(),
+    );
     const first = addresses[0]!;
     const agent = new Agent({
       connect: {

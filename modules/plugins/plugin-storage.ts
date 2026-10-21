@@ -173,8 +173,9 @@ export async function importGit(
   root: string,
   url: string,
   ref: string,
+  trustedHosts: readonly string[] = [],
 ): Promise<{ files: Record<string, string>; sha: string }> {
-  const target = await resolveTarget(url, false);
+  const target = await resolveTarget(url, false, trustedHosts);
   if (new URL(url).search) pluginError("INVALID_GIT_URL");
   const dir = join(root, `.tmp-${randomUUID()}`);
   await mkdir(dir, { recursive: true, mode: 0o700 });

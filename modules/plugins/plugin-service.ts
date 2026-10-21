@@ -1,3 +1,4 @@
+import type { TrustedHostsProvider } from "../shared/network-settings.js";
 import { pluginImportErrorCode } from "./plugin-import-error.js";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -23,6 +24,7 @@ export class PluginService {
     databaseUrl: string,
     readonly storage: PluginStorage,
     key: string,
+    readonly trustedHosts: TrustedHostsProvider = () => Promise.resolve([]),
   ) {
     this.pool = new Pool({ connectionString: databaseUrl });
     this.cipher = new SettingsCipher(key);
@@ -66,6 +68,7 @@ export class PluginService {
               this.storage.root,
               String(source.url),
               String(source.ref),
+              await this.trustedHosts(),
             );
         const directories = packageDirectories(data.files);
         if (!directories.length) pluginError("NO_PLUGIN_MANIFEST");
@@ -191,7 +194,7 @@ export class PluginService {
   async discover(connections: Record<string, Connection>) {
     const tools: PluginConfiguration["tools"] = [];
     for (const [server, c] of Object.entries(connections)) {
-      const client = new PluginMcp();
+      const client = new PluginMcp(this.trustedHosts);
       try {
         await client.connect(c);
         tools.push(...(await client.discover(server)));

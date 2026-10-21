@@ -237,7 +237,7 @@ export class PluginSession {
             const key = `${p.id}:${tool.server}`;
             let client = this.clients.get(key);
             if (!client) {
-              client = new PluginMcp();
+              client = new PluginMcp(this.service.trustedHosts);
               this.clients.set(key, client);
               await client.connect(
                 p.config.connections[tool.server]!,

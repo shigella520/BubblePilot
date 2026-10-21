@@ -1,7 +1,15 @@
+import {
+  isPublicResourceAddressAllowed,
+  type PublicResourceFetchPolicy,
+} from "../../shared/public-network-policy.js";
+export {
+  isPublicResourceAddressAllowed,
+  type PublicResourceFetchPolicy,
+} from "../../shared/public-network-policy.js";
 import { lookup } from "node:dns/promises";
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { BlockList, isIP, type LookupFunction } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
 
 import { loadBuffer } from "cheerio";
 
@@ -9,39 +17,6 @@ import type { LinkPreviewItem } from "../../ingestion/link-preview.js";
 
 const maxBodyBytes = 1_048_576;
 const maxRedirects = 3;
-
-const blockedIpv4 = new BlockList();
-for (const [network, prefix] of [
-  ["0.0.0.0", 8],
-  ["10.0.0.0", 8],
-  ["100.64.0.0", 10],
-  ["127.0.0.0", 8],
-  ["169.254.0.0", 16],
-  ["172.16.0.0", 12],
-  ["192.0.0.0", 24],
-  ["192.0.2.0", 24],
-  ["192.168.0.0", 16],
-  ["198.18.0.0", 15],
-  ["198.51.100.0", 24],
-  ["203.0.113.0", 24],
-  ["224.0.0.0", 4],
-  ["240.0.0.0", 4],
-] as const) {
-  blockedIpv4.addSubnet(network, prefix, "ipv4");
-}
-const proxyFakeAddresses = new BlockList();
-proxyFakeAddresses.addSubnet("198.18.0.0", 15, "ipv4");
-const blockedIpv6 = new BlockList();
-for (const [network, prefix] of [
-  ["::", 128],
-  ["::1", 128],
-  ["fc00::", 7],
-  ["fe80::", 10],
-  ["ff00::", 8],
-  ["2001:db8::", 32],
-] as const) {
-  blockedIpv6.addSubnet(network, prefix, "ipv6");
-}
 
 export class OpenGraphFetchError extends Error {
   constructor(
@@ -84,55 +59,6 @@ function validateUrl(value: string, base?: URL): URL {
     );
   }
   return url;
-}
-
-export interface PublicResourceFetchPolicy {
-  trustedProxyHosts?: readonly string[];
-}
-
-function normalizedHost(value: string): string {
-  return value.toLowerCase().replace(/\.$/u, "");
-}
-
-function trustsProxyFakeAddress(
-  hostname: string,
-  policy: PublicResourceFetchPolicy,
-): boolean {
-  const candidate = normalizedHost(hostname);
-  return (policy.trustedProxyHosts ?? []).some(
-    (host) => normalizedHost(host) === candidate,
-  );
-}
-
-function isBlockedAddress(
-  address: string,
-  family: 4 | 6,
-  allowProxyFakeAddress: boolean,
-): boolean {
-  const blocked =
-    family === 4
-      ? blockedIpv4.check(address, "ipv4")
-      : blockedIpv6.check(address, "ipv6") ||
-        blockedIpv4.check(address, "ipv6");
-  if (!blocked) return false;
-  return !(
-    allowProxyFakeAddress &&
-    family === 4 &&
-    proxyFakeAddresses.check(address, "ipv4")
-  );
-}
-
-export function isPublicResourceAddressAllowed(
-  hostname: string,
-  address: string,
-  family: 4 | 6,
-  policy: PublicResourceFetchPolicy = {},
-): boolean {
-  return !isBlockedAddress(
-    address,
-    family,
-    trustsProxyFakeAddress(hostname, policy),
-  );
 }
 
 async function resolvePublicAddress(
@@ -335,12 +261,14 @@ export async function fetchPublicResource(
 async function fetchHtml(
   initialUrl: string,
   timeoutMs: number,
+  policy: PublicResourceFetchPolicy,
 ): Promise<PublicResource> {
   const response = await fetchPublicResource(
     initialUrl,
     timeoutMs,
     maxBodyBytes,
     "text/html,application/xhtml+xml;q=0.9",
+    policy,
   );
   const contentType = response.headers["content-type"] ?? "";
   if (!/^text\/html\b|^application\/xhtml\+xml\b/iu.test(contentType))
@@ -364,8 +292,14 @@ function meta(
 }
 
 export class OpenGraphClient {
+  constructor(
+    private readonly trustedHosts: () => Promise<readonly string[]> = () =>
+      Promise.resolve([]),
+  ) {}
   async fetch(url: string, timeoutMs: number): Promise<LinkPreviewItem | null> {
-    const response = await fetchHtml(url, timeoutMs);
+    const response = await fetchHtml(url, timeoutMs, {
+      trustedProxyHosts: await this.trustedHosts(),
+    });
     const $ = loadBuffer(response.body);
     const title = clean(
       meta($, "og:title", "twitter:title") ?? $("title").first().text(),
