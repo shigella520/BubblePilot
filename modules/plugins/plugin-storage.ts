@@ -220,20 +220,30 @@ export async function importGit(
         },
       );
       let out = "";
+      let failure = "PLUGIN_GIT_FAILED";
       const timer = setTimeout(
-        () => child.kill("SIGKILL"),
+        () => {
+          failure = "PLUGIN_GIT_TIMEOUT";
+          child.kill("SIGKILL");
+        },
         Math.max(1, deadline - Date.now()),
       );
       const monitor = setInterval(() => {
         void diskSize(dir)
           .then((size) => {
-            if (size > pluginLimits.expandedBytes * 2) child.kill("SIGKILL");
+            if (size > pluginLimits.expandedBytes * 2) {
+              failure = "PLUGIN_ARCHIVE_TOO_LARGE";
+              child.kill("SIGKILL");
+            }
           })
           .catch(() => child.kill("SIGKILL"));
       }, 100);
       child.stdout.on("data", (b: Buffer) => {
         out += b.toString();
-        if (out.length > pluginLimits.expandedBytes) child.kill("SIGKILL");
+        if (out.length > pluginLimits.expandedBytes) {
+          failure = "PLUGIN_ARCHIVE_TOO_LARGE";
+          child.kill("SIGKILL");
+        }
       });
       child.on("error", () => {
         clearTimeout(timer);
@@ -244,7 +254,7 @@ export async function importGit(
         clearTimeout(timer);
         clearInterval(monitor);
         if (code === 0) res(out.trim());
-        else rej(new Error("PLUGIN_GIT_FAILED"));
+        else rej(new Error(failure));
       });
     });
   try {

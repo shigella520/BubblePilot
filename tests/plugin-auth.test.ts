@@ -45,7 +45,14 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
   const authRepository = new InMemoryAuthRepository();
 
   const mutate = vi.fn().mockResolvedValue({ enabled: true });
+  const stage = vi.fn().mockResolvedValue({
+    id: "fictional-import",
+    state: "failed",
+    directories: [],
+    error_code: "PLUGIN_NO_PLUGIN_MANIFEST",
+  });
   const plugins = {
+    stage,
     list: () => Promise.resolve([]),
     mutate,
     close: () => Promise.resolve(),
@@ -84,6 +91,14 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
     };
     expect((await app.inject(request)).statusCode).toBe(403);
     expect(mutate).not.toHaveBeenCalled();
+    const importRequest = {
+      method: "POST" as const,
+      url: "/api/v1/plugins/imports",
+      headers,
+      payload: { url: "https://example.test/plugins.git", ref: "HEAD" },
+    };
+    expect((await app.inject(importRequest)).statusCode).toBe(403);
+    expect(stage).not.toHaveBeenCalled();
     expect(
       (
         await app.inject({
@@ -96,6 +111,12 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
     ).toBe(200);
     expect((await app.inject(request)).statusCode).toBe(200);
     expect(mutate).toHaveBeenCalledOnce();
+    const imported = await app.inject(importRequest);
+    expect(imported.statusCode).toBe(200);
+    expect(
+      imported.json<{ data: { error_code: string } }>().data.error_code,
+    ).toBe("PLUGIN_NO_PLUGIN_MANIFEST");
+    expect(stage).toHaveBeenCalledOnce();
     expect(
       authRepository.auditEvents.some((e) => e.action === "plugin.update"),
     ).toBe(true);

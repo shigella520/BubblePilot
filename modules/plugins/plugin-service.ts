@@ -1,3 +1,4 @@
+import { pluginImportErrorCode } from "./plugin-import-error.js";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { SettingsCipher } from "../integrations/bluebubbles/settings-cipher.js";
@@ -92,10 +93,10 @@ export class PluginService {
             { ...source, sha: data.sha },
           ],
         );
-      } catch {
+      } catch (error) {
         await this.pool.query(
-          "UPDATE plugin_imports SET state='failed',error_code='IMPORT_FAILED' WHERE id=$1",
-          [id],
+          "UPDATE plugin_imports SET state='failed',error_code=$2 WHERE id=$1",
+          [id, pluginImportErrorCode(error)],
         );
       }
     })();

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "bubblepilot-firecrawl",
+  "version": "1.0.0",
+  "description": "BubblePilot 独立维护的 Firecrawl 远程 MCP 适配包：按需读取公开网页，补充已有搜索结果。"
+}

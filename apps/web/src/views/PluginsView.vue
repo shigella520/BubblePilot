@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { Boxes, Plus, RefreshCw, UploadCloud } from "@lucide/vue";
+import DismissibleMessage from "../components/DismissibleMessage.vue";
+import { pluginErrorMessage, canInspectPlugin } from "../utils/plugin-feedback";
 import { apiRequest } from "../services/api";
 import { apiUpload } from "../services/upload";
 interface Connection {
@@ -139,14 +141,16 @@ async function action(fn: () => Promise<void>) {
   try {
     await fn();
   } catch (e) {
-    error.value =
-      e instanceof Error ? e.message : "操作失败，请刷新状态后重试。";
+    error.value = pluginErrorMessage(e);
   } finally {
     busy.value = false;
   }
 }
 onMounted(() => void action(load));
 function reset() {
+  error.value = "";
+  progress.value = 0;
+  directory.value = "";
   showImport.value = true;
   task.value = null;
   preview.value = null;
@@ -160,6 +164,15 @@ function reset() {
 }
 async function stage(file?: File) {
   await action(async () => {
+    task.value = null;
+    preview.value = null;
+    directory.value = "";
+    previous.value = null;
+    connections.value = {};
+    tools.value = [];
+    approved.value = [];
+    tested.value = false;
+    progress.value = 0;
     task.value = file
       ? await apiUpload<ImportTask>(
           "/api/v1/plugins/imports",
@@ -186,6 +199,12 @@ async function stage(file?: File) {
     directory.value = task.value!.directories[0] ?? "";
   });
 }
+function upload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (file) void stage(file);
+}
 function setup(pkg: Package) {
   connections.value = Object.fromEntries(
     pkg.servers.map((s) => [
@@ -205,6 +224,7 @@ function setup(pkg: Package) {
   tested.value = !pkg.servers.length;
 }
 async function inspect() {
+  if (!canInspectPlugin(task.value, directory.value)) return;
   await action(async () => {
     preview.value = await apiRequest(
       `/api/v1/plugins/imports/${task.value!.id}/inspect`,
@@ -358,11 +378,11 @@ async function remove() {
         </button>
       </div>
     </header>
+    <DismissibleMessage v-if="error" error @close="error = ''">{{
+      error
+    }}</DismissibleMessage>
     <div class="plugin-status" role="status">
-      <span v-if="busy">正在处理，请稍候…</span
-      ><span v-if="error" role="alert"
-        >{{ error }} 涉及敏感操作时，请使用顶栏解锁后重试。</span
-      >
+      <span v-if="busy">正在处理，请稍候…</span>
     </div>
     <div class="plugin-grid">
       <button
@@ -394,21 +414,30 @@ async function remove() {
             v-model="url"
             placeholder="https://github.com/example/plugins.git" /></label
         ><label>分支／标签／提交<input v-model="gitRef" /></label
-        ><button @click="stage()">读取仓库</button
-        ><label class="plugin-upload"
-          ><UploadCloud />选择 ZIP 插件包<input
+        ><button :disabled="!url.trim() || !gitRef.trim()" @click="stage()">
+          读取仓库</button
+        ><label class="plugin-upload">
+          <UploadCloud :size="28" /><strong>选择 ZIP 插件包</strong>
+          <span>仅打包插件目录 · 最大 10 MiB</span>
+          <input
+            class="plugin-file-input"
             type="file"
             accept=".zip"
-            @change="
-              stage(($event.target as HTMLInputElement).files?.[0])
-            " /></label
+            aria-label="选择 ZIP 插件包"
+            @change="upload"
+          /> </label
         ><progress v-if="progress > 0" :value="progress" max="100" />
-        <template v-if="task"
+        <template v-if="task?.state === 'staged' && task.directories.length"
           ><label
             >插件目录<select v-model="directory">
               <option v-for="d in task.directories" :key="d">{{ d }}</option>
             </select></label
-          ><button @click="inspect">检查兼容性</button></template
+          ><button
+            :disabled="!canInspectPlugin(task, directory)"
+            @click="inspect"
+          >
+            检查兼容性
+          </button></template
         >
       </fieldset>
     </section>
@@ -623,7 +652,34 @@ async function remove() {
   padding: 24px;
   border: 2px dashed #b9c8dd;
   border-radius: 12px;
-  background: #f8fafc;
+  background: rgba(10, 132, 255, 0.04);
+  position: relative;
+  flex-direction: column;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--bubblepilot-muted);
+}
+.plugin-upload strong {
+  color: var(--bubblepilot-ink);
+}
+.plugin-upload span {
+  font-size: 12px;
+}
+.plugin-upload:focus-within {
+  outline: 2px solid #0a84ff;
+  outline-offset: 3px;
+}
+.plugin-panel .plugin-file-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  padding: 0;
+}
+.plugin-panel input:disabled {
+  cursor: default;
 }
 .plugin-content {
   white-space: pre-wrap;
