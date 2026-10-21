@@ -2989,14 +2989,21 @@ paths:
           description: Version conflict, dependency unavailable or approval changed
   /api/v1/plugins/imports:
     post:
+      description: 接受公开 HTTPS Git 仓库或 GitHub tree/blob 目录链接；可选 ref、directory；仅读取选定目录并固定提交 SHA，ZIP 合同不变。
       operationId: postApiVPluginsImports
       summary: Declarative plugin post
-      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object }
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                ref: { type: string, maxLength: 200 }
+                directory: { type: string, maxLength: 1024 }
+              additionalProperties: false
       responses:
         "200":
           description: Operation result in data envelope

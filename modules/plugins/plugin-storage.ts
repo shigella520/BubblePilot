@@ -1,4 +1,9 @@
 import {
+  parseGitSource,
+  resolveGitDirectory,
+  pluginDirectory,
+} from "./plugin-git-source.js";
+import {
   mkdir,
   readFile,
   writeFile,
@@ -172,10 +177,16 @@ export async function unpackZip(
 export async function importGit(
   root: string,
   url: string,
-  ref: string,
+  ref: string | undefined,
   trustedHosts: readonly string[] = [],
-): Promise<{ files: Record<string, string>; sha: string }> {
-  const target = await resolveTarget(url, false, trustedHosts);
+  directory?: string,
+): Promise<{
+  files: Record<string, string>;
+  sha: string;
+  resolvedSource: { url: string; ref: string; directory: string };
+}> {
+  const source = parseGitSource(url);
+  const target = await resolveTarget(source.url, false, trustedHosts);
   if (new URL(url).search) pluginError("INVALID_GIT_URL");
   const dir = join(root, `.tmp-${randomUUID()}`);
   await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -190,8 +201,8 @@ export async function importGit(
     }
     return total;
   };
-  const run = (args: string[]) =>
-    new Promise<string>((res, rej) => {
+  const runBytes = (args: string[]) =>
+    new Promise<Buffer>((res, rej) => {
       const child = spawn(
         "git",
         [
@@ -220,7 +231,8 @@ export async function importGit(
           stdio: ["ignore", "pipe", "ignore"],
         },
       );
-      let out = "";
+      const chunks: Buffer[] = [];
+      let outputBytes = 0;
       let failure = "PLUGIN_GIT_FAILED";
       const timer = setTimeout(
         () => {
@@ -240,8 +252,9 @@ export async function importGit(
           .catch(() => child.kill("SIGKILL"));
       }, 100);
       child.stdout.on("data", (b: Buffer) => {
-        out += b.toString();
-        if (out.length > pluginLimits.expandedBytes) {
+        chunks.push(b);
+        outputBytes += b.length;
+        if (outputBytes > pluginLimits.expandedBytes) {
           failure = "PLUGIN_ARCHIVE_TOO_LARGE";
           child.kill("SIGKILL");
         }
@@ -254,44 +267,76 @@ export async function importGit(
       child.on("close", (code) => {
         clearTimeout(timer);
         clearInterval(monitor);
-        if (code === 0) res(out.trim());
+        if (code === 0) res(Buffer.concat(chunks));
         else rej(new Error(failure));
       });
     });
+  const run = async (args: string[]) =>
+    (await runBytes(args)).toString("utf8").trim();
   try {
     await run(["init", "--quiet"]);
-    await run(["fetch", "--depth=1", "--no-tags", url, ref]);
-    const sha = await run(["rev-parse", "FETCH_HEAD"]);
+    let chosenRef = ref ?? "HEAD";
+    let fetchRef = chosenRef;
+    let chosenDirectory = pluginDirectory(directory ?? ".");
+    if (source.tail) {
+      const refs = await run(["ls-remote", "--heads", "--tags", source.url]);
+      const resolved = resolveGitDirectory(source.tail, refs, ref, directory);
+      chosenRef = resolved.ref;
+      fetchRef = resolved.sha;
+      chosenDirectory = resolved.directory;
+    }
+    await run(["remote", "add", "origin", source.url]);
+    await run(["config", "remote.origin.promisor", "true"]);
+    await run(["config", "remote.origin.partialclonefilter", "blob:none"]);
     await run([
-      "-c",
-      "core.symlinks=true",
-      "checkout",
-      "--detach",
-      "FETCH_HEAD",
+      "fetch",
+      "--filter=blob:none",
+      "--depth=1",
+      "--no-tags",
+      "origin",
+      fetchRef,
     ]);
+    const sha = await run(["rev-parse", "FETCH_HEAD^{commit}"]);
+    const tree = chosenDirectory === "." ? sha : `${sha}:${chosenDirectory}`;
+    if ((await run(["cat-file", "-t", tree])) !== "tree")
+      pluginError("GIT_DIRECTORY_REQUIRED");
+    const entries = (await runBytes(["ls-tree", "-r", "-z", "--long", tree]))
+      .toString("utf8")
+      .split("\0")
+      .filter(Boolean);
+    if (entries.length > pluginLimits.files) pluginError("ARCHIVE_TOO_LARGE");
+    const selected = entries.map((entry) => {
+      const match = /^(\d+) (\w+) ([a-f0-9]+) +([0-9-]+)\t([\s\S]+)$/.exec(
+        entry,
+      );
+      if (!match) return pluginError("GIT_FAILED");
+      const [, mode, type, oid, size, path] = match;
+      if (mode === "120000") pluginError("SYMLINK_DENIED");
+      if (type !== "blob" || !["100644", "100755"].includes(mode!))
+        pluginError("UNSAFE_ARCHIVE_ENTRY");
+      safePath(path!);
+      return { oid: oid!, size: Number(size), path: path! };
+    });
+    if (
+      selected.reduce((total, item) => total + item.size, 0) >
+      pluginLimits.expandedBytes
+    )
+      pluginError("ARCHIVE_TOO_LARGE");
     const files: Record<string, string> = {};
-    let total = 0;
-    const walk = async (base: string) => {
-      for (const name of await readdir(join(dir, base))) {
-        if (name === ".git") continue;
-        const path = base ? `${base}/${name}` : name;
-        safePath(path);
-        const s = await lstat(join(dir, path));
-        if (s.isSymbolicLink()) pluginError("SYMLINK_DENIED");
-        if (s.isDirectory()) await walk(path);
-        else {
-          total += s.size;
-          if (
-            Object.keys(files).length >= pluginLimits.files ||
-            total > pluginLimits.expandedBytes
-          )
-            pluginError("ARCHIVE_TOO_LARGE");
-          files[path] = decode(path, await readFile(join(dir, path)));
-        }
-      }
+    for (const item of selected) {
+      const bytes = await runBytes(["cat-file", "blob", item.oid]);
+      if (bytes.length !== item.size) pluginError("GIT_FAILED");
+      files[item.path] = decode(item.path, bytes);
+    }
+    return {
+      files,
+      sha,
+      resolvedSource: {
+        url: source.url,
+        ref: chosenRef,
+        directory: chosenDirectory,
+      },
     };
-    await walk("");
-    return { files, sha };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

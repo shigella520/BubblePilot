@@ -93,6 +93,7 @@ export const importSchema = z
       .string()
       .regex(/^[A-Za-z0-9][A-Za-z0-9_./-]*$/)
       .max(200)
-      .default("HEAD"),
+      .optional(),
+    directory: z.string().min(1).max(1024).optional(),
   })
   .strict();

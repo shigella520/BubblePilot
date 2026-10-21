@@ -14,7 +14,7 @@
 
 安装步骤、凭据保管及验收要求以[部署与运维](../../doc/部署与运维.md#firecrawl-独立适配包)为准。
 
-当前推荐单包 ZIP，不能上传整个 BubblePilot 仓库。Git 导入目前在选择子目录前限制整个仓库，因此不承诺本仓库 Git 地址可直接导入。单包打包方式（从仓库根目录运行）：
+推荐直接粘贴目录链接 `https://github.com/shigella520/BubblePilot/tree/main/plugins/firecrawl`。导入器自动解析分支和目录，只读取该目录文件，并记录实际提交 SHA。也支持同路径的 `blob` 链接（目标必须是目录）。单包 ZIP 仍可使用，打包方式（从仓库根目录运行）：
 
 ```bash
 (cd plugins/firecrawl && zip -r /tmp/bubblepilot-firecrawl-1.0.0.zip plugin.json mcp.json README.md skills)

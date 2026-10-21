@@ -12,6 +12,9 @@ export function pluginImportErrorCode(error: unknown): string {
     "PLUGIN_INVALID_GIT_URL",
     "PLUGIN_GIT_FAILED",
     "PLUGIN_GIT_TIMEOUT",
+    "PLUGIN_GIT_REF_NOT_FOUND",
+    "PLUGIN_GIT_SOURCE_AMBIGUOUS",
+    "PLUGIN_GIT_DIRECTORY_REQUIRED",
   ]);
   const code =
     error instanceof Error && "code" in error ? error.code : undefined;
