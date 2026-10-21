@@ -2930,6 +2930,251 @@ paths:
           description: 当前运行状态和稳定告警码。
         "401":
           $ref: "#/components/responses/Error"
+  /api/v1/plugins:
+    get:
+      operationId: getApiVPlugins
+      summary: Declarative plugin get
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+  /api/v1/plugins/imports:
+    post:
+      operationId: postApiVPluginsImports
+      summary: Declarative plugin post
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+  /api/v1/plugins/imports/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getApiVPluginsImportsId
+      summary: Declarative plugin get
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+  /api/v1/plugins/imports/{id}/inspect:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: postApiVPluginsImportsIdInspect
+      summary: Declarative plugin post
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+  /api/v1/plugins/imports/{id}/install:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: postApiVPluginsImportsIdInstall
+      summary: Declarative plugin post
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+  /api/v1/plugins/connections/test:
+    post:
+      operationId: postApiVPluginsConnectionsTest
+      summary: Declarative plugin post
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+  /api/v1/plugins/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getApiVPluginsId
+      summary: Declarative plugin get
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+    put:
+      operationId: putApiVPluginsId
+      summary: Declarative plugin put
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+    delete:
+      operationId: deleteApiVPluginsId
+      summary: Declarative plugin delete
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+  /api/v1/plugins/{id}/config:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: putApiVPluginsIdConfig
+      summary: Declarative plugin put
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+  /api/v1/plugins/{id}/content:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getApiVPluginsIdContent
+      summary: Declarative plugin get
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      parameters:
+        - in: query
+          name: file
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Operation result in data envelope
+        "400":
+          description: Invalid or incompatible package
+        "401":
+          description: Administrator authentication required
+        "403":
+          description: Permission or sensitive verification required
+        "409":
+          description: Version conflict, dependency unavailable or approval changed
+
 components:
   securitySchemes:
     bearerAuth:

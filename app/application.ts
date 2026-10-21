@@ -1,3 +1,6 @@
+import multipart from "@fastify/multipart";
+import { registerPluginRoutes } from "../modules/plugins/plugin-routes.js";
+import type { PluginService } from "../modules/plugins/plugin-service.js";
 import type { MemeDeliveryService } from "../modules/memes/meme-delivery-service.js";
 import { registerMemeRoutes } from "../modules/memes/meme-routes.js";
 import type { MemeService } from "../modules/memes/meme-service.js";
@@ -333,6 +336,7 @@ const triggerPreviewBodySchema = z.object({
 
 export interface ApplicationOptions {
   memes?: MemeService;
+  plugins?: PluginService;
   memeDelivery?: MemeDeliveryService;
   botIdentity?: BotIdentityService;
   memory?: MemoryService;
@@ -950,6 +954,16 @@ export function buildApplication(
       sensitiveAudits.set(request, { action, targetType });
     };
 
+  if (options.plugins) {
+    if (!options.memes) application.register(multipart);
+    registerPluginRoutes(
+      application,
+      options.plugins,
+      requireAdmin,
+      requireSensitive,
+    );
+    application.addHook("onClose", async () => options.plugins?.close());
+  }
   if (options.memes)
     registerMemeRoutes(
       application,
@@ -2953,6 +2967,17 @@ export function buildApplication(
           parameters.workflowId,
           parameters.version,
         );
+        for (const node of candidate?.definition.nodes ?? []) {
+          if (node.type === "ai-chat" && node.config.pluginIds?.length) {
+            if (!options.plugins)
+              throw new ApplicationError(
+                "PLUGINS_UNAVAILABLE",
+                "插件服务不可用。",
+                409,
+              );
+            await options.plugins.assertAvailable(node.config.pluginIds);
+          }
+        }
         const routePolicies = new Map<
           string,
           "disabled" | "auto" | "required"
@@ -2977,6 +3002,12 @@ export function buildApplication(
             !(await options.ai.management.isRoutePublishable(
               routeId,
               webSearch,
+              candidate?.definition.nodes.some(
+                (node) =>
+                  node.type === "ai-chat" &&
+                  node.config.providerRouteId === routeId &&
+                  !!node.config.pluginIds?.length,
+              ) ?? false,
             ))
           ) {
             throw new ApplicationError(

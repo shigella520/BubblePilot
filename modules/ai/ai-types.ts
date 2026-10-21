@@ -643,6 +643,7 @@ export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 export interface AiRouteRequest {
   imageSession?: ChatImageSession | undefined;
   allowMemes?: boolean;
+  pluginIds?: string[];
   executionId: string | null;
   nodeId: string;
   memoryEvent?: { provider: string; messageId: string; timeZone?: string };

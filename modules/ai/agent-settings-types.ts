@@ -23,6 +23,12 @@ export const agentSettingsUpdateSchema = agentRuntimeSettingsSchema.extend({
 export type AgentSettingsUpdate = z.infer<typeof agentSettingsUpdateSchema>;
 export type AgentBudgetReason = "tool-calls" | "tool-output" | "tool-duration";
 export interface AgentBudgetSnapshot {
+  plugins?: Array<{
+    id: string;
+    name: string;
+    version: string;
+    revision: string;
+  }>;
   images?: ImageBudgetView;
   settings: AgentSettingsView;
   modelTurns: number;

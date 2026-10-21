@@ -429,6 +429,7 @@ export class AiManagementService {
   async isRoutePublishable(
     routeId: string,
     webSearch: WebSearchPolicy = "disabled",
+    requiresTools = false,
   ): Promise<boolean> {
     const route = await this.repository.getRoute(routeId);
     if (route === null || !route.enabled) {
@@ -446,7 +447,11 @@ export class AiManagementService {
           });
     const available = configured.filter(
       (provider) =>
-        provider.enabled && isProviderSecretConfigured(provider, this.secrets),
+        provider.enabled &&
+        isProviderSecretConfigured(provider, this.secrets) &&
+        (!requiresTools ||
+          (provider.capabilities?.functionCalling === true &&
+            provider.capabilityProbe?.functionCalling === "verified")),
     );
     if (webSearch === "disabled") return available.length > 0;
     const localWebSearchReady =

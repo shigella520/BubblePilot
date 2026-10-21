@@ -1207,6 +1207,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
         maxOutputCharacters: generationPolicy.maxOutputCharacters,
         outputFormat: node.config.outputFormat,
         allowMemes: node.config.allowMemes ?? false,
+        pluginIds: node.config.pluginIds ?? [],
         ...(node.config.webSearch === undefined
           ? {}
           : { webSearch: node.config.webSearch }),

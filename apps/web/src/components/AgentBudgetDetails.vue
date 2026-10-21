@@ -2,6 +2,12 @@
 import { computed } from "vue";
 const props = defineProps<{ summary: unknown }>();
 interface Budget {
+  plugins?: Array<{
+    id: string;
+    name: string;
+    version: string;
+    revision: string;
+  }>;
   images?: {
     count: { used: number; limit: number };
     bytes: { used: number; limit: number };
@@ -72,6 +78,14 @@ const reasonLabels: Record<string, string> = {
         {{ (budget.toolDurationMs / 1000).toFixed(2) }} /
         {{ budget.settings.maxToolDurationMs / 1000 }} 秒
       </p>
+      <details v-if="budget.plugins?.length">
+        <summary>本次插件版本</summary>
+        <p v-for="plugin in budget.plugins" :key="plugin.id">
+          {{ plugin.name }} · {{ plugin.version }}<br /><code>{{
+            plugin.revision
+          }}</code>
+        </p>
+      </details>
       <p v-if="budget.images">
         图片 {{ budget.images.count.used }} / {{ budget.images.count.limit }} 张
         · {{ budget.images.bytes.used }} /
