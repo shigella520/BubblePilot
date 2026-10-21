@@ -152,8 +152,9 @@ describe.each(["responses", "chat-completions"] as const)(
         undefined,
         service,
       );
+      const executionId = randomUUID();
       const result = await runner.run({
-        executionId: randomUUID(),
+        executionId,
         nodeId: "ai",
         routeId: route.value.id,
         messages: [{ role: "user", content: "Test plugin" }],
@@ -190,6 +191,14 @@ describe.each(["responses", "chat-completions"] as const)(
           (m) => m.role === "tool" && m.toolCallId === "skill-call",
         ),
       ).toBe(true);
+      const calls = await repo.listToolExecutions(executionId);
+      expect(
+        calls.find((call) => call.toolName.startsWith("ext_"))?.requestDetails,
+      ).toMatchObject({
+        pluginName: "fictional",
+        server: "fictional",
+        tool: "lookup",
+      });
       expect(result.agentBudget?.toolCalls).toBe(2);
       expect(result.agentBudget?.plugins?.[0]?.revision).toBe(pkg.hash);
     });

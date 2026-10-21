@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import {
+  pluginToolPresentation,
+  pluginToolErrorLabel,
+} from "../utils/plugin-tool-diagnostics";
 import ExecutionImageResult from "../components/ExecutionImageResult.vue";
 import { memeToolLabel } from "../utils/meme-tool-diagnostics";
 import MemeDeliveries from "../components/MemeDeliveries.vue";
@@ -2116,20 +2120,32 @@ function contextSnapshotValue(
               >
                 <Search :size="17" />
                 <div>
-                  <strong>{{ item.toolName }} · {{ item.status }}</strong>
+                  <strong
+                    >{{
+                      pluginToolPresentation(item, detail.nodes)?.title ??
+                      item.toolName
+                    }}
+                    · {{ item.status }}</strong
+                  >
                   <p v-if="item.requestDetails?.kind === 'plugin'">
-                    插件
-                    {{
-                      item.responseDetails?.pluginId ??
-                      item.requestDetails?.pluginId
+                    插件：{{
+                      pluginToolPresentation(item, detail.nodes)?.plugin
                     }}
-                    · {{ item.responseDetails?.tool ?? item.toolName }} ·
-                    {{ item.durationMs }} ms<br />版本
-                    {{
-                      item.responseDetails?.revision ??
-                      item.requestDetails?.revision
-                    }}
-                    · {{ item.responseDetails?.outcome ?? item.status }}
+                    <span
+                      v-if="pluginToolPresentation(item, detail.nodes)?.server"
+                    >
+                      · MCP：{{
+                        pluginToolPresentation(item, detail.nodes)?.server
+                      }}
+                    </span>
+                  </p>
+                  <p
+                    v-if="
+                      item.requestDetails?.kind === 'plugin' &&
+                      pluginToolErrorLabel(item.errorCode)
+                    "
+                  >
+                    {{ pluginToolErrorLabel(item.errorCode) }}
                   </p>
                   <p v-if="item.toolName === 'view_chat_image'">
                     {{ imageToolLabel(item.responseDetails) }} ·
@@ -2141,6 +2157,14 @@ function contextSnapshotValue(
                   <p v-if="memeToolLabel(item.toolName, item.responseDetails)">
                     {{ item.durationMs }} ms ·
                     {{ memeToolLabel(item.toolName, item.responseDetails) }}
+                  </p>
+                  <p v-else-if="item.requestDetails?.kind === 'plugin'">
+                    {{ item.durationMs }} ms ·
+                    {{
+                      item.status === "succeeded"
+                        ? "工具执行成功"
+                        : "工具执行失败"
+                    }}
                   </p>
                   <p v-else>
                     {{ item.durationMs }} ms · 结果
@@ -2168,6 +2192,19 @@ function contextSnapshotValue(
                   />
                   <details class="keyline">
                     <summary>诊断标识</summary>
+                    <template v-if="item.requestDetails?.kind === 'plugin'">
+                      <code>tool={{ item.toolName }}</code>
+                      <code
+                        >plugin={{
+                          pluginToolPresentation(item, detail.nodes)?.id
+                        }}</code
+                      >
+                      <code
+                        >revision={{
+                          pluginToolPresentation(item, detail.nodes)?.revision
+                        }}</code
+                      >
+                    </template>
                     <code>query={{ item.queryHash }}</code>
                     <code>call={{ item.toolCallId }}</code>
                   </details>
