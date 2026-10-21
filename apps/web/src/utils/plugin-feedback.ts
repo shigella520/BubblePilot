@@ -1,5 +1,21 @@
 import { ApiError } from "../services/api.js";
 const messages: Record<string, string> = {
+  PLUGIN_SCHEMA_UNSUPPORTED:
+    "MCP 工具的 JSON Schema 无法安全校验（可能包含未支持的关键字或外部引用），未批准该工具。",
+  PLUGIN_SCHEMA_DIALECT_UNSUPPORTED:
+    "MCP 工具声明了未支持的 JSON Schema 版本；支持 2020-12、2019-09 和 draft-07。",
+  PLUGIN_MCP_PROTOCOL_ERROR:
+    "MCP 服务返回了不符合协议或输出契约的响应。请检查服务兼容性。",
+  PLUGIN_MCP_OUTPUT_INVALID:
+    "MCP 返回的结构化结果不符合其输出契约，结果未被接受。",
+  PLUGIN_MCP_TRANSPORT_ERROR:
+    "无法完成 MCP 网络请求，请检查服务地址与服务器网络。",
+  PLUGIN_MCP_TIMEOUT: "MCP 握手或工具发现超时，请稍后重试。",
+  PLUGIN_MCP_CANCELLED: "MCP 请求已取消，未接受迟到结果。",
+  PLUGIN_REMOTE_AUTH_DENIED: "MCP 服务拒绝认证，请核对认证方式及凭据。",
+  PLUGIN_BILLING_REQUIRED: "MCP 服务要求付费或补充额度。",
+  PLUGIN_RATE_LIMITED: "MCP 服务限制了请求频率，请稍后重试。",
+  PLUGIN_MCP_TASK_REQUIRED: "该 MCP 工具要求任务式执行，目前客户端尚不支持。",
   SENSITIVE_AUTH_REQUIRED: "此操作需要敏感验证，请在顶栏解锁后重试。",
   UNAUTHORIZED: "管理会话已失效，请重新登录。",
   IMPORT_FAILED:

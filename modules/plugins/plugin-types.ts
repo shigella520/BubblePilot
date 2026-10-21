@@ -42,6 +42,7 @@ export interface PluginPackage {
   hash: string;
 }
 export interface ApprovedTool {
+  outputSchema?: Record<string, unknown>;
   server: string;
   definition: AiToolDefinition;
   hash: string;

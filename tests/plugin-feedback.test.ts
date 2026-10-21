@@ -19,6 +19,10 @@ describe("plugin import diagnostics", () => {
       "PLUGIN_NO_PLUGIN_MANIFEST",
       "PLUGIN_GIT_FAILED",
       "PLUGIN_GIT_TIMEOUT",
+      "PLUGIN_SCHEMA_UNSUPPORTED",
+      "PLUGIN_SCHEMA_DIALECT_UNSUPPORTED",
+      "PLUGIN_MCP_PROTOCOL_ERROR",
+      "PLUGIN_REMOTE_AUTH_DENIED",
       "PLUGIN_ARCHIVE_TOO_LARGE",
     ]) {
       expect(pluginErrorMessage(new Error(code))).not.toContain("顶栏解锁");
