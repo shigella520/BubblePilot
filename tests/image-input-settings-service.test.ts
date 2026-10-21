@@ -94,4 +94,33 @@ describe("ImageInputSettingsService", () => {
       maxHistoryImages: 1,
     });
   });
+  it("reads the shared policy without allowing legacy image writes to replace it", async () => {
+    const repository = new InMemoryImageInputSettingsRepository();
+    await repository.save({
+      ...defaults,
+      trustedLinkPreviewHosts: ["old.example.test"],
+      expectedVersion: 0,
+    });
+    let hosts = ["shared.example.test"];
+    const service = new ImageInputSettingsService(repository, defaults, () =>
+      Promise.resolve(hosts),
+    );
+    expect((await service.resolve()).trustedLinkPreviewHosts).toEqual(hosts);
+    await expect(
+      service.update({ ...defaults, expectedVersion: 1 }),
+    ).rejects.toMatchObject({ code: "NETWORK_SETTINGS_MOVED" });
+    const { trustedLinkPreviewHosts: _, ...input } = defaults;
+    void _;
+    await expect(
+      service.update({ ...input, expectedVersion: 1 }),
+    ).resolves.toMatchObject({
+      status: "ok",
+      value: { trustedLinkPreviewHosts: hosts },
+    });
+    hosts = [];
+    expect((await service.view()).trustedLinkPreviewHosts).toEqual([]);
+    expect((await repository.find())?.trustedLinkPreviewHosts).toEqual([
+      "old.example.test",
+    ]);
+  });
 });

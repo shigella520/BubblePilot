@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NetworkSettingsPanel from "../components/NetworkSettingsPanel.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import {
   Cable,
@@ -143,7 +144,10 @@ onMounted(load);
         <h2>系统设置</h2>
       </div>
       <SectionNavigation
-        :items="[{ id: 'bluebubbles', label: 'BlueBubbles', icon: Cable }]"
+        :items="[
+          { id: 'bluebubbles', label: 'BlueBubbles', icon: Cable },
+          { id: 'network', label: '外部网络', icon: ShieldCheck },
+        ]"
       />
       <div class="sidebar-note">
         运行时配置保存在应用数据库中，修改后无需重新部署容器。
@@ -308,6 +312,7 @@ onMounted(load);
           </div>
         </form>
       </section>
+      <NetworkSettingsPanel />
     </div>
   </main>
 </template>

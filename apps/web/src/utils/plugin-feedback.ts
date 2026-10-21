@@ -15,7 +15,7 @@ const messages: Record<string, string> = {
     "没有找到插件清单。请选择包含 plugin.json 或 .codex-plugin/plugin.json 的插件包，普通项目仓库不能直接安装。",
   PLUGIN_INVALID_ZIP: "ZIP 文件损坏或结构不受支持，请重新打包插件目录。",
   PLUGIN_NETWORK_TARGET_DENIED:
-    "目标地址未通过网络安全检查，可能解析到了内网或代理 Fake-IP。请检查服务器 DNS，或使用 ZIP 导入。",
+    "目标地址未通过网络安全检查，可能解析到了内网或代理 Fake-IP。请检查服务器 DNS；若使用 Fake-IP，请在系统设置 → 外部网络添加可信精确域名，或使用 ZIP 导入。",
   PLUGIN_INVALID_GIT_URL: "请填写公开 HTTPS Git 仓库地址，不要包含查询参数。",
   PLUGIN_UNSAFE_PATH: "包内存在不安全路径，已拒绝导入。",
   PLUGIN_SYMLINK_DENIED: "包内包含符号链接，已拒绝导入。",

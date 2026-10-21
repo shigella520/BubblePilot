@@ -32,6 +32,10 @@ import type { ImageInputSettingsService } from "../modules/ai/image-input-settin
 import type { ContextSettingsService } from "../modules/workflow/context-settings-service.js";
 import type { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
 import { contextSettingsUpdateSchema } from "../modules/workflow/context-settings-types.js";
+import {
+  networkSettingsUpdateSchema,
+  type NetworkSettings,
+} from "../modules/shared/network-settings.js";
 import { imageInputSettingsUpdateSchema } from "../modules/ai/image-input-settings-types.js";
 import type { NativeImageInputService } from "../modules/ai/native-image-input.js";
 import type {
@@ -335,6 +339,7 @@ const triggerPreviewBodySchema = z.object({
 });
 
 export interface ApplicationOptions {
+  networkSettings?: NetworkSettings;
   memes?: MemeService;
   plugins?: PluginService;
   memeDelivery?: MemeDeliveryService;
@@ -954,6 +959,47 @@ export function buildApplication(
       sensitiveAudits.set(request, { action, targetType });
     };
 
+  application.get(
+    "/api/v1/settings/network",
+    { preHandler: requireAdmin },
+    async () => {
+      if (!options.networkSettings)
+        throw new ApplicationError(
+          "NETWORK_SETTINGS_UNAVAILABLE",
+          "Network settings unavailable.",
+          503,
+        );
+      return { data: await options.networkSettings.view() };
+    },
+  );
+  application.put(
+    "/api/v1/settings/network",
+    {
+      preHandler: requireSensitive(
+        "network.settings.update",
+        "network-settings",
+      ),
+    },
+    async (request) => {
+      if (!options.networkSettings)
+        throw new ApplicationError(
+          "NETWORK_SETTINGS_UNAVAILABLE",
+          "Network settings unavailable.",
+          503,
+        );
+      const value = await options.networkSettings.update(
+        networkSettingsUpdateSchema.parse(request.body),
+      );
+      if (!value)
+        throw new ApplicationError(
+          "NETWORK_SETTINGS_CONFLICT",
+          "Network settings changed; refresh before retrying.",
+          409,
+        );
+      return { data: value };
+    },
+  );
+  application.addHook("onClose", async () => options.networkSettings?.close());
   if (options.plugins) {
     if (!options.memes) application.register(multipart);
     registerPluginRoutes(

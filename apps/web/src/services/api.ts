@@ -135,6 +135,10 @@ export function parseJsonObject(value: string): Record<string, unknown> {
 export function errorMessage(cause: unknown): string {
   if (cause instanceof ApiError) {
     const knownMessages: Record<string, string> = {
+      NETWORK_SETTINGS_CONFLICT:
+        "外部网络配置已被其他操作修改，请刷新后重新编辑。",
+      NETWORK_SETTINGS_MOVED: "可信域名已迁移，请到系统设置 → 外部网络修改。",
+      NETWORK_SETTINGS_UNAVAILABLE: "外部网络配置暂不可用，请刷新重试。",
       TRIGGER_REFERENCED:
         "该触发器已有执行记录引用，不能直接删除。请先停用它；执行历史会保留以确保审计完整。",
       TRIGGER_NOT_FOUND: "触发器不存在，可能已被删除。",

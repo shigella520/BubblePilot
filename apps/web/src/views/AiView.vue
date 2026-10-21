@@ -112,7 +112,7 @@ interface ContextSettings {
 type ImageInputSettingsForm = Omit<
   ImageInputSettings,
   "source" | "version" | "updatedAt" | "trustedLinkPreviewHosts"
-> & { trustedLinkPreviewHosts: string };
+>;
 type WebSearchSettingsForm = Pick<
   WebSearchSettings,
   | "maxAttempts"
@@ -167,7 +167,6 @@ const imageInputSettingsForm = reactive<ImageInputSettingsForm>({
   enabled: false,
   includeAttachments: true,
   includeLinkPreviewImages: true,
-  trustedLinkPreviewHosts: "",
   maxCurrentAttachments: 4,
   maxHistoryImages: 2,
   maxTotalImages: 6,
@@ -264,7 +263,6 @@ function applyImageInputSettings(value: ImageInputSettings) {
     enabled: value.enabled,
     includeAttachments: value.includeAttachments,
     includeLinkPreviewImages: value.includeLinkPreviewImages,
-    trustedLinkPreviewHosts: value.trustedLinkPreviewHosts.join("\n"),
     maxCurrentAttachments: value.maxCurrentAttachments,
     maxHistoryImages: value.maxHistoryImages,
     maxTotalImages: value.maxTotalImages,
@@ -370,11 +368,6 @@ async function saveImageInputSettings() {
         method: "PUT",
         body: jsonBody({
           ...imageInputSettingsForm,
-          trustedLinkPreviewHosts:
-            imageInputSettingsForm.trustedLinkPreviewHosts
-              .split(/[\s,]+/u)
-              .map((host) => host.trim().toLowerCase())
-              .filter((host) => host.length > 0),
           expectedVersion: imageInputSettings.value.version,
         }),
       },
@@ -1085,18 +1078,10 @@ onMounted(async () => {
               </select></label
             >
           </div>
-          <label
-            ><span>可信链接图片域名（每行一个）</span
-            ><textarea
-              v-model="imageInputSettingsForm.trustedLinkPreviewHosts"
-              rows="3"
-              placeholder="例如：linkpeek-dev.jianyutan.com"
-            ></textarea>
-            <small
-              >仅填写你信任的精确域名，不含协议、端口、路径或通配符。白名单只允许该域名使用代理
-              Fake-IP，其他私网地址仍会被阻止。</small
-            ></label
-          >
+          <p class="panel-description">
+            图片与插件共用可信 Fake-IP 域名，请前往
+            <a href="/#/settings#network">系统设置 → 外部网络</a> 管理。
+          </p>
           <details class="advanced-settings">
             <summary>高级限制（通常无需修改）</summary>
             <p class="panel-description">

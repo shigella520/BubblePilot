@@ -1,3 +1,4 @@
+import { trustedFakeIpHostsSchema } from "../shared/network-settings.js";
 import { z } from "zod";
 
 export type ImageDetail = "low" | "high" | "auto";
@@ -26,20 +27,7 @@ const runtimeFields = {
   enabled: z.boolean(),
   includeAttachments: z.boolean(),
   includeLinkPreviewImages: z.boolean(),
-  trustedLinkPreviewHosts: z
-    .array(
-      z
-        .string()
-        .trim()
-        .toLowerCase()
-        .max(253)
-        .regex(
-          /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u,
-          "Trusted image hosts must be exact DNS hostnames without a scheme, port, path, or wildcard.",
-        ),
-    )
-    .max(32)
-    .transform((hosts) => [...new Set(hosts)]),
+  trustedLinkPreviewHosts: trustedFakeIpHostsSchema.optional(),
   maxCurrentAttachments: z.number().int().min(1).max(10),
   maxHistoryImages: z.number().int().min(0).max(10),
   maxTotalImages: z.number().int().min(1).max(20),

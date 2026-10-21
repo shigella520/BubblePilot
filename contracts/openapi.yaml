@@ -6,6 +6,47 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/settings/network:
+    get:
+      operationId: getNetworkSettings
+      security:
+        - sessionAuth: []
+      responses:
+        "200":
+          description: Shared Fake-IP trust policy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/NetworkSettingsView" }
+        "401":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: updateNetworkSettings
+      description: Requires admin and sensitive unlock; audited and version checked.
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NetworkSettingsUpdate" }
+      responses:
+        "200":
+          description: Updated shared policy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/NetworkSettingsView" }
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/image-inputs/{imageInputId}/source:
     get:
       operationId: viewExecutionImageSource
@@ -3588,6 +3629,25 @@ components:
         expectedVersion:
           type: integer
           minimum: 1
+    NetworkSettingsUpdate:
+      type: object
+      required: [trustedFakeIpHosts, expectedVersion]
+      properties:
+        trustedFakeIpHosts:
+          type: array
+          maxItems: 32
+          items: { type: string, maxLength: 253 }
+        expectedVersion: { type: integer, minimum: 1 }
+      additionalProperties: false
+    NetworkSettingsView:
+      type: object
+      required: [trustedFakeIpHosts, version, updatedAt]
+      properties:
+        trustedFakeIpHosts:
+          type: array
+          items: { type: string }
+        version: { type: integer }
+        updatedAt: { type: string, format: date-time }
     ImageInputSettingsUpdate:
       type: object
       required:
@@ -3595,7 +3655,6 @@ components:
           enabled,
           includeAttachments,
           includeLinkPreviewImages,
-          trustedLinkPreviewHosts,
           maxCurrentAttachments,
           maxHistoryImages,
           maxTotalImages,
@@ -3610,6 +3669,8 @@ components:
         includeAttachments: { type: boolean }
         includeLinkPreviewImages: { type: boolean }
         trustedLinkPreviewHosts:
+          deprecated: true
+          description: Read-only compatibility alias; changing it returns NETWORK_SETTINGS_MOVED. Use /api/v1/settings/network.
           type: array
           maxItems: 32
           items: { type: string, maxLength: 253 }

@@ -1,4 +1,6 @@
 import { PluginService } from "../modules/plugins/plugin-service.js";
+import { NetworkSettings } from "../modules/shared/network-settings.js";
+import { OpenGraphClient } from "../modules/integrations/bluebubbles/open-graph-client.js";
 import { PluginStorage } from "../modules/plugins/plugin-storage.js";
 import { ChatImageSourceRepository } from "../modules/ai/chat-image-source.js";
 import { MemeDeliveryService } from "../modules/memes/meme-delivery-service.js";
@@ -93,6 +95,10 @@ const imageInputSettingsRepository = new PostgresImageInputSettingsRepository(
   config.databaseUrl,
   config.databaseQueryTimeoutMs,
 );
+const networkSettings = new NetworkSettings(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+);
 const imageInputSettings = new ImageInputSettingsService(
   imageInputSettingsRepository,
   {
@@ -108,6 +114,7 @@ const imageInputSettings = new ImageInputSettingsService(
     fetchTimeoutMs: 15_000,
     detail: "high",
   },
+  networkSettings.trustedHosts,
 );
 const authRepository = new PostgresAuthRepository(
   config.databaseUrl,
@@ -187,6 +194,7 @@ const plugins = new PluginService(
   config.databaseUrl,
   new PluginStorage(config.pluginStoragePath ?? "./data/plugins"),
   config.settingsEncryptionKey,
+  networkSettings.trustedHosts,
 );
 await plugins.init();
 const aiAgent = new AgentRunner(
@@ -232,7 +240,10 @@ const messageRetention =
       )
     : undefined;
 const replyGateway = new ManagedBlueBubblesReplyGateway(blueBubblesSettings);
-const linkPreviewEnricher = new ManagedLinkPreviewEnricher(blueBubblesSettings);
+const linkPreviewEnricher = new ManagedLinkPreviewEnricher(
+  blueBubblesSettings,
+  new OpenGraphClient(networkSettings.trustedHosts),
+);
 const nativeImageInput = new NativeImageInputService(
   imageInputSettings,
   blueBubblesSettings,
@@ -277,6 +288,7 @@ const workflowDispatcher = new InProcessWorkflowExecutionDispatcher(
   workflowEngine,
 );
 const application = buildApplication(config, repository, {
+  networkSettings,
   auth: authService,
   memes: memeService,
   plugins,

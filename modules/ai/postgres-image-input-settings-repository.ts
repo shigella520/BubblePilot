@@ -73,7 +73,9 @@ export class PostgresImageInputSettingsRepository implements ImageInputSettingsR
       input.enabled,
       input.includeAttachments,
       input.includeLinkPreviewImages,
-      JSON.stringify(input.trustedLinkPreviewHosts),
+      input.trustedLinkPreviewHosts === undefined
+        ? null
+        : JSON.stringify(input.trustedLinkPreviewHosts),
       input.maxCurrentAttachments,
       input.maxHistoryImages,
       input.maxTotalImages,
@@ -90,7 +92,7 @@ export class PostgresImageInputSettingsRepository implements ImageInputSettingsR
                trusted_link_preview_hosts,
                max_current_attachments, max_history_images, max_total_images,
                max_image_bytes, max_total_bytes, fetch_timeout_ms, detail
-             ) VALUES (1, $1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11)
+             ) VALUES (1, $1, $2, $3, COALESCE($4::jsonb, '[]'::jsonb), $5, $6, $7, $8, $9, $10, $11)
              ON CONFLICT (id) DO NOTHING RETURNING ${returning}`,
             values,
           )
@@ -98,7 +100,7 @@ export class PostgresImageInputSettingsRepository implements ImageInputSettingsR
             `UPDATE ai_image_input_settings SET
                enabled = $1, include_attachments = $2,
                include_link_preview_images = $3,
-               trusted_link_preview_hosts = $4::jsonb,
+               trusted_link_preview_hosts = COALESCE($4::jsonb, trusted_link_preview_hosts),
                max_current_attachments = $5,
                max_history_images = $6, max_total_images = $7,
                max_image_bytes = $8, max_total_bytes = $9,
