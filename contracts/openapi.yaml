@@ -6,6 +6,49 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/settings/plugins:
+    get:
+      operationId: getPluginRuntimeSettings
+      security:
+        - sessionAuth: []
+      responses:
+        "200":
+          description: Catalogue character limit, version, updatedAt, and enabled plugin usage breakdown. Usage excludes output schemas, hashes, and disabled capabilities.
+        "401":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: updatePluginRuntimeSettings
+      description: Requires sensitive unlock and audit. Applies to new executions, with optimistic concurrency.
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [catalogueCharacters, expectedVersion]
+              properties:
+                catalogueCharacters:
+                  {
+                    type: integer,
+                    minimum: 8000,
+                    maximum: 256000,
+                    default: 64000,
+                  }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Saved catalogueCharacters, version and updatedAt.
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
   /api/v1/settings/network:
     get:
       operationId: getNetworkSettings

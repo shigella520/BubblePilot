@@ -1,3 +1,5 @@
+import { ApplicationError } from "../../app/errors.js";
+import { pluginCatalogueUsage } from "./plugin-catalogue.js";
 import type { TrustedHostsProvider } from "../shared/network-settings.js";
 import { pluginImportErrorCode } from "./plugin-import-error.js";
 import { randomUUID } from "node:crypto";
@@ -394,29 +396,74 @@ export class PluginService {
       config: { connections, tools, disabledSkills, disabledTools },
     });
   }
+  async runtimeSettings() {
+    const result = await this.pool.query<{
+      catalogue_characters: number;
+      version: number;
+      updated_at: Date;
+    }>("SELECT * FROM plugin_runtime_settings WHERE id=1");
+    const row = result.rows[0];
+    if (!row) pluginError("SETTINGS_UNAVAILABLE", 503);
+    return {
+      catalogueCharacters: row.catalogue_characters,
+      version: row.version,
+      updatedAt: row.updated_at.toISOString(),
+    };
+  }
+  async updateRuntimeSettings(input: {
+    catalogueCharacters: number;
+    expectedVersion: number;
+  }) {
+    const result = await this.pool.query<{
+      catalogue_characters: number;
+      version: number;
+      updated_at: Date;
+    }>(
+      "UPDATE plugin_runtime_settings SET catalogue_characters=$1,version=version+1,updated_at=now() WHERE id=1 AND version=$2 RETURNING *",
+      [input.catalogueCharacters, input.expectedVersion],
+    );
+    const row = result.rows[0];
+    if (!row) pluginError("CONFLICT", 409);
+    return {
+      catalogueCharacters: row.catalogue_characters,
+      version: row.version,
+      updatedAt: row.updated_at.toISOString(),
+    };
+  }
+  async runtimeUsage() {
+    const rows = await this.pool.query<{ id: string }>(
+      "SELECT id FROM plugins WHERE enabled=true ORDER BY name,id",
+    );
+    return pluginCatalogueUsage(
+      this,
+      await Promise.all(rows.rows.map((row) => this.get(row.id))),
+    );
+  }
   async assertAvailable(ids: string[]) {
-    let toolCount = 0,
-      characters = 0;
-    for (const id of ids) {
-      const p = await this.get(id);
+    if (!ids.length) return;
+    const plugins = await Promise.all(
+      [...new Set(ids)].map((id) => this.get(id)),
+    );
+    for (const p of plugins) {
       if (!p.enabled) pluginError("DISABLED", 409);
       this.checkConnections(p.package, p.config.connections);
       for (const c of Object.values(p.config.connections))
         if (c.auth !== "none" && !c.secret) pluginError("SECRET_REQUIRED", 409);
-      toolCount += p.config.tools.length;
-      characters +=
-        JSON.stringify(
-          p.package.skills.map((s) => ({
-            name: s.name,
-            description: s.description,
-          })),
-        ).length + JSON.stringify(p.config.tools).length;
-      if (
-        toolCount > pluginLimits.tools ||
-        characters > pluginLimits.catalogueCharacters
-      )
-        pluginError("CATALOGUE_TOO_LARGE", 409);
     }
+    const settings = await this.runtimeSettings();
+    const usage = pluginCatalogueUsage(this, plugins);
+    if (usage.toolCount > pluginLimits.tools)
+      throw new ApplicationError(
+        "PLUGIN_TOO_MANY_TOOLS",
+        `插件工具数量 ${usage.toolCount} 超过上限 ${pluginLimits.tools}。请减少启用的工具。`,
+        409,
+      );
+    if (usage.characters > settings.catalogueCharacters)
+      throw new ApplicationError(
+        "PLUGIN_CATALOGUE_TOO_LARGE",
+        `插件目录占用 ${usage.characters} 字符，超过上限 ${settings.catalogueCharacters}。请减少启用的工具，或在系统设置 → 插件工具预算调整上限。`,
+        409,
+      );
   }
   async remove(id: string, version: number) {
     const client = await this.pool.connect();

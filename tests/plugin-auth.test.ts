@@ -52,7 +52,20 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
     directories: [],
     error_code: "PLUGIN_NO_PLUGIN_MANIFEST",
   });
+  const updateRuntimeSettings = vi
+    .fn()
+    .mockResolvedValue({ catalogueCharacters: 64000, version: 2 });
   const plugins = {
+    updateRuntimeSettings,
+    runtimeSettings: () =>
+      Promise.resolve({ catalogueCharacters: 64000, version: 1 }),
+    runtimeUsage: () =>
+      Promise.resolve({
+        characters: 4,
+        toolCount: 0,
+        plugins: [],
+        sharedCharacters: 4,
+      }),
     stage,
     list: () => Promise.resolve([]),
     mutate,
@@ -86,6 +99,10 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
       (await app.inject({ method: "GET", url: "/api/v1/settings/network" }))
         .statusCode,
     ).toBe(401);
+    expect(
+      (await app.inject({ method: "GET", url: "/api/v1/settings/plugins" }))
+        .statusCode,
+    ).toBe(401);
     const login = await app.inject({
       method: "POST",
       url: "/api/v1/auth/session",
@@ -109,6 +126,18 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
     ).toBe(200);
     expect((await app.inject(networkRequest)).statusCode).toBe(403);
     expect(networkUpdate).not.toHaveBeenCalled();
+    const settingsRequest = {
+      method: "PUT" as const,
+      url: "/api/v1/settings/plugins",
+      headers,
+      payload: { catalogueCharacters: 64000, expectedVersion: 1 },
+    };
+    expect(
+      (await app.inject({ method: "GET", url: settingsRequest.url, headers }))
+        .statusCode,
+    ).toBe(200);
+    expect((await app.inject(settingsRequest)).statusCode).toBe(403);
+    expect(updateRuntimeSettings).not.toHaveBeenCalled();
     const request = {
       method: "PUT" as const,
       url: "/api/v1/plugins/11111111-1111-4111-8111-111111111111",
@@ -137,6 +166,21 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
     ).toBe(200);
     expect((await app.inject(request)).statusCode).toBe(200);
     expect(mutate).toHaveBeenCalledOnce();
+    expect((await app.inject(settingsRequest)).statusCode).toBe(200);
+    expect(updateRuntimeSettings).toHaveBeenCalledOnce();
+    expect(
+      authRepository.auditEvents.some(
+        (e) => e.action === "plugin.settings.update",
+      ),
+    ).toBe(true);
+    expect(
+      (
+        await app.inject({
+          ...settingsRequest,
+          payload: { catalogueCharacters: 0, expectedVersion: 1 },
+        })
+      ).statusCode,
+    ).toBe(400);
     expect((await app.inject(networkRequest)).statusCode).toBe(200);
     expect(networkUpdate).toHaveBeenCalledOnce();
     expect(

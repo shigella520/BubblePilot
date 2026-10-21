@@ -6,6 +6,7 @@ import {
   importSchema,
   pluginError,
   pluginLimits,
+  pluginRuntimeSettingsSchema,
 } from "./plugin-types.js";
 const connections = z.record(z.string(), connectionSchema);
 export function registerPluginRoutes(
@@ -17,6 +18,21 @@ export function registerPluginRoutes(
     target: string,
   ) => (r: FastifyRequest) => Promise<void>,
 ) {
+  app.get("/api/v1/settings/plugins", { preHandler: admin }, async () => ({
+    data: {
+      ...(await service.runtimeSettings()),
+      usage: await service.runtimeUsage(),
+    },
+  }));
+  app.put(
+    "/api/v1/settings/plugins",
+    { preHandler: sensitive("plugin.settings.update", "plugin-settings") },
+    async (r) => ({
+      data: await service.updateRuntimeSettings(
+        pluginRuntimeSettingsSchema.parse(r.body),
+      ),
+    }),
+  );
   const id = (r: FastifyRequest) =>
     z.object({ id: z.string().uuid() }).parse(r.params).id;
   app.get("/api/v1/plugins", { preHandler: admin }, async () => ({

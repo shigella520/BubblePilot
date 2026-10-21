@@ -8,9 +8,15 @@ export const pluginLimits = {
   textBytes: 256 * 1024,
   timeoutMs: 30_000,
   tools: 100,
-  catalogueCharacters: 24000,
+  catalogueCharacters: 64000,
   plugins: 10,
 } as const;
+export const pluginRuntimeSettingsSchema = z
+  .object({
+    catalogueCharacters: z.number().int().min(8000).max(256000),
+    expectedVersion: z.number().int().positive(),
+  })
+  .strict();
 export function pluginError(code: string, status = 400): never {
   throw new ApplicationError(
     `PLUGIN_${code}`,
