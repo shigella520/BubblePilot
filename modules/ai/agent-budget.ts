@@ -5,6 +5,7 @@ import type {
 } from "./agent-settings-types.js";
 
 export interface AgentToolContext {
+  toolCallId?: string;
   signal: AbortSignal;
   deadline: number;
   maxOutputCharacters: number;

@@ -317,7 +317,7 @@ describe("AgentRunner", () => {
         (message) => message.role === "system",
       )?.content;
       expect(policy).toContain(
-        "10 tool calls, 24000 tool-result characters, and 60 seconds",
+        "10 tool calls, 64000 tool-result characters, and 90 seconds",
       );
       expect(policy).toContain("12 model rounds");
       expect(policy).toContain("native structured tool-call channel");

@@ -67,3 +67,36 @@ describe("plugin audit presentation", () => {
     expect(pluginToolErrorLabel("UNKNOWN")).toBeNull();
   });
 });
+
+it("explains partial delivery and links local reads to the original MCP tool", async () => {
+  const { pluginDeliveryLabel } =
+    await import("../apps/web/src/utils/plugin-tool-diagnostics.js");
+  expect(pluginDeliveryLabel(null)).toBe("未记录详细交付信息");
+  expect(
+    pluginDeliveryLabel({ diagnosticVersion: 1, delivery: "partial" }),
+  ).toContain("部分内容");
+  expect(
+    pluginDeliveryLabel({
+      diagnosticVersion: 1,
+      delivery: "read",
+      offset: 20,
+      nextOffset: 40,
+    }),
+  ).toContain("20—40");
+  expect(
+    pluginDeliveryLabel({
+      diagnosticVersion: 1,
+      delivery: "search",
+      matchCount: 0,
+    }),
+  ).toContain("0 处");
+  expect(
+    pluginToolPresentation({
+      ...call,
+      toolName: "read_tool_result",
+      requestDetails: { kind: "plugin" },
+      responseDetails: { ...call.requestDetails, parentToolCallId: "original" },
+    })?.title,
+  ).toBe("读取结果 · example-mcp / read_page");
+  expect(pluginToolErrorLabel("PLUGIN_RESULT_STORAGE_LIMIT")).toContain("暂存");
+});

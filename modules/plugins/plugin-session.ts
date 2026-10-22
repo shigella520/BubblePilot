@@ -1,3 +1,8 @@
+import {
+  PluginResultStore,
+  resultLimits,
+  normalizeMcpResult,
+} from "./plugin-result-store.js";
 import { mcpModelDefinition, decodeMcpArguments } from "./plugin-schema.js";
 import { pluginFailureGuidance } from "./plugin-guidance.js";
 import type {
@@ -15,6 +20,7 @@ import {
   type ApprovedTool,
 } from "./plugin-types.js";
 export class PluginSession {
+  private readonly results = new PluginResultStore();
   private readonly clients = new Map<string, PluginMcp>();
   private readonly loaded = new Set<string>();
   constructor(
@@ -107,10 +113,8 @@ export class PluginSession {
               pluginError("INVALID_ARGUMENTS");
             const result = await fn(args as Record<string, unknown>, ctx);
             ctx.signal.throwIfAborted();
-            if (
-              Date.now() >= ctx.deadline ||
-              result.text.length > ctx.maxOutputCharacters
-            )
+            if (Date.now() >= ctx.deadline) pluginError("MCP_TIMEOUT");
+            if (result.text.length > ctx.maxOutputCharacters)
               pluginError("RESULT_BUDGET");
             return {
               text: result.text,
@@ -130,17 +134,39 @@ export class PluginSession {
               ...(result.commit ? { commit: result.commit } : {}),
             };
           } catch (e) {
-            const code =
-              e instanceof Error && "code" in e
+            const code = ctx.signal.aborted
+              ? "PLUGIN_MCP_CANCELLED"
+              : e instanceof Error && "code" in e
                 ? String(e.code)
                 : "PLUGIN_EXECUTION_FAILED";
+            const text = JSON.stringify({
+              status: "unavailable",
+              code,
+              ...(code === "PLUGIN_RESULT_BUDGET"
+                ? { reason: "tool-output" }
+                : {}),
+              ...pluginFailureGuidance,
+            });
             return {
-              text: JSON.stringify({
-                status: "unavailable",
-                code,
-                ...pluginFailureGuidance,
-              }),
-              diagnostics: { outcome: "error", errorCode: code },
+              text,
+              diagnostics: {
+                ...metadata,
+                diagnosticVersion: 1,
+                delivery: "unavailable",
+                outcome: "error",
+                errorCode: code,
+                outputLimit: ctx.maxOutputCharacters,
+                remainingBefore: ctx.maxOutputCharacters,
+                remainingAfter: Math.max(
+                  0,
+                  ctx.maxOutputCharacters - text.length,
+                ),
+                deliveredCharacters:
+                  text.length <= ctx.maxOutputCharacters ? text.length : 0,
+                responseLimitBytes: resultLimits.responseBytes,
+                storageLimitBytes: resultLimits.storedBytes,
+                callTimeoutMs: resultLimits.callTimeoutMs,
+              },
             };
           }
         },
@@ -226,6 +252,42 @@ export class PluginSession {
         },
       );
     }
+    if (
+      this.plugins.some((p) =>
+        p.config.tools.some(
+          (t) =>
+            !p.config.disabledTools.includes(
+              `${t.server}/${t.definition.name}`,
+            ),
+        ),
+      )
+    ) {
+      for (const search of [false, true])
+        register(
+          search ? "search_tool_result" : "read_tool_result",
+          search
+            ? "Find literal keywords in a large MCP result already fetched in this run. Returns matching excerpts and Unicode code-point offsets; does not contact the supplier again."
+            : "Read a range of a large MCP result already fetched in this run using its result_ref and Unicode code-point offset. Does not contact the supplier again.",
+          {
+            type: "object",
+            properties: {
+              result_ref: { type: "string" },
+              ...(search
+                ? { query: { type: "string", minLength: 1, maxLength: 256 } }
+                : { offset: { type: "integer", minimum: 0 } }),
+              limit: {
+                type: "integer",
+                minimum: 1,
+                maximum: search ? 10 : resultLimits.outputCharacters,
+              },
+            },
+            required: search ? ["result_ref", "query"] : ["result_ref"],
+            additionalProperties: false,
+          },
+          (args, ctx) =>
+            this.results.access(args, search, ctx.maxOutputCharacters),
+        );
+    }
     for (const p of this.plugins)
       for (const tool of p.config.tools) {
         if (
@@ -265,19 +327,36 @@ export class PluginSession {
               tool,
               mcpArgs,
               ctx.signal,
-              ctx.deadline - Date.now(),
+              Math.min(resultLimits.callTimeoutMs, ctx.deadline - Date.now()),
             );
             await this.check(p, undefined, tool);
-            return {
-              text: JSON.stringify(result),
-              metadata: {
+            ctx.signal.throwIfAborted();
+            if (Date.now() >= ctx.deadline) pluginError("MCP_TIMEOUT");
+            const { responseBytes, ...payload } = result;
+            const prepared = this.results.prepare(
+              normalizeMcpResult(payload),
+              {
                 pluginId: p.id,
                 pluginName: p.name,
                 revision: p.revision,
                 server: tool.server,
                 tool: tool.definition.name,
+                parentToolCallId: ctx.toolCallId,
                 resultStatus: result.status,
                 ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+              },
+              () => this.check(p, undefined, tool),
+              ctx.maxOutputCharacters,
+            );
+            return {
+              ...prepared,
+              metadata: {
+                ...prepared.metadata,
+                // Serialized validated payload bytes, not transport/SSE framing.
+                responseBytes,
+                responsePayloadBytes: Buffer.byteLength(
+                  JSON.stringify(payload),
+                ),
               },
             };
           },
@@ -292,6 +371,7 @@ export class PluginSession {
       }
   }
   async close() {
+    this.results.close();
     await Promise.all([...this.clients.values()].map((c) => c.close()));
   }
 }

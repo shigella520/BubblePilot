@@ -638,10 +638,10 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                 });
               if (isMemory || isPlugin) {
                 images?.beginCall(turn, call.id);
-                const output = await registered.execute(
-                  call.arguments,
-                  context,
-                );
+                const output = await registered.execute(call.arguments, {
+                  ...context,
+                  toolCallId: call.id,
+                });
                 context.signal.throwIfAborted();
                 if (Date.now() >= context.deadline)
                   throw new AgentToolTimeout();

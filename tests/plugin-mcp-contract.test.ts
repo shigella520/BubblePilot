@@ -1,6 +1,7 @@
+import type * as ResultStore from "../modules/plugins/plugin-result-store.js";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -11,6 +12,14 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { PluginMcp } from "../modules/plugins/plugin-mcp.js";
+// Exercise the real streaming boundary without allocating 30 MiB per parallel test worker.
+vi.mock("../modules/plugins/plugin-result-store.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof ResultStore>();
+  return {
+    ...actual,
+    resultLimits: { ...actual.resultLimits, responseBytes: 64 * 1024 },
+  };
+});
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
@@ -164,3 +173,14 @@ describe("MCP discovery and result contracts", () => {
     },
   );
 });
+
+it("reports the network response cap distinctly from MCP protocol failures", async () => {
+  const { client } = await fixture(
+    [{ name: "large", inputSchema: { type: "object", properties: {} } }],
+    { content: [{ type: "text", text: "x".repeat(64 * 1024 + 1) }] },
+  );
+  const tools = await client.discover("fixture");
+  await expect(
+    client.call(tools[0]!, {}, AbortSignal.timeout(10000), 10000),
+  ).rejects.toMatchObject({ code: "PLUGIN_RESPONSE_TOO_LARGE" });
+}, 15000);

@@ -53,6 +53,8 @@ export class PluginMcp {
     { capabilities: {}, jsonSchemaValidator: mcpSchemaValidator },
   );
   private transport?: StreamableHTTPClientTransport;
+  private callMetrics:
+    { responseBytes: number; tooLarge: boolean; abort: () => void } | undefined;
   async connect(connection: Connection, signal?: AbortSignal) {
     const headers: Record<string, string> = {};
     if (connection.auth !== "none") {
@@ -80,6 +82,22 @@ export class PluginMcp {
           connection.url,
           connection.allowPrivate,
           this.trustedHosts,
+          (init) => {
+            if (typeof init?.body !== "string") return;
+            let method: unknown;
+            try {
+              method = (JSON.parse(init.body) as { method?: unknown }).method;
+            } catch {
+              return;
+            }
+            const metrics = this.callMetrics;
+            if (method !== "tools/call" || !metrics) return;
+            return (bytes, tooLarge) => {
+              metrics.responseBytes = bytes;
+              metrics.tooLarge = tooLarge;
+              if (tooLarge) metrics.abort();
+            };
+          },
         ),
       },
     );
@@ -162,6 +180,13 @@ export class PluginMcp {
       pluginError("INVALID_TOOL_ARGUMENTS");
     // Validate against the pinned contract below, not the SDK's last-page cache.
     // Error results need not satisfy a successful outputSchema.
+    const controller = new AbortController();
+    const metrics = {
+      responseBytes: 0,
+      tooLarge: false,
+      abort: () => controller.abort(),
+    };
+    this.callMetrics = metrics;
     const result = await this.client
       .request(
         {
@@ -172,9 +197,13 @@ export class PluginMcp {
           },
         },
         CallToolResultSchema,
-        { signal, timeout: Math.max(1, timeout) },
+        {
+          signal: AbortSignal.any([signal, controller.signal]),
+          timeout: Math.max(1, timeout),
+        },
       )
       .catch((error: unknown) => {
+        if (metrics.tooLarge) pluginError("RESPONSE_TOO_LARGE", 502);
         mcpFailure(error, signal);
       });
     if (signal.aborted) pluginError("MCP_CANCELLED");
@@ -195,6 +224,7 @@ export class PluginMcp {
     )
       pluginError("UNSUPPORTED_RESULT");
     return {
+      responseBytes: metrics.responseBytes,
       status: result.isError ? "error" : "success",
       content,
       ...(result.isError

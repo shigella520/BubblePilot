@@ -579,8 +579,8 @@ describe("AI workflow", () => {
         settings: {
           version: 0,
           maxToolCalls: 10,
-          maxToolOutputCharacters: 24000,
-          maxToolDurationMs: 60000,
+          maxToolOutputCharacters: 64000,
+          maxToolDurationMs: 90000,
         },
         modelTurns: 1,
         toolCalls: 0,
