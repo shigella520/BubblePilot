@@ -247,18 +247,8 @@ describe("AI workflow", () => {
           type: "load-context",
           version: 1,
           config: {},
-          onSuccess: "map-question",
-          onFailure: "failed",
-        },
-        {
-          id: "map-question",
-          type: "set-variable",
-          version: 1,
-          config: {
-            name: "question",
-            valueTemplate: "{{message.text}}",
-          },
           onSuccess: "ask-ai",
+          onFailure: "failed",
         },
         {
           id: "ask-ai",
@@ -267,7 +257,7 @@ describe("AI workflow", () => {
           config: {
             providerRouteId: routeId,
             systemPrompt: "Answer safely for {{message.senderId}}.",
-            promptTemplate: "Question: {{variables.question}}",
+            promptTemplate: "Question: {{message.text}}",
             includeLoadedContext: true,
             targetOutputCharacters: 2_000,
             temperature: 0.2,

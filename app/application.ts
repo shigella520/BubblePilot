@@ -2607,7 +2607,7 @@ export function buildApplication(
             "Use spec for workflow logic and bindings for external AI routes and chats.",
             "Use providerRouteRef and chatRefs in node config; never invent instance IDs.",
             "Keep node IDs stable, connect every node, and keep the graph acyclic.",
-            "set-variable is deprecated; use render-text with Context paths for new workflows.",
+            "Use render-text with Context paths for text transformations.",
             "Import always creates an unpublished candidate version.",
           ],
           contextPaths: [
@@ -2622,7 +2622,7 @@ export function buildApplication(
           ],
           standardPrompt:
             "Create one BubblePilotWorkflow JSON document matching the supplied JSON Schema and Binding Catalog. Use only listed action blocks and logical binding refs. Do not include secrets, database IDs, Markdown fences, comments, or YAML. Return JSON only.",
-          deprecatedNodes: ["set-variable"],
+          deprecatedNodes: [],
           actionBlocks: listActionBlockDefinitions(),
           example: {
             $schema: "/api/v1/workflows/schema",

@@ -78,18 +78,6 @@ const logNodeSchema = z.object({
   onSuccess: nextNodeIdSchema,
 });
 
-const setVariableNodeSchema = z.object({
-  ...canvasNodeFields,
-  id: nodeIdSchema,
-  type: z.literal("set-variable"),
-  version: z.literal(1),
-  config: z.object({
-    name: variableNameSchema,
-    valueTemplate: z.string().max(4_000),
-  }),
-  onSuccess: nextNodeIdSchema,
-});
-
 const renderTextNodeSchema = z.object({
   ...canvasNodeFields,
   id: nodeIdSchema,
@@ -209,7 +197,6 @@ export const workflowNodeSchema = z.discriminatedUnion("type", [
   messageTriggerNodeSchema,
   conditionNodeSchema,
   logNodeSchema,
-  setVariableNodeSchema,
   renderTextNodeSchema,
   loadContextNodeSchema,
   aiChatNodeSchema,
@@ -235,7 +222,6 @@ function targets(node: WorkflowNode): readonly string[] {
     case "condition":
       return [node.onTrue, node.onFalse];
     case "log":
-    case "set-variable":
     case "render-text":
       return [node.onSuccess];
     case "load-context":
@@ -291,9 +277,6 @@ function validateSemantics(definition: WorkflowDefinition): void {
     "chat.providerChatId",
   ]);
   for (const node of definition.nodes) {
-    if (node.type === "set-variable") {
-      allowedTemplateKeys.add(`variables.${node.config.name}`);
-    }
     if (node.type === "ai-chat") {
       allowedTemplateKeys.add(`variables.${node.config.outputVariable}`);
     }
@@ -342,9 +325,6 @@ function validateSemantics(definition: WorkflowDefinition): void {
     }
     if (node.type === "reply") {
       validateTemplate(node.id, node.config.text, "reply text");
-    }
-    if (node.type === "set-variable") {
-      validateTemplate(node.id, node.config.valueTemplate, "value template");
     }
     if (node.type === "ai-chat") {
       validateTemplate(node.id, node.config.systemPrompt, "system prompt");
@@ -495,8 +475,4 @@ export function parseWorkflowDefinition(value: unknown): WorkflowDefinition {
   const definition = workflowDefinitionSchema.parse(value);
   validateSemantics(definition);
   return definition;
-}
-
-export function workflowNodeTargets(node: WorkflowNode): readonly string[] {
-  return targets(node);
 }

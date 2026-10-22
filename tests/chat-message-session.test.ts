@@ -1,11 +1,9 @@
+import { chatMessageQuerySchema } from "../modules/memory/chat-query-types.js";
 import { defaultAgentSettings } from "../modules/ai/agent-settings-types.js";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryService } from "../modules/memory/memory-service.js";
 import type { MemoryRepository } from "../modules/memory/memory-repository.js";
-import {
-  latestChatMessagesSchema,
-  defaultMemoryConfig,
-} from "../modules/memory/memory-types.js";
+import { defaultMemoryConfig } from "../modules/memory/memory-types.js";
 import type { MemoryMessage } from "../modules/memory/chunking.js";
 
 function parseResult(value: string): { status: string; evidence: unknown[] } {
@@ -31,7 +29,16 @@ function fixture(messages = [message]) {
       }),
     },
     allowed: vi.fn().mockResolvedValue(true),
-    latest: vi.fn().mockResolvedValue(messages),
+    archiveQueries: {
+      query: vi.fn().mockResolvedValue({
+        queriedAt: "2026-09-11T00:00:00Z",
+        rows: messages.map((message) => ({
+          message,
+          senderId: message.senderId,
+          position: { sentAt: message.sentAt, index: String(message.index) },
+        })),
+      }),
+    },
     messages: vi
       .fn()
       .mockImplementation((_chat, index) =>
@@ -65,26 +72,26 @@ function fixture(messages = [message]) {
       }),
   };
 }
-describe("latest chat messages", () => {
+describe("archived message queries", () => {
   it("validates limits, timezone and scope without accepting a chat override", () => {
-    expect(latestChatMessagesSchema.parse({}).limit).toBe(1);
+    expect(chatMessageQuerySchema.parse({}).limit).toBe(20);
     for (const value of [
-      { limit: 21 },
+      { limit: 51 },
       { limit: 0 },
       { chatId: "other" },
       { from: "2026-09-10T00:00:00" },
       { from: "2026-09-11T00:00:00Z", to: "2026-09-10T00:00:00Z" },
     ])
-      expect(latestChatMessagesSchema.safeParse(value).success).toBe(false);
+      expect(chatMessageQuerySchema.safeParse(value).success).toBe(false);
   });
   it("reuses exact sources on repeat queries without invoking embeddings", async () => {
     const f = fixture();
     const session = await f.session();
     const first = parseResult(
-      await session.execute("get_latest_chat_messages", "{}"),
+      await session.execute("query_chat_messages", "{}"),
     );
     const second = parseResult(
-      await session.execute("get_latest_chat_messages", "{}"),
+      await session.execute("query_chat_messages", "{}"),
     );
     expect(first.status).toBe("succeeded");
     expect(second.evidence).toEqual(first.evidence);
@@ -100,26 +107,24 @@ describe("latest chat messages", () => {
     const empty = fixture([]);
     expect(
       parseResult(
-        await (await empty.session()).execute("get_latest_chat_messages", "{}"),
+        await (await empty.session()).execute("query_chat_messages", "{}"),
       ).status,
     ).toBe("no-results");
     const revoked = fixture();
     revoked.repository.allowed.mockResolvedValue(false);
     expect(
       parseResult(
-        await (
-          await revoked.session()
-        ).execute("get_latest_chat_messages", "{}"),
+        await (await revoked.session()).execute("query_chat_messages", "{}"),
       ).status,
     ).toBe("unavailable");
-    expect(revoked.repository.latest).not.toHaveBeenCalled();
+    expect(revoked.repository.archiveQueries.query).not.toHaveBeenCalled();
     const failed = fixture();
-    failed.repository.latest.mockRejectedValue(new Error("offline"));
+    failed.repository.archiveQueries.query.mockRejectedValue(
+      new Error("offline"),
+    );
     expect(
       parseResult(
-        await (
-          await failed.session()
-        ).execute("get_latest_chat_messages", "{}"),
+        await (await failed.session()).execute("query_chat_messages", "{}"),
       ).status,
     ).toBe("unavailable");
     const large = fixture([
@@ -130,7 +135,7 @@ describe("latest chat messages", () => {
     ]);
     expect(
       parseResult(
-        await (await large.session()).execute("get_latest_chat_messages", "{}"),
+        await (await large.session()).execute("query_chat_messages", "{}"),
       ),
     ).toMatchObject({ status: "unavailable", truncated: true });
   });
@@ -139,7 +144,7 @@ describe("latest chat messages", () => {
     f.repository.messages.mockResolvedValue([]);
     expect(
       parseResult(
-        await (await f.session()).execute("get_latest_chat_messages", "{}"),
+        await (await f.session()).execute("query_chat_messages", "{}"),
       ).status,
     ).toBe("unavailable");
   });

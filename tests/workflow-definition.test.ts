@@ -119,3 +119,23 @@ describe("render-text workflow node", () => {
     ).toThrow(/unsupported Context path/);
   });
 });
+
+it("rejects the removed set-variable node instead of silently dropping its effect", () => {
+  const value = definition();
+  expect(() =>
+    parseWorkflowDefinition({
+      ...value,
+      startNodeId: "assign",
+      nodes: [
+        {
+          id: "assign",
+          type: "set-variable",
+          version: 1,
+          config: { name: "question", valueTemplate: "hello" },
+          onSuccess: "ask-ai",
+        },
+        ...value.nodes,
+      ],
+    }),
+  ).toThrow();
+});

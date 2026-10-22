@@ -381,27 +381,6 @@ class LogNodeHandler extends BaseNodeHandler {
   }
 }
 
-class SetVariableNodeHandler extends BaseNodeHandler {
-  readonly type = "set-variable" as const;
-
-  execute(
-    node: WorkflowNode,
-    context: NodeExecutionContext,
-  ): Promise<NodeHandlerResult> {
-    this.assertType(node, this.type);
-    const value = renderTemplate(node.config.valueTemplate, context);
-    setVariable(context, node.config.name, value);
-    return Promise.resolve({
-      status: "succeeded",
-      nextNodeId: node.onSuccess,
-      outputSummary: {
-        variable: node.config.name,
-        characters: value.length,
-      },
-    });
-  }
-}
-
 class RenderTextNodeHandler extends BaseNodeHandler {
   readonly type = "render-text" as const;
 
@@ -1533,9 +1512,6 @@ export function createDefaultNodeRegistry(
   registry.register(new MessageTriggerNodeHandler());
   registry.register(new ConditionNodeHandler());
   registry.register(new LogNodeHandler());
-  // Keep the legacy handler so already-published set-variable@1 workflows
-  // continue to execute, but do not expose that block in the action catalog.
-  registry.register(new SetVariableNodeHandler());
   registry.register(new RenderTextNodeHandler());
   if (capabilities !== undefined) {
     registry.register(

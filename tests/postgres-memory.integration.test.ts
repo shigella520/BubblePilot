@@ -500,26 +500,30 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       Number(boundary.rows[0]!.message_index),
       null,
     ))!;
-    const rows = await repo.latest(scope, {
-      limit: 20,
-      senderId: "fictional-sender",
-      from: "2026-09-11T00:00:00+08:00",
-      to: "2026-09-11T00:00:00+08:00",
-    });
+    const rows = (
+      await repo.archiveQueries.query(
+        scope,
+        chatMessageQuerySchema.parse({
+          limit: 20,
+          senderId: "fictional-sender",
+          from: "2026-09-11T00:00:00+08:00",
+          to: "2026-09-11T00:00:00+08:00",
+        }),
+        "UTC",
+      )
+    ).rows.map((r) => r.message);
     expect(rows.map((m) => m.id)).toEqual([latest, old]);
-    expect((await repo.latest(scope, { limit: 20 })).map((m) => m.id)).toEqual([
-      latest,
-      old,
-      delayed,
-    ]);
     expect(
-      await repo.latest(scope, { limit: 20, senderId: "other@example.test" }),
+      (await queryMessages(scope, { limit: 20 })).map((m) => m.id),
+    ).toEqual([latest, old, delayed]);
+    expect(
+      await queryMessages(scope, { limit: 20, senderId: "other@example.test" }),
     ).toEqual([]);
     await repo.pool.query(
       "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
       [latest],
     );
-    expect((await repo.latest(scope, { limit: 1 }))[0]?.id).toBe(old);
+    expect((await queryMessages(scope, { limit: 1 }))[0]?.id).toBe(old);
   });
   it("reuses sources beyond the old search/read quotas and validates every repeat", async () => {
     const id = await chat();
@@ -541,14 +545,18 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     expect(count.rows[0]!.n).toBe(1);
     await repo.authorize(id, false, 1);
     expect(
-      JSON.parse(await session.execute("get_latest_chat_messages", "{}")),
+      JSON.parse(await session.execute("query_chat_messages", "{}")),
     ).toMatchObject({ status: "unavailable" });
   });
   it("isolates a cancelled query's late result without persisting or registering sources", async () => {
     const id = await chat();
     await message(id, "虚构迟到结果");
     const scope = (await repo.scope(id, 999, null))!;
-    const rows = await repo.latest(scope, { limit: 1 });
+    const rows = await repo.archiveQueries.query(
+      scope,
+      chatMessageQuerySchema.parse({ limit: 1 }),
+      "UTC",
+    );
     const session = await service.session(scope);
     let release!: () => void;
     let entered!: () => void;
@@ -558,14 +566,16 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     const blocked = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const spy = vi.spyOn(repo, "latest").mockImplementationOnce(async () => {
-      entered();
-      await blocked;
-      return rows;
-    });
+    const spy = vi
+      .spyOn(repo.archiveQueries, "query")
+      .mockImplementationOnce(async () => {
+        entered();
+        await blocked;
+        return rows;
+      });
     const controller = new AbortController();
     try {
-      const pending = session.execute("get_latest_chat_messages", "{}", {
+      const pending = session.execute("query_chat_messages", "{}", {
         signal: controller.signal,
         deadline: Date.now() + 5000,
         maxOutputCharacters: 24000,
@@ -599,7 +609,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       `CREATE TRIGGER agent_fixture_delay_source BEFORE INSERT ON memory_retrieval_sources FOR EACH ROW WHEN (NEW.retrieval_id = '${session.id}') EXECUTE FUNCTION agent_fixture_delay_source()`,
     );
     try {
-      const pending = session.execute("get_latest_chat_messages", "{}", {
+      const pending = session.execute("query_chat_messages", "{}", {
         signal: controller.signal,
         deadline: Date.now() + 5000,
         maxOutputCharacters: 24000,
@@ -649,11 +659,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       maxOutputCharacters: 4000,
     };
     const result = JSON.parse(
-      await session.execute(
-        "get_latest_chat_messages",
-        '{"limit":20}',
-        context,
-      ),
+      await session.execute("query_chat_messages", '{"limit":20}', context),
     ) as { evidence: unknown[] };
     expect(result).toMatchObject({
       status: "succeeded",
@@ -671,7 +677,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       ).rows[0]!.n,
     ).toBe(1);
     const tiny = JSON.parse(
-      await session.execute("get_latest_chat_messages", "{}", {
+      await session.execute("query_chat_messages", "{}", {
         ...context,
         maxOutputCharacters: 1,
       }),
@@ -682,6 +688,20 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       truncated: true,
     });
   });
+  async function queryMessages(
+    scope: Parameters<typeof repo.archiveQueries.query>[0],
+    input: unknown,
+  ) {
+    return (
+      await repo.archiveQueries.query(
+        scope,
+        chatMessageQuerySchema.parse(input),
+        "UTC",
+      )
+    ).rows
+      .slice(0, chatMessageQuerySchema.parse(input).limit)
+      .map((r) => r.message);
+  }
   async function drain() {
     await repo.pool.query(
       "UPDATE memory_jobs SET next_attempt_at=now() WHERE status='queued'",
