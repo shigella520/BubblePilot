@@ -9,8 +9,8 @@ export type AgentRuntimeSettings = z.infer<typeof agentRuntimeSettingsSchema>;
 export const defaultAgentSettings: Readonly<AgentRuntimeSettings> =
   Object.freeze({
     maxToolCalls: 10,
-    maxToolOutputCharacters: 24_000,
-    maxToolDurationMs: 60_000,
+    maxToolOutputCharacters: 64_000,
+    maxToolDurationMs: 90_000,
   });
 export interface AgentSettingsView extends AgentRuntimeSettings {
   source: "defaults" | "database";

@@ -1,3 +1,4 @@
+import { defaultAgentSettings } from "../modules/ai/agent-settings-types.js";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryService } from "../modules/memory/memory-service.js";
 import type { MemoryRepository } from "../modules/memory/memory-repository.js";
@@ -121,7 +122,12 @@ describe("latest chat messages", () => {
         ).execute("get_latest_chat_messages", "{}"),
       ).status,
     ).toBe("unavailable");
-    const large = fixture([{ ...message, text: "x".repeat(24100) }]);
+    const large = fixture([
+      {
+        ...message,
+        text: "x".repeat(defaultAgentSettings.maxToolOutputCharacters + 100),
+      },
+    ]);
     expect(
       parseResult(
         await (await large.session()).execute("get_latest_chat_messages", "{}"),

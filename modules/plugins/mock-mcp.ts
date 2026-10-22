@@ -54,7 +54,12 @@ export async function startMockMcp(port = 0) {
                         : [
                             {
                               title: "虚构资料",
-                              text: "测试资料：蓝色小镇图书馆周二开放。",
+                              text:
+                                query === "large"
+                                  ? "虚构说明。\n".repeat(8000) +
+                                    "退款期限为七天。" +
+                                    "\n图书馆测试资料。".repeat(8000)
+                                  : "测试资料：蓝色小镇图书馆周二开放。",
                             },
                           ],
                   }),

@@ -69,7 +69,9 @@ describe("shared Agent budget", () => {
     const budget = new AgentBudget(settings);
     const output = budget.append(
       JSON.stringify({
-        evidence: [{ text: "x".repeat(25000) }],
+        evidence: [
+          { text: "x".repeat(settings.maxToolOutputCharacters + 100) },
+        ],
         status: "succeeded",
       }),
     );

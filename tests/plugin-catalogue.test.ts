@@ -85,7 +85,7 @@ describe("plugin catalogue resource budget", () => {
         plugin,
         { ...plugin, id: "second" },
       ]).toolCount,
-    ).toBe(4);
+    ).toBe(6);
   });
   it("enforces the configured boundary, deduplicates plugin IDs and reports usage", async () => {
     const service = new PluginService(

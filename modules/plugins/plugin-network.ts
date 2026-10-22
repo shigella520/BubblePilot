@@ -1,3 +1,4 @@
+import { resultLimits } from "./plugin-result-store.js";
 import { isPublicResourceAddressAllowed } from "../shared/public-network-policy.js";
 import type { TrustedHostsProvider } from "../shared/network-settings.js";
 import { lookup } from "node:dns/promises";
@@ -44,8 +45,12 @@ export function safeFetch(
   origin: string,
   allowPrivate: boolean,
   trustedHosts: TrustedHostsProvider = () => Promise.resolve([]),
+  observe?: (
+    init: RequestInit | undefined,
+  ) => ((bytes: number, tooLarge: boolean) => void) | undefined,
 ): typeof fetch {
   return async (input, init) => {
+    const report = observe?.(init);
     const target =
       typeof input === "string"
         ? input
@@ -101,7 +106,8 @@ export function safeFetch(
               await agent.close();
             } else {
               bytes += item.value.byteLength;
-              if (bytes > pluginLimits.expandedBytes) {
+              report?.(bytes, bytes > resultLimits.responseBytes);
+              if (bytes > resultLimits.responseBytes) {
                 await reader.cancel();
                 controller.error(new Error("PLUGIN_RESPONSE_TOO_LARGE"));
                 await agent.close();

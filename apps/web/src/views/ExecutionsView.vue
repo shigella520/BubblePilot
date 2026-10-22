@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   pluginToolPresentation,
+  pluginDeliveryLabel,
   pluginToolErrorLabel,
 } from "../utils/plugin-tool-diagnostics";
 import ExecutionImageResult from "../components/ExecutionImageResult.vue";
@@ -2147,6 +2148,35 @@ function contextSnapshotValue(
                   >
                     {{ pluginToolErrorLabel(item.errorCode) }}
                   </p>
+                  <div
+                    v-if="item.requestDetails?.kind === 'plugin'"
+                    class="muted"
+                  >
+                    <p>{{ pluginDeliveryLabel(item.responseDetails) }}</p>
+                    <p v-if="item.responseDetails?.diagnosticVersion === 1">
+                      本次交付
+                      {{ item.responseDetails.deliveredCharacters }} 字符 ·
+                      单次上限 {{ item.responseDetails.outputLimit }} · 剩余
+                      {{ item.responseDetails.remainingAfter }}
+                    </p>
+                    <p
+                      v-if="
+                        typeof item.responseDetails?.responseBytes === 'number'
+                      "
+                    >
+                      网络响应 {{ item.responseDetails.responseBytes }} 字节 ·
+                      整理后
+                      {{ item.responseDetails.normalizedCharacters }} 字符
+                    </p>
+                    <p v-if="item.responseDetails?.resultRef">
+                      结果引用：{{
+                        item.responseDetails.resultRef
+                      }}。正文仅运行期间暂存，结束后释放。
+                    </p>
+                    <p v-if="item.responseDetails?.parentToolCallId">
+                      来源工具调用：{{ item.responseDetails.parentToolCallId }}
+                    </p>
+                  </div>
                   <p v-if="item.toolName === 'view_chat_image'">
                     {{ imageToolLabel(item.responseDetails) }} ·
                     {{ item.durationMs }} ms

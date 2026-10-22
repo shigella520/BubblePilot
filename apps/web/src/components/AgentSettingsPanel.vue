@@ -12,8 +12,8 @@ interface Settings {
 }
 const defaults = {
   maxToolCalls: 10,
-  maxToolOutputCharacters: 24000,
-  seconds: 60,
+  maxToolOutputCharacters: 64000,
+  seconds: 90,
 };
 const form = reactive({ ...defaults });
 const settings = ref<Settings | null>(null);

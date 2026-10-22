@@ -786,8 +786,8 @@ describe("AI management API", () => {
     expect(initial.json()).toMatchObject({
       data: {
         maxToolCalls: 10,
-        maxToolOutputCharacters: 24000,
-        maxToolDurationMs: 60000,
+        maxToolOutputCharacters: 64000,
+        maxToolDurationMs: 90000,
         source: "defaults",
         version: 0,
       },
