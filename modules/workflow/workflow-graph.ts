@@ -1,8 +1,5 @@
 import { z } from "zod";
-import {
-  actionBlockDefinitions,
-  type ActionValueType,
-} from "./action-blocks.js";
+import { actionBlockDefinitions } from "./action-blocks.js";
 
 export const contextValueSchema: z.ZodTypeAny = z.lazy(() =>
   z.union([
@@ -166,12 +163,4 @@ export function validateWorkflowGraph(value: unknown): WorkflowGraphDefinition {
       `Workflow contains unreachable nodes: ${[...nodes.keys()].filter((id) => !visited.has(id)).join(", ")}.`,
     );
   return definition;
-}
-
-export function actionPortType(type: string): ActionValueType | null {
-  for (const definition of actionBlockDefinitions) {
-    for (const port of [...definition.inputs, ...definition.outputs])
-      if (port.name === type) return port.type;
-  }
-  return null;
 }

@@ -49,24 +49,29 @@ BubblePilot receives new-message events from BlueBubbles, archives only the chat
 - **No single AI dependency:** providers can Retry and Fallback in a fixed order, with automatic degradation after repeated failures.
 - **Group-chat participants stay identifiable:** configure real names and nicknames for sender IDs already seen in each chat; AI only receives mappings that occur in the current context.
 - **Link cards become usable context:** prefer BlueBubbles metadata, safely fall back to public Open Graph, and retain bounded diagnostics.
-- **Native multimodal models can understand images:** temporarily load current attachments, link-card images, and a bounded recent-image history under instance-wide safety limits, with explicit text fallback on failure.
+- **Native multimodal models can understand images:** temporarily load current attachments, link-card images, and a bounded recent-image history under instance-wide safety limits, with records of image inputs and request states.
 - **Your instance owns the data:** PostgreSQL is authoritative for messages, configuration, executions, and audit records.
 
 Before upgrading to **2.0.0**, read the [upgrade guide](doc/部署与运维.md#从-120-升级到-200). This release permanently removes AI chat summaries and their data while retaining buffered raw-message context. Moving from PostgreSQL Alpine to pgvector requires a logical backup and restore into a new volume; do not attach the old volume directly to the new image.
 
 ## What you can build
 
-| Use case                            | BubblePilot capability                                                                                                        |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Archive important conversations     | Enable monitoring per chat, search archived messages, and export an authorized JSON Lines snapshot                            |
-| Create a group-chat bot             | Trigger on chat, sender, content type, keyword, prefix, regex, or time window                                                 |
-| Identify chat participants          | Maintain real names and nicknames per chat so AI can distinguish each historical speaker                                      |
-| Understand link cards               | Archive titles, summaries, and site names so AI can use card context without claiming it read the full page                   |
-| Understand chat images              | Send current image attachments, link-card images, and bounded recent images to a verified native multimodal provider          |
-| Design message workflows            | Connect context, condition, variable, AI, reply, and end nodes on a visual canvas                                             |
-| Use multiple AI services            | Manage OpenAI-compatible providers, models, and routes with Retry, Fallback, degradation, and recovery                        |
-| Answer with current web information | Use provider-hosted search or Function Calling with the bundled private SearXNG service                                       |
-| Diagnose failures                   | Inspect executions, node traces, provider attempts, tool calls, and outgoing delivery state, then safely recover dead letters |
+[![BubblePilot highlights: memory, AI memes, MCP plugins, and workflow automation](assets/preview/bubblepilot-highlights.svg)](assets/preview/bubblepilot-highlights.svg)
+
+| Top 10 features | What you can do |
+| --- | --- |
+| Long-term vector memory | Retrieve authorized chat history with semantic and keyword search, raw-message queries, context expansion, counts, and earliest/latest matches. |
+| On-demand web search | Get current web information through provider-hosted search or self-hosted SearXNG. |
+| Image understanding | Understand current chat images and link-card images, or retrieve historical images after searching messages to inspect details missing from summaries. |
+| Workflow personas | Give automations distinct names and identify bot messages so models can distinguish personas in the same chat. |
+| AI memes and media library | Upload images or GIFs, organize collections, manage items in batches, and track usage; AI can choose one suitable meme to send after its text reply. |
+| Plugin management and MCP | Import compatible plugins from Git repositories or ZIP files, manage Skills and remote MCP tools, and authorize workflows to load and call them on demand. |
+| Visual workflows | Connect triggers, conditions, context, AI, and reply nodes to build chat bots and message automations. |
+| Agent tool orchestration | Combine history, web search, image viewing, memes, and plugin tools across turns; read large results in chunks within shared call, content, and time budgets. |
+| Multiple models and fallback | Connect local or cloud OpenAI-compatible services with routes, retries, and backup providers to reduce single-provider failures. |
+| End-to-end execution tracing | Inspect nodes, model usage, plugin and tool calls, image inputs, and text/image delivery states to diagnose failures and recover pending tasks. |
+
+Plugins support a declarative subset of the Codex format for administrator-approved public-information queries; arbitrary scripts, stdio, OAuth, and personal-app authorization are not supported. These features describe the current source and Dev image; check release notes for availability in a stable image.
 
 Web search is optional. With it disabled, archiving, regular workflows, and non-search AI replies continue to work.
 
@@ -87,7 +92,7 @@ The workflow canvas is shown on the left; the complete node, AI provider, web-se
 
 [![BubblePilot workflow canvas and execution trace](assets/preview/bubblepilot-usage.png)](assets/preview/bubblepilot-usage.png)
 
-With native image input enabled, an AI bot can understand iMessage image attachments and link-card images. Images are fetched only for the current AI node and sent to a verified multimodal provider; download or vision failures explicitly fall back to text without failing the whole workflow.
+With native image input enabled, an AI bot can understand iMessage image attachments and link-card images. Images are fetched only for the current AI node and sent to a verified multimodal provider; the Agent can also retrieve historical images on demand. If loading fails, it can answer cautiously from existing text; failed image-bearing requests are reported rather than silently dropping the images.
 
 <p align="center">
   <a href="assets/preview/bubblepilot-multimodal-chat.jpg"><img src="assets/preview/bubblepilot-multimodal-chat.jpg" width="960" alt="BubblePilot handling image understanding, web research, and contextual questions across several iMessage conversations" /></a>

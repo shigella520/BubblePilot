@@ -32,7 +32,6 @@ const manifestNodeSchema = z.looseObject({
     "message-trigger",
     "condition",
     "log",
-    "set-variable",
     "render-text",
     "load-context",
     "ai-chat",

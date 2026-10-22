@@ -31,6 +31,7 @@ if (!baseUrl || !model) {
   const baselineFile = resolve(
     `modules/ai/.agent-eval-baseline-${process.pid}.ts`,
   );
+  // Adapt the historical baseline prompt only; the retired tool has no runtime implementation.
   await writeFile(
     baselineFile,
     execFileSync("git", ["show", `${baselineRef}:modules/ai/agent-runner.ts`], {

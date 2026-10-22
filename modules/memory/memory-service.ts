@@ -36,8 +36,6 @@ import {
   chatExcerptSchema,
   memorySettingsSchema,
   memorySearchSchema,
-  latestChatMessagesSchema,
-  type LatestChatMessages,
   type MemoryScope,
   type MemorySearch,
   type Evidence,
@@ -510,29 +508,6 @@ export class MemorySession {
           : "no-results";
     return result;
   }
-  private async latest(query: LatestChatMessages): Promise<string> {
-    const messages = await this.service.repository.latest(this.scope, query);
-    this.checkActive();
-    const evidence = [];
-    for (const message of messages) {
-      const item = await this.add([message]);
-      if (item)
-        evidence.push({
-          ...item,
-          messageId: message.id,
-          sentAt: message.sentAt,
-          senderId: message.senderId,
-        });
-    }
-    return JSON.stringify({
-      status: messages.length ? "succeeded" : "no-results",
-      order: "sent_at_desc,message_index_desc",
-      limit: query.limit,
-      limitReached: messages.length === query.limit,
-      truncated: false,
-      evidence,
-    });
-  }
   private async archive(name: string, parsed: unknown): Promise<string> {
     const query: ChatArchiveQuery =
       name === "query_chat_messages"
@@ -692,8 +667,6 @@ export class MemorySession {
       ].includes(name)
     )
       return this.archive(name, parsed);
-    if (name === "get_latest_chat_messages")
-      return this.latest(latestChatMessagesSchema.parse(parsed));
     if (name === "search_chat_history")
       return JSON.stringify(
         await this.searchWithinBudget(memorySearchSchema.parse(parsed)),
