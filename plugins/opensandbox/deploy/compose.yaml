@@ -24,7 +24,7 @@ services:
       MAX_MCP_SESSIONS: ${MAX_MCP_SESSIONS:-64}
       SANDBOX_TTL_SECONDS: ${SANDBOX_TTL_SECONDS:-600}
       SANDBOX_MEMORY_MIB: ${SANDBOX_MEMORY_MIB:-512}
-      SANDBOX_IMAGE: ${SANDBOX_IMAGE:?Set a pinned Python 3.12 image digest}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:?Set a pinned Python 3.12 or BubblePilot runtime image digest}
       OPENSANDBOX_URL: ${OPENSANDBOX_URL:-http://host.docker.internal:18090}
       MCP_TOKEN_FILE: /run/secrets/mcp_token
       OPENSANDBOX_API_KEY_FILE: /run/secrets/opensandbox_api_key

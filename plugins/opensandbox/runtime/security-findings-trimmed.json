@@ -1,0 +1,421 @@
+{
+  "scanner": "Trivy 0.69.3",
+  "checkedAt": "2026-10-23",
+  "imageId": "sha256:ae801d626322bffbff99b0912507db95617f78f6555454bd6565ab529d7aaf96",
+  "releaseBlocked": true,
+  "packageRecords": {
+    "HIGH": 44
+  },
+  "uniqueCves": 8,
+  "removedCves": [
+    "CVE-2019-16224",
+    "CVE-2019-16225",
+    "CVE-2019-16226",
+    "CVE-2019-16227",
+    "CVE-2019-16228",
+    "CVE-2026-12064",
+    "CVE-2026-40467",
+    "CVE-2026-40468",
+    "CVE-2026-40469",
+    "CVE-2026-40553",
+    "CVE-2026-58471",
+    "CVE-2026-58472",
+    "CVE-2026-6653",
+    "CVE-2026-74860",
+    "CVE-2026-8458",
+    "CVE-2026-86138",
+    "CVE-2026-86139",
+    "CVE-2026-86140",
+    "CVE-2026-86142",
+    "CVE-2026-86143",
+    "CVE-2026-86144"
+  ],
+  "findings": [
+    {
+      "id": "CVE-2025-69720",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libncursesw6", "libtinfo6", "ncurses-base", "ncurses-bin"],
+      "debianReview": [
+        {
+          "sourcePackage": "ncurses",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2025-69720",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "6.6+20251231-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "6.6+20251231-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "infocmp 分析特制终端描述时发生栈溢出。",
+        "evidence": "镜像实际包含 /usr/bin/infocmp。",
+        "recommendation": "保留阻断；优先评估移除不需要的 infocmp 或升级，不把用途少等同不可触发。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-16742",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libsystemd0", "libudev1"],
+      "debianReview": [
+        {
+          "sourcePackage": "systemd",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-16742",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "261.2-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "261.2-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "A",
+        "trigger": "systemd-homed 管理的本地登录用户借组成员修改提权。",
+        "evidence": "镜像没有 systemd-homed 可执行程序，仅有 libsystemd0/libudev1；未配置 homed 服务。",
+        "recommendation": "可审阅为组件缺失例外；仅限本镜像摘要且禁止后续安装/启动 homed，条件变化立即失效。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-54369",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libacl1"],
+      "debianReview": [
+        {
+          "sourcePackage": "acl",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-54369",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; libacl acl_*_file() follow symlinks; fix adds new acl_*_at() ABI, not individually backportable",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Will be fixed first in unstable, then point release update; not to be backported by individual patches",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.4.0-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.4.0-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "特权调用方用 libacl 路径 API 时，可替换路径组件为符号链接。",
+        "evidence": "libacl 被 coreutils/tar/sed 等依赖；安全 read_file 不覆盖 run_command 任意 shell。",
+        "recommendation": "保留阻断；需要修复或有效的路径/权限控制证据，禁止把文件工具防链接当作全局保护。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-76642",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": [
+        "bsdutils",
+        "libblkid1",
+        "liblastlog2-2",
+        "libmount1",
+        "libsmartcols1",
+        "libuuid1",
+        "login",
+        "mount",
+        "util-linux"
+      ],
+      "debianReview": [
+        {
+          "sourcePackage": "util-linux",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-76642",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "B",
+        "trigger": "mount helper 失败后仍执行特权 post-mount hooks。",
+        "evidence": "mount 为 SUID；fstab 为空。尚未重新核实 NAS 子沙箱 capabilities 和 no-new-privileges。",
+        "recommendation": "须移除 SUID/不需要的 mount 路径，并验证无 SYS_ADMIN、无宿主挂载，之后再审例外。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-78408",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": [
+        "bsdutils",
+        "libblkid1",
+        "liblastlog2-2",
+        "libmount1",
+        "libsmartcols1",
+        "libuuid1",
+        "login",
+        "mount",
+        "util-linux"
+      ],
+      "debianReview": [
+        {
+          "sourcePackage": "util-linux",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-78408",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.42.4-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.42.4-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "B",
+        "trigger": "特权 nsenter --join-cgroup 泄漏可迁移 cgroup 的文件描述符。",
+        "evidence": "nsenter 存在；宿主 cgroup 可写性和命名空间隔离未在本轮验证。",
+        "recommendation": "须证明无法进入宿主命名空间且无可写宿主 cgroup；仅无 Docker Socket 不够。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-78409",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": [
+        "bsdutils",
+        "libblkid1",
+        "liblastlog2-2",
+        "libmount1",
+        "libsmartcols1",
+        "libuuid1",
+        "login",
+        "mount",
+        "util-linux"
+      ],
+      "debianReview": [
+        {
+          "sourcePackage": "util-linux",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-78409",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "B",
+        "trigger": "Linux 6.15+ 下 fstab X-mount.subdir 中间符号链接逃逸。",
+        "evidence": "fstab 未配置，但本轮未核实 NAS 内核及运行时挂载能力；不以旧截图代替现状。",
+        "recommendation": "须核实内核与 mount 权限、无 fstab 授权条目，按实际摘要和部署条件审批。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-78410",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": [
+        "bsdutils",
+        "libblkid1",
+        "liblastlog2-2",
+        "libmount1",
+        "libsmartcols1",
+        "libuuid1",
+        "login",
+        "mount",
+        "util-linux"
+      ],
+      "debianReview": [
+        {
+          "sourcePackage": "util-linux",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-78410",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "B",
+        "trigger": "SUID mount 使用可竞争替换的 fstab bind 源，可能改变错误路径权限。",
+        "evidence": "mount 为 SUID；镜像 fstab 为空，运行时配置尚待核实。",
+        "recommendation": "须移除不需要的特权路径并验证实际容器控制；当前暂不批准。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-9538",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["perl-base"],
+      "debianReview": [
+        {
+          "sourcePackage": "perl",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-9538",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; wait for regressions upstream sorted out",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; wait for regressions upstream sorted out",
+              "nodsa_reason": "postponed"
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "5.42.3-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "5.42.3-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "A",
+        "trigger": "Perl Archive::Tar 按恶意 tar 头大小分配内存。",
+        "evidence": "精简后仅保留 perl-base；本地 perl -MArchive::Tar 失败，Archive/Tar.pm 不存在。旧候选的模块存在证据不再适用。",
+        "recommendation": "可作为受影响模块缺失的风险例外候选；未批准，运行中安装模块会改变条件。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    }
+  ],
+  "exceptionsApproved": false,
+  "deploymentPerformed": false
+}

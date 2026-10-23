@@ -1,0 +1,321 @@
+{
+  "schemaVersion": 1,
+  "approvedAt": "2026-10-23",
+  "expiresAt": "2026-11-22T00:00:00Z",
+  "scope": "Single-task NAS sandbox; user authorized reviewed base-risk release on 2026-10-23. See risk-acceptance.md.",
+  "sourceHashes": {
+    "Dockerfile": "5e25a6225b98224c5bfa0f011582e6e4ee6d81485e02ef2b99ddc987d2511ea8",
+    "requirements.lock": "3258cfdee42cd1ede553e66c6b7b96abe19a4debaf322725cf474c4993bd4c68",
+    "capabilities.json": "073985d99ffbb975106391fb5b485abddd55cfe12848c6010246c211705d1d19"
+  },
+  "entries": [
+    {
+      "id": "CVE-2026-76642",
+      "package": "bsdutils",
+      "version": "1:2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78408",
+      "package": "bsdutils",
+      "version": "1:2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78409",
+      "package": "bsdutils",
+      "version": "1:2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78410",
+      "package": "bsdutils",
+      "version": "1:2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-54369",
+      "package": "libacl1",
+      "version": "2.3.2-2+b1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-76642",
+      "package": "libblkid1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78408",
+      "package": "libblkid1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78409",
+      "package": "libblkid1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78410",
+      "package": "libblkid1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-76642",
+      "package": "liblastlog2-2",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78408",
+      "package": "liblastlog2-2",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78409",
+      "package": "liblastlog2-2",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78410",
+      "package": "liblastlog2-2",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-76642",
+      "package": "libmount1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78408",
+      "package": "libmount1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78409",
+      "package": "libmount1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78410",
+      "package": "libmount1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "libncursesw6",
+      "version": "6.5+20250216-2",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-76642",
+      "package": "libsmartcols1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78408",
+      "package": "libsmartcols1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78409",
+      "package": "libsmartcols1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78410",
+      "package": "libsmartcols1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-16742",
+      "package": "libsystemd0",
+      "version": "257.13-1~deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "libtinfo6",
+      "version": "6.5+20250216-2",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-16742",
+      "package": "libudev1",
+      "version": "257.13-1~deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-76642",
+      "package": "libuuid1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78408",
+      "package": "libuuid1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78409",
+      "package": "libuuid1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78410",
+      "package": "libuuid1",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-76642",
+      "package": "login",
+      "version": "1:4.16.0-2+really2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78408",
+      "package": "login",
+      "version": "1:4.16.0-2+really2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78409",
+      "package": "login",
+      "version": "1:4.16.0-2+really2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78410",
+      "package": "login",
+      "version": "1:4.16.0-2+really2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-76642",
+      "package": "mount",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78408",
+      "package": "mount",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78409",
+      "package": "mount",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78410",
+      "package": "mount",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "ncurses-base",
+      "version": "6.5+20250216-2",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2025-69720",
+      "package": "ncurses-bin",
+      "version": "6.5+20250216-2",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-9538",
+      "package": "perl-base",
+      "version": "5.40.1-6+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-76642",
+      "package": "util-linux",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78408",
+      "package": "util-linux",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78409",
+      "package": "util-linux",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    },
+    {
+      "id": "CVE-2026-78410",
+      "package": "util-linux",
+      "version": "2.41.5-0+deb13u1",
+      "severity": "HIGH",
+      "type": "debian"
+    }
+  ]
+}

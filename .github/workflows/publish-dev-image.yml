@@ -73,16 +73,44 @@ jobs:
       - name: Validate Docker Compose
         run: docker compose config
 
+  sandbox-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime
+        run: docker build --platform linux/amd64 -f plugins/opensandbox/runtime/Dockerfile -t bubblepilot-sandbox-python:test .
+      - name: Verify runtime in 512 MiB
+        run: sh plugins/opensandbox/runtime/verify.sh
+      - name: Scan runtime OS and Python dependencies
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: bubblepilot-sandbox-python:test
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+          format: json
+          output: runtime-vulnerabilities.json
+      - name: Enforce reviewed runtime risk baseline
+        run: node --test plugins/opensandbox/runtime/check-scan.test.mjs && node plugins/opensandbox/runtime/check-scan.mjs runtime-vulnerabilities.json
+      - name: Save scan evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-vulnerabilities
+          path: runtime-vulnerabilities.json
+
   docker:
     strategy:
       matrix:
         include:
           - image: bubblepilot
             dockerfile: Dockerfile
+          - image: bubblepilot-sandbox-python
+            dockerfile: plugins/opensandbox/runtime/Dockerfile
           - image: bubblepilot-opensandbox-mcp
             dockerfile: plugins/opensandbox/server/Dockerfile
     runs-on: ubuntu-latest
-    needs: verify
+    needs: [verify, sandbox-runtime]
     permissions:
       contents: read
       packages: write
@@ -108,11 +136,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build runtime candidate
+        if: matrix.image == 'bubblepilot-sandbox-python'
+        run: docker build --platform linux/amd64 --label org.opencontainers.image.revision="$GITHUB_SHA" --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" -f plugins/opensandbox/runtime/Dockerfile -t runtime-candidate .
+      - name: Test exact runtime candidate
+        if: matrix.image == 'bubblepilot-sandbox-python'
+        run: sh plugins/opensandbox/runtime/verify.sh runtime-candidate
+      - name: Scan exact runtime candidate
+        if: matrix.image == 'bubblepilot-sandbox-python'
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: runtime-candidate
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+          format: json
+          output: candidate-vulnerabilities.json
+      - name: Enforce exact candidate risk baseline
+        if: matrix.image == 'bubblepilot-sandbox-python'
+        run: node plugins/opensandbox/runtime/check-scan.mjs candidate-vulnerabilities.json
+      - name: Push tested runtime candidate
+        if: matrix.image == 'bubblepilot-sandbox-python'
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            docker tag runtime-candidate "$tag"
+            docker push "$tag"
+          done <<< "$IMAGE_TAGS"
       - name: Build and push Docker image
+        if: matrix.image != 'bubblepilot-sandbox-python'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
