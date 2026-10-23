@@ -9,3 +9,7 @@ logs
 node_modules
 tests
 *.local
+
+**/node_modules
+**/dist
+plugins/opensandbox/deploy/secrets

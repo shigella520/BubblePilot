@@ -1,5 +1,6 @@
 packages:
   - apps/*
+  - plugins/opensandbox/server
 
 allowBuilds:
   esbuild: true

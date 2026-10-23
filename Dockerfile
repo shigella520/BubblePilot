@@ -4,7 +4,8 @@ WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/package.json
-RUN pnpm install --frozen-lockfile
+COPY plugins/opensandbox/server/package.json ./plugins/opensandbox/server/package.json
+RUN pnpm install --frozen-lockfile --filter bubblepilot --filter ./apps/web
 COPY tsconfig.json tsconfig.build.json ./
 COPY app ./app
 COPY modules ./modules
@@ -19,7 +20,8 @@ WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json ./apps/web/package.json
-RUN pnpm install --prod --frozen-lockfile
+COPY plugins/opensandbox/server/package.json ./plugins/opensandbox/server/package.json
+RUN pnpm install --prod --frozen-lockfile --filter bubblepilot --filter ./apps/web
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/apps/web/dist ./public
 COPY migrations ./migrations

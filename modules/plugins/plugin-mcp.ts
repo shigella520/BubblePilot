@@ -1,3 +1,4 @@
+import { boundedClose } from "./bounded-close.js";
 import type { TrustedHostsProvider } from "../shared/network-settings.js";
 import {
   McpError,
@@ -239,7 +240,7 @@ export class PluginMcp {
     };
   }
   async close() {
-    await this.transport?.terminateSession().catch(() => undefined);
-    await this.client.close().catch(() => undefined);
+    await boundedClose(async () => this.transport?.terminateSession());
+    await boundedClose(() => this.client.close());
   }
 }

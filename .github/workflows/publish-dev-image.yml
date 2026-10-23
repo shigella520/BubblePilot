@@ -74,6 +74,13 @@ jobs:
         run: docker compose config
 
   docker:
+    strategy:
+      matrix:
+        include:
+          - image: bubblepilot
+            dockerfile: Dockerfile
+          - image: bubblepilot-opensandbox-mcp
+            dockerfile: plugins/opensandbox/server/Dockerfile
     runs-on: ubuntu-latest
     needs: verify
     permissions:
@@ -89,7 +96,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/shigella520/bubblepilot
+          images: ${{ env.REGISTRY }}/shigella520/${{ matrix.image }}
           tags: |
             type=sha
             type=raw,value=dev
@@ -105,9 +112,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=bubblepilot-dev
-          cache-to: type=gha,mode=max,scope=bubblepilot-dev
+          cache-from: type=gha,scope=${{ matrix.image }}-dev
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-dev

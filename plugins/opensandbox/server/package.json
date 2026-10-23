@@ -1,0 +1,17 @@
+{
+  "name": "@bubblepilot/opensandbox-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --root .",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@alibaba-group/opensandbox": "1.1.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.1.5"
+  }
+}

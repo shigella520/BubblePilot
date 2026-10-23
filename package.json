@@ -22,7 +22,7 @@
     "dev:local": "tsx --env-file=.env.local watch app/main.ts",
     "dev:web": "pnpm --dir apps/web dev",
     "docs:check": "node scripts/check-markdown-links.mjs",
-    "format": "prettier --check app modules tests contracts apps/web/src apps/web/*.json apps/web/*.ts apps/web/*.html scripts/*.mjs *.json *.js *.ts *.yaml",
+    "format": "prettier --check app modules tests contracts apps/web/src apps/web/*.json apps/web/*.ts apps/web/*.html scripts/*.mjs *.json *.js *.ts *.yaml plugins/opensandbox/server/src plugins/opensandbox/server/tests plugins/opensandbox/server/*.json plugins/opensandbox/plugin/**/*.json",
     "format:write": "prettier --write app modules tests contracts apps/web/src apps/web/*.json apps/web/*.ts apps/web/*.html scripts/*.mjs *.json *.js *.ts *.yaml",
     "lint": "eslint .",
     "ops:check": "sh -n scripts/*.sh && node scripts/check-ops-contract.mjs",
@@ -31,14 +31,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm ops:check && pnpm contracts:check && pnpm docs:check && pnpm build",
+    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm ops:check && pnpm contracts:check && pnpm docs:check && pnpm build && pnpm sandbox:verify",
     "db:prepare-memory": "tsx app/prepare-memory.ts",
     "memory:evaluate": "tsx app/evaluate-memory.ts",
     "memory:benchmark": "tsx app/benchmark-memory.ts",
     "bot:evaluate": "tsx app/evaluate-bot-identity.ts",
     "agent:evaluate": "tsx app/evaluate-agent.ts",
     "chat:benchmark": "tsx app/benchmark-chat-queries.ts",
-    "memes:organize": "tsx app/organize-memes.ts"
+    "memes:organize": "tsx app/organize-memes.ts",
+    "sandbox:verify": "pnpm --dir plugins/opensandbox/server typecheck && pnpm --dir plugins/opensandbox/server test && pnpm --dir plugins/opensandbox/server build"
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.1",

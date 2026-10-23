@@ -79,7 +79,12 @@ jobs:
         run: sh scripts/test-memory-upgrade.sh
 
       - name: Validate Docker Compose
-        run: docker compose config
+        run: |
+          docker compose config
+          docker compose --env-file plugins/opensandbox/deploy/.env.example -f plugins/opensandbox/deploy/compose.yaml config --quiet
+
+      - name: Build sandbox adapter image
+        run: docker build -f plugins/opensandbox/server/Dockerfile -t bubblepilot-opensandbox-mcp:ci .
 
   docker:
     runs-on: ubuntu-latest
