@@ -2,6 +2,18 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
+/**
+ * @typedef {{id:string,package:string,version:string,severity:string,type:string}} Entry
+ * @typedef {{schemaVersion:number,expiresAt:string,sourceHashes:Record<string,string>,entries:Entry[]}} Baseline
+ * @typedef {{VulnerabilityID:string,PkgName:string,InstalledVersion:string,Severity:string,FixedVersion?:string}} Finding
+ * @typedef {{SchemaVersion:number,Metadata?:{ImageConfig?:{architecture?:string},OS?:{Family?:string}},Results?:{Class?:string,Type:string,Vulnerabilities?:Finding[]}[]}} Report
+ */
+/**
+ * @param {Report} report
+ * @param {Baseline} baseline
+ * @param {Record<string,string>} hashes
+ * @param {Date} now
+ */
 export function checkScan(report, baseline, hashes, now = new Date()) {
   if (
     baseline.schemaVersion !== 1 ||
@@ -23,6 +35,7 @@ export function checkScan(report, baseline, hashes, now = new Date()) {
     !report.Results?.some((r) => r.Type === "python-pkg")
   )
     throw new Error("Incomplete or incompatible scan");
+  /** @param {Entry} v */
   const key = (v) =>
     JSON.stringify([v.id, v.package, v.version, v.severity, v.type]);
   const allowed = new Set(baseline.entries.map(key));
@@ -54,10 +67,15 @@ export function checkScan(report, baseline, hashes, now = new Date()) {
   return { acceptedRecords: accepted, expiresAt: baseline.expiresAt };
 }
 
+/** @param {string} text @returns {unknown} */
+function parseJson(text) {
+  return JSON.parse(text);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = new URL("./", import.meta.url);
-  const baseline = JSON.parse(
-    readFileSync(new URL("risk-baseline.json", root), "utf8"),
+  const baseline = /** @type {Baseline} */ (
+    parseJson(readFileSync(new URL("risk-baseline.json", root), "utf8"))
   );
   const hashes = Object.fromEntries(
     Object.keys(baseline.sourceHashes).map((file) => [
@@ -70,7 +88,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   console.log(
     JSON.stringify(
       checkScan(
-        JSON.parse(readFileSync(process.argv[2], "utf8")),
+        /** @type {Report} */ (
+          parseJson(readFileSync(process.argv[2], "utf8"))
+        ),
         baseline,
         hashes,
       ),

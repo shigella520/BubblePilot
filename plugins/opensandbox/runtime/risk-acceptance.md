@@ -31,3 +31,5 @@
 完整 Trivy JSON 作为 CI 证据保留。check-scan.mjs 仅接受上述固定 CVE/包/版本的 HIGH，拒绝新增发现、CRITICAL、已提供 FixedVersion、过期基线、构建源码输入变化及不完整扫描。没有全局 ignore-unfixed 或通配忽略。更换基础镜像、依赖、能力清单时须重新审阅；运行时安装软件会改变适用条件，Skill 不等同强制禁止。
 
 发布后保留原镜像与配置备份；部署核验失败回滚。到期重新扫描评估，不自动续期。
+
+实际前置核验已完成：NAS 已备份到 opensandbox/backups/runtime-release-20261023，server 固定为 opensandbox/server@sha256:bcd5f264101262cebfa7e1ff9cd0424403e42f31a6596e4364cf90d8cb5c936b。新版虚构测试沙箱的 44772/8080 端口均只绑定 172.17.0.1，非特权、no-new-privileges 和无挂载保持。四工具、中文文件、会话复用/容量隔离、代理 HTTP 200、任务结束 remaining=0 均通过。首次创建 25.1 秒；测试人为保留的 45 秒不计入创建速度。运行镜像/适配器升级仍由后续镜像流水线及部署核验决定。

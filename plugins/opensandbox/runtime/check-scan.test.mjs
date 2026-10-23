@@ -36,19 +36,20 @@ const report = () => ({
     { Type: "python-pkg", Vulnerabilities: [] },
   ],
 });
+/** @param {import("./check-scan.mjs").Report} r */
 const check = (
   r,
   b = baseline,
   h = { Dockerfile: "hash" },
   d = new Date("2026-10-23"),
 ) => checkScan(r, b, h, d);
-test("accepts only reviewed records and allows resolved findings to disappear", () => {
+await test("accepts only reviewed records and allows resolved findings to disappear", () => {
   assert.equal(check(report()).acceptedRecords, 1);
   const r = report();
   r.Results[0].Vulnerabilities = [];
   assert.equal(check(r).acceptedRecords, 0);
 });
-test("blocks new CVE, package version, critical, and available fix", () => {
+await test("blocks new CVE, package version, critical, and available fix", () => {
   for (const patch of [
     { VulnerabilityID: "CVE-new" },
     { InstalledVersion: "2" },
@@ -60,7 +61,7 @@ test("blocks new CVE, package version, critical, and available fix", () => {
     assert.throws(() => check(r));
   }
 });
-test("blocks expiry, changed sources and incomplete or wrong architecture scans", () => {
+await test("blocks expiry, changed sources and incomplete or wrong architecture scans", () => {
   assert.throws(() => check(report(), baseline, { Dockerfile: "changed" }));
   assert.throws(() =>
     check(report(), baseline, { Dockerfile: "hash" }, new Date("2026-11-22")),
