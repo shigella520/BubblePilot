@@ -47,7 +47,11 @@ export async function collectOutput(
   let exitCode: number | null = null;
   for await (const event of events) {
     if (event.type === "stdout" || event.type === "stderr") {
-      const data = Buffer.from(event.text ?? "");
+      // Execd emits log records; release 1.1.0 strips their line terminators.
+      // Keep records separate instead of turning e.g. 12 and 34 into 1234.
+      const previous = event.type === "stdout" ? stdout : stderr;
+      const separator = previous && !previous.endsWith("\n") ? "\n" : "";
+      const data = Buffer.from(separator + (event.text ?? ""));
       const remaining = cap - bytes;
       // TextDecoder avoids emitting half a UTF-8 code point at the output boundary.
       const text = new TextDecoder().decode(data.subarray(0, remaining), {
