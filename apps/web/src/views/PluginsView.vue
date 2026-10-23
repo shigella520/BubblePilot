@@ -376,7 +376,10 @@ async function remove() {
     <header class="plugin-heading">
       <div>
         <h1><Boxes :size="28" /> 插件</h1>
-        <p>按需扩展公共信息查询能力，支持声明式 Skill 与 HTTP MCP。</p>
+        <p>
+          按需扩展外部能力，支持声明式 Skill 与 HTTP
+          MCP；执行类工具须由管理员明确授权。
+        </p>
       </div>
       <div class="plugin-actions">
         <button :disabled="busy" @click="action(load)">
@@ -507,7 +510,7 @@ async function remove() {
         <button v-if="Object.keys(connections).length" @click="test">
           测试连接并发现工具
         </button>
-        <h3 v-if="tools.length">批准查询类工具</h3>
+        <h3 v-if="tools.length">批准工具（请确认用途及副作用）</h3>
         <p v-if="tools.length">
           请确认用途；服务端只读注解不构成权限保证。本轮不支持写入操作。 MCP
           参数通过 JSON 封装传给模型，调用前按服务端原始契约校验。

@@ -1,0 +1,39 @@
+services:
+  opensandbox-mcp:
+    build:
+      context: ../../..
+      dockerfile: plugins/opensandbox/server/Dockerfile
+    image: bubblepilot-opensandbox-mcp:local
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    pids_limit: 64
+    ports:
+      - "${MCP_BIND_ADDRESS:-127.0.0.1}:${MCP_PORT:-18091}:8080"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      PORT: "8080"
+      ADAPTER_INSTANCE_ID: ${ADAPTER_INSTANCE_ID:-bubblepilot-sandbox}
+      MAX_CONCURRENT_SANDBOXES: ${MAX_CONCURRENT_SANDBOXES:-1}
+      MAX_MCP_SESSIONS: ${MAX_MCP_SESSIONS:-64}
+      SANDBOX_TTL_SECONDS: ${SANDBOX_TTL_SECONDS:-600}
+      SANDBOX_MEMORY_MIB: ${SANDBOX_MEMORY_MIB:-512}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:?Set a pinned Python 3.12 image digest}
+      OPENSANDBOX_URL: ${OPENSANDBOX_URL:-http://host.docker.internal:18090}
+      MCP_TOKEN_FILE: /run/secrets/mcp_token
+      OPENSANDBOX_API_KEY_FILE: /run/secrets/opensandbox_api_key
+    secrets: [mcp_token, opensandbox_api_key]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+secrets:
+  mcp_token:
+    file: ./secrets/mcp_token
+  opensandbox_api_key:
+    file: ./secrets/opensandbox_api_key

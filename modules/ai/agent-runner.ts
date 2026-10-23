@@ -257,7 +257,7 @@ export class AgentRunner {
         attemptCount: 0,
       };
     }
-    await plugins?.close();
+    await plugins?.close().catch(() => undefined);
     if (request.imageSession)
       budget.snapshot.images = request.imageSession.snapshot();
     budget.snapshot.outcome =

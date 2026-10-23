@@ -8,6 +8,7 @@ README 负责回答“它能做什么、怎样首次用起来”；`doc/` 只保
 | --- | --- |
 | [项目 README](../README.md) | 核心功能、前置条件和从部署到首次回复的完整流程 |
 | [部署与运维](部署与运维.md) | Compose、BlueBubbles、反向代理、AI、备份、升级和排障 |
+| [OpenSandbox 插件](../plugins/opensandbox/README.md) | 独立沙箱 MCP 部署、配置和临时会话边界 |
 | [产品与范围](产品与范围.md) | 产品定位、需求基线、用户闭环、非目标和后续方向 |
 
 ## 设计与契约
