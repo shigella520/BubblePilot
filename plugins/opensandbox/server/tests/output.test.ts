@@ -30,3 +30,32 @@ it("requires completion and preserves nonzero command failure", async () => {
     await collectOutput(events([{ type: "execution_complete" }])),
   ).toMatchObject({ status: "completed", exitCode: 0 });
 });
+
+it("separates per-stream log records without doubling existing line endings", async () => {
+  const result = await collectOutput(
+    events([
+      { type: "stdout", text: "12" },
+      { type: "stderr", text: "first\n" },
+      { type: "stdout", text: "34" },
+      { type: "stderr", text: "second" },
+      { type: "execution_complete" },
+    ]),
+  );
+  expect(result).toMatchObject({
+    stdout: "12\n34",
+    stderr: "first\nsecond",
+    exitCode: 0,
+  });
+  const limited = await collectOutput(
+    events([
+      { type: "stdout", text: "12" },
+      { type: "stdout", text: "34" },
+    ]),
+    4,
+  );
+  expect(limited).toMatchObject({
+    stdout: "12\n3",
+    truncated: true,
+    exitCode: null,
+  });
+});
