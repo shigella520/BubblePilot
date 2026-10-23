@@ -4,7 +4,7 @@
     "opensandbox": {
       "type": "streamable-http",
       "url": "http://opensandbox-mcp:8080/mcp",
-      "headers": { "Authorization": "${OPENSANDBOX_MCP_AUTHORIZATION}" }
+      "headers": { "Authorization": "${OPENSANDBOX_MCP_TOKEN}" }
     }
   }
 }

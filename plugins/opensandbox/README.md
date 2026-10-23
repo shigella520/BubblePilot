@@ -7,7 +7,7 @@
 插件 Git 目录地址（代码合入并推送后才可使用）：
 `https://github.com/shigella520/BubblePilot/tree/main/plugins/opensandbox/plugin`
 
-服务必须先独立部署。插件导入不会运行 Docker、安装软件或启动服务。安装时将连接地址改为 BubblePilot 可访问的 `/mcp`，明确批准内网目标；认证值填写完整的 `Bearer <MCP token>`。这是适配服务 token，不是 OpenSandbox API key。连接测试只握手、发现工具，不创建沙箱。
+服务必须先独立部署。插件导入不会运行 Docker、安装软件或启动服务。安装时将连接地址改为 BubblePilot 可访问的 `/mcp`，明确批准内网目标；认证方式选择 `Bearer Token`，凭据只填写原始 MCP token（不要加 `Bearer ` 前缀，应用会自动添加）。这是适配服务 token，不是 OpenSandbox API key。连接测试只握手、发现工具，不创建沙箱。
 
 管理员审阅并批准四个工具后，再绑定 AI 文本节点。`run_command` 与 `write_file` 有副作用。应用没有新增配置、迁移、角色绑定或自动授权。
 
