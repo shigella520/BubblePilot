@@ -9,7 +9,11 @@ export const configSchema = z.object({
   MAX_MCP_SESSIONS: integer(64, 1, 256),
   SANDBOX_TTL_SECONDS: integer(600, 60, 1800),
   SANDBOX_MEMORY_MIB: integer(512, 128, 4096),
-  SANDBOX_IMAGE: z.string().regex(/^python:3\.12[^@]*@sha256:[a-f0-9]{64}$/),
+  SANDBOX_IMAGE: z
+    .string()
+    .regex(
+      /^(?:python:3\.12[a-zA-Z0-9_.-]*|ghcr\.io\/shigella520\/bubblepilot-sandbox-python(?::[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127})?)@sha256:[a-f0-9]{64}$/,
+    ),
   ADAPTER_INSTANCE_ID: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
   OPENSANDBOX_URL: z.url().refine((value) => {
     const url = new URL(value);

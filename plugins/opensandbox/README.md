@@ -64,3 +64,7 @@ pnpm security:check
 文件边界测试使用系统 Python 3 执行虚构临时文件，不安装本机数据库或新 Python。独立 Docker PostgreSQL 集成验证按[开发说明](../../doc/开发与发布.md)执行。
 
 自动化测试使用模拟 OpenSandbox 后端与真实 MCP SDK 客户端，检查隔离、配额、取消、迟到结果、TTL、清理失败、鉴权、路径及输出上限。真实 OpenSandbox 服务与真实模型联合验收另行执行；本次不部署 NAS，不授权生产工作流。此前 NAS 创建速度/代理测试不等同于本适配服务联调通过。
+
+## 可选轻量运行镜像
+
+新增 [Python 运行镜像](runtime/README.md)，提供 CLI 和轻量数据处理库。插件 0.2.0 以 `prepare_sandbox.runtime` 清单为准，旧镜像返回 `id=unknown`。不跨任务保存文件，不新增工具或附件回传。发布与切换需要单独授权。

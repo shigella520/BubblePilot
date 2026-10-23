@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "bubblepilot-python-3.12-v1",
+  "python": "3.12",
+  "commands": [
+    "bash",
+    "cp",
+    "timeout",
+    "find",
+    "grep",
+    "sed",
+    "rg",
+    "jq",
+    "ping",
+    "ip",
+    "ss",
+    "nc",
+    "tar",
+    "gzip",
+    "zip",
+    "unzip",
+    "xz",
+    "file",
+    "diff",
+    "patch",
+    "ps",
+    "sqlite3",
+    "python",
+    "pip"
+  ],
+  "pythonModules": [
+    "numpy",
+    "pandas",
+    "httpx",
+    "bs4",
+    "yaml",
+    "openpyxl",
+    "pypdf",
+    "PIL"
+  ],
+  "limits": [
+    "single-task-files",
+    "text-results-only",
+    "no-ocr",
+    "no-browser",
+    "no-automatic-chat-attachments",
+    "ping-requires-kernel-permission"
+  ]
+}

@@ -86,9 +86,35 @@ jobs:
       - name: Build sandbox adapter image
         run: docker build -f plugins/opensandbox/server/Dockerfile -t bubblepilot-opensandbox-mcp:ci .
 
+  sandbox-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime
+        run: docker build --platform linux/amd64 -f plugins/opensandbox/runtime/Dockerfile -t bubblepilot-sandbox-python:test .
+      - name: Verify runtime in 512 MiB
+        run: sh plugins/opensandbox/runtime/verify.sh
+      - name: Scan runtime OS and Python dependencies
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: bubblepilot-sandbox-python:test
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+          format: json
+          output: runtime-vulnerabilities.json
+      - name: Enforce reviewed runtime risk baseline
+        run: node --test plugins/opensandbox/runtime/check-scan.test.mjs && node plugins/opensandbox/runtime/check-scan.mjs runtime-vulnerabilities.json
+      - name: Save scan evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-vulnerabilities
+          path: runtime-vulnerabilities.json
+
   docker:
     runs-on: ubuntu-latest
-    needs: verify
+    needs: [verify, sandbox-runtime]
     permissions:
       contents: read
       packages: write

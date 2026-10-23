@@ -22,7 +22,7 @@
     "dev:local": "tsx --env-file=.env.local watch app/main.ts",
     "dev:web": "pnpm --dir apps/web dev",
     "docs:check": "node scripts/check-markdown-links.mjs",
-    "format": "prettier --check app modules tests contracts apps/web/src apps/web/*.json apps/web/*.ts apps/web/*.html scripts/*.mjs *.json *.js *.ts *.yaml plugins/opensandbox/server/src plugins/opensandbox/server/tests plugins/opensandbox/server/*.json plugins/opensandbox/plugin/**/*.json",
+    "format": "prettier --check app modules tests contracts apps/web/src apps/web/*.json apps/web/*.ts apps/web/*.html scripts/*.mjs *.json *.js *.ts *.yaml plugins/opensandbox/server/src plugins/opensandbox/server/tests plugins/opensandbox/server/*.json plugins/opensandbox/plugin/**/*.json plugins/opensandbox/runtime/*.json plugins/opensandbox/runtime/*.mjs",
     "format:write": "prettier --write app modules tests contracts apps/web/src apps/web/*.json apps/web/*.ts apps/web/*.html scripts/*.mjs *.json *.js *.ts *.yaml",
     "lint": "eslint .",
     "ops:check": "sh -n scripts/*.sh && node scripts/check-ops-contract.mjs",

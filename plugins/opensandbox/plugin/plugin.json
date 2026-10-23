@@ -1,6 +1,6 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "bubblepilot-opensandbox",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "按需使用本次运行独享的临时 Python 沙箱；远程执行有副作用，须由管理员批准。"
 }

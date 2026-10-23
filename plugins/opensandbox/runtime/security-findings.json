@@ -1,0 +1,1280 @@
+{
+  "scanner": "Trivy 0.69.3",
+  "checkedAt": "2026-10-23",
+  "imageId": "sha256:69315c28c15530f854292ff3cdb2d2749f0899e570312f84ae0493a54affa7a9",
+  "releaseBlocked": true,
+  "findings": [
+    {
+      "id": "CVE-2019-16224",
+      "severity": "CRITICAL",
+      "fixedVersion": "未提供",
+      "packages": ["liblmdb0"],
+      "debianReview": [
+        {
+          "sourcePackage": "lmdb",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2019-16224",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; only reachable via attacker-supplied/corrupted LMDB database file; unfixed upstream",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "读取攻击者构造的 data.mdb，md_flags 导致非法写。",
+        "evidence": "未装 Python lmdb 或 mdb_dump，但 dig 经 bind9-libs 链接 liblmdb；无法据此排除 C 库调用。",
+        "recommendation": "保留阻断；确认 BIND 实际调用路径或替换 DNS 工具，不能仅以没有 Python 模块申请例外。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2019-16225",
+      "severity": "CRITICAL",
+      "fixedVersion": "未提供",
+      "packages": ["liblmdb0"],
+      "debianReview": [
+        {
+          "sourcePackage": "lmdb",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2019-16225",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; only reachable via attacker-supplied/corrupted LMDB database file; unfixed upstream",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "读取恶意 data.mdb，mp_flags 导致非法写。",
+        "evidence": "同上：liblmdb 随 bind9-libs 存在，未证明相关入口不可达。",
+        "recommendation": "保留阻断；验证调用路径或移除该依赖。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2019-16226",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["liblmdb0"],
+      "debianReview": [
+        {
+          "sourcePackage": "lmdb",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2019-16226",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; only reachable via attacker-supplied/corrupted LMDB database file; unfixed upstream",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "恶意 LMDB 节点触发未校验 memmove。",
+        "evidence": "库存在，Python 封装缺失并不能证明原生库安全。",
+        "recommendation": "保留阻断；验证调用路径或移除该依赖。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2019-16227",
+      "severity": "CRITICAL",
+      "fixedVersion": "未提供",
+      "packages": ["liblmdb0"],
+      "debianReview": [
+        {
+          "sourcePackage": "lmdb",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2019-16227",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; only reachable via attacker-supplied/corrupted LMDB database file; unfixed upstream",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "恶意 LMDB 游标节点触发非法 memcpy。",
+        "evidence": "库存在，经 DNS 工具依赖加载。",
+        "recommendation": "保留阻断；验证调用路径或移除该依赖。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2019-16228",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["liblmdb0"],
+      "debianReview": [
+        {
+          "sourcePackage": "lmdb",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2019-16228",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; only reachable via attacker-supplied/corrupted LMDB database file; unfixed upstream",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "打开恶意 data.mdb，头部零长度字段导致除零。",
+        "evidence": "库存在；当前正常 DNS 测试不覆盖恶意数据库入口。",
+        "recommendation": "保留阻断；验证调用路径或移除该依赖。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2025-69720",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libncursesw6", "libtinfo6", "ncurses-base", "ncurses-bin"],
+      "debianReview": [
+        {
+          "sourcePackage": "ncurses",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2025-69720",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "6.6+20251231-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "6.6+20251231-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "infocmp 分析特制终端描述时发生栈溢出。",
+        "evidence": "镜像实际包含 /usr/bin/infocmp。",
+        "recommendation": "保留阻断；优先评估移除不需要的 infocmp 或升级，不把用途少等同不可触发。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-12064",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["curl", "libcurl3t64-gnutls", "libcurl4t64"],
+      "debianReview": [
+        {
+          "sourcePackage": "curl",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-12064",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; needs schemeless URL with --proto-default sftp/scp",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "8.21.0~rc3-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "8.21.0~rc3-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "B",
+        "trigger": "curl 无 scheme URL + --proto-default sftp/scp，遗漏 SSH 主机验证选项。",
+        "evidence": "curl -V 明确支持 scp/sftp，路径可能触达；普通显式 https 请求不等于该触发条件。",
+        "recommendation": "候选条件：强制只允许显式 HTTP(S) 且禁用相关 SSH 路径；当前任意 shell 没有强制控制，暂不批准。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-16742",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libsystemd0", "libudev1"],
+      "debianReview": [
+        {
+          "sourcePackage": "systemd",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-16742",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "261.2-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "261.2-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "A",
+        "trigger": "systemd-homed 管理的本地登录用户借组成员修改提权。",
+        "evidence": "镜像没有 systemd-homed 可执行程序，仅有 libsystemd0/libudev1；未配置 homed 服务。",
+        "recommendation": "可审阅为组件缺失例外；仅限本镜像摘要且禁止后续安装/启动 homed，条件变化立即失效。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-40467",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["gawk"],
+      "debianReview": [
+        {
+          "sourcePackage": "gawk",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-40467",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "gawk getline 重定向路径的 use-after-free。",
+        "evidence": "gawk 可直接执行；任务会处理外部文本和生成脚本。",
+        "recommendation": "保留阻断；替换为其他 awk/Python 或补丁修复。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-40468",
+      "severity": "CRITICAL",
+      "fixedVersion": "未提供",
+      "packages": ["gawk"],
+      "debianReview": [
+        {
+          "sourcePackage": "gawk",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-40468",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "gawk 整数溢出，可能耗尽内存或覆盖堆元数据。",
+        "evidence": "64 位 gawk 存在；512 MiB 不能证明不存在内存破坏。",
+        "recommendation": "保留阻断；不因短生命周期接受直接可触发解析器问题。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-40469",
+      "severity": "CRITICAL",
+      "fixedVersion": "未提供",
+      "packages": ["gawk"],
+      "debianReview": [
+        {
+          "sourcePackage": "gawk",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-40469",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "A",
+        "trigger": "gawk do_sub 整数溢出，公告限定 32 位构建。",
+        "evidence": "file /usr/bin/gawk 确认为 ELF 64-bit x86-64；getconf LONG_BIT=64。",
+        "recommendation": "可审阅为架构不适用例外；只绑定已验证 amd64 ELF，禁止套用于其他架构/32 位安装。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-40553",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["gawk"],
+      "debianReview": [
+        {
+          "sourcePackage": "gawk",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-40553",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "gawk readdir 扩展 ftype 缓冲区溢出。",
+        "evidence": "dpkg -L 确认存在 /usr/lib/x86_64-linux-gnu/gawk/readdir.so，相关扩展实际随镜像安装。",
+        "recommendation": "保留阻断；修复或移除对应功能并回归，不能仅靠 Skill 避免加载。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-54369",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libacl1"],
+      "debianReview": [
+        {
+          "sourcePackage": "acl",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-54369",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; libacl acl_*_file() follow symlinks; fix adds new acl_*_at() ABI, not individually backportable",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Will be fixed first in unstable, then point release update; not to be backported by individual patches",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.4.0-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.4.0-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "特权调用方用 libacl 路径 API 时，可替换路径组件为符号链接。",
+        "evidence": "libacl 被 coreutils/tar/sed 等依赖；安全 read_file 不覆盖 run_command 任意 shell。",
+        "recommendation": "保留阻断；需要修复或有效的路径/权限控制证据，禁止把文件工具防链接当作全局保护。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-58471",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["wget"],
+      "debianReview": [
+        {
+          "sourcePackage": "wget",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-58471",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "wget 对服务端文件名做字符集转换时发生堆溢出。",
+        "evidence": "wget 是预装下载工具，服务端响应是不可信数据。",
+        "recommendation": "保留阻断；优先换用固定 HTTP 客户端或上游修复版本。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-58472",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["wget"],
+      "debianReview": [
+        {
+          "sourcePackage": "wget",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-58472",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "wget 转换恶意 HTML 属性时整数溢出导致堆溢出。",
+        "evidence": "相关内容处理用途可被模型调用；普通下载成功不排除路径。",
+        "recommendation": "保留阻断；禁用功能须有代码控制，仅 Skill 不足。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-6653",
+      "severity": "CRITICAL",
+      "fixedVersion": "未提供",
+      "packages": ["libxml2"],
+      "debianReview": [
+        {
+          "sourcePackage": "libxml2",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-6653",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; UAF present via CVE-2021-3541 backport, fix only in 2.11.0",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.14.5+dfsg-0.1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.14.5+dfsg-0.1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "libxml2 DTD/实体解析触发 use-after-free。",
+        "evidence": "dig 经 BIND 动态链接 libxml2；当前没有 Python 绑定，但原生路径未排除。",
+        "recommendation": "保留阻断；Debian 标记 affected，不能仅凭混合版本号自行判为已修复。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-74860",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libxml2"],
+      "debianReview": [
+        {
+          "sourcePackage": "libxml2",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-74860",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.15.3+dfsg-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.15.3+dfsg-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "A",
+        "trigger": "libxml2 Python SAX 绑定解析特制 DTD 属性时 double-free。",
+        "evidence": "Python libxml2 与 lxml 均不可导入，未安装对应 Python 绑定。",
+        "recommendation": "可审阅为相关绑定缺失例外；安装绑定或改变镜像即失效，不覆盖其他原生 libxml2 漏洞。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-76642",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": [
+        "bsdutils",
+        "libblkid1",
+        "liblastlog2-2",
+        "libmount1",
+        "libsmartcols1",
+        "libuuid1",
+        "login",
+        "mount",
+        "util-linux"
+      ],
+      "debianReview": [
+        {
+          "sourcePackage": "util-linux",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-76642",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "B",
+        "trigger": "mount helper 失败后仍执行特权 post-mount hooks。",
+        "evidence": "mount 为 SUID；fstab 为空。尚未重新核实 NAS 子沙箱 capabilities 和 no-new-privileges。",
+        "recommendation": "须移除 SUID/不需要的 mount 路径，并验证无 SYS_ADMIN、无宿主挂载，之后再审例外。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-78408",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": [
+        "bsdutils",
+        "libblkid1",
+        "liblastlog2-2",
+        "libmount1",
+        "libsmartcols1",
+        "libuuid1",
+        "login",
+        "mount",
+        "util-linux"
+      ],
+      "debianReview": [
+        {
+          "sourcePackage": "util-linux",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-78408",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.42.4-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.42.4-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "B",
+        "trigger": "特权 nsenter --join-cgroup 泄漏可迁移 cgroup 的文件描述符。",
+        "evidence": "nsenter 存在；宿主 cgroup 可写性和命名空间隔离未在本轮验证。",
+        "recommendation": "须证明无法进入宿主命名空间且无可写宿主 cgroup；仅无 Docker Socket 不够。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-78409",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": [
+        "bsdutils",
+        "libblkid1",
+        "liblastlog2-2",
+        "libmount1",
+        "libsmartcols1",
+        "libuuid1",
+        "login",
+        "mount",
+        "util-linux"
+      ],
+      "debianReview": [
+        {
+          "sourcePackage": "util-linux",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-78409",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "B",
+        "trigger": "Linux 6.15+ 下 fstab X-mount.subdir 中间符号链接逃逸。",
+        "evidence": "fstab 未配置，但本轮未核实 NAS 内核及运行时挂载能力；不以旧截图代替现状。",
+        "recommendation": "须核实内核与 mount 权限、无 fstab 授权条目，按实际摘要和部署条件审批。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-78410",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": [
+        "bsdutils",
+        "libblkid1",
+        "liblastlog2-2",
+        "libmount1",
+        "libsmartcols1",
+        "libuuid1",
+        "login",
+        "mount",
+        "util-linux"
+      ],
+      "debianReview": [
+        {
+          "sourcePackage": "util-linux",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-78410",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.42.3-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "B",
+        "trigger": "SUID mount 使用可竞争替换的 fstab bind 源，可能改变错误路径权限。",
+        "evidence": "mount 为 SUID；镜像 fstab 为空，运行时配置尚待核实。",
+        "recommendation": "须移除不需要的特权路径并验证实际容器控制；当前暂不批准。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-8458",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["curl", "libcurl3t64-gnutls", "libcurl4t64"],
+      "debianReview": [
+        {
+          "sourcePackage": "curl",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-8458",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; needs HTTP Negotiate auth with differing service names",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": ""
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "8.21.0~rc2-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "8.21.0~rc2-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "B",
+        "trigger": "libcurl 复用 Negotiate 认证连接时跨 service 误复用。",
+        "evidence": "curl 具有 GSS-API/SPNEGO；普通无认证 HTTP 不满足该条件，但任意 shell 可启用认证。",
+        "recommendation": "须明确禁止提供此类凭据及调用路径，且有强制控制或修复；不能只靠提示词。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-86138",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libxml2"],
+      "debianReview": [
+        {
+          "sourcePackage": "libxml2",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-86138",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "libxml2 xmlDictAddQString 整数溢出与堆溢出。",
+        "evidence": "libxml2 实际存在且被 BIND 链接；未完成函数级可达性证明。",
+        "recommendation": "保留阻断；升级、去依赖或补充可达性证据。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-86139",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libxml2"],
+      "debianReview": [
+        {
+          "sourcePackage": "libxml2",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-86139",
+          "releases": {
+            "bookworm": {
+              "status": "resolved",
+              "fixed_version": "0",
+              "urgency": "unimportant"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "libxml2 xmlURIEscapeStr 整数溢出。",
+        "evidence": "当前 trixie 被官方标记 open；bookworm 不受影响不代表本候选不受影响。",
+        "recommendation": "保留阻断；不能借其他发行版状态申请本镜像例外。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-86140",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libxml2"],
+      "debianReview": [
+        {
+          "sourcePackage": "libxml2",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-86140",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "libxml2 校验代码 xmlSnprintfElements 栈溢出。",
+        "evidence": "库存在，相关函数是否被现有调用方使用未证明。",
+        "recommendation": "保留阻断；升级或证明相关功能不可达。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-86142",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libxml2"],
+      "debianReview": [
+        {
+          "sourcePackage": "libxml2",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-86142",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "libxml2 XPointer 长度饱和导致堆溢出。",
+        "evidence": "未提供 XPointer 业务入口，但任意 shell 与原生库存在，不等于禁止访问。",
+        "recommendation": "保留阻断；需代码级禁用/去依赖或补丁。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-86143",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libxml2"],
+      "debianReview": [
+        {
+          "sourcePackage": "libxml2",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-86143",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "libxml2 写回调负长度，影响取决于回调实现。",
+        "evidence": "未确认所有 BIND/原生回调调用路径。",
+        "recommendation": "保留阻断；风险无法仅凭无 Python 绑定排除。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-86144",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libxml2"],
+      "debianReview": [
+        {
+          "sourcePackage": "libxml2",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-86144",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned"
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "2.15.4+dfsg-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "libxml2 XInclude 未传播解析选项，可能绕过 NONET 导致 SSRF/DoS。",
+        "evidence": "库存在；沙箱允许授权联网，Skill 不是网络 ACL。",
+        "recommendation": "保留阻断；核实 XInclude/资源加载器或修复，不以代理代替 SSRF 防护。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    },
+    {
+      "id": "CVE-2026-9538",
+      "severity": "HIGH",
+      "fixedVersion": "未提供",
+      "packages": ["libperl5.40", "perl", "perl-base", "perl-modules-5.40"],
+      "debianReview": [
+        {
+          "sourcePackage": "perl",
+          "url": "https://security-tracker.debian.org/tracker/CVE-2026-9538",
+          "releases": {
+            "bookworm": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; wait for regressions upstream sorted out",
+              "nodsa_reason": "postponed"
+            },
+            "trixie": {
+              "status": "open",
+              "urgency": "not yet assigned",
+              "nodsa": "Minor issue; wait for regressions upstream sorted out",
+              "nodsa_reason": "postponed"
+            },
+            "forky": {
+              "status": "resolved",
+              "fixed_version": "5.42.3-1",
+              "urgency": "not yet assigned"
+            },
+            "sid": {
+              "status": "resolved",
+              "fixed_version": "5.42.3-1",
+              "urgency": "not yet assigned"
+            }
+          }
+        }
+      ],
+      "riskReview": {
+        "category": "C",
+        "trigger": "Perl Archive::Tar 按恶意 tar 头大小分配内存。",
+        "evidence": "实际模块版本 3.02_001，小于公告修复版 3.10；Perl 由系统依赖带入。",
+        "recommendation": "保留阻断；优先升级/移除该模块。512 MiB 只能缓解进程内存耗尽，不能消除漏洞。",
+        "approval": "pending",
+        "testedByExploit": false
+      }
+    }
+  ],
+  "reviewSummary": {
+    "stableUpgradeAvailable": false,
+    "stableUpgradeNote": "APT check on candidate found only tzdata upgrade; tracked CVEs remain open in trixie. Bookworm does not eliminate the findings.",
+    "policyChanged": false,
+    "exceptionsApproved": false,
+    "deploymentPerformed": false,
+    "source": "https://security-tracker.debian.org/tracker/data/json",
+    "decision": "Review only; no exemptions or deployment authorized"
+  }
+}

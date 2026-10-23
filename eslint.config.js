@@ -25,7 +25,10 @@ export default tseslint.config(
       parserOptions: {
         extraFileExtensions: [".vue"],
         projectService: {
-          allowDefaultProject: ["scripts/*.mjs"],
+          allowDefaultProject: [
+            "scripts/*.mjs",
+            "plugins/opensandbox/runtime/*.mjs",
+          ],
         },
         tsconfigRootDir: import.meta.dirname,
       },

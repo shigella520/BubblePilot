@@ -1,3 +1,8 @@
+import {
+  initializeWorkspaceCommand,
+  parseRuntime,
+  type RuntimeInfo,
+} from "./runtime.js";
 import { randomUUID } from "node:crypto";
 import type { Backend, Handle } from "./backend.js";
 
@@ -53,6 +58,7 @@ export class SandboxSession {
   ended = false;
   private busy = false;
   private handle: Handle | undefined;
+  private runtime: RuntimeInfo = { id: "unknown" };
   private creating = false;
   private claimed = false;
   private uncertainUntil = 0;
@@ -76,6 +82,7 @@ export class SandboxSession {
         status: "reused",
         workspace: "/workspace",
         expiresAt: this.expiresAt,
+        runtime: this.runtime,
       };
     this.pool.claim(this);
     this.claimed = true;
@@ -91,17 +98,19 @@ export class SandboxSession {
       this.handle = await this.pool.backend.create(this.owner, combined);
       combined.throwIfAborted();
       const initialized = await this.handle.run(
-        "mkdir -p /workspace",
+        initializeWorkspaceCommand,
         combined,
         5,
       );
       combined.throwIfAborted();
       if (initialized.status !== "completed")
         throw new Error("Workspace unavailable");
+      this.runtime = parseRuntime(initialized.stdout);
       return {
         status: "created",
         workspace: "/workspace",
         expiresAt: this.expiresAt,
+        runtime: this.runtime,
       };
     } catch {
       // A create may have reached the server without returning its ID. Keep the slot
