@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { Boxes, Plus, RefreshCw, UploadCloud } from "@lucide/vue";
+import PluginToolPicker from "../components/PluginToolPicker.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { pluginErrorMessage, canInspectPlugin } from "../utils/plugin-feedback";
 import { apiRequest } from "../services/api";
@@ -93,6 +94,18 @@ const items = ref<
   disabledTools = ref<string[]>([]),
   tested = ref(false);
 const previous = ref<Detail | null>(null);
+const workflowReferences = computed(() => {
+  const groups = new Map<string, number[]>();
+  for (const reference of selected.value?.references ?? []) {
+    const versions = groups.get(reference.workflow_id) ?? [];
+    if (!versions.includes(reference.version)) versions.push(reference.version);
+    groups.set(reference.workflow_id, versions);
+  }
+  return [...groups].map(([id, versions]) => ({
+    id,
+    versions: versions.sort((a, b) => b - a),
+  }));
+});
 const changes = computed(() => {
   if (!preview.value || !previous.value) return [];
   const old = previous.value.package,
@@ -510,24 +523,13 @@ async function remove() {
         <button v-if="Object.keys(connections).length" @click="test">
           测试连接并发现工具
         </button>
-        <h3 v-if="tools.length">批准工具（请确认用途及副作用）</h3>
-        <p v-if="tools.length">
-          请确认用途；服务端只读注解不构成权限保证。本轮不支持写入操作。 MCP
-          参数通过 JSON 封装传给模型，调用前按服务端原始契约校验。
-        </p>
-        <label
-          v-for="tool in tools"
-          :key="tool.server + '/' + tool.definition.name"
-          class="tool-choice"
-          ><input
-            v-model="approved"
-            type="checkbox"
-            :value="tool.server + '/' + tool.definition.name + '#' + tool.hash"
-          /><span
-            ><strong>{{ tool.server }} / {{ tool.definition.name }}</strong
-            ><small>{{ tool.definition.description }}</small></span
-          ></label
-        >
+        <PluginToolPicker
+          v-if="tools.length"
+          :key="preview?.hash ?? selected?.id"
+          v-model="approved"
+          :tools="tools"
+          :disabled="busy"
+        />
         <section v-if="previous && preview">
           <h3>
             升级变更 {{ previous.package.version }} → {{ preview.version }}
@@ -539,19 +541,28 @@ async function remove() {
             未发现 Skill 或 MCP 地址变化，请测试连接后复核工具定义。
           </p>
         </section>
-        <section v-if="selected?.references.length">
-          <h3>工作流引用</h3>
-          <p
-            v-for="reference in selected.references"
-            :key="reference.workflow_id + ':' + reference.version"
+        <details v-if="selected?.references.length" class="reference-panel">
+          <summary>
+            工作流引用 · {{ selected.references.length }} 个版本
+          </summary>
+          <div
+            v-for="group in workflowReferences"
+            :key="group.id"
+            class="reference-group"
           >
-            {{ reference.workflow_id }} · 版本 {{ reference.version }}
-          </p>
-        </section>
+            <code>{{ group.id }}</code>
+            <div class="version-list">
+              <span v-for="version in group.versions" :key="version"
+                >v{{ version }}</span
+              >
+            </div>
+          </div>
+        </details>
         <h3>Skills</h3>
         <article
           v-for="skill in (preview ?? selected?.package)?.skills"
           :key="skill.id"
+          class="skill-card"
         >
           <strong>{{ skill.name }}</strong>
           <p>{{ skill.description }}</p>
@@ -722,12 +733,49 @@ async function remove() {
   background: #f1f5f9;
   border-radius: 10px;
 }
-.tool-choice span {
-  display: grid;
-  gap: 4px;
+.reference-panel,
+.skill-card {
+  border: 1px solid var(--border-color, #dce2ea);
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 0;
 }
-.tool-choice small {
-  color: #64748b;
+.reference-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.reference-group {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+.reference-group code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--bubblepilot-muted);
+}
+.version-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.version-list span {
+  background: #f1f5f9;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.skill-card {
+  line-height: 1.6;
+}
+.skill-card button {
+  margin: 6px 8px 0 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.plugin-panel .danger-button {
+  color: #b42318;
 }
 button:disabled {
   opacity: 0.5;
