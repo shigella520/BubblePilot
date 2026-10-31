@@ -621,30 +621,75 @@ describe("AgentRunner", () => {
     );
   });
 
-  it("hides searched source links while retaining tool audit results", async () => {
-    const { repository, client, routing, search, request } = await setup(
-      "Fresh fact [News](https://news.example.test/item) 详情：https://other.example.test/story，之后继续。\n来源：https://source.example.test",
-    );
-    const result = await new AgentRunner(routing, search, repository).run({
-      ...request,
-      webSearchSources: "hidden",
-    });
+  it.each(["full", "compact", "hidden"] as const)(
+    "guides %s source display without deleting answer links or audit results",
+    async (mode) => {
+      const answer = [
+        "[Video](https://video.example.test/one)",
+        "https://video.example.test/two",
+        "<https://video.example.test/three>",
+        "www.example.test/four",
+        "Sources: https://news.example.test/item",
+        '```python\nurl = "https://api.example.test/v1"\n```',
+      ].join("\n");
+      const { repository, client, routing, search, request } =
+        await setup(answer);
+      const result = await new AgentRunner(routing, search, repository).run({
+        ...request,
+        webSearchSources: mode,
+      });
+      expect(result).toMatchObject({ status: "succeeded", text: answer });
+      const instruction = client.requests[0]?.messages
+        .filter((message) => message.role === "system")
+        .map((message) =>
+          typeof message.content === "string" ? message.content : "",
+        )
+        .join("\n");
+      expect(instruction).toContain(
+        "Preserve URLs explicitly requested by the user",
+      );
+      expect(instruction).toContain(
+        {
+          full: "Cite source URLs when useful",
+          compact: "This limit does not apply to task-required links",
+          hidden: "Do not proactively add supporting citations",
+        }[mode],
+      );
+      expect(repository.toolExecutions[0]?.responseDetails).toMatchObject({
+        results: [{ url: "https://news.example.test/item" }],
+      });
+    },
+  );
 
-    expect(result).toMatchObject({
-      status: "succeeded",
-      text: "Fresh fact News 详情，之后继续。",
-    });
-    const sourceInstruction = client.requests[0]?.messages.find(
-      (message) =>
-        message.role === "system" &&
-        typeof message.content === "string" &&
-        message.content.includes("do not include URLs"),
-    );
-    expect(sourceInstruction?.content).toContain("do not include URLs");
-    expect(repository.toolExecutions[0]?.responseDetails).toMatchObject({
-      results: [{ url: "https://news.example.test/item" }],
-    });
-  });
+  it.each(["text", "json"] as const)(
+    "preserves task URLs in %s without a search call under hidden sources",
+    async (outputFormat) => {
+      const answer =
+        outputFormat === "json"
+          ? JSON.stringify({
+              links: [
+                "https://video.example.test/one",
+                { url: "https://video.example.test/two" },
+              ],
+              source: "来源：https://news.example.test/item",
+            })
+          : "Video one：https://video.example.test/one\nVideo two：https://video.example.test/two";
+      const { repository, client, routing, search, request } = await setup();
+      vi.spyOn(client, "call").mockResolvedValue({
+        status: "succeeded",
+        text: answer,
+        durationMs: 1,
+      });
+      const result = await new AgentRunner(routing, search, repository).run({
+        ...request,
+        outputFormat,
+        webSearch: "auto",
+        webSearchSources: "hidden",
+      });
+      expect(result).toMatchObject({ status: "succeeded", text: answer });
+      expect(repository.toolExecutions).toHaveLength(0);
+    },
+  );
 
   it("records searchable request and response diagnostics for tool failures", async () => {
     const { repository, routing, request } = await setup();
