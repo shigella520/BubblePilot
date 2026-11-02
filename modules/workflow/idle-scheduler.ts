@@ -1,3 +1,4 @@
+import { DEFAULT_CONTEXT_SETTINGS } from "./context-settings-types.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import {
@@ -380,8 +381,21 @@ export class IdleScheduler {
                   'settings',jsonb_build_object('includeFromMe',s.include_from_me,'baseMessageWindow',s.base_message_window,'redundancyMessageWindow',s.redundancy_message_window,'characterLimit',s.character_limit),
                   'settingsVersion',s.version,'compatibilityInitialized',true))
                 || jsonb_build_object('chatId',$1::text,'triggerMessageIndex',$2::text) AS snapshot
-              FROM conversation_context_settings s WHERE id=1`,
-                [activity.chat_id, activity.next_message_index],
+              FROM (
+                SELECT include_from_me,base_message_window,redundancy_message_window,character_limit,version
+                FROM conversation_context_settings WHERE id=1
+                UNION ALL
+                SELECT $3::boolean,$4::integer,$5::integer,$6::integer,0
+                WHERE NOT EXISTS (SELECT 1 FROM conversation_context_settings WHERE id=1)
+              ) s`,
+                [
+                  activity.chat_id,
+                  activity.next_message_index,
+                  DEFAULT_CONTEXT_SETTINGS.includeFromMe,
+                  DEFAULT_CONTEXT_SETTINGS.baseMessageWindow,
+                  DEFAULT_CONTEXT_SETTINGS.redundancyMessageWindow,
+                  DEFAULT_CONTEXT_SETTINGS.characterLimit,
+                ],
               )
             ).rows[0]?.snapshot;
             if (!snapshot)

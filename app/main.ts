@@ -1,3 +1,4 @@
+import { DEFAULT_CONTEXT_SETTINGS } from "../modules/workflow/context-settings-types.js";
 import { IdleScheduler } from "../modules/workflow/idle-scheduler.js";
 import { runtimeTimeZone } from "../modules/workflow/context-time.js";
 import { PluginService } from "../modules/plugins/plugin-service.js";
@@ -224,12 +225,7 @@ const contextSettings = new ContextSettingsService(
     config.databaseUrl,
     config.databaseQueryTimeoutMs,
   ),
-  {
-    includeFromMe: true,
-    baseMessageWindow: 10,
-    characterLimit: 6000,
-    redundancyMessageWindow: 10,
-  },
+  DEFAULT_CONTEXT_SETTINGS,
 );
 const messageRetention =
   config.messageRetentionDays > 0
