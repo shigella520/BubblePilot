@@ -12,30 +12,8 @@ paths:
       security: [{ sessionAuth: [] }]
       responses:
         "200":
-          {
-            description: Instance dailyLimit (1–10),
-            version and explicit timeZone.,
-          }
+          { description: Instance default timeZone for idle configuration. }
         "401": { $ref: "#/components/responses/Error" }
-    patch:
-      operationId: updateIdleSettings
-      description: Requires sensitive unlock and audit. Uses expectedVersion concurrency control.
-      security: [{ sessionAuth: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [dailyLimit, expectedVersion]
-              properties:
-                dailyLimit: { type: integer, minimum: 1, maximum: 10 }
-                expectedVersion: { type: integer, minimum: 1 }
-      responses:
-        "200": { description: Updated instance idle protection settings. }
-        "403": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
   /api/v1/workflows/{workflowId}/idle-preview:
     get:
       operationId: previewWorkflowIdle
@@ -52,7 +30,7 @@ paths:
             description: Chat eligibility,
             activity and earliest trigger time,
             quiet hours,
-            remaining workflow and instance quota,
+            remaining workflow quota,
             and blocking reason.,
           }
         "401": { $ref: "#/components/responses/Error" }

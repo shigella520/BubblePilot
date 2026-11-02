@@ -39,13 +39,13 @@ export const idleTriggerSchema = z
       .max(50)
       .refine((ids) => new Set(ids).size === ids.length)
       .default([]),
-    idleMinutes: z.number().int().min(10).max(10_080).default(60),
+    idleMinutes: z.number().int().min(2).max(360).default(60),
     timeZone: idleTimeZoneSchema,
     quietPeriods: z
       .array(quietPeriodSchema)
       .max(20)
       .default([{ days: [1, 2, 3, 4, 5, 6, 7], start: "23:00", end: "09:00" }]),
-    dailyLimit: z.number().int().min(1).max(10).default(2),
+    dailyLimit: z.number().int().min(2).max(666).default(2),
     taskInstruction: z
       .string()
       .trim()

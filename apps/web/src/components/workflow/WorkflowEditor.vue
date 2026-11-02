@@ -598,10 +598,20 @@ function save() {
       node.data.block.type === "message-trigger" &&
       config.idle?.enabled &&
       (!Number.isInteger(config.idle.idleMinutes) ||
-        config.idle.idleMinutes < 10 ||
-        config.idle.idleMinutes > 10080)
+        config.idle.idleMinutes < 2 ||
+        config.idle.idleMinutes > 360)
     ) {
-      saveValidationError.value = "空闲时长必须为 10～10080 分钟的整数。";
+      saveValidationError.value = "空闲时长必须为 2～360 分钟的整数。";
+      return;
+    }
+    if (
+      node.data.block.type === "message-trigger" &&
+      config.idle?.enabled &&
+      (!Number.isInteger(config.idle.dailyLimit) ||
+        config.idle.dailyLimit < 2 ||
+        config.idle.dailyLimit > 666)
+    ) {
+      saveValidationError.value = "每日上限必须为 2～666 次的整数。";
       return;
     }
     if (

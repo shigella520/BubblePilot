@@ -22,8 +22,24 @@ describe("idle policy", () => {
       idleTriggerSchema.parse({ timeZone: "invalid/zone" }),
     ).toThrow();
     expect(() =>
-      idleTriggerSchema.parse({ timeZone: "UTC", idleMinutes: 9 }),
+      idleTriggerSchema.parse({ timeZone: "UTC", idleMinutes: 1 }),
     ).toThrow();
+  });
+  it("accepts new bounds and rejects out-of-range or fractional limits", () => {
+    for (const idleMinutes of [2, 360])
+      for (const dailyLimit of [2, 666]) {
+        expect(
+          idleTriggerSchema.parse({ timeZone: "UTC", idleMinutes, dailyLimit }),
+        ).toMatchObject({ idleMinutes, dailyLimit });
+      }
+    for (const idleMinutes of [1, 361, 2.5])
+      expect(() =>
+        idleTriggerSchema.parse({ timeZone: "UTC", idleMinutes }),
+      ).toThrow();
+    for (const dailyLimit of [1, 667, 2.5])
+      expect(() =>
+        idleTriggerSchema.parse({ timeZone: "UTC", dailyLimit }),
+      ).toThrow();
   });
   it("uses inclusive start and exclusive end across midnight", () => {
     expect(isQuiet(new Date("2026-11-02T15:00:00Z"), config)).toBe(true);

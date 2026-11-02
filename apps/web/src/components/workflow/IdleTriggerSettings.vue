@@ -17,12 +17,9 @@ const emit = defineEmits<{
   (event: "update:modelValue", value: IdleTriggerConfig): void;
 }>();
 const settings = ref<{
-  dailyLimit: number;
-  version: number;
   timeZone: string;
 } | null>(null);
 const error = ref("");
-const saving = ref(false);
 const days = ["一", "二", "三", "四", "五", "六", "日"];
 onMounted(async () => {
   try {
@@ -63,25 +60,6 @@ function period(
     ),
   });
 }
-async function saveLimit() {
-  if (!settings.value || saving.value) return;
-  saving.value = true;
-  error.value = "";
-  try {
-    settings.value = await apiRequest("/api/v1/settings/idle", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        dailyLimit: settings.value.dailyLimit,
-        expectedVersion: settings.value.version,
-      }),
-    });
-  } catch (cause) {
-    error.value = errorMessage(cause);
-  } finally {
-    saving.value = false;
-  }
-}
 </script>
 <template>
   <section class="idle-settings">
@@ -117,10 +95,10 @@ async function saveLimit() {
         <p v-if="!modelValue.chatIds.length">尚未选择聊天，不能启用。</p>
       </fieldset>
       <label
-        >空闲时长（10～10080 分钟）<input
+        >空闲时长（2～360 分钟）<input
           type="number"
-          min="10"
-          max="10080"
+          min="2"
+          max="360"
           :value="modelValue.idleMinutes"
           @input="
             update({
@@ -136,10 +114,10 @@ async function saveLimit() {
           "
       /></label>
       <label
-        >本工作流每聊天每日上限<input
+        >本工作流每聊天每日上限（2～666 次）<input
           type="number"
-          min="1"
-          max="10"
+          min="2"
+          max="666"
           :value="modelValue.dailyLimit"
           @input="
             update({
@@ -223,23 +201,6 @@ async function saveLimit() {
           "
         />
       </label>
-      <details v-if="settings">
-        <summary>实例级保护</summary>
-        <label
-          >跨工作流每聊天每日上限<input
-            v-model.number="settings.dailyLimit"
-            type="number"
-            min="1"
-            max="10"
-        /></label>
-        <small
-          >按
-          {{ settings.timeZone }} 计日；此修改立即生效，需要敏感解锁。</small
-        >
-        <button type="button" :disabled="saving" @click="saveLimit">
-          {{ saving ? "保存中…" : "保存实例上限" }}
-        </button>
-      </details>
     </template>
   </section>
 </template>

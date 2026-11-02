@@ -63,24 +63,8 @@ export class IdleScheduler {
     this.timer = undefined;
     await this.running;
   }
-  async settings() {
-    const row = (
-      await this.pool.query<{ daily_limit: number; version: number }>(
-        "SELECT daily_limit,version FROM idle_settings WHERE id=1",
-      )
-    ).rows[0]!;
-    return {
-      dailyLimit: row.daily_limit,
-      version: row.version,
-      timeZone: this.timeZone,
-    };
-  }
-  async updateSettings(dailyLimit: number, expectedVersion: number) {
-    const result = await this.pool.query(
-      "UPDATE idle_settings SET daily_limit=$1,version=version+1,updated_at=now() WHERE id=1 AND version=$2 RETURNING id",
-      [dailyLimit, expectedVersion],
-    );
-    return result.rowCount ? this.settings() : null;
+  settings() {
+    return { timeZone: this.timeZone };
   }
   private config(trigger: TriggerBinding): IdleTriggerConfig | undefined {
     const node = trigger.definition.nodes.find(
@@ -119,22 +103,14 @@ export class IdleScheduler {
         const due = activity
           ? idleDueAt(activity.last_activity_at, config, now)
           : null;
-        const limits = await this.settings();
         const counts = activity
           ? (
               await this.pool.query<{
-                instance_count: string;
                 workflow_count: string;
               }>(
-                `SELECT count(*) FILTER(WHERE instance_day=$2)::text AS instance_count,
-           count(*) FILTER(WHERE workflow_day=$3 AND workflow_version_id IN(SELECT id FROM workflow_versions WHERE workflow_id=$4))::text AS workflow_count
+                `SELECT count(*) FILTER(WHERE workflow_day=$2 AND workflow_version_id IN(SELECT id FROM workflow_versions WHERE workflow_id=$3))::text AS workflow_count
            FROM idle_attempts WHERE chat_id=$1 AND state IN ('reserved','confirmed','unknown')`,
-                [
-                  activity.chat_id,
-                  idleDay(now, this.timeZone),
-                  idleDay(now, config.timeZone),
-                  workflowId,
-                ],
+                [activity.chat_id, idleDay(now, config.timeZone), workflowId],
               )
             ).rows[0]
           : undefined;
@@ -142,14 +118,9 @@ export class IdleScheduler {
           0,
           config.dailyLimit - Number(counts?.workflow_count ?? 0),
         );
-        const instanceRemaining = Math.max(
-          0,
-          limits.dailyLimit - Number(counts?.instance_count ?? 0),
-        );
         results.push({
           chatId,
           workflowRemaining,
-          instanceRemaining,
           lastActivityAt: activity?.last_activity_at.toISOString() ?? null,
           eligible,
           earliestTriggerAt: due?.toISOString() ?? null,
@@ -159,7 +130,7 @@ export class IdleScheduler {
             ? "chat-unavailable-or-no-activity"
             : !eligible
               ? "waiting-for-human"
-              : !workflowRemaining || !instanceRemaining
+              : !workflowRemaining
                 ? "daily-limit"
                 : isQuiet(now, config)
                   ? "quiet-hours"
@@ -571,38 +542,24 @@ export class IdleScheduler {
         await db.query("ROLLBACK");
         return "idle-new-activity";
       }
-      const instanceDay = idleDay(now, this.timeZone),
-        workflowDay = idleDay(now, config.timeZone);
+      const workflowDay = idleDay(now, config.timeZone);
       const counts = (
-        await db.query<{
-          instance_count: string;
-          workflow_count: string;
-          daily_limit: number;
-        }>(
-          `SELECT (SELECT daily_limit FROM idle_settings WHERE id=1) AS daily_limit,
-          count(*) FILTER(WHERE instance_day=$2)::text AS instance_count,
-          count(*) FILTER(WHERE workflow_day=$3 AND workflow_version_id IN (SELECT id FROM workflow_versions WHERE workflow_id=$4))::text AS workflow_count
-         FROM idle_attempts WHERE chat_id=$1 AND state IN ('reserved','confirmed','unknown') AND execution_id<>$5`,
-          [
-            activity.chat_id,
-            instanceDay,
-            workflowDay,
-            trigger.workflowId,
-            executionId,
-          ],
+        await db.query<{ workflow_count: string }>(
+          `SELECT count(*)::text AS workflow_count FROM idle_attempts
+         WHERE chat_id=$1 AND workflow_day=$2
+         AND workflow_version_id IN (SELECT id FROM workflow_versions WHERE workflow_id=$3)
+         AND state IN ('reserved','confirmed','unknown') AND execution_id<>$4`,
+          [activity.chat_id, workflowDay, trigger.workflowId, executionId],
         )
       ).rows[0]!;
-      if (
-        Number(counts.instance_count) >= counts.daily_limit ||
-        Number(counts.workflow_count) >= config.dailyLimit
-      ) {
+      if (Number(counts.workflow_count) >= config.dailyLimit) {
         await db.query("ROLLBACK");
         return "idle-daily-limit";
       }
       if (sending)
         await db.query(
-          "UPDATE idle_attempts SET state='reserved',instance_day=$2,workflow_day=$3,updated_at=now() WHERE execution_id=$1 AND state IN ('accepted','reserved')",
-          [executionId, instanceDay, workflowDay],
+          "UPDATE idle_attempts SET state='reserved',workflow_day=$2,updated_at=now() WHERE execution_id=$1 AND state IN ('accepted','reserved')",
+          [executionId, workflowDay],
         );
       await db.query("COMMIT");
       return null;

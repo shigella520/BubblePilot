@@ -139,8 +139,8 @@
                           "idleMinutes": {
                             "default": 60,
                             "type": "integer",
-                            "minimum": 10,
-                            "maximum": 10080
+                            "minimum": 2,
+                            "maximum": 360
                           },
                           "timeZone": {
                             "type": "string",
@@ -186,8 +186,8 @@
                           "dailyLimit": {
                             "default": 2,
                             "type": "integer",
-                            "minimum": 1,
-                            "maximum": 10
+                            "minimum": 2,
+                            "maximum": 666
                           },
                           "taskInstruction": {
                             "default": "结合角色与已有聊天，自然、简短地主动交流。没有合适内容时保持安静；不重复回答历史问题，不制造紧迫感，不连续追问，也不宣称用户刚刚提出了新要求。",

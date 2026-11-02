@@ -961,49 +961,15 @@ export function buildApplication(
       sensitiveAudits.set(request, { action, targetType });
     };
 
-  application.get(
-    "/api/v1/settings/idle",
-    { preHandler: requireAdmin },
-    async () => {
-      if (!options.workflow?.idleScheduler)
-        throw new ApplicationError(
-          "IDLE_UNAVAILABLE",
-          "Idle scheduling unavailable.",
-          503,
-        );
-      return { data: await options.workflow.idleScheduler.settings() };
-    },
-  );
-  application.patch(
-    "/api/v1/settings/idle",
-    { preHandler: requireSensitive("idle.settings.update", "settings") },
-    async (request) => {
-      const body = z
-        .object({
-          dailyLimit: z.number().int().min(1).max(10),
-          expectedVersion: z.number().int().positive(),
-        })
-        .strict()
-        .parse(request.body);
-      if (!options.workflow?.idleScheduler)
-        throw new ApplicationError(
-          "IDLE_UNAVAILABLE",
-          "Idle scheduling unavailable.",
-          503,
-        );
-      const result = await options.workflow.idleScheduler.updateSettings(
-        body.dailyLimit,
-        body.expectedVersion,
+  application.get("/api/v1/settings/idle", { preHandler: requireAdmin }, () => {
+    if (!options.workflow?.idleScheduler)
+      throw new ApplicationError(
+        "IDLE_UNAVAILABLE",
+        "Idle scheduling unavailable.",
+        503,
       );
-      if (!result)
-        throw new ApplicationError(
-          "VERSION_CONFLICT",
-          "Refresh idle settings.",
-          409,
-        );
-      return { data: result };
-    },
-  );
+    return { data: options.workflow.idleScheduler.settings() };
+  });
   application.get(
     "/api/v1/workflows/:workflowId/idle-preview",
     { preHandler: requireAdmin },

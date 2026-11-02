@@ -9,7 +9,6 @@ interface Preview {
   quiet: boolean;
   reason: string;
   workflowRemaining: number;
-  instanceRemaining: number;
 }
 const rows = ref<Preview[]>([]),
   error = ref("");
@@ -76,10 +75,7 @@ async function load() {
             : "暂无"
         }}
       </p>
-      <p>
-        今日剩余：本工作流 {{ row.workflowRemaining }} 次，实例
-        {{ row.instanceRemaining }} 次
-      </p>
+      <p>今日剩余：本工作流在此聊天 {{ row.workflowRemaining }} 次</p>
     </article>
   </details>
 </template>

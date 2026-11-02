@@ -66,6 +66,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
       status: "confirmed",
       providerMessageId: "fictional-result",
     },
+    dailyLimit = 2,
   ) {
     const chatId = `fictional-idle-${randomUUID()}`;
     let now = new Date(Date.now() + 60_000);
@@ -74,6 +75,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
       chatIds: [chatId],
       timeZone: "UTC",
       idleMinutes: 10,
+      dailyLimit,
       quietPeriods: [],
     };
     const definition = parseWorkflowDefinition({
@@ -216,7 +218,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     await s.scheduler.tick();
     expect(run).toHaveBeenCalledTimes(2);
   });
-  it("sends only the decision text and reserves shared daily quota", async () => {
+  it("sends only the decision text and reserves workflow daily quota", async () => {
     const s = await setup();
     const run = vi
       .spyOn(AgentRunner.prototype, "run")
@@ -238,6 +240,21 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
       "confirmed",
       "released",
     ]);
+  });
+  it("allows more than the retired instance limit and reports only workflow quota", async () => {
+    const s = await setup(undefined, 3);
+    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(
+      success('{"action":"send","text":"虚构问候"}'),
+    );
+    for (let i = 0; i < 4; i++) {
+      await s.message();
+      s.advance(11);
+      await s.scheduler.tick();
+    }
+    expect(s.send).toHaveBeenCalledTimes(3);
+    const preview = await s.scheduler.preview(s.version.workflowId);
+    expect(preview[0]?.workflowRemaining).toBe(0);
+    expect(preview[0]).not.toHaveProperty("instanceRemaining");
   });
   it("cancels when a human speaks during generation", async () => {
     const s = await setup();
