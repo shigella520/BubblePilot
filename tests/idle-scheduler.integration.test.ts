@@ -219,6 +219,10 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     ).toEqual([]);
     const request = run.mock.calls[0]![0];
     expect(request.idleDecision).toBe(true);
+    expect(JSON.stringify(request.messages)).toContain(
+      "结合角色与已有聊天，自然、简短地主动交流",
+    );
+    expect(JSON.stringify(request.messages)).not.toContain("优先结合角色");
     expect(JSON.stringify(request.messages)).toContain("没有新的用户消息");
     expect(JSON.stringify(request.messages)).not.toContain("<current_message>");
     const rows = await pool.query(
@@ -259,6 +263,84 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
         .items,
     ).toEqual([]);
     expect((await s.scheduler.history(randomUUID())).items).toEqual([]);
+  });
+  it("blocks own messages, ignores late activity, and requalifies only after a new human message", async () => {
+    const s = await setup();
+    const run = vi
+      .spyOn(AgentRunner.prototype, "run")
+      .mockResolvedValue(success('{"action":"skip"}'));
+    await s.message();
+    s.advance(1);
+    await s.message({ isFromMe: true });
+    await s.message({ offset: -120_000 });
+    s.advance(11);
+    await s.scheduler.tick();
+    expect(run).not.toHaveBeenCalled();
+    expect((await s.scheduler.preview(s.version.workflowId))[0]).toMatchObject({
+      eligible: false,
+      earliestTriggerAt: null,
+      reason: "last-message-unknown",
+    });
+    await s.message();
+    s.advance(11);
+    await s.scheduler.tick();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+  it("cancels when an own message arrives during generation", async () => {
+    const s = await setup();
+    vi.spyOn(AgentRunner.prototype, "run").mockImplementation(async () => {
+      await s.message({ isFromMe: true });
+      return success('{"action":"send","text":"过时问候"}');
+    });
+    await s.message();
+    s.advance(11);
+    await s.scheduler.tick();
+    expect(s.send).not.toHaveBeenCalled();
+  });
+  it("confirmed bot activity blocks eligibility but a late acknowledgement cannot overwrite a newer human", async () => {
+    const s = await setup();
+    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(
+      success('{"action":"skip"}'),
+    );
+    await s.message();
+    s.advance(11);
+    await s.scheduler.tick();
+    const execution = (
+      await s.scheduler.history(s.version.workflowId, { limit: 1 })
+    ).items[0]!;
+    await s.message();
+    const delivery = randomUUID();
+    await pool.query(
+      `INSERT INTO outbound_deliveries(id,execution_id,node_id,idempotency_key,provider,provider_chat_id,body_hash,provider_temp_guid,status,created_at,confirmed_at)
+      SELECT $1::uuid,$2::uuid,'reply',$1::text,'bluebubbles',$3,'fictional',$1::uuid,'confirmed',a.last_activity_at+interval '1 second',a.last_activity_at+interval '1 second'
+      FROM idle_chat_activity a JOIN chats c ON c.id=a.chat_id WHERE c.provider_chat_id=$3`,
+      [delivery, execution.id, s.chatId],
+    );
+    expect((await s.scheduler.preview(s.version.workflowId))[0]).toMatchObject({
+      eligible: false,
+      reason: "last-message-bot",
+      earliestTriggerAt: null,
+    });
+    s.advance(1);
+    await s.message();
+    await pool.query(
+      "UPDATE outbound_deliveries SET status='unknown' WHERE id=$1",
+      [delivery],
+    );
+    await pool.query(
+      "UPDATE outbound_deliveries SET status='confirmed',confirmed_at=created_at+interval '1 day' WHERE id=$1",
+      [delivery],
+    );
+    expect((await s.scheduler.preview(s.version.workflowId))[0]?.eligible).toBe(
+      true,
+    );
+    await pool.query(
+      "UPDATE idle_chat_activity SET last_activity_source='unknown' WHERE chat_id=(SELECT id FROM chats WHERE provider_chat_id=$1)",
+      [s.chatId],
+    );
+    expect((await s.scheduler.preview(s.version.workflowId))[0]?.eligible).toBe(
+      false,
+    );
   });
   it("sends only the decision text and reserves workflow daily quota", async () => {
     const s = await setup();

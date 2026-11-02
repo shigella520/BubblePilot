@@ -24,6 +24,7 @@ interface Activity {
   consumed_generation: string;
   last_activity_at: Date;
   last_human_at: Date | null;
+  last_activity_source: "human" | "bot" | "unknown";
   next_message_index: string;
   last_message_index: string;
 }
@@ -153,7 +154,8 @@ export class IdleScheduler {
       for (const chatId of config.chatIds) {
         const activity = activities.find((a) => a.provider_chat_id === chatId);
         const eligible =
-          !!activity?.last_human_at &&
+          activity?.last_activity_source === "human" &&
+          !!activity.last_human_at &&
           activity.last_human_at > new Date(trigger.updatedAt) &&
           BigInt(activity.generation) > BigInt(activity.consumed_generation);
         const due = activity
@@ -197,15 +199,19 @@ export class IdleScheduler {
             ? "running"
             : !activity
               ? "chat-unavailable-or-no-activity"
-              : !eligible
-                ? "waiting-for-human"
-                : !workflowRemaining
-                  ? "daily-limit"
-                  : isQuiet(now, config)
-                    ? "quiet-hours"
-                    : due && due > now
-                      ? "waiting-for-idle"
-                      : "eligible",
+              : activity.last_activity_source !== "human"
+                ? activity.last_activity_source === "bot"
+                  ? "last-message-bot"
+                  : "last-message-unknown"
+                : !eligible
+                  ? "waiting-for-human"
+                  : !workflowRemaining
+                    ? "daily-limit"
+                    : isQuiet(now, config)
+                      ? "quiet-hours"
+                      : due && due > now
+                        ? "waiting-for-idle"
+                        : "eligible",
         });
       }
     }
@@ -235,6 +241,7 @@ export class IdleScheduler {
         if (
           !config ||
           !config.chatIds.includes(activity.provider_chat_id) ||
+          activity.last_activity_source !== "human" ||
           !activity.last_human_at ||
           activity.last_human_at <= new Date(trigger.updatedAt)
         )
@@ -325,6 +332,7 @@ export class IdleScheduler {
             ).rows[0];
             if (
               !current ||
+              current.last_activity_source !== "human" ||
               current.generation !== activity.generation ||
               current.last_activity_at.getTime() !==
                 activity.last_activity_at.getTime()
@@ -534,6 +542,7 @@ export class IdleScheduler {
       consumed_generation: event.idle.activityGeneration,
       last_activity_at: new Date(event.idle.lastActivityAt),
       last_human_at: null,
+      last_activity_source: "unknown",
       next_message_index: event.idle.upperMessageIndex,
       last_message_index: event.idle.lastMessageIndex,
     };
@@ -572,6 +581,8 @@ export class IdleScheduler {
       (a) => a.chat_id === activity.chat_id,
     );
     if (!current) return "idle-chat-unavailable";
+    if (!textConfirmed && current.last_activity_source !== "human")
+      return "idle-last-message-not-human";
     if (
       current.generation !== activity.generation ||
       current.last_message_index !== activity.last_message_index ||
@@ -593,15 +604,17 @@ export class IdleScheduler {
       const row = (
         await db.query<{
           generation: string;
+          last_activity_source: string;
           last_activity_at: Date;
           last_message_index: string;
         }>(
-          "SELECT generation,last_activity_at,last_message_index FROM idle_chat_activity WHERE chat_id=$1",
+          "SELECT generation,last_activity_source,last_activity_at,last_message_index FROM idle_chat_activity WHERE chat_id=$1",
           [activity.chat_id],
         )
       ).rows[0];
       if (
         !row ||
+        (!textConfirmed && row.last_activity_source !== "human") ||
         row.generation !== activity.generation ||
         row.last_message_index !== activity.last_message_index ||
         (!textConfirmed &&

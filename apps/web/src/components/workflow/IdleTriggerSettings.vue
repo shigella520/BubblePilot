@@ -191,7 +191,7 @@ function period(
         >跨午夜时，星期代表开始日。解除免打扰后重新等待完整空闲时长。</small
       >
       <label
-        >主动交流任务说明<textarea
+        >主动交流提示词<textarea
           rows="5"
           :value="modelValue.taskInstruction"
           @input="
@@ -201,6 +201,17 @@ function period(
           "
         />
       </label>
+      <small
+        >只填写交流要求，无需填写 JSON
+        或发送／跳过协议。保存并发布后生效。</small
+      >
+      <button
+        type="button"
+        class="button secondary"
+        @click="update({ taskInstruction: idleTaskInstruction })"
+      >
+        恢复默认
+      </button>
     </template>
   </section>
 </template>

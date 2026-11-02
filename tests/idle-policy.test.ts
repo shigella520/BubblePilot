@@ -14,6 +14,21 @@ const config = idleTriggerSchema.parse({
   timeZone: "Asia/Shanghai",
 });
 describe("idle policy", () => {
+  it("defaults to the original neutral instruction and preserves custom configuration", () => {
+    expect(config.taskInstruction).toBe(
+      "结合角色与已有聊天，自然、简短地主动交流。没有合适内容时保持安静；不重复回答历史问题，不制造紧迫感，不连续追问，也不宣称用户刚刚提出了新要求。",
+    );
+    expect(
+      idleTriggerSchema.parse({
+        timeZone: "UTC",
+        taskInstruction: "自定义虚构交流说明",
+      }).taskInstruction,
+    ).toBe("自定义虚构交流说明");
+    for (const taskInstruction of ["", " ", "字".repeat(4001)])
+      expect(() =>
+        idleTriggerSchema.parse({ timeZone: "UTC", taskInstruction }),
+      ).toThrow();
+  });
   it("requires explicit chats and a valid time zone", () => {
     expect(() =>
       idleTriggerSchema.parse({ enabled: true, timeZone: "Asia/Shanghai" }),

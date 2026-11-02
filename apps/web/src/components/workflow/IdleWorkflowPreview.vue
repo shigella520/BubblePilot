@@ -51,6 +51,8 @@ let generation = 0,
 let timer: ReturnType<typeof setTimeout> | undefined;
 const reasons: Record<string, string> = {
   "chat-unavailable-or-no-activity": "聊天不可用或尚无活动",
+  "last-message-bot": "最后发言为 Bot，等待真人发言",
+  "last-message-unknown": "最后发言来源未确认，等待真人发言",
   "waiting-for-human": "等待新的真人发言",
   "quiet-hours": "免打扰中",
   "waiting-for-idle": "等待达到空闲时长",
