@@ -1,3 +1,4 @@
+import { idleDecisionInstruction } from "./idle-defaults.js";
 import type { MemeDeliveryService } from "../memes/meme-delivery-service.js";
 import { z } from "zod";
 import {
@@ -1126,8 +1127,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
           ? [
               {
                 role: "system" as const,
-                content:
-                  '本轮先判断是否主动交流。仅返回 JSON：保持安静返回 {"action":"skip"}；发送返回 {"action":"send","text":"回复正文"}。不得把决策标记写入正文。',
+                content: idleDecisionInstruction,
               },
             ]
           : []),
@@ -1308,6 +1308,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
           completionStatus: "skipped",
           outputSummary: {
             reason: "idle-model-skip",
+            skipReason: decision.reason ?? "not-recorded",
             ...this.routing.outputSummary(result),
           },
         };

@@ -14,7 +14,6 @@ import { useRoute, useRouter } from "vue-router";
 import AdminDetailDialog from "../components/AdminDetailDialog.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import BotIdentityPanel from "../components/workflow/BotIdentityPanel.vue";
-import IdleWorkflowPreview from "../components/workflow/IdleWorkflowPreview.vue";
 import WorkflowEditor from "../components/workflow/WorkflowEditor.vue";
 import { apiAllPages, apiRequest, errorMessage } from "../services/api";
 
@@ -403,11 +402,6 @@ onMounted(load);
         </button>
       </div>
     </AdminDetailDialog>
-    <IdleWorkflowPreview
-      v-if="!isNew && !busy"
-      :workflow-id="workflowId"
-      :version="publishedVersion"
-    />
     <section v-if="!busy" class="workflow-canvas-main">
       <WorkflowEditor
         :blocks="blocks"

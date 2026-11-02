@@ -84,6 +84,62 @@ export class IdleScheduler {
       AND EXISTS(SELECT 1 FROM messages m WHERE m.chat_id=c.id AND m.message_index=a.last_message_index AND m.content_redacted_at IS NULL)`)
     ).rows;
   }
+  async history(
+    workflowId: string,
+    options: {
+      offset?: number;
+      limit?: number;
+      chatId?: string | undefined;
+      status?: string | undefined;
+    } = {},
+  ) {
+    const limit = options.limit ?? 20;
+    const result = await this.pool.query<{
+      id: string;
+      chatId: string;
+      chatName: string | null;
+      createdAt: Date;
+      completedAt: Date | null;
+      version: number;
+      status: string;
+      reason: string | null;
+      skipReason: string | null;
+      requestCount: number;
+      requests: Array<{
+        provider: string;
+        model: string;
+        status: string;
+        httpStatus: number | null;
+      }>;
+      provider: string | null;
+      model: string | null;
+    }>(
+      `SELECT e.id,c.provider_chat_id AS "chatId",c.display_name AS "chatName",e.created_at AS "createdAt",e.completed_at AS "completedAt",v.version,
+      CASE WHEN a.state='unknown' THEN 'unknown' ELSE e.status END AS status,
+      COALESCE(n.output_summary->>'reason',e.error_code) AS reason,n.output_summary->>'skipReason' AS "skipReason",
+      (SELECT count(*)::int FROM ai_provider_attempts p WHERE p.execution_id=e.id) AS "requestCount",
+      p.provider_name AS provider,p.model,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('provider',r.provider_name,'model',r.model,'status',r.status,'httpStatus',r.http_status) ORDER BY r.created_at) FROM ai_provider_attempts r WHERE r.execution_id=e.id),'[]'::jsonb) AS requests
+      FROM idle_attempts a JOIN workflow_executions e ON e.id=a.execution_id
+      JOIN workflow_versions v ON v.id=e.workflow_version_id JOIN chats c ON c.id=a.chat_id
+      LEFT JOIN LATERAL (SELECT output_summary FROM node_executions WHERE execution_id=e.id AND node_type='ai-chat' ORDER BY started_at DESC LIMIT 1) n ON true
+      LEFT JOIN LATERAL (SELECT provider_name,model FROM ai_provider_attempts WHERE execution_id=e.id ORDER BY created_at DESC LIMIT 1) p ON true
+      WHERE v.workflow_id=$1 AND ($2::text IS NULL OR c.provider_chat_id=$2)
+      AND ($3::text IS NULL OR CASE WHEN a.state='unknown' THEN 'unknown' ELSE e.status END=$3)
+      ORDER BY e.created_at DESC,e.id DESC LIMIT $4 OFFSET $5`,
+      [
+        workflowId,
+        options.chatId ?? null,
+        options.status ?? null,
+        limit + 1,
+        options.offset ?? 0,
+      ],
+    );
+    return {
+      items: result.rows.slice(0, limit),
+      hasMore: result.rows.length > limit,
+    };
+  }
   async preview(workflowId: string) {
     const bindings = (await this.repository.listActiveTriggerBindings()).filter(
       (t) => t.workflowId === workflowId,
@@ -118,25 +174,38 @@ export class IdleScheduler {
           0,
           config.dailyLimit - Number(counts?.workflow_count ?? 0),
         );
+        const latest =
+          (await this.history(workflowId, { chatId, limit: 1 })).items[0] ??
+          null;
+        const running =
+          latest && ["created", "running", "retrying"].includes(latest.status);
         results.push({
           chatId,
+          chatName: activity?.display_name ?? latest?.chatName ?? null,
+          dailyLimit: config.dailyLimit,
+          latest,
           workflowRemaining,
           lastActivityAt: activity?.last_activity_at.toISOString() ?? null,
           eligible,
-          earliestTriggerAt: due?.toISOString() ?? null,
+          earliestTriggerAt:
+            eligible && !running && workflowRemaining > 0
+              ? (due?.toISOString() ?? null)
+              : null,
           quiet: isQuiet(now, config),
           quietUntil: quietUntil(now, config)?.toISOString() ?? null,
-          reason: !activity
-            ? "chat-unavailable-or-no-activity"
-            : !eligible
-              ? "waiting-for-human"
-              : !workflowRemaining
-                ? "daily-limit"
-                : isQuiet(now, config)
-                  ? "quiet-hours"
-                  : due && due > now
-                    ? "waiting-for-idle"
-                    : "eligible",
+          reason: running
+            ? "running"
+            : !activity
+              ? "chat-unavailable-or-no-activity"
+              : !eligible
+                ? "waiting-for-human"
+                : !workflowRemaining
+                  ? "daily-limit"
+                  : isQuiet(now, config)
+                    ? "quiet-hours"
+                    : due && due > now
+                      ? "waiting-for-idle"
+                      : "eligible",
         });
       }
     }

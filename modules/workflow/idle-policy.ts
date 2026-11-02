@@ -148,7 +148,14 @@ export function idleDay(now: Date, timeZone: string): string {
 }
 
 export const idleDecisionSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("skip") }).strict(),
+  z
+    .object({
+      action: z.literal("skip"),
+      reason: z
+        .enum(["user-unavailable", "repetitive", "no-suitable-topic"])
+        .optional(),
+    })
+    .strict(),
   z
     .object({
       action: z.literal("send"),

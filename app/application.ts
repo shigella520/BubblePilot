@@ -971,6 +971,44 @@ export function buildApplication(
     return { data: options.workflow.idleScheduler.settings() };
   });
   application.get(
+    "/api/v1/workflows/:workflowId/idle-history",
+    { preHandler: requireAdmin },
+    async (request) => {
+      const { workflowId } = z
+        .object({ workflowId: z.string().uuid() })
+        .parse(request.params);
+      const query = z
+        .object({
+          offset: z.coerce.number().int().min(0).max(100000).default(0),
+          limit: z.coerce.number().int().min(1).max(50).default(20),
+          chatId: z.string().max(200).optional(),
+          status: z
+            .enum([
+              "created",
+              "running",
+              "retrying",
+              "succeeded",
+              "skipped",
+              "failed",
+              "dead-lettered",
+              "closed",
+              "unknown",
+            ])
+            .optional(),
+        })
+        .parse(request.query);
+      if (!options.workflow?.idleScheduler)
+        throw new ApplicationError(
+          "IDLE_UNAVAILABLE",
+          "Idle scheduling unavailable.",
+          503,
+        );
+      return {
+        data: await options.workflow.idleScheduler.history(workflowId, query),
+      };
+    },
+  );
+  application.get(
     "/api/v1/workflows/:workflowId/idle-preview",
     { preHandler: requireAdmin },
     async (request) => {

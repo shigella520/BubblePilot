@@ -11,6 +11,7 @@ import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
 import MemorySources from "../components/MemorySources.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
+import IdleAuditPanel from "../components/workflow/IdleAuditPanel.vue";
 import {
   ChartColumn,
   FileClock,
@@ -1058,8 +1059,9 @@ function contextSnapshotValue(
       <SectionNavigation
         :items="[
           { id: 'ai-usage', label: 'AI 用量与缓存', icon: ChartColumn },
-          { id: 'executions', label: '执行记录', icon: FileClock },
           { id: 'memory-jobs', label: '历史索引', icon: FileClock },
+          { id: 'idle-conversations', label: '空闲主动交流', icon: FileClock },
+          { id: 'executions', label: '执行记录', icon: FileClock },
           { id: 'audit', label: '审计事件', icon: ShieldCheck },
         ]"
       />
@@ -1238,6 +1240,8 @@ function contextSnapshotValue(
           正在加载 AI 用量统计…
         </div>
       </section>
+      <MemoryPanel id="memory-jobs" mode="jobs" embedded />
+      <IdleAuditPanel id="idle-conversations" />
       <section id="executions" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -1381,7 +1385,6 @@ function contextSnapshotValue(
           @next="changePage(executionPager.next)"
         />
       </section>
-      <MemoryPanel id="memory-jobs" mode="jobs" embedded />
       <section id="audit" class="admin-panel">
         <div class="panel-head">
           <div>

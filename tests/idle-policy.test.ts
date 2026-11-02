@@ -96,6 +96,12 @@ describe("idle policy", () => {
   });
   it("uses an explicit decision rather than natural language or partial JSON", () => {
     expect(parseIdleDecision('{"action":"skip"}')).toEqual({ action: "skip" });
+    expect(
+      parseIdleDecision('{"action":"skip","reason":"repetitive"}'),
+    ).toEqual({ action: "skip", reason: "repetitive" });
+    expect(() =>
+      parseIdleDecision('{"action":"skip","reason":"free-form reasoning"}'),
+    ).toThrow();
     expect(parseIdleDecision('{"action":"send","text":"你好"}')).toEqual({
       action: "send",
       text: "你好",

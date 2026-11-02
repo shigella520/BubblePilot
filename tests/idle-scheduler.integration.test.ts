@@ -192,13 +192,31 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     const s = await setup();
     const run = vi
       .spyOn(AgentRunner.prototype, "run")
-      .mockResolvedValue(success('{"action":"skip"}'));
+      .mockResolvedValue(success('{"action":"skip","reason":"repetitive"}'));
     await s.message();
     s.advance(11);
     await s.scheduler.tick();
     await s.scheduler.tick();
     expect(run).toHaveBeenCalledTimes(1);
     expect(s.send).not.toHaveBeenCalled();
+    const history = await s.scheduler.history(s.version.workflowId, {
+      limit: 1,
+    });
+    expect(history.items[0]).toMatchObject({
+      reason: "idle-model-skip",
+      skipReason: "repetitive",
+      status: "skipped",
+    });
+    expect(
+      (await s.scheduler.preview(s.version.workflowId))[0]?.earliestTriggerAt,
+    ).toBeNull();
+    expect(
+      (
+        await s.scheduler.history(s.version.workflowId, {
+          chatId: "fictional-other",
+        })
+      ).items,
+    ).toEqual([]);
     const request = run.mock.calls[0]![0];
     expect(request.idleDecision).toBe(true);
     expect(JSON.stringify(request.messages)).toContain("没有新的用户消息");
@@ -217,6 +235,30 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     s.advance(11);
     await s.scheduler.tick();
     expect(run).toHaveBeenCalledTimes(2);
+    const first = await s.scheduler.history(s.version.workflowId, { limit: 1 });
+    const second = await s.scheduler.history(s.version.workflowId, {
+      limit: 1,
+      offset: 1,
+    });
+    expect(
+      (await s.scheduler.history(s.version.workflowId, { chatId: s.chatId }))
+        .items,
+    ).toHaveLength(2);
+    expect(
+      (
+        await s.scheduler.history(s.version.workflowId, {
+          chatId: "missing-fictional-chat",
+        })
+      ).items,
+    ).toEqual([]);
+    expect(first.hasMore).toBe(true);
+    expect(second.hasMore).toBe(false);
+    expect(first.items[0]?.id).not.toBe(second.items[0]?.id);
+    expect(
+      (await s.scheduler.history(s.version.workflowId, { status: "succeeded" }))
+        .items,
+    ).toEqual([]);
+    expect((await s.scheduler.history(randomUUID())).items).toEqual([]);
   });
   it("sends only the decision text and reserves workflow daily quota", async () => {
     const s = await setup();
