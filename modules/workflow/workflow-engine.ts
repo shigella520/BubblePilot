@@ -1,3 +1,4 @@
+import type { ChatIdleEvent, WorkflowEvent } from "./workflow-event.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
 import type { ContextMessage } from "../archive/archive-repository.js";
 import {
@@ -99,6 +100,12 @@ export class WorkflowEngine implements MessageAutomation {
     const bindings = await this.repository.listActiveTriggerBindings();
     const matched = bindings.filter(
       (binding) =>
+        !binding.definition.nodes.some(
+          (node) =>
+            node.type === "message-trigger" &&
+            node.config.idle !== undefined &&
+            !node.config.enabled,
+        ) &&
         matchTrigger(envelope, binding.conditions, binding.includeFromMe)
           .matched,
     );
@@ -185,10 +192,36 @@ export class WorkflowEngine implements MessageAutomation {
     return this.gate.status();
   }
 
+  async handleIdle(input: {
+    trigger: TriggerBinding;
+    event: ChatIdleEvent;
+    accept: () => Promise<WorkflowExecutionRecord | null>;
+    guard: (executionId: string, sending: boolean) => Promise<string | null>;
+  }): Promise<void> {
+    await this.gate.run(
+      async () => {
+        const execution = await input.accept();
+        if (!execution) return;
+        await this.run(
+          execution,
+          input.trigger,
+          execution.triggerEvent ?? input.event,
+          (sending) => input.guard(execution.id, sending),
+        );
+      },
+      executionIsolationKey(
+        input.trigger.workflowId,
+        input.event.provider,
+        input.event.chat.providerChatId,
+      ),
+    );
+  }
+
   private async run(
     execution: WorkflowExecutionRecord,
     trigger: TriggerBinding,
-    envelope: MessageEnvelope,
+    envelope: WorkflowEvent,
+    idleGuard?: (sending: boolean) => Promise<string | null>,
   ): Promise<void> {
     const definition = trigger.definition;
     const nodes = new Map(definition.nodes.map((node) => [node.id, node]));
@@ -198,11 +231,38 @@ export class WorkflowEngine implements MessageAutomation {
     let contextIncompleteReasons: string[] | undefined;
     const participantIdentities = {};
     const outputs: Record<string, Record<string, unknown>> = {};
-    const timeZone = trigger.conditions.timeWindow?.timeZone ?? this.timeZone;
+    const timeZone =
+      (envelope.message === null
+        ? trigger.definition.nodes.find((n) => n.type === "message-trigger")
+            ?.config.idle?.timeZone
+        : undefined) ??
+      trigger.conditions.timeWindow?.timeZone ??
+      this.timeZone;
+    const priorNodes =
+      envelope.message === null
+        ? ((await this.repository.getExecution(execution.id))?.nodes ?? [])
+        : [];
+    const priorAttempts = new Map<string, number>();
+    for (const node of priorNodes)
+      priorAttempts.set(
+        node.nodeId,
+        Math.max(priorAttempts.get(node.nodeId) ?? 0, node.attempt),
+      );
+    let idleDecisionAccepted = false;
     let currentNodeId: string | null = definition.startNodeId;
     let steps = 0;
 
     while (currentNodeId !== null) {
+      if (idleGuard) {
+        const reason = await idleGuard(false);
+        if (reason) {
+          await this.repository.finishExecution(execution.id, "skipped", {
+            code: reason,
+            summary: reason,
+          });
+          return;
+        }
+      }
       steps += 1;
       if (steps > definition.maxSteps) {
         await this.repository.finishExecution(execution.id, "dead-lettered", {
@@ -243,14 +303,15 @@ export class WorkflowEngine implements MessageAutomation {
         const nodeExecutionId = await this.repository.startNodeExecution({
           executionId: execution.id,
           node,
-          attempt,
+          attempt: attempt + (priorAttempts.get(node.id) ?? 0),
           inputSummary: {
             eventId: envelope.eventId,
-            contentType: envelope.message.contentType,
-            hasText: envelope.message.text !== null,
-            attachmentCount: envelope.message.attachments.length,
-            linkPreviewStatus: envelope.message.linkPreview.status,
-            linkPreviewCount: envelope.message.linkPreview.items.length,
+            triggerType: envelope.message === null ? "chat-idle" : "message",
+            contentType: envelope.message?.contentType ?? null,
+            hasText: envelope.message?.text != null,
+            attachmentCount: envelope.message?.attachments.length ?? 0,
+            linkPreviewStatus: envelope.message?.linkPreview.status ?? null,
+            linkPreviewCount: envelope.message?.linkPreview.items.length ?? 0,
             variableCount: Object.keys(variables).length,
             historyMessageCount: history.length,
           },
@@ -264,6 +325,13 @@ export class WorkflowEngine implements MessageAutomation {
             correlationId: execution.correlationId,
             timeZone,
             envelope,
+            get idleDecisionAccepted() {
+              return idleDecisionAccepted;
+            },
+            set idleDecisionAccepted(value) {
+              idleDecisionAccepted = value ?? false;
+            },
+            ...(idleGuard ? { beforeIdleSend: () => idleGuard(true) } : {}),
             variables,
             history,
             get historyCoverage() {

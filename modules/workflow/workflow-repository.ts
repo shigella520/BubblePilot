@@ -1,3 +1,4 @@
+import type { ChatIdleEvent, WorkflowEvent } from "./workflow-event.js";
 import type { BotIdentity } from "../identity/bot-identity.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
 import type { ConversationContextTrigger } from "./conversation-context-service.js";
@@ -58,6 +59,7 @@ export interface TriggerBinding extends TriggerRecord {
 }
 
 export interface WorkflowExecutionRecord {
+  triggerEvent?: ChatIdleEvent | null;
   botIdentity?: BotIdentity | null;
   id: string;
   provider: string;
@@ -233,7 +235,7 @@ export interface WorkflowRepository {
   listTriggers(): Promise<readonly TriggerRecord[]>;
   listActiveTriggerBindings(): Promise<readonly TriggerBinding[]>;
   createExecution(input: {
-    envelope: MessageEnvelope;
+    envelope: WorkflowEvent;
     trigger: TriggerBinding;
     contextTrigger?: ConversationContextTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }>;

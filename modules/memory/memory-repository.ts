@@ -217,6 +217,23 @@ export class MemoryRepository {
     ).rows[0];
     return row ? { chatId, upperIndex, executionId, generation: row } : null;
   }
+  async scopeForIdle(
+    executionId: string,
+    timeZone = "UTC",
+  ): Promise<MemoryScope | null> {
+    const row = (
+      await this.pool.query<{ chat_id: string; upper_index: string }>(
+        `SELECT target_chat_id AS chat_id,trigger_event->'idle'->>'upperMessageIndex' AS upper_index
+       FROM workflow_executions WHERE id=$1 AND trigger_event->>'schemaVersion'='chat-idle-v1'`,
+        [executionId],
+      )
+    ).rows[0];
+    const scope = row
+      ? await this.scope(row.chat_id, Number(row.upper_index), executionId)
+      : null;
+    return scope ? { ...scope, timeZone } : null;
+  }
+
   async scopeForEvent(
     provider: string,
     messageId: string,

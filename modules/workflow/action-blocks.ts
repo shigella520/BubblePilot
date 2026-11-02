@@ -136,6 +136,7 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         type: "select",
         required: true,
         options: [
+          { value: "event.type", label: "触发类型（message / chat-idle）" },
           { value: "message.text", label: "消息正文" },
           { value: "message.senderId", label: "发送者 ID" },
           { value: "message.contentType", label: "消息类型" },

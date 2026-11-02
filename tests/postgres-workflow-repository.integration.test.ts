@@ -431,7 +431,11 @@ describe.runIf(testDatabaseUrl !== undefined)(
           return Promise.resolve({
             status: "succeeded",
             nextNodeId: "done",
-            outputSummary: { replay: context.envelope.metadata.isReplay },
+            outputSummary: {
+              replay:
+                context.envelope.message !== null &&
+                context.envelope.metadata.isReplay,
+            },
           });
         },
       };

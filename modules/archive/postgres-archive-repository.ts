@@ -355,6 +355,18 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       );
 
       const persistedMessageId = message.rows[0]?.id ?? null;
+      if (
+        persistedMessageId !== null &&
+        !envelope.metadata.isReplay &&
+        envelope.metadata.eventType === "new-message"
+      ) {
+        await client.query("SELECT idle_record_activity($1,$2,$3,$4)", [
+          persistedChatId,
+          messageIndex,
+          envelope.message.sentAt,
+          !envelope.message.isFromMe,
+        ]);
+      }
       const initialAutomationOutcome: AutomationOutcome =
         persistedMessageId === null ? "not-evaluated" : "evaluation-pending";
       await client.query(

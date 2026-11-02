@@ -48,6 +48,26 @@ function scrollToImage(id: string) {
     .getElementById(`image-input-${id}`)
     ?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
+function idleReasonText(value: unknown): string {
+  const reason =
+    typeof value === "string"
+      ? value
+      : value && typeof value === "object" && "reason" in value
+        ? String(value.reason)
+        : "";
+  const labels: Record<string, string> = {
+    "idle-model-skip": "角色决定本次保持安静",
+    "idle-new-activity": "聊天出现新活动，已取消主动发送",
+    "idle-quiet-hours": "已进入免打扰，取消主动发送",
+    "idle-configuration-changed": "工作流配置或启用状态已变化",
+    "idle-chat-unavailable": "聊天权限失效或来源已清理",
+    "idle-daily-limit": "今日主动交流额度不足",
+    "idle-not-due": "尚未达到空闲时长",
+    "idle-stale-attempt": "本次空闲任务已失效",
+    "idle-execution-ended": "本次主动任务已结束",
+  };
+  return labels[reason] ?? "";
+}
 function imageToolLabel(details: Record<string, unknown> | null) {
   if (!details?.status) return "未记录详细结果";
   if (details.status === "loaded") return "图片已加载（不代表模型已识别）";
@@ -72,6 +92,14 @@ function imageToolLabel(details: Record<string, unknown> | null) {
   return `图片未加载：${reasons[reason] ?? reason}`;
 }
 interface Execution {
+  triggerEvent?: {
+    schemaVersion: string;
+    idle: {
+      triggeredAt: string;
+      activityGeneration: string;
+      upperMessageIndex: string;
+    };
+  } | null;
   id: string;
   providerChatId: string | null;
   chatDisplayName: string | null;
@@ -1293,7 +1321,9 @@ function contextSnapshotValue(
               </tr>
               <tr v-for="item in executions" :key="item.id">
                 <td>
-                  <strong>{{ item.workflowName }}</strong
+                  <span v-if="item.triggerEvent" class="keyline"
+                    >空闲主动交流</span
+                  ><strong>{{ item.workflowName }}</strong
                   ><span class="keyline"
                     >v{{ item.workflowVersion }} · {{ item.id }}</span
                   ><span v-if="item.recoveryAttempt" class="keyline"
@@ -1596,6 +1626,17 @@ function contextSnapshotValue(
               </span>
             </p>
           </section>
+          <section v-if="detail.triggerEvent" class="context-snapshot-note">
+            <strong>空闲主动交流</strong>
+            <p v-if="idleReasonText(detail.errorCode)">
+              {{ idleReasonText(detail.errorCode) }}
+            </p>
+            <p>
+              本轮没有新的用户消息；活动代次
+              {{ detail.triggerEvent.idle.activityGeneration }}，历史独占上界
+              {{ detail.triggerEvent.idle.upperMessageIndex }}。
+            </p>
+          </section>
           <div class="trace-columns">
             <section>
               <h3>节点轨迹</h3>
@@ -1607,6 +1648,9 @@ function contextSnapshotValue(
                 <span class="trace-dot" :class="node.status"></span>
                 <div>
                   <strong>{{ node.nodeId }} · {{ node.nodeType }}</strong>
+                  <p v-if="idleReasonText(node.outputSummary)">
+                    {{ idleReasonText(node.outputSummary) }}
+                  </p>
                   <p>
                     attempt {{ node.attempt }} · {{ node.durationMs ?? "—" }} ms
                     ·

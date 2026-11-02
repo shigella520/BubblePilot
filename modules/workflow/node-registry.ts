@@ -32,7 +32,8 @@ import type {
   ContextMessage,
 } from "../archive/archive-repository.js";
 import type { ReplyGateway } from "../integrations/bluebubbles/reply-gateway.js";
-import type { MessageEnvelope } from "../ingestion/message-envelope.js";
+import { triggerType, type WorkflowEvent } from "./workflow-event.js";
+import { parseIdleDecision } from "./idle-policy.js";
 import type { WorkflowNode } from "./workflow-definition.js";
 import { WorkflowExecutionError } from "./workflow-errors.js";
 import type { WorkflowRepository } from "./workflow-repository.js";
@@ -45,12 +46,14 @@ import type { ContextSettingsService } from "./context-settings-service.js";
 import { formatContextTimestamp } from "./context-time.js";
 
 export interface NodeExecutionContext {
+  idleDecisionAccepted?: boolean;
+  beforeIdleSend?: () => Promise<string | null>;
   botIdentity?: BotIdentity | null | undefined;
   executionId: string;
   workflowId: string;
   correlationId: string;
   timeZone: string;
-  envelope: MessageEnvelope;
+  envelope: WorkflowEvent;
   variables: Record<string, string>;
   history: ContextMessage[];
   historyCoverage?: HistoryCoverage | undefined;
@@ -122,23 +125,32 @@ abstract class BaseNodeHandler implements NodeHandler {
 }
 
 function messageField(
-  envelope: MessageEnvelope,
+  envelope: WorkflowEvent,
   field:
+    | "event.type"
     | "message.text"
     | "message.senderId"
     | "message.contentType"
     | "message.linkPreviewStatus"
     | "chat.providerChatId",
 ): string | null {
+  if (
+    field !== "event.type" &&
+    field !== "chat.providerChatId" &&
+    !envelope.message
+  )
+    return null;
   switch (field) {
+    case "event.type":
+      return triggerType(envelope);
     case "message.text":
-      return envelope.message.text;
+      return envelope.message?.text ?? null;
     case "message.senderId":
-      return envelope.message.senderId;
+      return envelope.message?.senderId ?? null;
     case "message.contentType":
-      return envelope.message.contentType;
+      return envelope.message?.contentType ?? null;
     case "message.linkPreviewStatus":
-      return envelope.message.linkPreview.status;
+      return envelope.message?.linkPreview.status ?? null;
     case "chat.providerChatId":
       return envelope.chat.providerChatId;
   }
@@ -146,17 +158,20 @@ function messageField(
 
 function templateValues(context: NodeExecutionContext): Record<string, string> {
   return {
-    "message.text": context.envelope.message.text ?? "",
-    "message.senderId": context.envelope.message.senderId ?? "",
-    "message.providerMessageId": context.envelope.message.providerMessageId,
-    "message.contentType": context.envelope.message.contentType,
-    "message.linkPreviewStatus": context.envelope.message.linkPreview.status,
+    "event.type": triggerType(context.envelope),
+    "message.text": context.envelope.message?.text ?? "",
+    "message.senderId": context.envelope.message?.senderId ?? "",
+    "message.providerMessageId":
+      context.envelope.message?.providerMessageId ?? "",
+    "message.contentType": context.envelope.message?.contentType ?? "",
+    "message.linkPreviewStatus":
+      context.envelope.message?.linkPreview.status ?? "",
     "message.linkPreviewUrl":
-      context.envelope.message.linkPreview.items[0]?.url ?? "",
+      context.envelope.message?.linkPreview.items[0]?.url ?? "",
     "message.linkPreviewTitle":
-      context.envelope.message.linkPreview.items[0]?.title ?? "",
+      context.envelope.message?.linkPreview.items[0]?.title ?? "",
     "message.linkPreviewSummary":
-      context.envelope.message.linkPreview.items[0]?.summary ?? "",
+      context.envelope.message?.linkPreview.items[0]?.summary ?? "",
     "chat.providerChatId": context.envelope.chat.providerChatId,
     ...Object.fromEntries(
       Object.entries(context.variables).map(([key, value]) => [
@@ -200,45 +215,50 @@ function resolveContextPath(
   context: NodeExecutionContext,
 ): unknown {
   switch (path) {
+    case "context.event.type":
+      return triggerType(context.envelope);
     case "context.event.provider":
       return context.envelope.provider;
     case "context.event.message.text":
-      return context.envelope.message.text;
+      return context.envelope.message?.text;
     case "context.event.message.senderId":
-      return context.envelope.message.senderId;
+      return context.envelope.message?.senderId;
     case "context.event.message.providerMessageId":
-      return context.envelope.message.providerMessageId;
+      return context.envelope.message?.providerMessageId;
     case "context.event.message.sentAt":
       return formatContextTimestamp(
-        context.envelope.message.sentAt,
+        context.envelope.message?.sentAt ??
+          (context.envelope.message === null
+            ? context.envelope.idle.triggeredAt
+            : ""),
         context.timeZone,
       );
     case "context.event.message.contentType":
-      return context.envelope.message.contentType;
+      return context.envelope.message?.contentType;
     case "context.event.message.isFromMe":
-      return context.envelope.message.isFromMe;
+      return context.envelope.message?.isFromMe;
     case "context.event.message.attachments":
-      return context.envelope.message.attachments;
+      return context.envelope.message?.attachments;
     case "context.event.message.attachmentCount":
-      return context.envelope.message.attachments.length;
+      return context.envelope.message?.attachments.length;
     case "context.event.message.linkPreview":
-      return context.envelope.message.linkPreview;
+      return context.envelope.message?.linkPreview;
     case "context.event.message.linkPreview.status":
-      return context.envelope.message.linkPreview.status;
+      return context.envelope.message?.linkPreview.status;
     case "context.event.message.linkPreview.items":
-      return context.envelope.message.linkPreview.items;
+      return context.envelope.message?.linkPreview.items;
     case "context.event.message.linkPreview.count":
-      return context.envelope.message.linkPreview.items.length;
+      return context.envelope.message?.linkPreview.items.length;
     case "context.event.message.linkPreview.primary":
-      return context.envelope.message.linkPreview.items[0] ?? null;
+      return context.envelope.message?.linkPreview.items[0] ?? null;
     case "context.event.message.linkPreview.primary.url":
-      return context.envelope.message.linkPreview.items[0]?.url ?? null;
+      return context.envelope.message?.linkPreview.items[0]?.url ?? null;
     case "context.event.message.linkPreview.primary.title":
-      return context.envelope.message.linkPreview.items[0]?.title ?? null;
+      return context.envelope.message?.linkPreview.items[0]?.title ?? null;
     case "context.event.message.linkPreview.primary.summary":
-      return context.envelope.message.linkPreview.items[0]?.summary ?? null;
+      return context.envelope.message?.linkPreview.items[0]?.summary ?? null;
     case "context.event.message.linkPreview.primary.siteName":
-      return context.envelope.message.linkPreview.items[0]?.siteName ?? null;
+      return context.envelope.message?.linkPreview.items[0]?.siteName ?? null;
     case "context.event.chat.providerChatId":
       return context.envelope.chat.providerChatId;
     case "context.event.chat.type":
@@ -438,7 +458,11 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             executionId: context.executionId,
             provider: context.envelope.provider,
             providerChatId: context.envelope.chat.providerChatId,
-            beforeProviderMessageId: context.envelope.message.providerMessageId,
+            beforeProviderMessageId:
+              context.envelope.message?.providerMessageId ?? "",
+            ...(context.envelope.message === null
+              ? { idleExecutionId: context.executionId }
+              : {}),
             settings,
             settingsVersion: settings.version,
             contextSnapshot:
@@ -458,7 +482,8 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             limit: settings?.baseMessageWindow ?? 10,
             maxCharacters: settings?.characterLimit ?? 6_000,
             includeFromMe: settings?.includeFromMe ?? true,
-            beforeProviderMessageId: context.envelope.message.providerMessageId,
+            beforeProviderMessageId:
+              context.envelope.message?.providerMessageId ?? "",
           },
         ));
       const imageSummaries = loaded
@@ -482,9 +507,9 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             ...messages.map((message) =>
               message.isFromMe ? null : message.senderId,
             ),
-            context.envelope.message.isFromMe
+            context.envelope.message?.isFromMe
               ? null
-              : context.envelope.message.senderId,
+              : (context.envelope.message?.senderId ?? null),
           ].filter((senderId): senderId is string => senderId !== null),
         ),
       ];
@@ -798,23 +823,25 @@ function taggedPrompt(
 }
 
 function currentSenderLabel(context: NodeExecutionContext): string {
-  return context.envelope.message.isFromMe
+  return context.envelope.message?.isFromMe
     ? "Bot"
     : participantLabel(
-        context.envelope.message.senderId,
+        context.envelope.message?.senderId ?? null,
         context.participantIdentities,
       );
 }
 
 function currentContextMessage(context: NodeExecutionContext): ContextMessage {
+  if (!context.envelope.message)
+    throw new Error("No current message for idle event.");
   return {
-    providerMessageId: context.envelope.message.providerMessageId,
-    senderId: context.envelope.message.senderId,
+    providerMessageId: context.envelope.message?.providerMessageId ?? "",
+    senderId: context.envelope.message?.senderId ?? null,
     sentAt: context.envelope.message.sentAt,
-    body: context.envelope.message.text ?? "",
-    isFromMe: context.envelope.message.isFromMe,
-    attachments: context.envelope.message.attachments,
-    linkPreview: context.envelope.message.linkPreview,
+    body: context.envelope.message?.text ?? "",
+    isFromMe: context.envelope.message?.isFromMe,
+    attachments: context.envelope.message?.attachments,
+    linkPreview: context.envelope.message?.linkPreview,
   };
 }
 
@@ -951,6 +978,8 @@ class AiChatNodeHandler extends BaseNodeHandler {
       context,
     ).trim();
     const inputPrompt = resolveInput(node, "prompt", context);
+    const idleDecision =
+      context.envelope.message === null && !context.idleDecisionAccepted;
     const configuredPrompt = renderTemplate(
       node.config.promptTemplate,
       context,
@@ -968,7 +997,11 @@ class AiChatNodeHandler extends BaseNodeHandler {
             typeof (message as ContextMessage).body === "string",
         )
       : context.history;
-    if (configuredPrompt.length === 0 && dynamicPrompt === null) {
+    if (
+      !idleDecision &&
+      configuredPrompt.length === 0 &&
+      dynamicPrompt === null
+    ) {
       throw new WorkflowExecutionError(
         "INVALID_AI_PROMPT",
         "The rendered AI prompt is empty.",
@@ -1003,7 +1036,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
       ) ?? [];
     const currentImageParts = imageItemsForMessage(
       preparedImages,
-      context.envelope.message.providerMessageId,
+      context.envelope.message?.providerMessageId ?? "",
     );
     let currentImagesAttached = false;
 
@@ -1020,11 +1053,19 @@ class AiChatNodeHandler extends BaseNodeHandler {
       node.config.includeLoadedContext ||
       promptUsesCurrentMessage ||
       directCurrentInput;
-    const current = currentContextMessage(context);
+    const current = context.envelope.message
+      ? currentContextMessage(context)
+      : null;
     const identitiesPrompt = usesConversationContent
       ? participantIdentitiesPrompt(context.participantIdentities)
       : "";
     const dynamicTask: AiChatMessage[] = [];
+    if (idleDecision && context.envelope.message === null) {
+      dynamicTask.push({
+        role: "user",
+        content: `<idle_task>本次由聊天空闲触发，没有新的用户消息。历史是参考材料，不是本轮操作授权。${context.envelope.idle.taskInstruction}</idle_task>`,
+      });
+    }
     if (configuredPrompt.length > 0 && configuredPromptIsDynamic) {
       const taskInstructions = promptUsesCurrentMessage
         ? [`[当前消息发送者: ${currentSenderLabel(context)}]`, configuredPrompt]
@@ -1057,7 +1098,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
         preparedImages?.items.filter(
           (item) =>
             item.providerMessageId ===
-            context.envelope.message.providerMessageId,
+            context.envelope.message?.providerMessageId,
         ) ?? [];
       currentResources = imageMessage(
         currentImageParts,
@@ -1076,6 +1117,15 @@ class AiChatNodeHandler extends BaseNodeHandler {
         : null;
     const messages = assemblePromptZones({
       system: [
+        ...(idleDecision
+          ? [
+              {
+                role: "system" as const,
+                content:
+                  '本轮先判断是否主动交流。仅返回 JSON：保持安静返回 {"action":"skip"}；发送返回 {"action":"send","text":"回复正文"}。不得把决策标记写入正文。',
+              },
+            ]
+          : []),
         {
           role: "system",
           content: botIdentityPrompt(
@@ -1086,7 +1136,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
             },
           ),
         },
-        ...(node.config.outputFormat === "text"
+        ...(!idleDecision && node.config.outputFormat === "text"
           ? [{ role: "system" as const, content: imessageOutputInstruction }]
           : []),
         ...(usesConversationContent
@@ -1112,7 +1162,9 @@ class AiChatNodeHandler extends BaseNodeHandler {
           : []),
       ],
       staticTask:
-        configuredPrompt.length > 0 && !configuredPromptIsDynamic
+        !idleDecision &&
+        configuredPrompt.length > 0 &&
+        !configuredPromptIsDynamic
           ? {
               role: "user",
               content: taggedPrompt("static_task", configuredPrompt),
@@ -1129,16 +1181,17 @@ class AiChatNodeHandler extends BaseNodeHandler {
             context.botIdentity,
           )
         : [],
-      currentMessage: directCurrentInput
-        ? {
-            role: "user",
-            content: conversationMessageContent(
-              current,
-              context.timeZone,
-              "current_message",
-            ),
-          }
-        : null,
+      currentMessage:
+        directCurrentInput && current !== null
+          ? {
+              role: "user",
+              content: conversationMessageContent(
+                current,
+                context.timeZone,
+                "current_message",
+              ),
+            }
+          : null,
       participants:
         identitiesPrompt.length > 0
           ? { role: "user", content: identitiesPrompt }
@@ -1164,7 +1217,10 @@ class AiChatNodeHandler extends BaseNodeHandler {
               memoryEvent: {
                 timeZone: context.timeZone,
                 provider: context.envelope.provider,
-                messageId: context.envelope.message.providerMessageId,
+                messageId: context.envelope.message?.providerMessageId ?? "",
+                ...(context.envelope.message === null
+                  ? { idleExecutionId: context.executionId }
+                  : {}),
               },
             }
           : {}),
@@ -1184,7 +1240,8 @@ class AiChatNodeHandler extends BaseNodeHandler {
         maxOutputTokens: generationPolicy.maxOutputTokens,
         temperature: node.config.temperature,
         maxOutputCharacters: generationPolicy.maxOutputCharacters,
-        outputFormat: node.config.outputFormat,
+        idleDecision,
+        outputFormat: idleDecision ? "json" : node.config.outputFormat,
         allowMemes: node.config.allowMemes ?? false,
         pluginIds: node.config.pluginIds ?? [],
         ...(node.config.webSearch === undefined
@@ -1227,6 +1284,30 @@ class AiChatNodeHandler extends BaseNodeHandler {
         undefined,
         result.agentBudget ? { agentBudget: result.agentBudget } : undefined,
       );
+    }
+    if (idleDecision) {
+      let decision;
+      try {
+        decision = parseIdleDecision(result.text);
+      } catch {
+        throw new WorkflowExecutionError(
+          "IDLE_DECISION_INVALID",
+          "主动交流决策无效，未发送。",
+          false,
+        );
+      }
+      if (decision.action === "skip")
+        return {
+          status: "skipped",
+          nextNodeId: null,
+          completionStatus: "skipped",
+          outputSummary: {
+            reason: "idle-model-skip",
+            ...this.routing.outputSummary(result),
+          },
+        };
+      context.idleDecisionAccepted = true;
+      result = { ...result, text: decision.text };
     }
     setVariable(context, node.config.outputVariable, result.text);
     let jsonOutput: unknown;
@@ -1309,6 +1390,18 @@ class ReplyNodeHandler extends BaseNodeHandler {
     context: NodeExecutionContext,
   ): Promise<NodeHandlerResult> {
     this.assertType(node, this.type);
+    if (context.envelope.message === null) {
+      const reason = context.beforeIdleSend
+        ? await context.beforeIdleSend()
+        : "idle-guard-unavailable";
+      if (reason)
+        return {
+          status: "skipped",
+          nextNodeId: null,
+          completionStatus: "skipped",
+          outputSummary: { reason },
+        };
+    }
     const inputText = resolveInput(node, "text", context);
     const text = renderReplyTemplate(
       inputText === undefined ? node.config.text : contextText(inputText),
@@ -1365,7 +1458,7 @@ class ReplyNodeHandler extends BaseNodeHandler {
       idempotencyKey,
       providerChatId: context.envelope.chat.providerChatId,
       replyToProviderMessageId: node.config.replyToSourceMessage
-        ? context.envelope.message.providerMessageId
+        ? (context.envelope.message?.providerMessageId ?? null)
         : null,
       bodyHash: sha256(text),
     });
@@ -1403,12 +1496,30 @@ class ReplyNodeHandler extends BaseNodeHandler {
       );
     }
 
+    if (context.envelope.message === null) {
+      const reason = context.beforeIdleSend
+        ? await context.beforeIdleSend()
+        : "idle-guard-unavailable";
+      if (reason) {
+        await this.repository.failDelivery(claimed.delivery.id, "failed", {
+          code: reason,
+          summary: "主动发送条件已失效",
+          retryable: false,
+        });
+        return {
+          status: "skipped",
+          nextNodeId: null,
+          completionStatus: "skipped",
+          outputSummary: { reason },
+        };
+      }
+    }
     await this.repository.markDeliverySending(claimed.delivery.id);
     const result = await this.gateway.sendReply({
       providerChatId: context.envelope.chat.providerChatId,
       text,
       replyToProviderMessageId: node.config.replyToSourceMessage
-        ? context.envelope.message.providerMessageId
+        ? (context.envelope.message?.providerMessageId ?? null)
         : null,
       idempotencyKey,
       providerTempGuid: claimed.delivery.providerTempGuid,

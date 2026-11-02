@@ -541,6 +541,7 @@ function toDefinition() {
         ...common,
         type: "message-trigger",
         config: {
+          ...(nodeConfig.idle ? { idle: nodeConfig.idle } : {}),
           provider: nodeConfig.provider ?? "",
           chatIds: Array.isArray(nodeConfig.chatIds) ? nodeConfig.chatIds : [],
           senderIds: Array.isArray(nodeConfig.senderIds)

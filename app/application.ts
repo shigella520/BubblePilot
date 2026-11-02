@@ -1,3 +1,4 @@
+import type { IdleScheduler } from "../modules/workflow/idle-scheduler.js";
 import multipart from "@fastify/multipart";
 import { registerPluginRoutes } from "../modules/plugins/plugin-routes.js";
 import type { PluginService } from "../modules/plugins/plugin-service.js";
@@ -361,6 +362,7 @@ export interface ApplicationOptions {
   workflow?: {
     repository: WorkflowRepository;
     engine: MessageAutomation;
+    idleScheduler?: IdleScheduler;
     dispatcher?: WorkflowExecutionDispatcher;
     contextState?: {
       close(): Promise<void>;
@@ -958,6 +960,68 @@ export function buildApplication(
       await requireAdmin(request);
       sensitiveAudits.set(request, { action, targetType });
     };
+
+  application.get(
+    "/api/v1/settings/idle",
+    { preHandler: requireAdmin },
+    async () => {
+      if (!options.workflow?.idleScheduler)
+        throw new ApplicationError(
+          "IDLE_UNAVAILABLE",
+          "Idle scheduling unavailable.",
+          503,
+        );
+      return { data: await options.workflow.idleScheduler.settings() };
+    },
+  );
+  application.patch(
+    "/api/v1/settings/idle",
+    { preHandler: requireSensitive("idle.settings.update", "settings") },
+    async (request) => {
+      const body = z
+        .object({
+          dailyLimit: z.number().int().min(1).max(10),
+          expectedVersion: z.number().int().positive(),
+        })
+        .strict()
+        .parse(request.body);
+      if (!options.workflow?.idleScheduler)
+        throw new ApplicationError(
+          "IDLE_UNAVAILABLE",
+          "Idle scheduling unavailable.",
+          503,
+        );
+      const result = await options.workflow.idleScheduler.updateSettings(
+        body.dailyLimit,
+        body.expectedVersion,
+      );
+      if (!result)
+        throw new ApplicationError(
+          "VERSION_CONFLICT",
+          "Refresh idle settings.",
+          409,
+        );
+      return { data: result };
+    },
+  );
+  application.get(
+    "/api/v1/workflows/:workflowId/idle-preview",
+    { preHandler: requireAdmin },
+    async (request) => {
+      const params = z
+        .object({ workflowId: z.string().uuid() })
+        .parse(request.params);
+      if (!options.workflow?.idleScheduler)
+        throw new ApplicationError(
+          "IDLE_UNAVAILABLE",
+          "Idle scheduling unavailable.",
+          503,
+        );
+      return {
+        data: await options.workflow.idleScheduler.preview(params.workflowId),
+      };
+    },
+  );
 
   application.get(
     "/api/v1/settings/network",
@@ -3013,6 +3077,26 @@ export function buildApplication(
           parameters.workflowId,
           parameters.version,
         );
+        if (
+          candidate?.definition.nodes.some(
+            (node) =>
+              node.type === "message-trigger" && node.config.idle?.enabled,
+          )
+        ) {
+          await requireSensitive("workflow.idle.publish", "workflow")(request);
+          for (const node of candidate.definition.nodes) {
+            if (node.type !== "message-trigger" || !node.config.idle?.enabled)
+              continue;
+            for (const chatId of node.config.idle.chatIds) {
+              if (!(await repository.getChatMonitoringState(chatId)))
+                throw new ApplicationError(
+                  "IDLE_CHAT_UNAVAILABLE",
+                  "主动聊天目标不可用，请检查聊天归档授权。",
+                  409,
+                );
+            }
+          }
+        }
         for (const node of candidate?.definition.nodes ?? []) {
           if (node.type === "ai-chat" && node.config.pluginIds?.length) {
             if (!options.plugins)
@@ -3095,7 +3179,9 @@ export function buildApplication(
               workflowVersion: version.version,
               conditions,
               includeFromMe: triggerNode.config.includeFromMe,
-              enabled: triggerNode.config.enabled,
+              enabled:
+                triggerNode.config.enabled ||
+                !!triggerNode.config.idle?.enabled,
             });
           } else {
             await workflowRepository.updateTrigger(existing.id, {
@@ -3105,7 +3191,7 @@ export function buildApplication(
             });
             await workflowRepository.updateTriggerEnabled(
               existing.id,
-              triggerNode.config.enabled,
+              triggerNode.config.enabled || !!triggerNode.config.idle?.enabled,
             );
           }
         }
@@ -3121,6 +3207,23 @@ export function buildApplication(
       async (request) => {
         const parameters = workflowParametersSchema.parse(request.params);
         const body = triggerStatusBodySchema.parse(request.body);
+        if (body.enabled) {
+          const versions = await workflowRepository.listWorkflowVersions(
+            parameters.workflowId,
+          );
+          if (
+            versions.some(
+              (version) =>
+                version.status === "published" &&
+                version.definition.nodes.some(
+                  (node) =>
+                    node.type === "message-trigger" &&
+                    node.config.idle?.enabled,
+                ),
+            )
+          )
+            await requireSensitive("workflow.idle.enable", "workflow")(request);
+        }
         const workflow = await workflowRepository.setWorkflowEnabled(
           parameters.workflowId,
           body.enabled,
@@ -3206,6 +3309,22 @@ export function buildApplication(
       { preHandler: requireAdmin },
       async (request, reply) => {
         const body = triggerBodySchema.parse(request.body);
+        if (body.enabled) {
+          const version = await workflowRepository.getWorkflowVersion(
+            body.workflowId,
+            body.workflowVersion,
+          );
+          if (
+            version?.definition.nodes.some(
+              (node) =>
+                node.type === "message-trigger" && node.config.idle?.enabled,
+            )
+          )
+            await requireSensitive(
+              "workflow.idle.trigger.create",
+              "trigger",
+            )(request);
+        }
         const trigger = await workflowRepository.createTrigger({
           ...body,
           conditions: triggerConditions(body.conditions),
@@ -3227,6 +3346,27 @@ export function buildApplication(
       async (request) => {
         const parameters = triggerParametersSchema.parse(request.params);
         const body = triggerStatusBodySchema.parse(request.body);
+        if (body.enabled) {
+          const target = (await workflowRepository.listTriggers()).find(
+            (trigger) => trigger.id === parameters.triggerId,
+          );
+          const version = target
+            ? await workflowRepository.getWorkflowVersion(
+                target.workflowId,
+                target.workflowVersion,
+              )
+            : null;
+          if (
+            version?.definition.nodes.some(
+              (node) =>
+                node.type === "message-trigger" && node.config.idle?.enabled,
+            )
+          )
+            await requireSensitive(
+              "workflow.idle.trigger.enable",
+              "trigger",
+            )(request);
+        }
         const trigger = await workflowRepository.updateTriggerEnabled(
           parameters.triggerId,
           body.enabled,

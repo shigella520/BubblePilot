@@ -1,3 +1,5 @@
+import { idleTriggerSchema } from "./idle-policy.js";
+import { validateIdlePaths } from "./idle-workflow-validation.js";
 import { executionPolicy } from "../ai/execution-policy.js";
 import { z } from "zod";
 
@@ -20,6 +22,7 @@ const conditionNodeSchema = z.object({
   version: z.literal(1),
   config: z.object({
     field: z.enum([
+      "event.type",
       "message.text",
       "message.senderId",
       "message.contentType",
@@ -46,6 +49,7 @@ const messageTriggerNodeSchema = z.object({
   type: z.literal("message-trigger"),
   version: z.literal(1),
   config: z.object({
+    idle: idleTriggerSchema.optional(),
     provider: z.string().max(64).default(""),
     chatIds: z.array(z.string().max(200)).max(50).default([]),
     senderIds: z.array(z.string().max(200)).max(50).default([]),
@@ -240,6 +244,7 @@ function targets(node: WorkflowNode): readonly string[] {
 
 function validateSemantics(definition: WorkflowDefinition): void {
   const contextTemplatePaths = new Set([
+    "context.event.type",
     "context.event.provider",
     "context.event.message.text",
     "context.event.message.senderId",
@@ -266,6 +271,7 @@ function validateSemantics(definition: WorkflowDefinition): void {
     "context.history.participants",
   ]);
   const allowedTemplateKeys = new Set<string>([
+    "event.type",
     "message.text",
     "message.senderId",
     "message.providerMessageId",
@@ -474,5 +480,6 @@ function validateSemantics(definition: WorkflowDefinition): void {
 export function parseWorkflowDefinition(value: unknown): WorkflowDefinition {
   const definition = workflowDefinitionSchema.parse(value);
   validateSemantics(definition);
+  validateIdlePaths(definition);
   return definition;
 }

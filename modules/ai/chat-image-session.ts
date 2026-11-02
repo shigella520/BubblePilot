@@ -3,7 +3,7 @@ import type { AiImageInputRecordInput } from "./ai-types.js";
 import { randomUUID } from "node:crypto";
 import { sha256 } from "../../app/canonical-json.js";
 import type { ContextMessage } from "../archive/archive-repository.js";
-import type { MessageEnvelope } from "../ingestion/message-envelope.js";
+import type { WorkflowEvent } from "../workflow/workflow-event.js";
 import { AgentToolTimeout, type AgentToolContext } from "./agent-budget.js";
 import type {
   AgentToolRegistry,
@@ -76,7 +76,7 @@ export class ChatImageSession {
     private readonly input: {
       executionId: string;
       nodeId: string;
-      envelope: MessageEnvelope;
+      envelope: WorkflowEvent;
       history: readonly ContextMessage[];
       prepared: PreparedImageInput;
     },
@@ -88,12 +88,16 @@ export class ChatImageSession {
     this.scope = {
       provider: input.envelope.provider,
       providerChatId: input.envelope.chat.providerChatId,
-      triggerMessageId: input.envelope.message.providerMessageId,
+      triggerMessageId: input.envelope.message?.providerMessageId ?? null,
+      ...(input.envelope.message === null
+        ? { idleExecutionId: input.executionId }
+        : {}),
     };
     this.count = input.prepared.selectedCount;
     this.automatic = this.count;
     this.bytes = input.prepared.totalBytes;
     for (const message of [input.envelope.message, ...input.history]) {
+      if (!message) continue;
       for (const [
         attachmentIndex,
         attachment,

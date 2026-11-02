@@ -16,6 +16,8 @@
   },
   "include": [
     "../../modules/ai/execution-policy.ts",
+    "../../modules/workflow/idle-policy.ts",
+    "../../modules/workflow/idle-defaults.ts",
     "src/**/*.ts",
     "src/**/*.vue",
     "vite.config.ts"
