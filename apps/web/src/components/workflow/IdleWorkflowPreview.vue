@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from "vue";
+import { Search } from "@lucide/vue";
 import { apiRequest, errorMessage } from "../../services/api";
 interface Attempt {
   id: string;
@@ -314,8 +315,9 @@ onBeforeUnmount(() => {
                   </p>
                   <p>耗时：{{ duration(a) }}</p>
                   <a
+                    class="button tiny secondary"
                     :href="`/#/executions?executionId=${encodeURIComponent(a.id)}`"
-                    >查看执行 ↗</a
+                    ><Search :size="14" />详情</a
                   >
                 </details>
               </td>
@@ -358,8 +360,9 @@ onBeforeUnmount(() => {
               <td>{{ duration(a) }}</td>
               <td>
                 <a
+                  class="button tiny secondary"
                   :href="`/#/executions?executionId=${encodeURIComponent(a.id)}`"
-                  >查看执行 ↗</a
+                  ><Search :size="14" />详情</a
                 >
               </td>
             </tr>
@@ -401,7 +404,6 @@ onBeforeUnmount(() => {
 </template>
 <style scoped>
 .idle-dashboard {
-  margin: 32px 0;
   display: grid;
   gap: 20px;
   color: var(--text-primary, #252a31);
@@ -471,11 +473,6 @@ td small {
   color: #7b8189;
   font-size: 12px;
   margin-top: 7px;
-}
-td a {
-  color: #1877be;
-  white-space: nowrap;
-  text-decoration: none;
 }
 .idle-badge {
   display: inline-block;
@@ -547,9 +544,6 @@ footer button {
   }
   .idle-filters {
     flex-wrap: wrap;
-  }
-  .idle-dashboard {
-    margin: 20px 0;
   }
   .idle-table-panel td {
     min-width: 115px;

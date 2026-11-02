@@ -39,7 +39,7 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <section>
+  <section class="admin-panel">
     <p v-if="error" role="alert">
       {{ error }} <button class="button secondary" @click="load">重试</button>
     </p>
@@ -62,7 +62,7 @@ onBeforeUnmount(() => {
         ></template
       >
     </IdleWorkflowPreview>
-    <div v-else class="admin-panel">
+    <div v-else>
       <h2>空闲主动交流</h2>
       <p>{{ busy ? "正在加载工作流…" : "暂无可查看的工作流。" }}</p>
     </div>
