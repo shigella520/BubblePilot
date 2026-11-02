@@ -92,6 +92,9 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
           id: "ai",
           type: "ai-chat",
           version: 1,
+          inputs: {
+            prompt: { kind: "path", path: "context.event.message.text" },
+          },
           config: {
             providerRouteId: randomUUID(),
             systemPrompt: "Fictional friendly role",

@@ -589,7 +589,31 @@ function toDefinition() {
     nodes: runtimeNodes,
   };
 }
+const saveValidationError = ref("");
 function save() {
+  saveValidationError.value = "";
+  for (const node of nodes.value) {
+    const config = configFor(node);
+    if (
+      node.data.block.type === "message-trigger" &&
+      config.idle?.enabled &&
+      (!Number.isInteger(config.idle.idleMinutes) ||
+        config.idle.idleMinutes < 10 ||
+        config.idle.idleMinutes > 10080)
+    ) {
+      saveValidationError.value = "空闲时长必须为 10～10080 分钟的整数。";
+      return;
+    }
+    if (
+      node.data.block.type === "message-trigger" &&
+      config._chatSelectionMode &&
+      !config.chatIds?.length
+    ) {
+      saveValidationError.value =
+        "聊天范围：选择“仅选定聊天”时，请至少勾选一个聊天。";
+      return;
+    }
+  }
   const definition = toDefinition();
   if (props.definition) emit("version", props.workflowName ?? "", definition);
   else emit("create", props.workflowName ?? "", definition);
@@ -738,6 +762,9 @@ function onKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
+  <p v-if="saveValidationError" role="alert" class="workflow-save-validation">
+    {{ saveValidationError }}
+  </p>
   <div class="workflow-editor-v2" @keydown="onKeydown">
     <div class="workflow-toolbar">
       <button class="button secondary" type="button" @click="openCreator()">

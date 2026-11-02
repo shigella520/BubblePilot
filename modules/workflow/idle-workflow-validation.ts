@@ -43,7 +43,17 @@ export function validateIdlePaths(definition: WorkflowDefinition): void {
     };
     if (node.type !== "message-trigger") {
       check(node.config, "config");
-      check(node.inputs, "inputs");
+      for (const [name, input] of Object.entries(node.inputs ?? {})) {
+        // A direct current-text prompt is optional on idle runs; idle_task supplies the task.
+        if (
+          node.type === "ai-chat" &&
+          name === "prompt" &&
+          input.kind === "path" &&
+          input.path === "context.event.message.text"
+        )
+          continue;
+        check(input, `inputs.${name}`);
+      }
     }
     if (node.type === "condition") {
       if (node.config.field.startsWith("message."))

@@ -117,7 +117,7 @@ async function saveLimit() {
         <p v-if="!modelValue.chatIds.length">尚未选择聊天，不能启用。</p>
       </fieldset>
       <label
-        >空闲时长（分钟）<input
+        >空闲时长（10～10080 分钟）<input
           type="number"
           min="10"
           max="10080"

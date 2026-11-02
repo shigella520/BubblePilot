@@ -136,7 +136,38 @@ function adoptGenerationPolicy() {
   props.config.targetOutputCharacters = executionPolicy.chat.targetCharacters;
   props.config.maxOutputTokens = executionPolicy.chat.maxTokens;
 }
+function chatOptions(): Array<{ value: string; label: string }> {
+  const fields = props.node.data.block.config as Array<{
+    name: string;
+    options?: Array<{ value: string; label: string }>;
+  }>;
+  const options = fields.find((item) => item.name === "chatIds")?.options ?? [];
+  const ids = (props.config.chatIds ?? []) as string[];
+  return [
+    ...options,
+    ...ids
+      .filter((id) => !options.some((item) => item.value === id))
+      .map((id) => ({ value: id, label: `${id}（当前列表不可用）` })),
+  ];
+}
+function selectedChatMode(): boolean {
+  return Boolean(
+    props.config._chatSelectionMode ?? props.config.chatIds?.length > 0,
+  );
+}
+function toggleChat(id: string, checked: boolean) {
+  props.config._chatSelectionMode = true;
+  const ids = (props.config.chatIds ?? []) as string[];
+  props.config.chatIds = checked
+    ? [...new Set([...ids, id])]
+    : ids.filter((value) => value !== id);
+}
 function configVisible(item: any): boolean {
+  if (
+    props.node?.data.block.type === "message-trigger" &&
+    item.name === "chatIds"
+  )
+    return false;
   if (!item.visibleWhen) return true;
   return props.config[item.visibleWhen.field] === item.visibleWhen.equals;
 }
@@ -150,6 +181,50 @@ function configVisible(item: any): boolean {
       </div>
       <button type="button" @click="emit('close')">×</button>
     </div>
+    <section
+      v-if="node.data.block.type === 'message-trigger'"
+      class="chat-scope-settings"
+    >
+      <h4>聊天范围</h4>
+      <label
+        ><input
+          type="radio"
+          name="chat-scope"
+          :checked="!selectedChatMode()"
+          @change="
+            props.config._chatSelectionMode = false;
+            props.config.chatIds = [];
+          "
+        />不限聊天</label
+      >
+      <label
+        ><input
+          type="radio"
+          name="chat-scope"
+          :checked="selectedChatMode()"
+          @change="props.config._chatSelectionMode = true"
+        />仅选定聊天</label
+      >
+      <fieldset v-if="selectedChatMode()">
+        <legend>允许消息触发的聊天</legend>
+        <label v-for="chat in chatOptions()" :key="chat.value"
+          ><input
+            type="checkbox"
+            :checked="(props.config.chatIds ?? []).includes(chat.value)"
+            @change="
+              toggleChat(
+                chat.value,
+                ($event.target as HTMLInputElement).checked,
+              )
+            "
+          />{{ chat.label }}</label
+        >
+        <p v-if="!props.config.chatIds?.length" role="alert">
+          请至少选择一个聊天后保存。
+        </p>
+      </fieldset>
+      <p>仅控制消息触发；主动发言范围在下方独立选择。</p>
+    </section>
     <IdleTriggerSettings
       v-if="node.data.block.type === 'message-trigger'"
       :model-value="props.config.idle"
@@ -340,3 +415,32 @@ function configVisible(item: any): boolean {
     </button>
   </aside>
 </template>
+
+<style scoped>
+.chat-scope-settings {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.chat-scope-settings label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-scope-settings input {
+  width: auto;
+}
+.chat-scope-settings fieldset {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 12px;
+  padding: 12px;
+}
+.chat-scope-settings p {
+  font-size: 13px;
+  color: var(--text-secondary, #666);
+}
+</style>

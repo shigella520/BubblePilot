@@ -132,6 +132,19 @@ describe("idle workflow validation", () => {
   it("accepts the existing AI chain without duplicating a role", () => {
     expect(() => parseWorkflowDefinition(definition())).not.toThrow();
   });
+  it("accepts direct current-text AI input but rejects other current-message dependencies", () => {
+    const input = definition();
+    Object.assign(input.nodes[1]!, {
+      inputs: { prompt: { kind: "path", path: "context.event.message.text" } },
+    });
+    expect(() => parseWorkflowDefinition(input)).not.toThrow();
+    Object.assign(input.nodes[1]!, {
+      inputs: {
+        prompt: { kind: "path", path: "context.event.message.senderId" },
+      },
+    });
+    expect(() => parseWorkflowDefinition(input)).toThrow(/current message/);
+  });
   it("rejects current message templates and reply paths bypassing AI", () => {
     const input = definition();
     Object.assign(input.nodes[1]!.config, {

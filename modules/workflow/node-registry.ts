@@ -977,7 +977,12 @@ class AiChatNodeHandler extends BaseNodeHandler {
       node.config.systemPrompt,
       context,
     ).trim();
-    const inputPrompt = resolveInput(node, "prompt", context);
+    const inputPrompt =
+      context.envelope.message === null &&
+      node.inputs?.prompt?.kind === "path" &&
+      node.inputs.prompt.path === "context.event.message.text"
+        ? undefined
+        : resolveInput(node, "prompt", context);
     const idleDecision =
       context.envelope.message === null && !context.idleDecisionAccepted;
     const configuredPrompt = renderTemplate(
