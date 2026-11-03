@@ -29,6 +29,19 @@ for module in manifest['pythonModules']:
     importlib.import_module(module)
 subprocess.run(['pip', 'check'], check=True)
 assert os.environ['OPENBLAS_NUM_THREADS'] == '1'
+# Both interfaces must load the repaired upstream library, with no old distro copy.
+assert sqlite3.sqlite_version == '3.54.1'
+assert subprocess.check_output(['sqlite3', ':memory:', 'select sqlite_version();'], text=True).strip() == sqlite3.sqlite_version
+assert not installed.intersection({'sqlite3', 'libsqlite3-0'})
+assert shutil.which('gcc') is None
+# Exercise negative rowids and detail=none prefix doclist merging (CVE-2026-119373).
+fts_sql = """CREATE VIRTUAL TABLE docs USING fts5(body, detail=none);
+INSERT INTO docs(rowid,body) VALUES(-9223372036854775808,'prefixa'),(-1,'prefixb'),(1,'prefixc');
+SELECT rowid FROM docs WHERE docs MATCH 'prefix*' ORDER BY rowid;"""
+with sqlite3.connect(':memory:') as fts:
+    fts.executescript(fts_sql)
+    assert [r[0] for r in fts.execute("SELECT rowid FROM docs WHERE docs MATCH 'prefix*' ORDER BY rowid")] == [-9223372036854775808, -1, 1]
+assert subprocess.check_output(['sqlite3', ':memory:', fts_sql], text=True).splitlines() == ['-9223372036854775808', '-1', '1']
 from bs4 import BeautifulSoup
 import httpx
 import numpy as np
