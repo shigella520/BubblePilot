@@ -37,3 +37,11 @@
 ## 2026-10-31 修复更新
 
 发布扫描新增 pypdf CVE-2026-119203 至 CVE-2026-119209（恶意 PDF 导致无限循环或内存耗尽）。将 pypdf 从 6.21.2 升级到 6.21.4，wheel/sdist 哈希取自 PyPI 版本元数据。仅同步锁文件源哈希；既有 Debian 风险例外条目、批准时间、有效期与阻断规则不变，不豁免上述 Python 漏洞。更新镜像须重新通过冒烟测试及实际候选扫描。
+
+## 2026-11-03 SQLite 修复
+
+CVE-2026-119373 是启用 FTS5 时 `detail=none`、负 rowid 和前缀查询合并中的堆溢出。Debian tracker 当日尚未提供发行版修复包，上游已在 3.54.0 修复。固定官方 3.54.1 源码，独立构建阶段产出 `bubblepilot-sqlite` Debian 包，提供并替换 `libsqlite3-0` 和 `sqlite3`，维持 liblastlog2 的共享库依赖。最终镜像不保留旧库或编译器。不是仅改变包版本或删除扫描元数据。
+
+源码：https://www.sqlite.org/2026/sqlite-autoconf-3540100.tar.gz 。官方 SHA3-256：`b6ced585c750916b1052667239a12c25a7ff34e7f06e1e6e01ecb0427657d9c4`；下载后交叉核对并固定 SHA-256：`926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e`。
+
+依据：https://security-tracker.debian.org/tracker/CVE-2026-119373 。Python sqlite3 和命令行均断言 3.54.1，运行负 rowid 的 FTS5 前缀查询回归。自编译包不属于 Debian 官方漏洞映射，不能只凭 Trivy 不再列出原包认定修复；版本、来源哈希和功能回归共同作为证据。后续须跟踪 SQLite 上游安全更新。仅更新 Dockerfile 源哈希，不新增 CVE 例外或延长有效期。

@@ -63,6 +63,7 @@ export type WorkflowGraphEdge = WorkflowGraphDefinition["edges"][number];
 export type ValueRef = z.infer<typeof valueRefSchema>;
 
 const contextPaths = new Set([
+  "context.event.type",
   "context.event.message.text",
   "context.event.message.senderId",
   "context.event.message.linkPreview",

@@ -194,7 +194,10 @@ export class AgentRunner {
     let plugins: PluginSession | undefined;
     try {
       if (request.pluginIds?.length) {
-        if (!this.plugins || request.outputFormat !== "text")
+        if (
+          !this.plugins ||
+          (request.outputFormat !== "text" && !request.idleDecision)
+        )
           throw new Error("Plugins unavailable");
         plugins = await PluginSession.create(this.plugins, request.pluginIds);
       }
@@ -230,12 +233,17 @@ export class AgentRunner {
     const sourceDisplay = request.webSearchSources ?? "full";
     const scope =
       request.memoryEvent && request.executionId && this.memory
-        ? await this.memory.repository.scopeForEvent(
-            request.memoryEvent.provider,
-            request.memoryEvent.messageId,
-            request.executionId,
-            request.memoryEvent.timeZone,
-          )
+        ? request.memoryEvent.idleExecutionId
+          ? await this.memory.repository.scopeForIdle(
+              request.memoryEvent.idleExecutionId,
+              request.memoryEvent.timeZone,
+            )
+          : await this.memory.repository.scopeForEvent(
+              request.memoryEvent.provider,
+              request.memoryEvent.messageId,
+              request.executionId,
+              request.memoryEvent.timeZone,
+            )
         : null;
     const memory =
       scope && this.memory ? await this.memory.session(scope) : null;
@@ -268,7 +276,9 @@ export class AgentRunner {
       this.routing.supportsImageTools(request.routeId),
     );
     const memes =
-      request.allowMemes && request.outputFormat === "text" && this.memes
+      request.allowMemes &&
+      (request.outputFormat === "text" || request.idleDecision) &&
+      this.memes
         ? new MemeToolSession(this.memes)
         : null;
     memes?.register(registry);

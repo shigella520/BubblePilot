@@ -9,6 +9,7 @@ import type { MemeService } from "./meme-service.js";
 import type { SelectedMeme } from "./meme-types.js";
 interface Part {
   id: string;
+  execution_id: string;
   kind: "text" | "meme";
   status: "pending" | "sending" | "confirmed" | "failed" | "unknown";
   provider_chat_id: string;
@@ -22,6 +23,10 @@ interface Part {
   error_code: string | null;
 }
 export class MemeDeliveryService {
+  private idleSendGuard?: (executionId: string) => Promise<string | null>;
+  setIdleSendGuard(guard: (executionId: string) => Promise<string | null>) {
+    this.idleSendGuard = guard;
+  }
   private timer: ReturnType<typeof setTimeout> | undefined;
   private active: Promise<void> | undefined;
   private stopped = true;
@@ -107,6 +112,29 @@ export class MemeDeliveryService {
     correlationId: string,
     retry = false,
   ): Promise<DeliveryResult> {
+    const source = (
+      await this.pool.query<{ execution_id: string; idle: boolean }>(
+        "SELECT d.execution_id,e.trigger_event IS NOT NULL AS idle FROM outbound_deliveries d JOIN workflow_executions e ON e.id=d.execution_id WHERE d.id=$1",
+        [id],
+      )
+    ).rows[0];
+    if (source?.idle) {
+      const reason = this.idleSendGuard
+        ? await this.idleSendGuard(source.execution_id)
+        : "idle-guard-unavailable";
+      if (reason) {
+        await this.pool.query(
+          "UPDATE outbound_deliveries SET status='failed',retryable=false,error_code=$2,error_summary='主动发送条件已失效',updated_at=now() WHERE id=$1 AND status IN ('pending','failed')",
+          [id, reason],
+        );
+        return {
+          status: "failed",
+          code: reason,
+          summary: "主动发送条件已失效",
+          retryable: false,
+        };
+      }
+    }
     const claim = await this.pool.query<Part>(
       `UPDATE outbound_deliveries d SET status='sending',attempt_count=attempt_count+1,send_lease_until=now()+interval '5 minutes',updated_at=now() WHERE id=$1 AND closed_at IS NULL AND EXISTS(SELECT 1 FROM workflow_executions e WHERE e.id=d.execution_id AND e.status<>'closed') AND (status='pending' OR ($2 AND status='failed' AND retryable)) AND (kind='text' OR EXISTS(SELECT 1 FROM outbound_deliveries parent WHERE parent.id=d.parent_delivery_id AND parent.status='confirmed')) RETURNING *`,
       [id, retry],
@@ -127,6 +155,20 @@ export class MemeDeliveryService {
         summary: "Delivery is not eligible for sending.",
       };
     }
+    const idleFailure = async (): Promise<DeliveryResult | null> => {
+      if (!source?.idle) return null;
+      const reason = this.idleSendGuard
+        ? await this.idleSendGuard(source.execution_id)
+        : "idle-guard-unavailable";
+      return reason
+        ? {
+            status: "failed",
+            code: reason,
+            summary: "主动发送条件已失效",
+            retryable: false,
+          }
+        : null;
+    };
     const started = Date.now();
     let result: DeliveryResult;
     try {
@@ -138,14 +180,16 @@ export class MemeDeliveryService {
           )
         ).rows[0];
         if (!plan) throw new Error("MISSING_PLAN");
-        result = await this.gateway.sendReply({
-          providerChatId: part.provider_chat_id,
-          text: this.cipher.decrypt(plan.encrypted_text),
-          replyToProviderMessageId: null,
-          idempotencyKey: part.idempotency_key,
-          providerTempGuid: part.provider_temp_guid,
-          correlationId,
-        });
+        result =
+          (await idleFailure()) ??
+          (await this.gateway.sendReply({
+            providerChatId: part.provider_chat_id,
+            text: this.cipher.decrypt(plan.encrypted_text),
+            replyToProviderMessageId: null,
+            idempotencyKey: part.idempotency_key,
+            providerTempGuid: part.provider_temp_guid,
+            correlationId,
+          }));
       } else {
         const asset = part.meme_id
           ? await this.library.repository.get(part.meme_id)
@@ -171,22 +215,24 @@ export class MemeDeliveryService {
           } catch {
             /* Clearly no request has been sent. */
           }
-          result = bytes
-            ? await this.gateway.sendAttachment({
-                providerChatId: part.provider_chat_id,
-                providerTempGuid: part.provider_temp_guid,
-                idempotencyKey: part.idempotency_key,
-                correlationId,
-                filename: `meme.${asset.mimeType.split("/")[1]}`,
-                mimeType: asset.mimeType,
-                bytes,
-              })
-            : {
-                status: "failed",
-                code: "MEME_FILE_MISSING",
-                summary: "The meme file is unavailable.",
-                retryable: true,
-              };
+          result =
+            (await idleFailure()) ??
+            (bytes
+              ? await this.gateway.sendAttachment({
+                  providerChatId: part.provider_chat_id,
+                  providerTempGuid: part.provider_temp_guid,
+                  idempotencyKey: part.idempotency_key,
+                  correlationId,
+                  filename: `meme.${asset.mimeType.split("/")[1]}`,
+                  mimeType: asset.mimeType,
+                  bytes,
+                })
+              : {
+                  status: "failed",
+                  code: "MEME_FILE_MISSING",
+                  summary: "The meme file is unavailable.",
+                  retryable: true,
+                });
         }
       }
     } catch {

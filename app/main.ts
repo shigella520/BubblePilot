@@ -1,3 +1,6 @@
+import { DEFAULT_CONTEXT_SETTINGS } from "../modules/workflow/context-settings-types.js";
+import { IdleScheduler } from "../modules/workflow/idle-scheduler.js";
+import { runtimeTimeZone } from "../modules/workflow/context-time.js";
 import { PluginService } from "../modules/plugins/plugin-service.js";
 import { NetworkSettings } from "../modules/shared/network-settings.js";
 import { OpenGraphClient } from "../modules/integrations/bluebubbles/open-graph-client.js";
@@ -222,12 +225,7 @@ const contextSettings = new ContextSettingsService(
     config.databaseUrl,
     config.databaseQueryTimeoutMs,
   ),
-  {
-    includeFromMe: true,
-    baseMessageWindow: 10,
-    characterLimit: 6000,
-    redundancyMessageWindow: 10,
-  },
+  DEFAULT_CONTEXT_SETTINGS,
 );
 const messageRetention =
   config.messageRetentionDays > 0
@@ -287,6 +285,19 @@ const workflowEngine = new WorkflowEngine(
 const workflowDispatcher = new InProcessWorkflowExecutionDispatcher(
   workflowEngine,
 );
+const idleScheduler = new IdleScheduler(
+  memoryService.repository.pool,
+  workflowRepository,
+  workflowEngine,
+  runtimeTimeZone(),
+  undefined,
+  () =>
+    application.log.error(
+      { code: "IDLE_SCHEDULER_FAILED" },
+      "Idle scheduling failed",
+    ),
+);
+memeDelivery.setIdleSendGuard((id) => idleScheduler.guardExecution(id));
 const application = buildApplication(config, repository, {
   networkSettings,
   auth: authService,
@@ -308,6 +319,7 @@ const application = buildApplication(config, repository, {
   workflow: {
     repository: workflowRepository,
     engine: workflowEngine,
+    idleScheduler,
     dispatcher: workflowDispatcher,
     contextState: conversationContext,
     conversationContext,
@@ -328,6 +340,7 @@ const application = buildApplication(config, repository, {
 
 const shutdown = async (signal: string) => {
   application.log.info({ signal }, "Shutting down BubblePilot");
+  await idleScheduler.close();
   await application.close();
   process.exitCode = 0;
 };
@@ -338,6 +351,7 @@ process.once("SIGTERM", () => void shutdown("SIGTERM"));
 try {
   botIdentity.start();
   await application.listen({ host: config.host, port: config.port });
+  idleScheduler.start();
 } catch (error) {
   application.log.fatal({ err: error }, "BubblePilot failed to start");
   await application.close();

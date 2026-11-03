@@ -641,12 +641,18 @@ export interface AiRouteFailure {
 export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 
 export interface AiRouteRequest {
+  idleDecision?: boolean;
   imageSession?: ChatImageSession | undefined;
   allowMemes?: boolean;
   pluginIds?: string[];
   executionId: string | null;
   nodeId: string;
-  memoryEvent?: { provider: string; messageId: string; timeZone?: string };
+  memoryEvent?: {
+    provider: string;
+    messageId: string;
+    timeZone?: string;
+    idleExecutionId?: string;
+  };
   routeId: string;
   messages: readonly AiChatMessage[];
   maxOutputTokens: number;

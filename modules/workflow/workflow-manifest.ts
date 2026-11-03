@@ -225,6 +225,19 @@ export function exportWorkflowManifest(input: {
         .map(chatRef);
       delete config.chatIds;
     }
+    if (
+      node.type === "message-trigger" &&
+      config.idle &&
+      typeof config.idle === "object"
+    ) {
+      const idle = config.idle as Record<string, unknown>;
+      if (Array.isArray(idle.chatIds)) {
+        idle.chatRefs = idle.chatIds
+          .filter((id): id is string => typeof id === "string")
+          .map(chatRef);
+        delete idle.chatIds;
+      }
+    }
     node.config = config;
   }
 
@@ -370,6 +383,13 @@ export function importWorkflowManifest(input: {
     if (typeof config.providerRouteRef === "string") {
       config.providerRouteId = selected.get(config.providerRouteRef);
       delete config.providerRouteRef;
+    }
+    if (config.idle && typeof config.idle === "object") {
+      const idle = config.idle as Record<string, unknown>;
+      if (Array.isArray(idle.chatRefs)) {
+        idle.chatIds = idle.chatRefs.map((ref) => selected.get(String(ref)));
+        delete idle.chatRefs;
+      }
     }
     if (Array.isArray(config.chatRefs)) {
       config.chatIds = config.chatRefs.map((ref) => selected.get(String(ref)));

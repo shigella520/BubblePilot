@@ -119,6 +119,94 @@
                   "config": {
                     "type": "object",
                     "properties": {
+                      "idle": {
+                        "type": "object",
+                        "properties": {
+                          "enabled": {
+                            "default": false,
+                            "type": "boolean"
+                          },
+                          "chatIds": {
+                            "default": [],
+                            "maxItems": 50,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            }
+                          },
+                          "idleMinutes": {
+                            "default": 60,
+                            "type": "integer",
+                            "minimum": 2,
+                            "maximum": 360
+                          },
+                          "timeZone": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          },
+                          "quietPeriods": {
+                            "default": [
+                              {
+                                "days": [1, 2, 3, 4, 5, 6, 7],
+                                "start": "23:00",
+                                "end": "09:00"
+                              }
+                            ],
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "days": {
+                                  "minItems": 1,
+                                  "maxItems": 7,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 7
+                                  }
+                                },
+                                "start": {
+                                  "type": "string",
+                                  "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+                                },
+                                "end": {
+                                  "type": "string",
+                                  "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+                                }
+                              },
+                              "required": ["days", "start", "end"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "dailyLimit": {
+                            "default": 2,
+                            "type": "integer",
+                            "minimum": 2,
+                            "maximum": 666
+                          },
+                          "taskInstruction": {
+                            "default": "结合角色与已有聊天，自然、简短地主动交流。没有合适内容时保持安静；不重复回答历史问题，不制造紧迫感，不连续追问，也不宣称用户刚刚提出了新要求。",
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          }
+                        },
+                        "required": [
+                          "enabled",
+                          "chatIds",
+                          "idleMinutes",
+                          "timeZone",
+                          "quietPeriods",
+                          "dailyLimit",
+                          "taskInstruction"
+                        ],
+                        "additionalProperties": false
+                      },
                       "provider": {
                         "default": "",
                         "type": "string",
@@ -299,6 +387,7 @@
                       "field": {
                         "type": "string",
                         "enum": [
+                          "event.type",
                           "message.text",
                           "message.senderId",
                           "message.contentType",

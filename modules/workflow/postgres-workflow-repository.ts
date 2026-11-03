@@ -1,3 +1,4 @@
+import type { ChatIdleEvent, WorkflowEvent } from "./workflow-event.js";
 import type { BotIdentity } from "../identity/bot-identity.js";
 import { randomUUID } from "node:crypto";
 
@@ -76,6 +77,7 @@ interface TriggerRow {
 }
 
 interface ExecutionRow {
+  trigger_event: ChatIdleEvent | null;
   bot_identity: BotIdentity | null;
   id: string;
   provider: string;
@@ -186,7 +188,7 @@ const triggerSelect = `SELECT
   t.created_at, t.updated_at, t.deleted_at`;
 
 const executionSelect = `SELECT
-  e.id, e.bot_identity, e.provider, e.external_event_id,
+  e.id, e.trigger_event, e.bot_identity, e.provider, e.external_event_id,
   source_message.provider_message_id AS source_provider_message_id,
   source_chat.provider_chat_id, source_chat.display_name AS chat_display_name,
   e.trigger_id,
@@ -209,7 +211,7 @@ LEFT JOIN messages source_message ON source_message.id = COALESCE(
    WHERE source_event.provider = e.provider
      AND source_event.external_event_id = e.external_event_id)
 )
-LEFT JOIN chats source_chat ON source_chat.id = source_message.chat_id
+LEFT JOIN chats source_chat ON source_chat.id = COALESCE(e.target_chat_id, source_message.chat_id)
 LEFT JOIN LATERAL (
   SELECT
     COALESCE(SUM(attempt.cached_prompt_tokens), 0)::text
@@ -265,6 +267,7 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
       ? null
       : Number(row.cached_prompt_tokens ?? 0);
   return {
+    triggerEvent: row.trigger_event,
     id: row.id,
     provider: row.provider,
     externalEventId: row.external_event_id,
@@ -716,7 +719,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
 
   async listActiveTriggerBindings(): Promise<readonly TriggerBinding[]> {
     const result = await this.pool.query<TriggerRow>(
-      `${triggerSelect}, v.definition
+      `${triggerSelect}, v.definition, GREATEST(t.updated_at,w.updated_at) AS updated_at
        FROM bot_triggers t
        INNER JOIN workflow_versions v ON v.id = t.workflow_version_id
        INNER JOIN workflows w ON w.id = v.workflow_id
@@ -730,7 +733,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   }
 
   async createExecution(input: {
-    envelope: MessageEnvelope;
+    envelope: WorkflowEvent;
     trigger: TriggerBinding;
     contextTrigger?: ConversationContextTrigger;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }> {
@@ -739,7 +742,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       `INSERT INTO workflow_executions (
          id, provider, external_event_id, source_message_id, trigger_id,
          workflow_version_id, correlation_id, status, trigger_message_index,
-         context_snapshot
+         context_snapshot,trigger_event,target_chat_id
        ) VALUES (
          $1, $2, $3,
          COALESCE(
@@ -752,7 +755,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
          $5, $6, $7, 'created',
          COALESCE($8::bigint, (SELECT message_index FROM messages
           WHERE provider = $2 AND provider_message_id = $4)),
-         $9::jsonb
+         $9::jsonb,$10::jsonb,$11::uuid
        )
        ON CONFLICT (provider, external_event_id, trigger_id, workflow_version_id)
        DO NOTHING
@@ -761,7 +764,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         id,
         input.envelope.provider,
         input.envelope.eventId,
-        input.envelope.message.providerMessageId,
+        input.envelope.message?.providerMessageId ?? null,
         input.trigger.id,
         input.trigger.workflowVersionId,
         input.envelope.correlationId,
@@ -769,6 +772,8 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         input.contextTrigger === undefined
           ? null
           : JSON.stringify(input.contextTrigger.contextSnapshot),
+        input.envelope.message === null ? JSON.stringify(input.envelope) : null,
+        input.envelope.message === null ? input.envelope.idle.chatId : null,
       ],
     );
     const persistedId = inserted.rows[0]?.id ?? id;

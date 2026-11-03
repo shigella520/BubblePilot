@@ -1,3 +1,4 @@
+import type { WorkflowEvent } from "../workflow/workflow-event.js";
 import type { ImageInputDiagnostic } from "./ai-types.js";
 import { executionPolicy } from "./execution-policy.js";
 import { randomUUID } from "node:crypto";
@@ -11,10 +12,7 @@ import {
   fetchPublicResource,
   OpenGraphFetchError,
 } from "../integrations/bluebubbles/open-graph-client.js";
-import type {
-  MessageAttachment,
-  MessageEnvelope,
-} from "../ingestion/message-envelope.js";
+import type { MessageAttachment } from "../ingestion/message-envelope.js";
 import type { LinkPreviewItem } from "../ingestion/link-preview.js";
 import type { AiRepository } from "./ai-repository.js";
 import type {
@@ -133,10 +131,11 @@ async function limitedResponseBody(
 }
 
 function currentCandidates(
-  envelope: MessageEnvelope,
+  envelope: WorkflowEvent,
   settings: ImageInputRuntimeSettings,
 ): ImageCandidate[] {
   const candidates: ImageCandidate[] = [];
+  if (!envelope.message) return candidates;
   if (settings.includeAttachments) {
     let selected = 0;
     for (const [index, attachment] of envelope.message.attachments.entries()) {
@@ -365,7 +364,7 @@ export class NativeImageInputService {
   createSession(input: {
     executionId: string;
     nodeId: string;
-    envelope: MessageEnvelope;
+    envelope: WorkflowEvent;
     history: readonly ContextMessage[];
     prepared: PreparedImageInput;
   }): ChatImageSession | undefined {
@@ -381,7 +380,7 @@ export class NativeImageInputService {
   async prepare(input: {
     executionId: string;
     nodeId: string;
-    envelope: MessageEnvelope;
+    envelope: WorkflowEvent;
     history: readonly ContextMessage[];
     includeHistory: boolean;
   }): Promise<PreparedImageInput> {
@@ -438,7 +437,11 @@ export class NativeImageInputService {
             {
               provider: input.envelope.provider,
               providerChatId: input.envelope.chat.providerChatId,
-              triggerMessageId: input.envelope.message.providerMessageId,
+              triggerMessageId:
+                input.envelope.message?.providerMessageId ?? null,
+              ...(input.envelope.message === null
+                ? { idleExecutionId: input.executionId }
+                : {}),
             },
             candidate.providerMessageId,
             Number(candidate.reference.split(":").at(-1)) - 1,
@@ -501,7 +504,11 @@ export class NativeImageInputService {
             const scope = {
               provider: input.envelope.provider,
               providerChatId: input.envelope.chat.providerChatId,
-              triggerMessageId: input.envelope.message.providerMessageId,
+              triggerMessageId:
+                input.envelope.message?.providerMessageId ?? null,
+              ...(input.envelope.message === null
+                ? { idleExecutionId: input.executionId }
+                : {}),
             };
             const source = await this.sources.resolve(
               scope,

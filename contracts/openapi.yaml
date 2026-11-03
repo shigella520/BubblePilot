@@ -6,6 +6,53 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/settings/idle:
+    get:
+      operationId: getIdleSettings
+      security: [{ sessionAuth: [] }]
+      responses:
+        "200":
+          { description: Instance default timeZone for idle configuration. }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/v1/workflows/{workflowId}/idle-history:
+    get:
+      operationId: listWorkflowIdleHistory
+      description: Authenticated metadata-only history, newest first. Filters chatId and status; offset defaults to 0, limit defaults to 20 (maximum 50). Returns items and hasMore.
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - in: path
+          name: workflowId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          {
+            description: Idle executions with chat name,
+            version,
+            decision reason,
+            request count and final provider/model.,
+          }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/v1/workflows/{workflowId}/idle-preview:
+    get:
+      operationId: previewWorkflowIdle
+      description: Read-only status for selected chats in the currently enabled workflow version. Does not call models or send messages.
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - in: path
+          name: workflowId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          {
+            description: Chat eligibility,
+            activity and earliest trigger time,
+            quiet hours,
+            remaining workflow quota,
+            and blocking reason.,
+          }
+        "401": { $ref: "#/components/responses/Error" }
   /api/v1/settings/plugins:
     get:
       operationId: getPluginRuntimeSettings

@@ -10,7 +10,8 @@ export interface ChatImageSource {
 export interface ChatImageScope {
   provider: string;
   providerChatId: string;
-  triggerMessageId: string;
+  triggerMessageId: string | null;
+  idleExecutionId?: string;
 }
 /** The archive, not the gateway, is authoritative for source access. */
 export class ChatImageSourceRepository {
@@ -28,11 +29,14 @@ export class ChatImageSourceRepository {
     }>(
       `SELECT m.id,m.provider_message_id,m.attachments FROM messages m
        JOIN chats c ON c.id=m.chat_id
-       JOIN messages trigger ON trigger.chat_id=c.id AND trigger.provider=$1 AND trigger.provider_message_id=$3
+       LEFT JOIN messages trigger ON trigger.chat_id=c.id AND trigger.provider=$1 AND trigger.provider_message_id=$3
+       LEFT JOIN workflow_executions idle ON idle.id=$6 AND idle.target_chat_id=c.id
+         AND idle.trigger_event->>'schemaVersion'='chat-idle-v1'
        WHERE m.provider=$1 AND c.provider=$1 AND c.provider_chat_id=$2 AND m.provider_message_id=$4
        AND c.enabled AND c.deleted_at IS NULL AND m.content_redacted_at IS NULL
-       AND trigger.content_redacted_at IS NULL AND m.message_index<=trigger.message_index
-       AND (NOT $5 OR (m.message_index<trigger.message_index
+       AND ((trigger.id IS NOT NULL AND trigger.content_redacted_at IS NULL AND m.message_index<=trigger.message_index)
+         OR (idle.id IS NOT NULL AND m.message_index<(idle.trigger_event->'idle'->>'upperMessageIndex')::bigint))
+       AND (NOT $5 OR ((idle.id IS NOT NULL OR m.message_index<trigger.message_index)
          AND EXISTS(SELECT 1 FROM memory_settings WHERE enabled)
          AND EXISTS(SELECT 1 FROM memory_chats mc WHERE mc.chat_id=c.id AND mc.enabled)))`,
       [
@@ -41,6 +45,7 @@ export class ChatImageSourceRepository {
         scope.triggerMessageId,
         providerMessageId,
         historical,
+        scope.idleExecutionId ?? null,
       ],
     );
     const row = result.rows[0];

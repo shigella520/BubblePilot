@@ -11,6 +11,7 @@ import {
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+import AdminDetailDialog from "../components/AdminDetailDialog.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import BotIdentityPanel from "../components/workflow/BotIdentityPanel.vue";
 import WorkflowEditor from "../components/workflow/WorkflowEditor.vue";
@@ -34,8 +35,39 @@ const workflowStatus = ref("draft");
 const publishedVersion = ref<number | null>(null);
 const candidateVersion = ref<number | null>(null);
 const busy = ref(false);
+const enableBusy = ref(false);
 const message = ref("");
 const messageIsError = ref(false);
+const idleConfirmation = ref<{
+  chats: string[];
+  action: () => Promise<void>;
+} | null>(null);
+function confirmIdle(
+  nextDefinition: any,
+  action: () => Promise<void>,
+): boolean {
+  const idle = nextDefinition?.nodes?.find(
+    (node: any) => node.type === "message-trigger",
+  )?.config?.idle;
+  if (!idle?.enabled) return false;
+  const choices =
+    blocks.value
+      .find((block: any) => block.type === "message-trigger")
+      ?.config?.find((field: any) => field.name === "chatIds")?.options ?? [];
+  idleConfirmation.value = {
+    chats: (idle.chatIds ?? []).map(
+      (id: string) =>
+        choices.find((choice: any) => choice.value === id)?.label ?? id,
+    ),
+    action,
+  };
+  return true;
+}
+async function approveIdle() {
+  const pending = idleConfirmation.value;
+  idleConfirmation.value = null;
+  await pending?.action();
+}
 const saveState = ref<"saved" | "dirty" | "saving" | "error">("saved");
 
 interface AiRouteOption {
@@ -150,7 +182,16 @@ async function create(name: string, nextDefinition: any) {
   }
 }
 
-async function saveVersion(name: string, nextDefinition: any) {
+async function saveVersion(
+  name: string,
+  nextDefinition: any,
+  approved = false,
+) {
+  if (saveState.value === "saving") return;
+  if (!approved && workflowStatus.value === "active") {
+    const snapshot = JSON.parse(JSON.stringify(nextDefinition));
+    if (confirmIdle(snapshot, () => saveVersion(name, snapshot, true))) return;
+  }
   if (isNew.value) return create(name, nextDefinition);
   saveState.value = "saving";
   try {
@@ -185,12 +226,20 @@ async function saveVersion(name: string, nextDefinition: any) {
   }
 }
 
-async function toggleEnabled() {
+async function toggleEnabled(approved = false) {
+  if (enableBusy.value) return;
+  if (
+    !approved &&
+    workflowStatus.value !== "active" &&
+    confirmIdle(definition.value, () => toggleEnabled(true))
+  )
+    return;
   if (isNew.value || candidateVersion.value === null) {
     message.value = "请先保存工作流，再启用。";
     messageIsError.value = true;
     return;
   }
+  enableBusy.value = true;
   try {
     if (
       workflowStatus.value !== "active" &&
@@ -216,6 +265,8 @@ async function toggleEnabled() {
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
+  } finally {
+    enableBusy.value = false;
   }
 }
 
@@ -311,8 +362,8 @@ onMounted(load);
         <button
           class="button secondary"
           type="button"
-          :disabled="isNew || candidateVersion === null"
-          @click="toggleEnabled"
+          :disabled="isNew || candidateVersion === null || enableBusy"
+          @click="toggleEnabled()"
         >
           <Power :size="16" />{{
             workflowStatus === "active" ? "停用" : "启用"
@@ -326,6 +377,31 @@ onMounted(load);
       @close="message = ''"
       >{{ message }}</DismissibleMessage
     >
+    <AdminDetailDialog
+      v-if="idleConfirmation"
+      title="确认允许角色主动发言"
+      @close="idleConfirmation = null"
+    >
+      <p>
+        将向以下
+        {{ idleConfirmation.chats.length }}
+        个聊天启用空闲主动交流，需要敏感解锁。无人回应时不连续发言。
+      </p>
+      <ul>
+        <li v-for="chat in idleConfirmation.chats" :key="chat">{{ chat }}</li>
+      </ul>
+      <div class="row-actions">
+        <button class="button secondary" @click="idleConfirmation = null">
+          取消</button
+        ><button
+          class="button"
+          :disabled="!idleConfirmation.chats.length"
+          @click="approveIdle"
+        >
+          确认并继续
+        </button>
+      </div>
+    </AdminDetailDialog>
     <section v-if="!busy" class="workflow-canvas-main">
       <WorkflowEditor
         :blocks="blocks"

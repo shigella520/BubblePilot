@@ -7,6 +7,13 @@ export interface ContextRuntimeSettings {
   redundancyMessageWindow: number;
 }
 
+export const DEFAULT_CONTEXT_SETTINGS: ContextRuntimeSettings = {
+  includeFromMe: true,
+  baseMessageWindow: 10,
+  characterLimit: 6000,
+  redundancyMessageWindow: 10,
+};
+
 export interface ContextSettingsView extends ContextRuntimeSettings {
   source: "defaults" | "database";
   version: number;

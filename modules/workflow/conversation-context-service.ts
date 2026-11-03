@@ -98,6 +98,7 @@ export interface ConversationContextLoadInput {
   provider: string;
   providerChatId: string;
   beforeProviderMessageId: string;
+  idleExecutionId?: string;
   settings: ContextRuntimeSettings;
   settingsVersion: number;
   contextSnapshot?: ConversationContextSnapshot | null;
@@ -340,6 +341,47 @@ export class ConversationContextService {
       db.release();
     }
   }
+  private async snapshotForIdle(
+    input: ConversationContextLoadInput,
+  ): Promise<ConversationContextSnapshot> {
+    const row = (
+      await this.pool.query<{
+        chat_id: string;
+        upper_index: string;
+        snapshot: ConversationContextSnapshot | null;
+      }>(
+        `SELECT e.target_chat_id AS chat_id,e.trigger_event->'idle'->>'upperMessageIndex' AS upper_index,
+        (SELECT snapshot FROM conversation_context_windows w WHERE w.chat_id=e.target_chat_id
+         AND w.trigger_message_index<(e.trigger_event->'idle'->>'upperMessageIndex')::bigint
+         ORDER BY trigger_message_index DESC LIMIT 1) AS snapshot
+       FROM workflow_executions e JOIN chats c ON c.id=e.target_chat_id
+       WHERE e.id=$1 AND c.enabled AND c.deleted_at IS NULL AND e.trigger_event->>'schemaVersion'='chat-idle-v1'`,
+        [input.idleExecutionId],
+      )
+    ).rows[0];
+    if (!row) throw new Error("Idle context unavailable.");
+    const snapshot = row.snapshot;
+    const lower =
+      snapshot?.afterMessageIndex ??
+      (
+        await this.pool.query<{ lower: string }>(
+          `SELECT COALESCE(min(message_index)-1,0)::text AS lower FROM
+       (SELECT message_index FROM messages WHERE chat_id=$1 AND message_index<$2
+        ORDER BY message_index DESC LIMIT $3) m`,
+          [row.chat_id, row.upper_index, input.settings.baseMessageWindow],
+        )
+      ).rows[0]?.lower ??
+      "0";
+    return {
+      contract: "raw-context-v1",
+      chatId: row.chat_id,
+      triggerMessageIndex: row.upper_index,
+      afterMessageIndex: lower,
+      settings: snapshot?.settings ?? input.settings,
+      settingsVersion: snapshot?.settingsVersion ?? input.settingsVersion,
+      compatibilityInitialized: !snapshot,
+    };
+  }
   async load(
     input: ConversationContextLoadInput,
   ): Promise<ConversationContextResult> {
@@ -347,29 +389,40 @@ export class ConversationContextService {
     const snapshot =
       input.contextSnapshot?.contract === "raw-context-v1"
         ? input.contextSnapshot
-        : (
-            await this.snapshotForMessage({
-              provider: input.provider,
-              providerChatId: input.providerChatId,
-              providerMessageId: input.beforeProviderMessageId,
-              settings: input.settings,
-              settingsVersion: input.settingsVersion,
-              compatibilityInitialized: true,
-            })
-          ).contextSnapshot;
+        : input.idleExecutionId
+          ? await this.snapshotForIdle(input)
+          : (
+              await this.snapshotForMessage({
+                provider: input.provider,
+                providerChatId: input.providerChatId,
+                providerMessageId: input.beforeProviderMessageId,
+                settings: input.settings,
+                settingsVersion: input.settingsVersion,
+                compatibilityInitialized: true,
+              })
+            ).contextSnapshot;
     const db = await this.pool.connect();
     try {
       await db.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-      const authorized = await db.query(
-        `SELECT 1 FROM chats c JOIN messages m ON m.chat_id=c.id WHERE c.id=$1 AND c.provider=$2 AND c.provider_chat_id=$3 AND c.enabled AND c.deleted_at IS NULL AND m.provider_message_id=$4 AND m.message_index=$5`,
-        [
-          snapshot.chatId,
-          input.provider,
-          input.providerChatId,
-          input.beforeProviderMessageId,
-          snapshot.triggerMessageIndex,
-        ],
-      );
+      const authorized = input.idleExecutionId
+        ? await db.query(
+            `SELECT 1 FROM workflow_executions e JOIN chats c ON c.id=e.target_chat_id WHERE e.id=$1 AND c.id=$2 AND c.enabled AND c.deleted_at IS NULL AND e.trigger_event->'idle'->>'upperMessageIndex'=$3`,
+            [
+              input.idleExecutionId,
+              snapshot.chatId,
+              snapshot.triggerMessageIndex,
+            ],
+          )
+        : await db.query(
+            `SELECT 1 FROM chats c JOIN messages m ON m.chat_id=c.id WHERE c.id=$1 AND c.provider=$2 AND c.provider_chat_id=$3 AND c.enabled AND c.deleted_at IS NULL AND m.provider_message_id=$4 AND m.message_index=$5`,
+            [
+              snapshot.chatId,
+              input.provider,
+              input.providerChatId,
+              input.beforeProviderMessageId,
+              snapshot.triggerMessageIndex,
+            ],
+          );
       if (!authorized.rowCount)
         throw new Error("Context authorization or trigger unavailable.");
       const values = [
