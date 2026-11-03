@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildApplication } from "../app/application.js";
 import type { AppConfig } from "../app/config.js";
@@ -452,6 +452,13 @@ describe("AI workflow", () => {
         ],
       }),
     ).resolves.toMatchObject({ status: "ok" });
+    const loadRecent = archive.loadRecentMessages.bind(archive);
+    vi.spyOn(archive, "loadRecentMessages").mockImplementation(
+      async (...args) =>
+        (await loadRecent(...args)).filter(
+          (m) => m.senderId !== "outside-user@example.test",
+        ),
+    );
     const incoming = await application.inject({
       method: "POST",
       url: "/api/v1/webhooks/bluebubbles",
@@ -483,6 +490,10 @@ describe("AI workflow", () => {
       'sender_id=\\"fictional-user@example.test\\"',
     );
     expect(serializedFirstMessages).toContain("<participant_identities>");
+    expect(serializedFirstMessages).toContain("三号");
+    expect(serializedFirstMessages).not.toContain(
+      "Older context outside the loaded window",
+    );
     expect(
       serializedFirstMessages.indexOf("Earlier fictional context"),
     ).toBeLessThan(serializedFirstMessages.indexOf("<participant_identities>"));
@@ -631,6 +642,37 @@ describe("AI workflow", () => {
     expect(unrelatedAttempt.body).not.toContain("Fictional AI answer");
 
     expect(detail.body).not.toContain("Fictional AI answer");
+    for (const nickname of ["新昵称", null]) {
+      const saved = await archive.saveChatParticipantIdentities({
+        chatId: chat!.id,
+        expectedVersion: nickname === null ? 3 : 2,
+        identities:
+          nickname === null
+            ? []
+            : [
+                {
+                  senderId: "outside-user@example.test",
+                  realName: "陈三",
+                  nickname,
+                },
+              ],
+      });
+      expect(saved.status).toBe("ok");
+      const start = aiClient.requests.length;
+      await application.inject({
+        method: "POST",
+        url: "/api/v1/webhooks/bluebubbles",
+        headers: { "x-bubblepilot-webhook-secret": webhookSecret },
+        payload: newMessageWebhook({
+          messageGuid: `fictional-remap-${nickname}`,
+          text: "/ask repeat the names",
+        }),
+      });
+      const prompt = JSON.stringify(aiClient.requests[start]?.messages);
+      if (nickname) expect(prompt).toContain(nickname);
+      else expect(prompt).not.toContain("<participant_identities>");
+      expect(prompt).not.toContain("三号");
+    }
   });
 
   it("does not inject iMessage presentation rules into JSON nodes", async () => {

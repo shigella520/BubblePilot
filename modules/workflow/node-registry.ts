@@ -502,33 +502,9 @@ class LoadContextNodeHandler extends BaseNodeHandler {
       context.history.splice(0, context.history.length, ...messages);
       context.historyCoverage = loaded?.historyCoverage;
       context.contextIncompleteReasons = loaded?.contextIncompleteReasons;
-      const senderIds = [
-        ...new Set(
-          [
-            ...messages.map((message) =>
-              message.isFromMe ? null : message.senderId,
-            ),
-            context.envelope.message?.isFromMe
-              ? null
-              : (context.envelope.message?.senderId ?? null),
-          ].filter((senderId): senderId is string => senderId !== null),
-        ),
-      ];
-      const resolvedParticipants =
-        await this.archive.resolveParticipantIdentities(
-          context.envelope.chat.providerChatId,
-          senderIds,
-        );
-      const participantsById = new Map(
-        resolvedParticipants.map((participant) => [
-          participant.senderId,
-          participant,
-        ]),
+      const participants = await this.archive.listParticipantIdentities(
+        context.envelope.chat.providerChatId,
       );
-      const participants = senderIds.flatMap((senderId) => {
-        const participant = participantsById.get(senderId);
-        return participant === undefined ? [] : [participant];
-      });
       for (const senderId of Object.keys(context.participantIdentities)) {
         delete context.participantIdentities[senderId];
       }

@@ -192,9 +192,8 @@ export interface ArchiveRepository {
     expectedVersion: number;
     identities: readonly ChatParticipantIdentity[];
   }): Promise<ChatParticipantIdentityMutation>;
-  resolveParticipantIdentities(
+  listParticipantIdentities(
     providerChatId: string,
-    senderIds: readonly string[],
   ): Promise<readonly ChatParticipantIdentity[]>;
   listMessages(
     chatId: string,

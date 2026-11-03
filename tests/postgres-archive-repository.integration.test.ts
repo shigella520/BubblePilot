@@ -140,9 +140,8 @@ describe.runIf(testDatabaseUrl !== undefined)(
         },
       });
       await expect(
-        repository.resolveParticipantIdentities(
+        repository.listParticipantIdentities(
           normalized.envelope.chat.providerChatId,
-          ["fictional-user@example.test", "not-present@example.test"],
         ),
       ).resolves.toEqual([
         {
@@ -151,6 +150,9 @@ describe.runIf(testDatabaseUrl !== undefined)(
           nickname: "队长",
         },
       ]);
+      await expect(
+        repository.listParticipantIdentities("fictional-unrelated-chat"),
+      ).resolves.toEqual([]);
       await expect(
         repository.saveChatParticipantIdentities({
           chatId: chat?.id ?? randomUUID(),

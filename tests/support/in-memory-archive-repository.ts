@@ -427,17 +427,15 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
     };
   }
 
-  resolveParticipantIdentities(
+  listParticipantIdentities(
     providerChatId: string,
-    senderIds: readonly string[],
   ): Promise<readonly ChatParticipantIdentity[]> {
     const identities = this.chats.get(providerChatId)?.participantIdentities;
     if (identities === undefined) return Promise.resolve([]);
     return Promise.resolve(
-      [...new Set(senderIds)].flatMap((senderId) => {
-        const identity = identities.get(senderId);
-        return identity === undefined ? [] : [{ ...identity }];
-      }),
+      [...identities.values()]
+        .sort((a, b) => a.senderId.localeCompare(b.senderId))
+        .map((identity) => ({ ...identity })),
     );
   }
 

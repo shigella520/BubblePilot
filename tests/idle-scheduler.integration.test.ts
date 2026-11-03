@@ -67,6 +67,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
       providerMessageId: "fictional-result",
     },
     dailyLimit = 2,
+    loadContext = false,
   ) {
     const chatId = `fictional-idle-${randomUUID()}`;
     let now = new Date(Date.now() + 60_000);
@@ -83,12 +84,23 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
       name: chatId,
       startNodeId: "message-trigger",
       nodes: [
+        ...(loadContext
+          ? [
+              {
+                id: "context",
+                type: "load-context",
+                version: 1,
+                config: {},
+                onSuccess: "ai",
+              },
+            ]
+          : []),
         {
           id: "message-trigger",
           type: "message-trigger",
           version: 1,
           config: { enabled: false, idle: config },
-          onSuccess: "ai",
+          onSuccess: loadContext ? "context" : "ai",
         },
         {
           id: "ai",
@@ -102,7 +114,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
             systemPrompt: "Fictional friendly role",
             promptTemplate: "Respond naturally",
             outputVariable: "reply",
-            includeLoadedContext: false,
+            includeLoadedContext: loadContext,
           },
           onSuccess: "reply",
         },
@@ -188,6 +200,24 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
       chatId,
     };
   }
+  it("includes configured participants absent from idle history", async () => {
+    const s = await setup(undefined, 2, true);
+    const run = vi
+      .spyOn(AgentRunner.prototype, "run")
+      .mockResolvedValue(success('{"action":"skip"}'));
+    await s.message();
+    await pool.query(
+      `INSERT INTO chat_participant_identities(id,chat_id,sender_id,real_name,nickname)
+      SELECT $1,id,'fictional-outside-window','虚构成员','窗口外昵称' FROM chats WHERE provider_chat_id=$2`,
+      [randomUUID(), s.chatId],
+    );
+    s.advance(11);
+    await s.scheduler.tick();
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(run.mock.calls[0]![0].messages)).toContain(
+      "窗口外昵称",
+    );
+  });
   it("only selected chats run once, uses no fake current message, and consumes skip eligibility", async () => {
     const s = await setup();
     const run = vi
