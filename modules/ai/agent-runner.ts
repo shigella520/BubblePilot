@@ -118,13 +118,15 @@ function continuesAfterSearchFailure(
 function sourceDisplayInstruction(
   sourceDisplay: WebSearchSourceDisplay,
 ): string {
+  const boundary =
+    "Source display controls supporting citations only. Preserve URLs explicitly requested by the user (including contextual follow-ups), required to complete the task, or contained in code, configuration, or structured data. Never invent URLs; distinguish constructed addresses from pages actually visited and verified.";
   switch (sourceDisplay) {
     case "full":
-      return "Cite source URLs for claims that depend on current information.";
+      return `${boundary} Cite source URLs when useful to support claims that depend on current information.`;
     case "compact":
-      return "Do not put URLs inline. Add a short Sources section at the end with at most two relevant source URLs.";
+      return `${boundary} Put supporting citations in a short Sources section at the end with at most two relevant source URLs. This limit does not apply to task-required links.`;
     case "hidden":
-      return "Use the results as evidence, but do not include URLs, citations, footnotes, or a Sources section in the visible answer.";
+      return `${boundary} Do not proactively add supporting citations, source URLs, footnotes, or a Sources section. This is not a ban on task-required links.`;
   }
 }
 
@@ -154,56 +156,6 @@ function systemPolicyMessage(
   return messages.map((message, index) =>
     index === systemIndex ? merged : message,
   );
-}
-
-function stripSourceLinks(value: string): string {
-  return value
-    .replace(/\[([^\]\n]+)\]\((?:https?:\/\/|www\.)[^)\s]+\)/giu, "$1")
-    .replace(/<https?:\/\/[^>\s]+>/giu, "")
-    .replace(/\b(?:https?:\/\/|www\.)[a-z0-9\-._~:/?#@!$&'()*+,;=%]+/giu, "")
-    .split("\n")
-    .filter(
-      (line) =>
-        !/^\s*(?:[-*]\s*)?(?:来源|参考(?:资料)?|sources?|references?)\s*[:：].*$/iu.test(
-          line,
-        ),
-    )
-    .join("\n")
-    .replace(/[ \t]+([，。！？；：,.!?;:])/gu, "$1")
-    .replace(/[:：]([，。！？；,.!?;])/gu, "$1")
-    .replace(/[ \t]{2,}/gu, " ")
-    .replace(/\n{3,}/gu, "\n\n")
-    .trim();
-}
-
-function stripJsonSourceLinks(value: unknown): unknown {
-  if (typeof value === "string") return stripSourceLinks(value);
-  if (Array.isArray(value)) return value.map(stripJsonSourceLinks);
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        stripJsonSourceLinks(item),
-      ]),
-    );
-  }
-  return value;
-}
-
-function applySourceDisplay(
-  text: string,
-  sourceDisplay: WebSearchSourceDisplay,
-  outputFormat: "text" | "json",
-): string {
-  if (sourceDisplay !== "hidden") return text;
-  if (outputFormat === "json") {
-    try {
-      return JSON.stringify(stripJsonSourceLinks(JSON.parse(text)));
-    } catch {
-      return stripSourceLinks(text);
-    }
-  }
-  return stripSourceLinks(text);
 }
 
 export class AgentRunner {
@@ -564,11 +516,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         return {
           ...result,
           selectedMeme: memes?.selection() ?? null,
-          text: applySourceDisplay(
-            answer,
-            policy === "disabled" ? "full" : sourceDisplay,
-            request.outputFormat,
-          ),
+          text: answer,
           attemptCount: totalAttempts,
           durationMs: Math.max(0, Date.now() - startedAt),
         };

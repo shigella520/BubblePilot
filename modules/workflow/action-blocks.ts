@@ -329,7 +329,8 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         name: "webSearchSources",
         label: "搜索来源展示",
         type: "select",
-        description: "完整展示来源、仅在末尾精简展示，或只在执行详情保留来源。",
+        description:
+          "通过模型指引完整、精简或隐藏附带来源；不影响用户索要或任务必需的链接。隐藏不保证绝对不出现引用，程序不删除回答中的 URL。",
         options: [
           { value: "full", label: "完整来源" },
           { value: "compact", label: "精简来源" },

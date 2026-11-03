@@ -5,7 +5,7 @@
   "scope": "Single-task NAS sandbox; user authorized reviewed base-risk release on 2026-10-23. See risk-acceptance.md.",
   "sourceHashes": {
     "Dockerfile": "5e25a6225b98224c5bfa0f011582e6e4ee6d81485e02ef2b99ddc987d2511ea8",
-    "requirements.lock": "3258cfdee42cd1ede553e66c6b7b96abe19a4debaf322725cf474c4993bd4c68",
+    "requirements.lock": "fb098f44eed7ee5b4d5f4a3543f1b1ee44801c68ba38f3d33d797d57c7473fbe",
     "capabilities.json": "073985d99ffbb975106391fb5b485abddd55cfe12848c6010246c211705d1d19"
   },
   "entries": [
