@@ -1,4 +1,5 @@
-import type { ChatIdleEvent, WorkflowEvent } from "./workflow-event.js";
+import { triggerType, type BackgroundWorkflowEvent } from "./workflow-event.js";
+import type { WorkflowEvent } from "./workflow-event.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
 import type { ContextMessage } from "../archive/archive-repository.js";
 import {
@@ -103,7 +104,8 @@ export class WorkflowEngine implements MessageAutomation {
         !binding.definition.nodes.some(
           (node) =>
             node.type === "message-trigger" &&
-            node.config.idle !== undefined &&
+            (node.config.idle !== undefined ||
+              node.config.scheduled !== undefined) &&
             !node.config.enabled,
         ) &&
         matchTrigger(envelope, binding.conditions, binding.includeFromMe)
@@ -148,6 +150,8 @@ export class WorkflowEngine implements MessageAutomation {
     staleRetryBefore: Date,
   ): Promise<ExecutionRecoveryClaim> {
     const source = await this.repository.getExecution(executionId);
+    if (source?.triggerEvent?.schemaVersion === "scheduled-task-v1")
+      return { status: "conflict", reason: "execution-not-recoverable" };
     if (
       source?.status === "retrying" &&
       source.nextRetryAt !== null &&
@@ -192,11 +196,16 @@ export class WorkflowEngine implements MessageAutomation {
     return this.gate.status();
   }
 
-  async handleIdle(input: {
+  async handleBackground(input: {
     trigger: TriggerBinding;
-    event: ChatIdleEvent;
+    event: BackgroundWorkflowEvent;
     accept: () => Promise<WorkflowExecutionRecord | null>;
     guard: (executionId: string, sending: boolean) => Promise<string | null>;
+    afterSend?: (executionId: string, knownFailed: boolean) => Promise<void>;
+    commitSend?: (
+      executionId: string,
+      deliveryId: string,
+    ) => Promise<string | null>;
   }): Promise<void> {
     await this.gate.run(
       async () => {
@@ -207,6 +216,12 @@ export class WorkflowEngine implements MessageAutomation {
           input.trigger,
           execution.triggerEvent ?? input.event,
           (sending) => input.guard(execution.id, sending),
+          input.commitSend
+            ? (deliveryId) => input.commitSend!(execution.id, deliveryId)
+            : undefined,
+          input.afterSend
+            ? (knownFailed) => input.afterSend!(execution.id, knownFailed)
+            : undefined,
         );
       },
       executionIsolationKey(
@@ -222,6 +237,8 @@ export class WorkflowEngine implements MessageAutomation {
     trigger: TriggerBinding,
     envelope: WorkflowEvent,
     idleGuard?: (sending: boolean) => Promise<string | null>,
+    commitScheduledSend?: (deliveryId: string) => Promise<string | null>,
+    afterScheduledSend?: (knownFailed: boolean) => Promise<void>,
   ): Promise<void> {
     const definition = trigger.definition;
     const nodes = new Map(definition.nodes.map((node) => [node.id, node]));
@@ -232,6 +249,9 @@ export class WorkflowEngine implements MessageAutomation {
     const participantIdentities = {};
     const outputs: Record<string, Record<string, unknown>> = {};
     const timeZone =
+      (envelope.schemaVersion === "scheduled-task-v1"
+        ? envelope.scheduled.timeZone
+        : undefined) ??
       (envelope.message === null
         ? trigger.definition.nodes.find((n) => n.type === "message-trigger")
             ?.config.idle?.timeZone
@@ -286,6 +306,8 @@ export class WorkflowEngine implements MessageAutomation {
       try {
         handler = this.registry.resolve(node);
         retry = handler.retryPolicy(node);
+        if (envelope.schemaVersion === "scheduled-task-v1")
+          retry = { ...retry, maxAttempts: Math.min(3, retry.maxAttempts) };
       } catch (error) {
         const workflowError = safeError(error);
         await this.repository.finishExecution(
@@ -306,7 +328,7 @@ export class WorkflowEngine implements MessageAutomation {
           attempt: attempt + (priorAttempts.get(node.id) ?? 0),
           inputSummary: {
             eventId: envelope.eventId,
-            triggerType: envelope.message === null ? "chat-idle" : "message",
+            triggerType: triggerType(envelope),
             contentType: envelope.message?.contentType ?? null,
             hasText: envelope.message?.text != null,
             attachmentCount: envelope.message?.attachments.length ?? 0,
@@ -332,6 +354,8 @@ export class WorkflowEngine implements MessageAutomation {
               idleDecisionAccepted = value ?? false;
             },
             ...(idleGuard ? { beforeIdleSend: () => idleGuard(true) } : {}),
+            ...(commitScheduledSend ? { commitScheduledSend } : {}),
+            ...(afterScheduledSend ? { afterScheduledSend } : {}),
             variables,
             history,
             get historyCoverage() {

@@ -250,6 +250,7 @@ export class AgentRunner {
     const images = request.imageSession;
     if (memory) memory.imagesEnabled = !!images;
     const registry = new AgentToolRegistry();
+    for (const tool of request.runtimeTools ?? []) registry.register(tool);
     plugins?.register(registry);
     if (plugins)
       request = {
@@ -290,7 +291,14 @@ export class AgentRunner {
             memory.execute(definition.name, args, context),
           diagnostics: "metadata-only",
         });
-    if (policy === "disabled" && !memory && !memes && !images && !plugins) {
+    if (
+      policy === "disabled" &&
+      !memory &&
+      !memes &&
+      !images &&
+      !plugins &&
+      !request.runtimeTools?.length
+    ) {
       budget.snapshot.modelTurns = 1;
       return this.routing.execute(request);
     }
@@ -548,6 +556,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
             }
           : originalCall;
         const isPlugin = registered?.diagnostics === "plugin";
+        const isTask = registered?.metadata?.capability === "scheduled-task";
         const isMemory = registered?.diagnostics === "metadata-only";
         const isMeme =
           call.name === "search_memes" || call.name === "select_meme";
@@ -649,6 +658,8 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
             content = budget.append(content);
             const payload = JSON.parse(content) as {
               status?: string;
+              errorCode?: string;
+              task?: { id?: string; status?: string; version?: number };
               reason?: string;
               evidence?: unknown[];
               groups?: unknown[];
@@ -679,6 +690,18 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                 metadataOnly: true,
                 sourceRefs: memory?.references?.() ?? [],
               };
+            if (isTask) {
+              if (payload.status === "failed")
+                errorCode = payload.errorCode ?? "TASK_OPERATION_FAILED";
+              responseDetails = {
+                kind: "scheduled-task",
+                outcome: payload.status,
+                taskId: payload.task?.id,
+                taskStatus: payload.task?.status,
+                taskVersion: payload.task?.version,
+                errorCode,
+              };
+            }
           } catch (error) {
             if (error instanceof AgentToolTimeout)
               budget.exhaust("tool-duration");

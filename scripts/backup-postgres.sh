@@ -12,7 +12,7 @@ umask 077
 mkdir -p "$BACKUP_DIR"
 docker compose config >/dev/null
 docker compose exec -T postgres sh -c \
-  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' >"$BACKUP_PATH"
+  'pg_dump --exclude-table-data=public.scheduled_task_restore_guard -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' >"$BACKUP_PATH"
 
 if [ ! -s "$BACKUP_PATH" ]; then
   printf '%s\n' "Backup is empty: $BACKUP_PATH" >&2

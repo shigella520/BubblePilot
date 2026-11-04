@@ -318,7 +318,7 @@ export class IdleScheduler {
           taskInstruction: config.taskInstruction,
         },
       };
-      await this.engine.handleIdle({
+      await this.engine.handleBackground({
         trigger,
         event,
         accept: async () => {
@@ -505,7 +505,11 @@ export class IdleScheduler {
   ): Promise<string | null> {
     const execution = await this.repository.getExecution(executionId);
     if (!execution) return "idle-execution-unavailable";
-    if (!execution.triggerEvent) return null;
+    if (
+      !execution.triggerEvent ||
+      execution.triggerEvent.schemaVersion !== "chat-idle-v1"
+    )
+      return null;
     if (
       ["skipped", "failed", "dead-lettered", "closed"].includes(
         execution.status,

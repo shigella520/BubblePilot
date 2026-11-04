@@ -46,16 +46,21 @@ function confirmIdle(
   nextDefinition: any,
   action: () => Promise<void>,
 ): boolean {
-  const idle = nextDefinition?.nodes?.find(
+  const triggerConfig = nextDefinition?.nodes?.find(
     (node: any) => node.type === "message-trigger",
-  )?.config?.idle;
-  if (!idle?.enabled) return false;
+  )?.config;
+  const enabled = [triggerConfig?.idle, triggerConfig?.scheduled].filter(
+    (value) => value?.enabled,
+  );
+  if (!enabled.length) return false;
   const choices =
     blocks.value
       .find((block: any) => block.type === "message-trigger")
       ?.config?.find((field: any) => field.name === "chatIds")?.options ?? [];
   idleConfirmation.value = {
-    chats: (idle.chatIds ?? []).map(
+    chats: [
+      ...new Set<string>(enabled.flatMap((value) => value.chatIds ?? [])),
+    ].map(
       (id: string) =>
         choices.find((choice: any) => choice.value === id)?.label ?? id,
     ),
@@ -385,7 +390,7 @@ onMounted(load);
       <p>
         将向以下
         {{ idleConfirmation.chats.length }}
-        个聊天启用空闲主动交流，需要敏感解锁。无人回应时不连续发言。
+        个聊天启用配置中的空闲交流或定时提醒，需要敏感解锁。定时提醒按用户指定时间发送，不受空闲免打扰限制。
       </p>
       <ul>
         <li v-for="chat in idleConfirmation.chats" :key="chat">{{ chat }}</li>

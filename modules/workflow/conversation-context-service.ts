@@ -350,12 +350,12 @@ export class ConversationContextService {
         upper_index: string;
         snapshot: ConversationContextSnapshot | null;
       }>(
-        `SELECT e.target_chat_id AS chat_id,e.trigger_event->'idle'->>'upperMessageIndex' AS upper_index,
+        `SELECT e.target_chat_id AS chat_id,COALESCE(e.trigger_event->'idle'->>'upperMessageIndex',e.trigger_event->'scheduled'->>'upperMessageIndex') AS upper_index,
         (SELECT snapshot FROM conversation_context_windows w WHERE w.chat_id=e.target_chat_id
-         AND w.trigger_message_index<(e.trigger_event->'idle'->>'upperMessageIndex')::bigint
+         AND w.trigger_message_index<(COALESCE(e.trigger_event->'idle'->>'upperMessageIndex',e.trigger_event->'scheduled'->>'upperMessageIndex'))::bigint
          ORDER BY trigger_message_index DESC LIMIT 1) AS snapshot
        FROM workflow_executions e JOIN chats c ON c.id=e.target_chat_id
-       WHERE e.id=$1 AND c.enabled AND c.deleted_at IS NULL AND e.trigger_event->>'schemaVersion'='chat-idle-v1'`,
+       WHERE e.id=$1 AND c.enabled AND c.deleted_at IS NULL AND e.trigger_event->>'schemaVersion' IN ('chat-idle-v1','scheduled-task-v1')`,
         [input.idleExecutionId],
       )
     ).rows[0];
@@ -406,7 +406,7 @@ export class ConversationContextService {
       await db.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
       const authorized = input.idleExecutionId
         ? await db.query(
-            `SELECT 1 FROM workflow_executions e JOIN chats c ON c.id=e.target_chat_id WHERE e.id=$1 AND c.id=$2 AND c.enabled AND c.deleted_at IS NULL AND e.trigger_event->'idle'->>'upperMessageIndex'=$3`,
+            `SELECT 1 FROM workflow_executions e JOIN chats c ON c.id=e.target_chat_id WHERE e.id=$1 AND c.id=$2 AND c.enabled AND c.deleted_at IS NULL AND COALESCE(e.trigger_event->'idle'->>'upperMessageIndex',e.trigger_event->'scheduled'->>'upperMessageIndex')=$3`,
             [
               input.idleExecutionId,
               snapshot.chatId,

@@ -6,6 +6,113 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/scheduled-tasks:
+    get:
+      operationId: listScheduledTasks
+      description: List reminders scoped by optional workflowId, chatId and status; offset and limit (1-50). Returns items and hasMore. Member tools additionally enforce creator ownership.
+      security: [{ sessionAuth: [] }]
+      responses:
+        "200":
+          {
+            description: Task list with content,
+            ownership,
+            absolute schedule,
+            timezone,
+            status and version.,
+          }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/v1/scheduled-tasks/{taskId}:
+    parameters:
+      - in: path
+        name: taskId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getScheduledTask
+      description: Sensitive unlock required. Returns task, protected request snapshot, changes and execution references.
+      security: [{ sessionAuth: [] }]
+      responses:
+        "200": { description: Protected task detail. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateScheduledTask
+      description: Sensitive unlock required. Change content or absolute scheduledAt and timeZone. Sending already started cannot be edited.
+      security: [{ sessionAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                content: { type: string, minLength: 1, maxLength: 2000 }
+                scheduledAt: { type: string, format: date-time }
+                timeZone:
+                  {
+                    type: string,
+                    description: IANA timezone matching the datetime offset.,
+                  }
+      responses:
+        "200": { description: Updated task. }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v1/scheduled-tasks/{taskId}/cancel:
+    post:
+      operationId: cancelScheduledTask
+      description: Sensitive unlock required. Cancellation after send fence is rejected; no promise to retract an issued gateway request.
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        "200": { description: Cancelled task. }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v1/settings/scheduled-tasks:
+    get:
+      operationId: getScheduledTaskSettings
+      security: [{ sessionAuth: [] }]
+      responses:
+        "200":
+          { description: paused, pending_limit, catchup_minutes and version. }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateScheduledTaskSettings
+      description: Sensitive unlock required. New catchup window affects new or rescheduled tasks only. Zero permits only the scheduled minute.
+      security: [{ sessionAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [paused, pendingLimit, catchupMinutes, expectedVersion]
+              properties:
+                paused: { type: boolean }
+                pendingLimit: { type: integer, minimum: 1, maximum: 10000 }
+                catchupMinutes: { type: integer, minimum: 0, maximum: 1440 }
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        "200": { description: Updated settings. }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /api/v1/settings/idle:
     get:
       operationId: getIdleSettings

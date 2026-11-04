@@ -13,7 +13,7 @@ resume() { if [ -n "$RUNNING" ]; then docker compose start app >/dev/null; fi; }
 trap resume EXIT
 trap 'exit 130' INT TERM
 docker compose stop app
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$BACKUP_SET/database.dump"
+docker compose exec -T postgres sh -c 'pg_dump --exclude-table-data=public.scheduled_task_restore_guard -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$BACKUP_SET/database.dump"
 docker compose run --rm --no-deps -T --entrypoint tar app -C /app/data -cf - memes plugins > "$BACKUP_SET/data.tar"
 docker compose run --rm --no-deps -T --entrypoint sh app -c 'cd /app/data && find memes plugins -type f -exec sha256sum {} \;' > "$BACKUP_SET/files.sha256"
 [ -s "$BACKUP_SET/database.dump" ] && [ -s "$BACKUP_SET/data.tar" ]

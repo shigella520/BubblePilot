@@ -1,18 +1,24 @@
 import type { WorkflowDefinition } from "./workflow-definition.js";
 
 /** Validate the actual idle path, including failure edges, rather than every node. */
-export function validateIdlePaths(definition: WorkflowDefinition): void {
+export function validateIdlePaths(
+  definition: WorkflowDefinition,
+  eventType: "chat-idle" | "scheduled-task" = "chat-idle",
+): void {
+  const enabled = (node: WorkflowDefinition["nodes"][number]) =>
+    node.type === "message-trigger" &&
+    (eventType === "chat-idle"
+      ? node.config.idle?.enabled
+      : node.config.scheduled?.enabled);
   const start = definition.nodes.find(
     (node) => node.id === definition.startNodeId,
   );
-  const idleStarts = definition.nodes.filter(
-    (node) => node.type === "message-trigger" && node.config.idle?.enabled,
-  );
+  const idleStarts = definition.nodes.filter((node) => enabled(node));
   if (!idleStarts.length) return;
   if (
     idleStarts.length !== 1 ||
     start?.type !== "message-trigger" ||
-    !start.config.idle?.enabled
+    !enabled(start)
   )
     throw new Error(
       "Idle triggering must be configured on the single workflow entry node.",
@@ -26,7 +32,9 @@ export function validateIdlePaths(definition: WorkflowDefinition): void {
     const node = nodes.get(id);
     if (!node) return; // Graph validation reports this first.
     const reject = (field: string): never => {
-      throw new Error(`Node '${id}' is incompatible with chat-idle: ${field}.`);
+      throw new Error(
+        `Node '${id}' is incompatible with ${eventType}: ${field}.`,
+      );
     };
     const check = (value: unknown, path: string): void => {
       if (
@@ -60,8 +68,8 @@ export function validateIdlePaths(definition: WorkflowDefinition): void {
         reject("config.field requires a current message");
       if (node.config.field === "event.type") {
         const value = node.config.caseSensitive
-          ? "chat-idle"
-          : "chat-idle".toLowerCase();
+          ? eventType
+          : eventType.toLowerCase();
         const expected = node.config.caseSensitive
           ? (node.config.value ?? "")
           : (node.config.value ?? "").toLowerCase();
@@ -97,6 +105,16 @@ export function validateIdlePaths(definition: WorkflowDefinition): void {
       if (node.config.replyToSourceMessage)
         reject("native reply requires a current message");
     }
+    if (eventType === "scheduled-task" && node.type === "ai-chat" && decision)
+      reject("only one AI generation node is allowed");
+    if (
+      eventType === "scheduled-task" &&
+      node.type === "reply" &&
+      node.inputs?.meme
+    )
+      reject("reminders cannot send memes");
+    if (eventType === "scheduled-task" && node.type === "end" && !sent)
+      reject("reminder path must send a reply");
     const nextDecision = decision || node.type === "ai-chat";
     const nextSent = sent || node.type === "reply";
     if ("onSuccess" in node && node.onSuccess)

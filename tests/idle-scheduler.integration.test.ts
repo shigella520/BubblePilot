@@ -597,7 +597,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     await s.message();
     s.advance(11);
     const admission = vi
-      .spyOn(s.engine, "handleIdle")
+      .spyOn(s.engine, "handleBackground")
       .mockRejectedValueOnce(new Error("Fictional queue full"));
     await s.scheduler.tick();
     admission.mockRestore();

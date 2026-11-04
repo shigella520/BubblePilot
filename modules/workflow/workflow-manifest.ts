@@ -238,6 +238,19 @@ export function exportWorkflowManifest(input: {
         delete idle.chatIds;
       }
     }
+    if (
+      node.type === "message-trigger" &&
+      config.scheduled &&
+      typeof config.scheduled === "object"
+    ) {
+      const idle = config.scheduled as Record<string, unknown>;
+      if (Array.isArray(idle.chatIds)) {
+        idle.chatRefs = idle.chatIds
+          .filter((id): id is string => typeof id === "string")
+          .map(chatRef);
+        delete idle.chatIds;
+      }
+    }
     node.config = config;
   }
 
@@ -386,6 +399,13 @@ export function importWorkflowManifest(input: {
     }
     if (config.idle && typeof config.idle === "object") {
       const idle = config.idle as Record<string, unknown>;
+      if (Array.isArray(idle.chatRefs)) {
+        idle.chatIds = idle.chatRefs.map((ref) => selected.get(String(ref)));
+        delete idle.chatRefs;
+      }
+    }
+    if (config.scheduled && typeof config.scheduled === "object") {
+      const idle = config.scheduled as Record<string, unknown>;
       if (Array.isArray(idle.chatRefs)) {
         idle.chatIds = idle.chatRefs.map((ref) => selected.get(String(ref)));
         delete idle.chatRefs;

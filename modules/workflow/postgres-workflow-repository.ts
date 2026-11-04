@@ -1,4 +1,8 @@
-import type { ChatIdleEvent, WorkflowEvent } from "./workflow-event.js";
+import { backgroundMetadata } from "./workflow-event.js";
+import type {
+  BackgroundWorkflowEvent,
+  WorkflowEvent,
+} from "./workflow-event.js";
 import type { BotIdentity } from "../identity/bot-identity.js";
 import { randomUUID } from "node:crypto";
 
@@ -77,7 +81,7 @@ interface TriggerRow {
 }
 
 interface ExecutionRow {
-  trigger_event: ChatIdleEvent | null;
+  trigger_event: BackgroundWorkflowEvent | null;
   bot_identity: BotIdentity | null;
   id: string;
   provider: string;
@@ -773,7 +777,9 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           ? null
           : JSON.stringify(input.contextTrigger.contextSnapshot),
         input.envelope.message === null ? JSON.stringify(input.envelope) : null,
-        input.envelope.message === null ? input.envelope.idle.chatId : null,
+        input.envelope.message === null
+          ? backgroundMetadata(input.envelope).chatId
+          : null,
       ],
     );
     const persistedId = inserted.rows[0]?.id ?? id;

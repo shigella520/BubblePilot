@@ -154,6 +154,64 @@ describe("Web admin authentication", () => {
     await application.close();
   });
 
+  it("protects scheduled task changes and request snapshots with step-up", async () => {
+    expect(
+      (
+        await application.inject({
+          method: "GET",
+          url: "/api/v1/scheduled-tasks",
+        })
+      ).statusCode,
+    ).toBe(401);
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const headers = {
+      cookie: login.cookies.map((c) => `${c.name}=${c.value}`).join("; "),
+      origin: "http://localhost",
+    };
+    for (const method of ["GET", "PATCH"] as const)
+      expect(
+        (
+          await application.inject({
+            method,
+            url: "/api/v1/scheduled-tasks/00000000-0000-4000-8000-000000000001",
+            headers,
+            ...(method === "PATCH"
+              ? { payload: { expectedVersion: 1, content: "fixture" } }
+              : {}),
+          })
+        ).statusCode,
+      ).toBe(403);
+    expect(
+      (
+        await application.inject({
+          method: "POST",
+          url: "/api/v1/scheduled-tasks/00000000-0000-4000-8000-000000000001/cancel",
+          headers,
+          payload: { expectedVersion: 1 },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await application.inject({
+          method: "PUT",
+          url: "/api/v1/settings/scheduled-tasks",
+          headers,
+          payload: {
+            paused: false,
+            pendingLimit: 1000,
+            catchupMinutes: 30,
+            expectedVersion: 1,
+          },
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+
   it("allows signed-in workflow imports without step-up and retains audit and unpublished candidate state", async () => {
     const manifest = {
       kind: "BubblePilotWorkflow",
