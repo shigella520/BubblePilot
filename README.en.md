@@ -52,7 +52,7 @@ BubblePilot receives new-message events from BlueBubbles, archives only the chat
 - **Native multimodal models can understand images:** temporarily load current attachments, link-card images, and a bounded recent-image history under instance-wide safety limits, with records of image inputs and request states.
 - **Your instance owns the data:** PostgreSQL is authoritative for messages, configuration, executions, and audit records.
 
-Before upgrading to **2.0.0**, read the [upgrade guide](doc/部署与运维.md#从-120-升级到-200). This release permanently removes AI chat summaries and their data while retaining buffered raw-message context. Moving from PostgreSQL Alpine to pgvector requires a logical backup and restore into a new volume; do not attach the old volume directly to the new image.
+Before upgrading to **3.0.0**, read the [upgrade guide](doc/部署与运维.md#从-200-升级到-300). This release removes the legacy `set-variable` node and adds persistent meme and plugin storage. Check workflows and back up the database, files, and encryption configuration together.
 
 ## What you can build
 
@@ -226,7 +226,7 @@ Optional settings:
 - `MONITORED_CHAT_IDS`: comma-separated Chat GUIDs to monitor from the first event. If empty, discover chats through the webhook and enable them in the Web UI.
 - `MESSAGE_RETENTION_DAYS`: archived bodies and attachment metadata are kept for 90 days by default. `0` explicitly accepts indefinite retention.
 - `ENABLE_WEB_SEARCH`: defaults to `false` and acts as the deployment-level safety switch. Once enabled, manage retries, timeouts, result limits, and failure fallback from the AI page's global Web Search settings; saved changes apply immediately.
-- `BUBBLEPILOT_IMAGE`: source deployments build locally. For a release deployment, pin `ghcr.io/shigella520/bubblepilot:2.0.0` instead of relying on `dev` or `latest`.
+- `BUBBLEPILOT_IMAGE`: source deployments build locally. For a release deployment, pin `ghcr.io/shigella520/bubblepilot:3.0.0` instead of relying on `dev` or `latest`.
 
 ### 4. Start and check the stack
 
