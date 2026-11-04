@@ -1,3 +1,4 @@
+import { serializeTriggerConfig } from "../apps/web/src/utils/workflow-trigger-config.js";
 import { ConversationContextService } from "../modules/workflow/conversation-context-service.js";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -67,6 +68,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       providerMessageId: "fictional-result",
     },
     loadContext = false,
+    sharedMeme = false,
   ) {
     const chatId = `fictional-idle-${randomUUID()}`;
     let now = new Date(Date.now() + 60_000);
@@ -96,7 +98,11 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
           id: "message-trigger",
           type: "message-trigger",
           version: 1,
-          config: { enabled: true, scheduled: config },
+          config: JSON.parse(
+            JSON.stringify(
+              serializeTriggerConfig({ enabled: true, scheduled: config }),
+            ),
+          ) as Record<string, unknown>,
           onSuccess: loadContext ? "context" : "ai",
         },
         {
@@ -112,6 +118,10 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
             promptTemplate: "Respond naturally",
             outputVariable: "reply",
             includeLoadedContext: loadContext,
+            allowMemes: sharedMeme,
+            ...(sharedMeme
+              ? { pluginIds: [randomUUID()], webSearch: "auto" }
+              : {}),
           },
           onSuccess: "reply",
         },
@@ -120,6 +130,14 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
           type: "reply",
           version: 1,
           config: { text: "{{variables.reply}}" },
+          ...(sharedMeme
+            ? {
+                inputs: {
+                  text: { kind: "output", blockId: "ai", port: "text" },
+                  meme: { kind: "output", blockId: "ai", port: "meme" },
+                },
+              }
+            : {}),
           onSuccess: "end",
         },
         { id: "end", type: "end", version: 1, config: {} },
@@ -268,11 +286,16 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
     expect(s.send).not.toHaveBeenCalled();
   });
   it("requests the model at due time with latest history and sends exactly once", async () => {
-    const s = await setup(undefined, true);
+    const s = await setup(undefined, true, true);
     const c = await create(s);
-    const model = vi
-      .spyOn(AgentRunner.prototype, "run")
-      .mockResolvedValue(success("五点到了，请记得抢票！"));
+    const model = vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue({
+      ...success("五点到了，请记得抢票！"),
+      selectedMeme: {
+        id: randomUUID(),
+        name: "fictional",
+        hash: "a".repeat(64),
+      },
+    });
     await due(c.task.id);
     await s.scheduler.tick();
     await s.scheduler.tick();
@@ -285,6 +308,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       idleDecision: false,
       pluginIds: [],
       allowMemes: false,
+      webSearch: "disabled",
     });
     expect((await s.tasks.detail(c.task.id)).task.status).toBe("sent");
     const run = (await s.tasks.detail(c.task.id)).runs[0]!;

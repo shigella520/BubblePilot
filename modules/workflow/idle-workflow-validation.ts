@@ -107,12 +107,6 @@ export function validateIdlePaths(
     }
     if (eventType === "scheduled-task" && node.type === "ai-chat" && decision)
       reject("only one AI generation node is allowed");
-    if (
-      eventType === "scheduled-task" &&
-      node.type === "reply" &&
-      node.inputs?.meme
-    )
-      reject("reminders cannot send memes");
     if (eventType === "scheduled-task" && node.type === "end" && !sent)
       reject("reminder path must send a reply");
     const nextDecision = decision || node.type === "ai-chat";

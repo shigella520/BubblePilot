@@ -1478,7 +1478,12 @@ class ReplyNodeHandler extends BaseNodeHandler {
       inputText === undefined ? node.config.text : contextText(inputText),
       context,
     );
-    const selected = resolveInput(node, "meme", context);
+    // Shared message workflows may wire memes; scheduled reminders stay text-only
+    // and must pass the scheduled-send fence below.
+    const selected =
+      context.envelope.schemaVersion === "scheduled-task-v1"
+        ? null
+        : resolveInput(node, "meme", context);
     if (selected !== undefined && selected !== null) {
       const meme = z
         .object({

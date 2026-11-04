@@ -52,3 +52,28 @@ it("rejects literal meme IDs, JSON AI mode and native reply combinations", () =>
   disabled.nodes[0]!.config.allowMemes = false;
   expect(() => parseWorkflowDefinition(disabled)).toThrow();
 });
+
+it("allows reminder triggering on a shared text and meme reply workflow", () => {
+  const shared = definition();
+  const trigger = {
+    id: "message-trigger",
+    type: "message-trigger",
+    version: 1,
+    config: {
+      scheduled: {
+        enabled: true,
+        chatIds: ["fictional-chat"],
+        timeZone: "UTC",
+      },
+    },
+    onSuccess: "ai",
+  };
+  const parsed = parseWorkflowDefinition({
+    ...shared,
+    startNodeId: trigger.id,
+    nodes: [trigger, ...shared.nodes],
+  });
+  expect(
+    parsed.nodes.find((node) => node.type === "reply")?.inputs?.meme,
+  ).toEqual({ kind: "output", blockId: "ai", port: "meme" });
+});
