@@ -42,12 +42,12 @@
   </a>
 </p>
 
-BubblePilot receives new-message events from BlueBubbles, archives only the chats you choose, matches triggers, and runs visual workflows. A workflow can load recent conversation context and images, call one or more OpenAI-compatible providers, search the web when needed, and safely reply to the original chat.
+BubblePilot receives new-message events from BlueBubbles, archives only the chats you choose, matches triggers, and runs visual workflows. A workflow can load recent conversation context and images, call one or more OpenAI-compatible providers, search the web when needed, and safely reply to the original chat. When enabled, the same personas can also initiate idle conversations or send scheduled reminders.
 
 - **Selective archiving:** unmonitored chats keep only the minimum metadata needed for discovery; message bodies are not archived.
 - **Explainable automation:** inbound decisions, nodes, AI attempts, search tools, and outgoing delivery states are traceable in the Web UI.
 - **No single AI dependency:** providers can Retry and Fallback in a fixed order, with automatic degradation after repeated failures.
-- **Group-chat participants stay identifiable:** configure real names and nicknames for sender IDs already seen in each chat; AI only receives mappings that occur in the current context.
+- **Group-chat participants stay identifiable:** configure real names and nicknames for sender IDs already seen in each chat; AI receives all configured participant mappings for that chat.
 - **Link cards become usable context:** prefer BlueBubbles metadata, safely fall back to public Open Graph, and retain bounded diagnostics.
 - **Native multimodal models can understand images:** temporarily load current attachments, link-card images, and a bounded recent-image history under instance-wide safety limits, with records of image inputs and request states.
 - **Your instance owns the data:** PostgreSQL is authoritative for messages, configuration, executions, and audit records.
@@ -56,22 +56,22 @@ Before upgrading to **2.0.0**, read the [upgrade guide](doc/部署与运维.md#�
 
 ## What you can build
 
-[![BubblePilot highlights: memory, AI memes, MCP plugins, and workflow automation](assets/preview/bubblepilot-highlights.svg)](assets/preview/bubblepilot-highlights.svg)
+[![BubblePilot highlights: memory, proactive chats, reminders, plugin sandboxes, and workflows](assets/preview/bubblepilot-highlights.svg)](assets/preview/bubblepilot-highlights.svg)
 
 | Top 10 features | What you can do |
 | --- | --- |
-| Long-term vector memory | Retrieve authorized chat history with semantic and keyword search, raw-message queries, context expansion, counts, and earliest/latest matches. |
-| On-demand web search | Get current web information through provider-hosted search or self-hosted SearXNG. |
-| Image understanding | Understand current chat images and link-card images, or retrieve historical images after searching messages to inspect details missing from summaries. |
-| Workflow personas | Give automations distinct names and identify bot messages so models can distinguish personas in the same chat. |
-| AI memes and media library | Upload images or GIFs, organize collections, manage items in batches, and track usage; AI can choose one suitable meme to send after its text reply. |
-| Plugin management and MCP | Import compatible plugins from Git repositories or ZIP files, manage Skills and remote MCP tools, and authorize workflows to load and call them on demand. |
-| Visual workflows | Connect triggers, conditions, context, AI, and reply nodes to build chat bots and message automations. |
-| Agent tool orchestration | Combine history, web search, image viewing, memes, and plugin tools across turns; read large results in chunks within shared call, content, and time budgets. |
-| Multiple models and fallback | Connect local or cloud OpenAI-compatible services with routes, retries, and backup providers to reduce single-provider failures. |
-| End-to-end execution tracing | Inspect nodes, model usage, plugin and tool calls, image inputs, and text/image delivery states to diagnose failures and recover pending tasks. |
+| Long-term chat memory | Find past conversations with semantic and keyword search, expand original messages, and query or count by participant and time. |
+| Web search and page reading | Find current information through provider-hosted search or SearXNG, then read page content with configured MCP tools. |
+| Image understanding | Understand current images and link cards, and inspect historical images on demand. |
+| AI memes and media library | Manage images, GIFs, and collections; let AI choose and send a meme that fits the conversation. |
+| Plugins, MCP, and sandboxes | Import compatible Git or ZIP plugins and load Skills and tools on demand; extend into page fetching, Python calculations, and file processing. |
+| Visual workflows with personas | Give personas distinct names and arrange conditions, context, AI, and reply nodes on a canvas. |
+| Proactive idle conversations | Let selected chats receive a proactive message after quiet periods, with quiet hours, quotas, and configurable guidance. |
+| Scheduled chat reminders | Create, edit, or cancel reminders in natural language; the original persona sends them with context when due, scoped to chat and workflow. |
+| Multiple models and fallback | Connect local or cloud OpenAI-compatible services with model routes, retries, and backup providers. |
+| Agent tools and execution tracing | Combine tools across turns, read large results in chunks, and trace calls, model usage, reminder status, and message delivery. |
 
-Plugins support a declarative subset of the Codex format for administrator-approved public-information queries; arbitrary scripts, stdio, OAuth, and personal-app authorization are not supported. These features describe the current source and Dev image; check release notes for availability in a stable image.
+Plugins support a declarative subset of the Codex format. They do not execute scripts on the application host or support stdio, OAuth, or personal-app authorization. Once configured and authorized by an administrator, a separately deployed remote OpenSandbox service can execute isolated code; sandboxes are created, reused, and cleaned up per task. Idle conversations and scheduled reminders are off by default and enabled in existing workflows. These features describe the current source and Dev image; check release notes for stable-image availability.
 
 Web search is optional. With it disabled, archiving, regular workflows, and non-search AI replies continue to work.
 
