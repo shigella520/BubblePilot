@@ -1,3 +1,5 @@
+import { TaskService } from "../modules/scheduled-tasks/task-service.js";
+import { TaskScheduler } from "../modules/scheduled-tasks/task-scheduler.js";
 import { DEFAULT_CONTEXT_SETTINGS } from "../modules/workflow/context-settings-types.js";
 import { IdleScheduler } from "../modules/workflow/idle-scheduler.js";
 import { runtimeTimeZone } from "../modules/workflow/context-time.js";
@@ -264,12 +266,17 @@ const memeDelivery = new MemeDeliveryService(
   replyGateway,
   new SettingsCipher(config.settingsEncryptionKey),
 );
+const tasks = new TaskService(
+  memoryService.repository.pool,
+  workflowRepository,
+);
 const workflowEngine = new WorkflowEngine(
   workflowRepository,
   createDefaultNodeRegistry(workflowRepository, replyGateway, {
     archive: repository,
     aiRouting,
     aiAgent,
+    tasks,
     memeDelivery,
     imageInput: nativeImageInput,
     conversationContext,
@@ -297,7 +304,18 @@ const idleScheduler = new IdleScheduler(
       "Idle scheduling failed",
     ),
 );
-memeDelivery.setIdleSendGuard((id) => idleScheduler.guardExecution(id));
+const taskScheduler = new TaskScheduler(tasks, workflowEngine, () =>
+  application.log.error(
+    { code: "TASK_SCHEDULER_FAILED" },
+    "Task scheduling failed",
+  ),
+);
+memeDelivery.setIdleSendGuard(async (id) =>
+  (await workflowRepository.getExecution(id))?.triggerEvent?.schemaVersion ===
+  "scheduled-task-v1"
+    ? "scheduled-manual-redelivery-not-supported"
+    : idleScheduler.guardExecution(id),
+);
 const application = buildApplication(config, repository, {
   networkSettings,
   auth: authService,
@@ -320,6 +338,8 @@ const application = buildApplication(config, repository, {
     repository: workflowRepository,
     engine: workflowEngine,
     idleScheduler,
+    tasks,
+    taskScheduler,
     dispatcher: workflowDispatcher,
     contextState: conversationContext,
     conversationContext,
@@ -340,6 +360,7 @@ const application = buildApplication(config, repository, {
 
 const shutdown = async (signal: string) => {
   application.log.info({ signal }, "Shutting down BubblePilot");
+  await taskScheduler.close();
   await idleScheduler.close();
   await application.close();
   process.exitCode = 0;
@@ -352,6 +373,7 @@ try {
   botIdentity.start();
   await application.listen({ host: config.host, port: config.port });
   idleScheduler.start();
+  taskScheduler.start();
 } catch (error) {
   application.log.fatal({ err: error }, "BubblePilot failed to start");
   await application.close();

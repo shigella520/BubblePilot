@@ -11,6 +11,7 @@ import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
 import MemorySources from "../components/MemorySources.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
+import ScheduledTasksPanel from "../components/workflow/ScheduledTasksPanel.vue";
 import IdleAuditPanel from "../components/workflow/IdleAuditPanel.vue";
 import {
   ChartColumn,
@@ -44,6 +45,18 @@ import { useCursorPager } from "../composables/useCursorPager";
 import { apiPageRequest, apiRequest, errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
 
+function scheduledToolName(name: string) {
+  return (
+    (
+      {
+        create_scheduled_task: "创建定时提醒",
+        list_scheduled_tasks: "查询定时提醒",
+        update_scheduled_task: "修改定时提醒",
+        cancel_scheduled_task: "取消定时提醒",
+      } as Record<string, string>
+    )[name] ?? name
+  );
+}
 function scrollToImage(id: string) {
   document
     .getElementById(`image-input-${id}`)
@@ -95,7 +108,12 @@ function imageToolLabel(details: Record<string, unknown> | null) {
 interface Execution {
   triggerEvent?: {
     schemaVersion: string;
-    idle: {
+    scheduled?: {
+      taskId: string;
+      scheduledAt: string;
+      upperMessageIndex: string;
+    };
+    idle?: {
       triggeredAt: string;
       activityGeneration: string;
       upperMessageIndex: string;
@@ -1061,6 +1079,7 @@ function contextSnapshotValue(
           { id: 'ai-usage', label: 'AI 用量与缓存', icon: ChartColumn },
           { id: 'memory-jobs', label: '历史索引', icon: FileClock },
           { id: 'idle-conversations', label: '空闲主动交流', icon: FileClock },
+          { id: 'scheduled-tasks', label: '定时任务', icon: FileClock },
           { id: 'executions', label: '执行记录', icon: FileClock },
           { id: 'audit', label: '审计事件', icon: ShieldCheck },
         ]"
@@ -1242,6 +1261,7 @@ function contextSnapshotValue(
       </section>
       <MemoryPanel id="memory-jobs" mode="jobs" embedded />
       <IdleAuditPanel id="idle-conversations" />
+      <ScheduledTasksPanel id="scheduled-tasks" />
       <section id="executions" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -1629,7 +1649,10 @@ function contextSnapshotValue(
               </span>
             </p>
           </section>
-          <section v-if="detail.triggerEvent" class="context-snapshot-note">
+          <section
+            v-if="detail.triggerEvent?.idle"
+            class="context-snapshot-note"
+          >
             <strong>空闲主动交流</strong>
             <p v-if="idleReasonText(detail.errorCode)">
               {{ idleReasonText(detail.errorCode) }}
@@ -1638,6 +1661,18 @@ function contextSnapshotValue(
               本轮没有新的用户消息；活动代次
               {{ detail.triggerEvent.idle.activityGeneration }}，历史独占上界
               {{ detail.triggerEvent.idle.upperMessageIndex }}。
+            </p>
+          </section>
+          <section
+            v-if="detail.triggerEvent?.scheduled"
+            class="context-snapshot-note"
+          >
+            <strong>定时提醒</strong>
+            <p>
+              任务 {{ detail.triggerEvent.scheduled.taskId }}；计划时间
+              {{
+                detail.triggerEvent.scheduled.scheduledAt
+              }}。本轮到期重新生成提醒，没有新的用户消息。
             </p>
           </section>
           <div class="trace-columns">
@@ -2171,7 +2206,7 @@ function contextSnapshotValue(
                   <strong
                     >{{
                       pluginToolPresentation(item, detail.nodes)?.title ??
-                      item.toolName
+                      scheduledToolName(item.toolName)
                     }}
                     · {{ item.status }}</strong
                   >

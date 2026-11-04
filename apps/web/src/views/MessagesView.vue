@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AdminFormDialog from "../components/AdminFormDialog.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
 import AdminDetailDialog from "../components/AdminDetailDialog.vue";
@@ -985,31 +986,15 @@ onBeforeUnmount(() =>
             </tbody>
           </table>
         </div>
-        <article v-if="participantChat" class="participant-editor">
-          <header>
-            <div>
-              <p class="card-kicker">PARTICIPANT IDENTITIES</p>
-              <h3>
-                {{
-                  participantChat.displayName || participantChat.providerChatId
-                }}
-                · 成员映射
-              </h3>
-              <p>
-                只列出该聊天历史中实际出现过的发送者
-                ID。留空本名和昵称后保存即可删除对应映射。
-              </p>
-            </div>
-            <button
-              class="icon-button"
-              type="button"
-              :disabled="participantSaveBusy"
-              aria-label="关闭成员映射编辑器"
-              @click="closeParticipantEditor"
-            >
-              <X :size="16" />
-            </button>
-          </header>
+        <AdminFormDialog
+          v-if="participantChat"
+          title="聊天成员映射"
+          :busy="participantSaveBusy || participantBusy"
+          :saved-version="participantDrafts"
+          :draft="participantDrafts"
+          @close="closeParticipantEditor"
+        >
+          <p v-if="message" role="status">{{ message }}</p>
           <div v-if="participantBusy" class="empty-panel">
             <Users :size="28" /><strong>正在读取历史成员…</strong>
           </div>
@@ -1080,7 +1065,7 @@ onBeforeUnmount(() =>
               }}
             </button>
           </div>
-        </article>
+        </AdminFormDialog>
         <CursorPagination
           :page="chatPager.pageNumber.value"
           :item-count="chats.length"

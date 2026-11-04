@@ -1,3 +1,4 @@
+import { scheduledTriggerSchema } from "../scheduled-tasks/task-policy.js";
 import { idleTriggerSchema } from "./idle-policy.js";
 import { validateIdlePaths } from "./idle-workflow-validation.js";
 import { executionPolicy } from "../ai/execution-policy.js";
@@ -50,6 +51,7 @@ const messageTriggerNodeSchema = z.object({
   version: z.literal(1),
   config: z.object({
     idle: idleTriggerSchema.optional(),
+    scheduled: scheduledTriggerSchema.optional(),
     provider: z.string().max(64).default(""),
     chatIds: z.array(z.string().max(200)).max(50).default([]),
     senderIds: z.array(z.string().max(200)).max(50).default([]),
@@ -481,5 +483,6 @@ export function parseWorkflowDefinition(value: unknown): WorkflowDefinition {
   const definition = workflowDefinitionSchema.parse(value);
   validateSemantics(definition);
   validateIdlePaths(definition);
+  validateIdlePaths(definition, "scheduled-task");
   return definition;
 }

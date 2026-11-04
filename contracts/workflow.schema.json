@@ -207,6 +207,43 @@
                         ],
                         "additionalProperties": false
                       },
+                      "scheduled": {
+                        "type": "object",
+                        "properties": {
+                          "enabled": {
+                            "default": false,
+                            "type": "boolean"
+                          },
+                          "chatIds": {
+                            "default": [],
+                            "maxItems": 50,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            }
+                          },
+                          "timeZone": {
+                            "default": "Asia/Shanghai",
+                            "type": "string",
+                            "maxLength": 100
+                          },
+                          "memberPendingLimit": {
+                            "default": 20,
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100
+                          }
+                        },
+                        "required": [
+                          "enabled",
+                          "chatIds",
+                          "timeZone",
+                          "memberPendingLimit"
+                        ],
+                        "additionalProperties": false
+                      },
                       "provider": {
                         "default": "",
                         "type": "string",

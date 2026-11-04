@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { serializeTriggerConfig } from "../../utils/workflow-trigger-config";
 import { workflowDataEdges } from "../../utils/workflow-data-edges";
 import { isCanvasShortcut } from "../../utils/keyboard-scope";
 import { executionPolicy } from "../../../../../modules/ai/execution-policy";
@@ -540,26 +541,7 @@ function toDefinition() {
       return {
         ...common,
         type: "message-trigger",
-        config: {
-          ...(nodeConfig.idle ? { idle: nodeConfig.idle } : {}),
-          provider: nodeConfig.provider ?? "",
-          chatIds: Array.isArray(nodeConfig.chatIds) ? nodeConfig.chatIds : [],
-          senderIds: Array.isArray(nodeConfig.senderIds)
-            ? nodeConfig.senderIds
-            : [],
-          contentTypes: Array.isArray(nodeConfig.contentTypes)
-            ? nodeConfig.contentTypes
-            : [],
-          includeFromMe: Boolean(nodeConfig.includeFromMe),
-          enabled: Boolean(nodeConfig.enabled),
-          text: nodeConfig.textValue
-            ? {
-                kind: nodeConfig.textKind ?? "prefix",
-                value: nodeConfig.textValue,
-                caseSensitive: false,
-              }
-            : null,
-        },
+        config: serializeTriggerConfig(nodeConfig),
         ...(next.get(node.id) ? { onSuccess: next.get(node.id) } : {}),
       };
     if (node.data.block.type === "condition")

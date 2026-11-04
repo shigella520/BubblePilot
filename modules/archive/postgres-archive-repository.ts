@@ -754,20 +754,17 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     }
   }
 
-  async resolveParticipantIdentities(
+  async listParticipantIdentities(
     providerChatId: string,
-    senderIds: readonly string[],
   ): Promise<readonly ChatParticipantIdentity[]> {
-    if (senderIds.length === 0) return [];
     const result = await this.pool.query<ParticipantIdentityRow>(
       `SELECT i.sender_id, i.real_name, i.nickname
        FROM chat_participant_identities i
        INNER JOIN chats c ON c.id = i.chat_id
        WHERE c.provider = 'bluebubbles'
          AND c.provider_chat_id = $1
-         AND i.sender_id = ANY($2::text[])
        ORDER BY i.sender_id`,
-      [providerChatId, [...new Set(senderIds)]],
+      [providerChatId],
     );
     return result.rows.map(participantIdentity);
   }

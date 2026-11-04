@@ -1,3 +1,12 @@
+import type { WorkflowExecutionRecord } from "../modules/workflow/workflow-repository.js";
+import type { TaskService } from "../modules/scheduled-tasks/task-service.js";
+import type { TaskScheduler } from "../modules/scheduled-tasks/task-scheduler.js";
+import {
+  TaskError,
+  taskStatusSchema,
+  updateTaskSchema,
+  cancelTaskSchema,
+} from "../modules/scheduled-tasks/task-policy.js";
 import type { IdleScheduler } from "../modules/workflow/idle-scheduler.js";
 import multipart from "@fastify/multipart";
 import { registerPluginRoutes } from "../modules/plugins/plugin-routes.js";
@@ -363,6 +372,8 @@ export interface ApplicationOptions {
     repository: WorkflowRepository;
     engine: MessageAutomation;
     idleScheduler?: IdleScheduler;
+    tasks?: TaskService;
+    taskScheduler?: TaskScheduler;
     dispatcher?: WorkflowExecutionDispatcher;
     contextState?: {
       close(): Promise<void>;
@@ -684,6 +695,25 @@ export function buildApplication(
   };
 
   application.setErrorHandler((error, request, reply) => {
+    if (
+      error instanceof Error &&
+      error.message === "TASK_CHAT_WORKFLOW_CONFLICT"
+    )
+      return reply.status(409).send({
+        error: {
+          code: "TASK_CHAT_WORKFLOW_CONFLICT",
+          message: "此聊天已绑定其他提醒工作流。",
+          correlationId: request.id,
+        },
+      });
+    if (error instanceof TaskError)
+      return reply.status(error.code === "TASK_NOT_FOUND" ? 404 : 409).send({
+        error: {
+          code: error.code,
+          message: "定时任务操作未完成，请检查任务状态、时间或版本。",
+          correlationId: request.id,
+        },
+      });
     if (error instanceof WorkflowCapacityError) {
       void reply.status(503).send({
         error: {
@@ -960,6 +990,107 @@ export function buildApplication(
       await requireAdmin(request);
       sensitiveAudits.set(request, { action, targetType });
     };
+
+  const taskAdminId = (request: FastifyRequest) => {
+    const p = principals.get(request);
+    return p?.kind === "session" ? p.sessionId : "api-token";
+  };
+  const taskService = () => {
+    if (!options.workflow?.tasks)
+      throw new ApplicationError(
+        "TASKS_UNAVAILABLE",
+        "定时任务服务不可用。",
+        503,
+      );
+    return options.workflow.tasks;
+  };
+  application.get(
+    "/api/v1/scheduled-tasks",
+    { preHandler: requireAdmin },
+    async (request) => {
+      const query = z
+        .object({
+          workflowId: z.string().uuid().optional(),
+          chatId: z.string().uuid().optional(),
+          status: taskStatusSchema.optional(),
+          offset: z.coerce.number().int().min(0).max(100000).default(0),
+          limit: z.coerce.number().int().min(1).max(50).default(20),
+        })
+        .parse(request.query);
+      return { data: await taskService().list(query) };
+    },
+  );
+  application.get(
+    "/api/v1/scheduled-tasks/:taskId",
+    { preHandler: requireSensitive("scheduled-task.read", "scheduled-task") },
+    async (request) => {
+      const { taskId } = z
+        .object({ taskId: z.string().uuid() })
+        .parse(request.params);
+      return { data: await taskService().detail(taskId) };
+    },
+  );
+  application.patch(
+    "/api/v1/scheduled-tasks/:taskId",
+    { preHandler: requireSensitive("scheduled-task.update", "scheduled-task") },
+    async (request) => {
+      const { taskId } = z
+        .object({ taskId: z.string().uuid() })
+        .parse(request.params);
+      const input = updateTaskSchema.parse({
+        ...z.record(z.string(), z.unknown()).parse(request.body),
+        id: taskId,
+      });
+      return {
+        data: await taskService().change(
+          { kind: "admin", id: taskAdminId(request) },
+          input,
+          false,
+        ),
+      };
+    },
+  );
+  application.post(
+    "/api/v1/scheduled-tasks/:taskId/cancel",
+    { preHandler: requireSensitive("scheduled-task.cancel", "scheduled-task") },
+    async (request) => {
+      const { taskId } = z
+        .object({ taskId: z.string().uuid() })
+        .parse(request.params);
+      const input = cancelTaskSchema.parse({
+        ...z.record(z.string(), z.unknown()).parse(request.body),
+        id: taskId,
+      });
+      return {
+        data: await taskService().change(
+          { kind: "admin", id: taskAdminId(request) },
+          input,
+          true,
+        ),
+      };
+    },
+  );
+  application.get(
+    "/api/v1/settings/scheduled-tasks",
+    { preHandler: requireAdmin },
+    async () => ({ data: await taskService().settings() }),
+  );
+  application.put(
+    "/api/v1/settings/scheduled-tasks",
+    { preHandler: requireSensitive("scheduled-task.settings", "settings") },
+    async (request) => {
+      const input = z
+        .object({
+          paused: z.boolean(),
+          pendingLimit: z.number().int().min(1).max(10000),
+          catchupMinutes: z.number().int().min(0).max(1440),
+          expectedVersion: z.number().int().positive(),
+        })
+        .strict()
+        .parse(request.body);
+      return { data: await taskService().configure(input) };
+    },
+  );
 
   application.get("/api/v1/settings/idle", { preHandler: requireAdmin }, () => {
     if (!options.workflow?.idleScheduler)
@@ -2952,12 +3083,28 @@ export function buildApplication(
         };
       },
     );
+    const executionMetadata = <T extends WorkflowExecutionRecord>(
+      execution: T,
+    ): T =>
+      execution.triggerEvent?.schemaVersion === "scheduled-task-v1"
+        ? {
+            ...execution,
+            triggerEvent: {
+              ...execution.triggerEvent,
+              scheduled: {
+                ...execution.triggerEvent.scheduled,
+                content: "",
+                requestSnapshot: "",
+              },
+            },
+          }
+        : execution;
     const executionDetail = async (executionId: string) => {
       const execution = await workflowRepository.getExecution(executionId);
       return execution === null
         ? null
         : {
-            ...execution,
+            ...executionMetadata(execution),
             aiProviderAttempts: (
               (await options.ai?.repository.listAttempts(executionId)) ?? []
             ).map((attempt) => ({
@@ -3084,7 +3231,8 @@ export function buildApplication(
         if (
           candidate?.definition.nodes.some(
             (node) =>
-              node.type === "message-trigger" && node.config.idle?.enabled,
+              node.type === "message-trigger" &&
+              (node.config.idle?.enabled || node.config.scheduled?.enabled),
           )
         ) {
           await requireSensitive("workflow.idle.publish", "workflow")(request);
@@ -3099,6 +3247,39 @@ export function buildApplication(
                   409,
                 );
             }
+          }
+        }
+        for (const node of candidate?.definition.nodes ?? []) {
+          if (
+            node.type !== "message-trigger" ||
+            !node.config.scheduled?.enabled
+          )
+            continue;
+          for (const chatId of node.config.scheduled.chatIds) {
+            if (!(await repository.getChatMonitoringState(chatId)))
+              throw new ApplicationError(
+                "TASK_CHAT_UNAVAILABLE",
+                "提醒目标聊天不可用。",
+                409,
+              );
+            const conflict = (
+              await workflowRepository.listActiveTriggerBindings()
+            ).some(
+              (binding) =>
+                binding.workflowId !== parameters.workflowId &&
+                binding.definition.nodes.some(
+                  (n) =>
+                    n.type === "message-trigger" &&
+                    n.config.scheduled?.enabled &&
+                    n.config.scheduled.chatIds.includes(chatId),
+                ),
+            );
+            if (conflict)
+              throw new ApplicationError(
+                "TASK_CHAT_WORKFLOW_CONFLICT",
+                "此聊天已绑定其他提醒工作流。",
+                409,
+              );
           }
         }
         for (const node of candidate?.definition.nodes ?? []) {
@@ -3140,7 +3321,12 @@ export function buildApplication(
                 (node) =>
                   node.type === "ai-chat" &&
                   node.config.providerRouteId === routeId &&
-                  !!node.config.pluginIds?.length,
+                  (!!node.config.pluginIds?.length ||
+                    !!candidate?.definition.nodes.some(
+                      (n) =>
+                        n.type === "message-trigger" &&
+                        n.config.scheduled?.enabled,
+                    )),
               ) ?? false,
             ))
           ) {
@@ -3185,7 +3371,8 @@ export function buildApplication(
               includeFromMe: triggerNode.config.includeFromMe,
               enabled:
                 triggerNode.config.enabled ||
-                !!triggerNode.config.idle?.enabled,
+                !!triggerNode.config.idle?.enabled ||
+                !!triggerNode.config.scheduled?.enabled,
             });
           } else {
             await workflowRepository.updateTrigger(existing.id, {
@@ -3195,7 +3382,9 @@ export function buildApplication(
             });
             await workflowRepository.updateTriggerEnabled(
               existing.id,
-              triggerNode.config.enabled || !!triggerNode.config.idle?.enabled,
+              triggerNode.config.enabled ||
+                !!triggerNode.config.idle?.enabled ||
+                !!triggerNode.config.scheduled?.enabled,
             );
           }
         }
@@ -3222,7 +3411,8 @@ export function buildApplication(
                 version.definition.nodes.some(
                   (node) =>
                     node.type === "message-trigger" &&
-                    node.config.idle?.enabled,
+                    (node.config.idle?.enabled ||
+                      node.config.scheduled?.enabled),
                 ),
             )
           )
@@ -3321,7 +3511,8 @@ export function buildApplication(
           if (
             version?.definition.nodes.some(
               (node) =>
-                node.type === "message-trigger" && node.config.idle?.enabled,
+                node.type === "message-trigger" &&
+                (node.config.idle?.enabled || node.config.scheduled?.enabled),
             )
           )
             await requireSensitive(
@@ -3363,7 +3554,8 @@ export function buildApplication(
           if (
             version?.definition.nodes.some(
               (node) =>
-                node.type === "message-trigger" && node.config.idle?.enabled,
+                node.type === "message-trigger" &&
+                (node.config.idle?.enabled || node.config.scheduled?.enabled),
             )
           )
             await requireSensitive(
@@ -3447,10 +3639,14 @@ export function buildApplication(
           ...(query.attention ? { attention: query.attention } : {}),
           cursor: decodeCursor(query.cursor),
         });
-        return cursorPage(executions, query.limit, (execution) => ({
-          timestamp: execution.createdAt,
-          id: execution.id,
-        }));
+        return cursorPage(
+          executions.map(executionMetadata),
+          query.limit,
+          (execution) => ({
+            timestamp: execution.createdAt,
+            id: execution.id,
+          }),
+        );
       },
     );
 

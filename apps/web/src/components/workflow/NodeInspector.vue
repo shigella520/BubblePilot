@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, vue/no-mutating-props */
+import ScheduledTriggerSettings from "./ScheduledTriggerSettings.vue";
 import IdleTriggerSettings from "./IdleTriggerSettings.vue";
 import { ref, onMounted } from "vue";
 import { apiRequest } from "../../services/api";
@@ -16,7 +17,10 @@ import { executionPolicy } from "../../../../../modules/ai/execution-policy";
 import ContextTemplateEditor from "./ContextTemplateEditor.vue";
 
 const contextTemplateReferences = [
-  { token: "context.event.type", label: "触发类型（message / chat-idle）" },
+  {
+    token: "context.event.type",
+    label: "触发类型（message / chat-idle / scheduled-task）",
+  },
   { token: "context.event.message.text", label: "当前消息文本" },
   { token: "context.event.message.senderId", label: "当前发送者标识" },
   {
@@ -233,6 +237,15 @@ function configVisible(item: any): boolean {
           ?.options ?? []
       "
       @update:model-value="(value) => (props.config.idle = value)"
+    />
+    <ScheduledTriggerSettings
+      v-if="node.data.block.type === 'message-trigger'"
+      :model-value="props.config.scheduled"
+      :chats="
+        node.data.block.config.find((field: any) => field.name === 'chatIds')
+          ?.options ?? []
+      "
+      @update:model-value="(value) => (props.config.scheduled = value)"
     />
     <section
       v-if="node.data.block.type === 'ai-chat'"

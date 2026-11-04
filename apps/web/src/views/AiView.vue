@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AdminFormDialog from "../components/AdminFormDialog.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentSettingsPanel from "../components/AgentSettingsPanel.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
@@ -191,6 +192,8 @@ const providerTestBusyIds = reactive(new Set<string>());
 const providerResetBusyIds = reactive(new Set<string>());
 const providerDeleteBusyIds = reactive(new Set<string>());
 const providerOrderBusy = ref(false);
+const providerDialog = ref(false);
+const routeDialog = ref(false);
 const providerFormBusy = ref(false);
 const routeFormBusy = ref(false);
 const routeToggleBusyIds = reactive(new Set<string>());
@@ -444,9 +447,8 @@ function editProvider(item: Provider) {
     hostedWebSearch: item.capabilities?.hostedWebSearch ?? false,
     imageInput: item.capabilities?.imageInput ?? false,
   });
-  document
-    .querySelector("#provider-form")
-    ?.scrollIntoView({ behavior: "smooth" });
+  message.value = "";
+  providerDialog.value = true;
 }
 async function saveProvider() {
   if (providerFormBusy.value) return;
@@ -485,6 +487,7 @@ async function saveProvider() {
       ...providers.value.filter((item) => item.id !== saved.id),
       saved,
     ].sort((left, right) => left.sortOrder - right.sortOrder);
+    providerDialog.value = false;
     resetProvider();
     message.value = `已${isUpdate ? "更新" : "创建"} AI Provider「${saved.name}」。`;
     messageIsError.value = false;
@@ -696,6 +699,8 @@ function resetRoute() {
   });
 }
 function editRoute(item: AiRoute) {
+  message.value = "";
+  routeDialog.value = true;
   Object.assign(routeForm, {
     id: item.id,
     expectedVersion: item.version,
@@ -739,6 +744,7 @@ async function saveRoute() {
       ...routes.value.filter((item) => item.id !== saved.id),
       saved,
     ];
+    routeDialog.value = false;
     resetRoute();
     message.value = `已${isUpdate ? "更新" : "创建"} Provider 路由「${saved.name}」。`;
     messageIsError.value = false;
@@ -1174,6 +1180,17 @@ onMounted(async () => {
           拖拽或使用上下按钮改变固定顺序，启停和连通性测试即时反馈；Secret API
           Key 会在服务端加密保存，列表和接口不会回显原值。
         </p>
+        <button
+          class="button primary"
+          type="button"
+          @click="
+            resetProvider();
+            message = '';
+            providerDialog = true;
+          "
+        >
+          <Plus :size="16" />新建 Provider
+        </button>
         <div class="provider-list">
           <article
             v-for="item in providers"
@@ -1321,108 +1338,119 @@ onMounted(async () => {
             <Bot :size="28" /><strong>暂无 Provider</strong>
           </div>
         </div>
-        <form
-          id="provider-form"
-          class="settings-form boxed-form"
-          @submit.prevent="saveProvider"
+        <AdminFormDialog
+          v-if="providerDialog"
+          :title="providerForm.id ? '编辑 Provider' : '新建 Provider'"
+          :busy="providerFormBusy"
+          :draft="providerForm"
+          @close="providerDialog = false"
         >
-          <h3>
-            <Plus :size="18" />{{
-              providerForm.id ? "编辑 Provider" : "新建 Provider"
-            }}
-          </h3>
-          <div class="field-grid">
-            <label
-              ><span>名称</span
-              ><input v-model.trim="providerForm.name" required /></label
-            ><label
-              ><span>API 类型</span
-              ><select v-model="providerForm.apiKind">
-                <option value="chat-completions">Chat Completions</option>
-                <option value="responses">Responses</option>
-              </select></label
-            ><label class="wide-field"
-              ><span>Base URL</span
-              ><input
-                v-model.trim="providerForm.baseUrl"
-                type="url"
-                required /></label
-            ><label
-              ><span>模型</span
-              ><input v-model.trim="providerForm.model" required /></label
-            ><label
-              ><span>API Key / Secret（Ollama 可留空）</span
-              ><input
-                v-model="providerForm.secret"
-                type="password"
-                autocomplete="new-password"
-                placeholder="例如 sk-…；本地 Ollama 无需填写" /></label
-            ><label
-              ><span>单次请求超时（毫秒）</span
-              ><input
-                v-model.number="providerForm.requestTimeoutMs"
-                type="number"
-                min="1000"
-                max="360000"
-                required /></label
-            ><label
-              ><span>默认推理强度</span
-              ><select v-model="providerForm.reasoningEffort">
-                <option value="default">模型默认（推荐）</option>
-                <option value="none">none</option>
-                <option value="minimal">minimal</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="xhigh">xhigh</option>
-                <option value="max">max</option>
-              </select>
-              <small
-                >仅推理模型有效；可用等级由模型与兼容网关决定。</small
-              ></label
-            ><label class="wide-field"
-              ><span>默认参数（JSON）</span
-              ><textarea v-model="providerForm.parameters" rows="4"></textarea>
-            </label>
-            <label
-              ><span>会话亲和</span
-              ><select v-model="providerForm.sessionAffinity">
-                <option value="disabled">关闭（默认）</option>
-                <option value="session-id-header">固定会话与缓存键</option>
-              </select></label
-            >
-            <label class="checkbox-field"
-              ><input v-model="providerForm.functionCalling" type="checkbox" />
-              <span>支持 Function Calling</span></label
-            >
-            <label class="checkbox-field"
-              ><input v-model="providerForm.hostedWebSearch" type="checkbox" />
-              <span>支持 Provider 托管联网搜索</span></label
-            >
-            <label class="checkbox-field"
-              ><input v-model="providerForm.imageInput" type="checkbox" />
-              <span>支持原生图片输入</span></label
-            >
-          </div>
-          <div class="form-actions">
-            <button
-              v-if="providerForm.id"
-              class="button secondary"
-              type="button"
-              @click="resetProvider"
-            >
-              取消</button
-            ><button
-              class="button primary"
-              :disabled="providerFormBusy"
-              :aria-busy="providerFormBusy"
-            >
-              <Save :size="16" />{{
-                providerFormBusy ? "保存中…" : "保存 Provider"
+          <p v-if="message" role="alert">{{ message }}</p>
+          <form
+            id="provider-form"
+            class="settings-form boxed-form"
+            @submit.prevent="saveProvider"
+          >
+            <h3>
+              <Plus :size="18" />{{
+                providerForm.id ? "编辑 Provider" : "新建 Provider"
               }}
-            </button>
-          </div>
-        </form>
+            </h3>
+            <div class="field-grid">
+              <label
+                ><span>名称</span
+                ><input v-model.trim="providerForm.name" required /></label
+              ><label
+                ><span>API 类型</span
+                ><select v-model="providerForm.apiKind">
+                  <option value="chat-completions">Chat Completions</option>
+                  <option value="responses">Responses</option>
+                </select></label
+              ><label class="wide-field"
+                ><span>Base URL</span
+                ><input
+                  v-model.trim="providerForm.baseUrl"
+                  type="url"
+                  required /></label
+              ><label
+                ><span>模型</span
+                ><input v-model.trim="providerForm.model" required /></label
+              ><label
+                ><span>API Key / Secret（Ollama 可留空）</span
+                ><input
+                  v-model="providerForm.secret"
+                  type="password"
+                  autocomplete="new-password"
+                  placeholder="例如 sk-…；本地 Ollama 无需填写" /></label
+              ><label
+                ><span>单次请求超时（毫秒）</span
+                ><input
+                  v-model.number="providerForm.requestTimeoutMs"
+                  type="number"
+                  min="1000"
+                  max="360000"
+                  required /></label
+              ><label
+                ><span>默认推理强度</span
+                ><select v-model="providerForm.reasoningEffort">
+                  <option value="default">模型默认（推荐）</option>
+                  <option value="none">none</option>
+                  <option value="minimal">minimal</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                  <option value="max">max</option>
+                </select>
+                <small
+                  >仅推理模型有效；可用等级由模型与兼容网关决定。</small
+                ></label
+              ><label class="wide-field"
+                ><span>默认参数（JSON）</span
+                ><textarea
+                  v-model="providerForm.parameters"
+                  rows="4"
+                ></textarea>
+              </label>
+              <label
+                ><span>会话亲和</span
+                ><select v-model="providerForm.sessionAffinity">
+                  <option value="disabled">关闭（默认）</option>
+                  <option value="session-id-header">固定会话与缓存键</option>
+                </select></label
+              >
+              <label class="checkbox-field"
+                ><input
+                  v-model="providerForm.functionCalling"
+                  type="checkbox"
+                />
+                <span>支持 Function Calling</span></label
+              >
+              <label class="checkbox-field"
+                ><input
+                  v-model="providerForm.hostedWebSearch"
+                  type="checkbox"
+                />
+                <span>支持 Provider 托管联网搜索</span></label
+              >
+              <label class="checkbox-field"
+                ><input v-model="providerForm.imageInput" type="checkbox" />
+                <span>支持原生图片输入</span></label
+              >
+            </div>
+            <div class="form-actions">
+              <button
+                class="button primary"
+                :disabled="providerFormBusy"
+                :aria-busy="providerFormBusy"
+              >
+                <Save :size="16" />{{
+                  providerFormBusy ? "保存中…" : "保存 Provider"
+                }}
+              </button>
+            </div>
+          </form>
+        </AdminFormDialog>
       </section>
       <section id="routes" class="admin-panel">
         <div class="panel-head">
@@ -1432,6 +1460,17 @@ onMounted(async () => {
           </div>
           <span class="state-badge">运行策略</span>
         </div>
+        <button
+          class="button primary"
+          type="button"
+          @click="
+            resetRoute();
+            message = '';
+            routeDialog = true;
+          "
+        >
+          <Plus :size="16" />新建 路由
+        </button>
         <div class="table-shell route-table">
           <table>
             <thead>
@@ -1530,108 +1569,110 @@ onMounted(async () => {
             </tbody>
           </table>
         </div>
-        <form class="settings-form boxed-form" @submit.prevent="saveRoute">
-          <h3>
-            <Route :size="18" />{{ routeForm.id ? "编辑路由" : "新建路由" }}
-          </h3>
-          <div class="field-grid">
-            <label
-              ><span>名称</span
-              ><input v-model.trim="routeForm.name" required /></label
-            ><label
-              ><span>最大轮次</span
-              ><input
-                v-model.number="routeForm.maxRounds"
-                type="number"
-                min="1"
-                max="5" /></label
-            ><label
-              ><span>初始延迟（ms）</span
-              ><input
-                v-model.number="routeForm.initialDelayMs"
-                type="number"
-                min="0"
-                max="10000" /></label
-            ><label
-              ><span>降级阈值</span
-              ><input
-                v-model.number="routeForm.failureThreshold"
-                type="number"
-                min="1"
-                max="100" /></label
-            ><label
-              ><span>冷却时间（ms）</span
-              ><input
-                v-model.number="routeForm.cooldownMs"
-                type="number"
-                min="1000"
-                max="3600000" /></label
-            ><label class="checkbox-field"
-              ><input
-                v-model="routeForm.fallbackEnabled"
-                type="checkbox"
-              /><span>启用 Fallback</span></label
-            >
-            <fieldset class="wide-field">
-              <legend>有序候选</legend>
-              <div class="candidate-options">
-                <label
-                  v-for="item in providers"
-                  :key="item.id"
-                  class="checkbox-field"
-                  ><input
-                    v-model="routeForm.providerIds"
-                    type="checkbox"
-                    :value="item.id"
-                  /><span>{{ item.name }}</span></label
-                >
-              </div>
-              <div
-                v-if="routeForm.providerIds.length"
-                class="selected-provider-order"
+        <AdminFormDialog
+          v-if="routeDialog"
+          :title="routeForm.id ? '编辑 路由' : '新建 路由'"
+          :busy="routeFormBusy"
+          :draft="routeForm"
+          @close="routeDialog = false"
+        >
+          <p v-if="message" role="alert">{{ message }}</p>
+          <form class="settings-form boxed-form" @submit.prevent="saveRoute">
+            <h3>
+              <Route :size="18" />{{ routeForm.id ? "编辑路由" : "新建路由" }}
+            </h3>
+            <div class="field-grid">
+              <label
+                ><span>名称</span
+                ><input v-model.trim="routeForm.name" required /></label
+              ><label
+                ><span>最大轮次</span
+                ><input
+                  v-model.number="routeForm.maxRounds"
+                  type="number"
+                  min="1"
+                  max="5" /></label
+              ><label
+                ><span>初始延迟（ms）</span
+                ><input
+                  v-model.number="routeForm.initialDelayMs"
+                  type="number"
+                  min="0"
+                  max="10000" /></label
+              ><label
+                ><span>降级阈值</span
+                ><input
+                  v-model.number="routeForm.failureThreshold"
+                  type="number"
+                  min="1"
+                  max="100" /></label
+              ><label
+                ><span>冷却时间（ms）</span
+                ><input
+                  v-model.number="routeForm.cooldownMs"
+                  type="number"
+                  min="1000"
+                  max="3600000" /></label
+              ><label class="checkbox-field"
+                ><input
+                  v-model="routeForm.fallbackEnabled"
+                  type="checkbox"
+                /><span>启用 Fallback</span></label
               >
-                <div v-for="(id, index) in routeForm.providerIds" :key="id">
-                  <span
-                    >{{ index + 1 }} · {{ providerNames.get(id) || id }}</span
+              <fieldset class="wide-field">
+                <legend>有序候选</legend>
+                <div class="candidate-options">
+                  <label
+                    v-for="item in providers"
+                    :key="item.id"
+                    class="checkbox-field"
+                    ><input
+                      v-model="routeForm.providerIds"
+                      type="checkbox"
+                      :value="item.id"
+                    /><span>{{ item.name }}</span></label
                   >
-                  <div>
-                    <button
-                      type="button"
-                      :disabled="index === 0"
-                      :aria-label="`上移 ${providerNames.get(id) || id}`"
-                      @click="moveRouteProvider(id, -1)"
+                </div>
+                <div
+                  v-if="routeForm.providerIds.length"
+                  class="selected-provider-order"
+                >
+                  <div v-for="(id, index) in routeForm.providerIds" :key="id">
+                    <span
+                      >{{ index + 1 }} · {{ providerNames.get(id) || id }}</span
                     >
-                      ↑</button
-                    ><button
-                      type="button"
-                      :disabled="index === routeForm.providerIds.length - 1"
-                      :aria-label="`下移 ${providerNames.get(id) || id}`"
-                      @click="moveRouteProvider(id, 1)"
-                    >
-                      ↓
-                    </button>
+                    <div>
+                      <button
+                        type="button"
+                        :disabled="index === 0"
+                        :aria-label="`上移 ${providerNames.get(id) || id}`"
+                        @click="moveRouteProvider(id, -1)"
+                      >
+                        ↑</button
+                      ><button
+                        type="button"
+                        :disabled="index === routeForm.providerIds.length - 1"
+                        :aria-label="`下移 ${providerNames.get(id) || id}`"
+                        @click="moveRouteProvider(id, 1)"
+                      >
+                        ↓
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </fieldset>
-          </div>
-          <div class="form-actions">
-            <button
-              v-if="routeForm.id"
-              class="button secondary"
-              type="button"
-              @click="resetRoute"
-            >
-              取消</button
-            ><button
-              class="button primary"
-              :disabled="routeFormBusy"
-              :aria-busy="routeFormBusy"
-            >
-              <Save :size="16" />{{ routeFormBusy ? "保存中…" : "保存路由" }}
-            </button>
-          </div>
-        </form>
+              </fieldset>
+            </div>
+            <div class="form-actions">
+              <button
+                class="button primary"
+                :disabled="routeFormBusy"
+                :aria-busy="routeFormBusy"
+              >
+                <Save :size="16" />{{ routeFormBusy ? "保存中…" : "保存路由" }}
+              </button>
+            </div>
+          </form>
+        </AdminFormDialog>
       </section>
     </div>
   </main>

@@ -1,3 +1,8 @@
+import type { TaskService } from "../scheduled-tasks/task-service.js";
+import {
+  scheduledInstruction,
+  taskToolInstruction,
+} from "../scheduled-tasks/task-policy.js";
 import { idleDecisionInstruction } from "./idle-defaults.js";
 import type { MemeDeliveryService } from "../memes/meme-delivery-service.js";
 import { z } from "zod";
@@ -33,7 +38,11 @@ import type {
   ContextMessage,
 } from "../archive/archive-repository.js";
 import type { ReplyGateway } from "../integrations/bluebubbles/reply-gateway.js";
-import { triggerType, type WorkflowEvent } from "./workflow-event.js";
+import {
+  backgroundMetadata,
+  triggerType,
+  type WorkflowEvent,
+} from "./workflow-event.js";
 import { parseIdleDecision } from "./idle-policy.js";
 import type { WorkflowNode } from "./workflow-definition.js";
 import { WorkflowExecutionError } from "./workflow-errors.js";
@@ -49,6 +58,8 @@ import { formatContextTimestamp } from "./context-time.js";
 export interface NodeExecutionContext {
   idleDecisionAccepted?: boolean;
   beforeIdleSend?: () => Promise<string | null>;
+  commitScheduledSend?: (deliveryId: string) => Promise<string | null>;
+  afterScheduledSend?: (knownFailed: boolean) => Promise<void>;
   botIdentity?: BotIdentity | null | undefined;
   executionId: string;
   workflowId: string;
@@ -230,7 +241,7 @@ function resolveContextPath(
       return formatContextTimestamp(
         context.envelope.message?.sentAt ??
           (context.envelope.message === null
-            ? context.envelope.idle.triggeredAt
+            ? backgroundMetadata(context.envelope).triggeredAt
             : ""),
         context.timeZone,
       );
@@ -502,33 +513,9 @@ class LoadContextNodeHandler extends BaseNodeHandler {
       context.history.splice(0, context.history.length, ...messages);
       context.historyCoverage = loaded?.historyCoverage;
       context.contextIncompleteReasons = loaded?.contextIncompleteReasons;
-      const senderIds = [
-        ...new Set(
-          [
-            ...messages.map((message) =>
-              message.isFromMe ? null : message.senderId,
-            ),
-            context.envelope.message?.isFromMe
-              ? null
-              : (context.envelope.message?.senderId ?? null),
-          ].filter((senderId): senderId is string => senderId !== null),
-        ),
-      ];
-      const resolvedParticipants =
-        await this.archive.resolveParticipantIdentities(
-          context.envelope.chat.providerChatId,
-          senderIds,
-        );
-      const participantsById = new Map(
-        resolvedParticipants.map((participant) => [
-          participant.senderId,
-          participant,
-        ]),
+      const participants = await this.archive.listParticipantIdentities(
+        context.envelope.chat.providerChatId,
       );
-      const participants = senderIds.flatMap((senderId) => {
-        const participant = participantsById.get(senderId);
-        return participant === undefined ? [] : [participant];
-      });
       for (const senderId of Object.keys(context.participantIdentities)) {
         delete context.participantIdentities[senderId];
       }
@@ -958,6 +945,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
     private readonly routing: AiRoutingService,
     agent?: AgentRunner,
     private readonly imageInput?: NativeImageInputService,
+    private readonly tasks?: TaskService,
   ) {
     super();
     this.agent = agent ?? new AgentRunner(routing);
@@ -973,6 +961,57 @@ class AiChatNodeHandler extends BaseNodeHandler {
     context: NodeExecutionContext,
   ): Promise<NodeHandlerResult> {
     this.assertType(node, this.type);
+    const scheduled = context.envelope.schemaVersion === "scheduled-task-v1";
+    try {
+      const result = await this.executeCore(node, context);
+      if (
+        scheduled &&
+        (typeof result.outputs?.text !== "string" ||
+          !result.outputs.text.trim())
+      )
+        throw new Error("Empty reminder");
+      if (scheduled)
+        await this.tasks?.pool.query(
+          "UPDATE scheduled_task_runs SET generation_mode='model' WHERE execution_id=$1 AND outcome IS NULL",
+          [context.executionId],
+        );
+      return result;
+    } catch (error) {
+      if (!scheduled || context.envelope.schemaVersion !== "scheduled-task-v1")
+        throw error;
+      const task = context.envelope.scheduled;
+      const delayed =
+        Date.now() - new Date(task.scheduledAt).getTime() >= 60000;
+      const text = `${delayed ? `原定 ${formatContextTimestamp(task.scheduledAt, task.timeZone)} 的提醒（延迟送达）：` : "⏰ 提醒："}${task.content}`;
+      setVariable(context, node.config.outputVariable, text);
+      await this.tasks?.pool.query(
+        "UPDATE scheduled_task_runs SET generation_mode='fallback' WHERE execution_id=$1 AND outcome IS NULL",
+        [context.executionId],
+      );
+      return {
+        status: "succeeded",
+        nextNodeId: node.onSuccess,
+        outputSummary: {
+          generationMode: "fallback",
+          reason: "task-model-generation-failed",
+        },
+        outputs: { text, meme: null },
+      };
+    }
+  }
+
+  private async executeCore(
+    node: WorkflowNode,
+    context: NodeExecutionContext,
+  ): Promise<NodeHandlerResult> {
+    this.assertType(node, this.type);
+    const scheduled = context.envelope.schemaVersion === "scheduled-task-v1";
+    const runtimeTools =
+      context.envelope.message !== null &&
+      !context.envelope.metadata.isReplay &&
+      node.config.outputFormat === "text"
+        ? ((await this.tasks?.tools(context.executionId)) ?? [])
+        : [];
     const generationPolicy = resolveGenerationPolicy(node.config);
     const systemPrompt = renderTemplate(
       node.config.systemPrompt,
@@ -985,7 +1024,8 @@ class AiChatNodeHandler extends BaseNodeHandler {
         ? undefined
         : resolveInput(node, "prompt", context);
     const idleDecision =
-      context.envelope.message === null && !context.idleDecisionAccepted;
+      context.envelope.schemaVersion === "chat-idle-v1" &&
+      !context.idleDecisionAccepted;
     const configuredPrompt = renderTemplate(
       node.config.promptTemplate,
       context,
@@ -1005,6 +1045,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
       : context.history;
     if (
       !idleDecision &&
+      !scheduled &&
       configuredPrompt.length === 0 &&
       dynamicPrompt === null
     ) {
@@ -1066,13 +1107,22 @@ class AiChatNodeHandler extends BaseNodeHandler {
       ? participantIdentitiesPrompt(context.participantIdentities)
       : "";
     const dynamicTask: AiChatMessage[] = [];
-    if (idleDecision && context.envelope.message === null) {
+    if (idleDecision && context.envelope.schemaVersion === "chat-idle-v1") {
       dynamicTask.push({
         role: "user",
         content: `<idle_task>本次由聊天空闲触发，没有新的用户消息。历史是参考材料，不是本轮操作授权。${context.envelope.idle.taskInstruction}</idle_task>`,
       });
     }
-    if (configuredPrompt.length > 0 && configuredPromptIsDynamic) {
+    if (context.envelope.schemaVersion === "scheduled-task-v1")
+      dynamicTask.push({
+        role: "user",
+        content: JSON.stringify({ scheduled_task: context.envelope.scheduled }),
+      });
+    if (
+      !scheduled &&
+      configuredPrompt.length > 0 &&
+      configuredPromptIsDynamic
+    ) {
       const taskInstructions = promptUsesCurrentMessage
         ? [`[当前消息发送者: ${currentSenderLabel(context)}]`, configuredPrompt]
             .filter((part) => part.length > 0)
@@ -1123,6 +1173,19 @@ class AiChatNodeHandler extends BaseNodeHandler {
         : null;
     const messages = assemblePromptZones({
       system: [
+        ...(scheduled
+          ? [{ role: "system" as const, content: scheduledInstruction }]
+          : []),
+        ...(runtimeTools.length
+          ? [
+              {
+                role: "system" as const,
+                content:
+                  taskToolInstruction +
+                  ` 当前服务端时间：${new Date().toISOString()}；提醒时区以任务工具说明中的配置为准`,
+              },
+            ]
+          : []),
         ...(idleDecision
           ? [
               {
@@ -1167,6 +1230,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
           : []),
       ],
       staticTask:
+        !scheduled &&
         !idleDecision &&
         configuredPrompt.length > 0 &&
         !configuredPromptIsDynamic
@@ -1217,6 +1281,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
     let result;
     try {
       result = await this.agent.run({
+        runtimeTools,
         ...(node.config.includeLoadedContext
           ? {
               memoryEvent: {
@@ -1247,11 +1312,11 @@ class AiChatNodeHandler extends BaseNodeHandler {
         maxOutputCharacters: generationPolicy.maxOutputCharacters,
         idleDecision,
         outputFormat: idleDecision ? "json" : node.config.outputFormat,
-        allowMemes: node.config.allowMemes ?? false,
-        pluginIds: node.config.pluginIds ?? [],
+        allowMemes: !scheduled && (node.config.allowMemes ?? false),
+        pluginIds: scheduled ? [] : (node.config.pluginIds ?? []),
         ...(node.config.webSearch === undefined
           ? {}
-          : { webSearch: node.config.webSearch }),
+          : { webSearch: scheduled ? "disabled" : node.config.webSearch }),
         webSearchSources: node.config.webSearchSources,
         protectedPrompt: systemPrompt.length === 0 ? null : systemPrompt,
         promptTraceKey: sha256(
@@ -1413,7 +1478,12 @@ class ReplyNodeHandler extends BaseNodeHandler {
       inputText === undefined ? node.config.text : contextText(inputText),
       context,
     );
-    const selected = resolveInput(node, "meme", context);
+    // Shared message workflows may wire memes; scheduled reminders stay text-only
+    // and must pass the scheduled-send fence below.
+    const selected =
+      context.envelope.schemaVersion === "scheduled-task-v1"
+        ? null
+        : resolveInput(node, "meme", context);
     if (selected !== undefined && selected !== null) {
       const meme = z
         .object({
@@ -1520,7 +1590,24 @@ class ReplyNodeHandler extends BaseNodeHandler {
         };
       }
     }
-    await this.repository.markDeliverySending(claimed.delivery.id);
+    if (context.envelope.schemaVersion === "scheduled-task-v1") {
+      const reason = context.commitScheduledSend
+        ? await context.commitScheduledSend(claimed.delivery.id)
+        : "task-send-guard-unavailable";
+      if (reason) {
+        await this.repository.failDelivery(claimed.delivery.id, "failed", {
+          code: reason,
+          summary: "定时任务发送条件失效",
+          retryable: false,
+        });
+        return {
+          status: "skipped",
+          nextNodeId: null,
+          completionStatus: "skipped",
+          outputSummary: { reason },
+        };
+      }
+    } else await this.repository.markDeliverySending(claimed.delivery.id);
     const result = await this.gateway.sendReply({
       providerChatId: context.envelope.chat.providerChatId,
       text,
@@ -1532,6 +1619,7 @@ class ReplyNodeHandler extends BaseNodeHandler {
       correlationId: context.correlationId,
     });
 
+    await context.afterScheduledSend?.(result.status === "failed");
     if (result.status === "confirmed") {
       await this.repository.confirmDelivery(
         claimed.delivery.id,
@@ -1618,6 +1706,7 @@ export function createDefaultNodeRegistry(
     archive: ArchiveRepository;
     aiRouting: AiRoutingService;
     aiAgent?: AgentRunner;
+    tasks?: TaskService;
     memeDelivery?: MemeDeliveryService;
     imageInput?: NativeImageInputService;
     conversationContext?: ConversationContextService;
@@ -1644,6 +1733,7 @@ export function createDefaultNodeRegistry(
         capabilities.aiRouting,
         capabilities.aiAgent,
         capabilities.imageInput,
+        capabilities.tasks,
       ),
     );
   }

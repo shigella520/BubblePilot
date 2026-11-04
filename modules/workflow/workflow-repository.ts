@@ -1,4 +1,7 @@
-import type { ChatIdleEvent, WorkflowEvent } from "./workflow-event.js";
+import type {
+  BackgroundWorkflowEvent,
+  WorkflowEvent,
+} from "./workflow-event.js";
 import type { BotIdentity } from "../identity/bot-identity.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
 import type { ConversationContextTrigger } from "./conversation-context-service.js";
@@ -59,7 +62,7 @@ export interface TriggerBinding extends TriggerRecord {
 }
 
 export interface WorkflowExecutionRecord {
-  triggerEvent?: ChatIdleEvent | null;
+  triggerEvent?: BackgroundWorkflowEvent | null;
   botIdentity?: BotIdentity | null;
   id: string;
   provider: string;

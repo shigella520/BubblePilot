@@ -223,8 +223,8 @@ export class MemoryRepository {
   ): Promise<MemoryScope | null> {
     const row = (
       await this.pool.query<{ chat_id: string; upper_index: string }>(
-        `SELECT target_chat_id AS chat_id,trigger_event->'idle'->>'upperMessageIndex' AS upper_index
-       FROM workflow_executions WHERE id=$1 AND trigger_event->>'schemaVersion'='chat-idle-v1'`,
+        `SELECT target_chat_id AS chat_id,COALESCE(trigger_event->'idle'->>'upperMessageIndex',trigger_event->'scheduled'->>'upperMessageIndex') AS upper_index
+       FROM workflow_executions WHERE id=$1 AND trigger_event->>'schemaVersion' IN ('chat-idle-v1','scheduled-task-v1')`,
         [executionId],
       )
     ).rows[0];
