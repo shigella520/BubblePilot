@@ -1,9 +1,27 @@
 <script setup lang="ts">
+import AdminFormDialog from "../AdminFormDialog.vue";
 import AdminDetailDialog from "../AdminDetailDialog.vue";
-import { CalendarClock, MessageSquare, History, Play, Save } from "@lucide/vue";
+import {
+  CalendarClock,
+  MessageSquare,
+  History,
+  Play,
+  Save,
+  RefreshCw,
+} from "@lucide/vue";
 import { useSessionStore } from "../../stores/session";
 import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 import { apiRequest, apiAllPages, errorMessage } from "../../services/api";
+const settingsDialog = ref(false);
+const settingsOriginal = ref<Settings | null>(null);
+function openSettings() {
+  settingsOriginal.value = settings.value ? { ...settings.value } : null;
+  settingsDialog.value = true;
+}
+function closeSettings() {
+  if (settingsOriginal.value) settings.value = { ...settingsOriginal.value };
+  settingsDialog.value = false;
+}
 interface Task {
   id: string;
   content: string | null;
@@ -188,6 +206,8 @@ async function saveSettings() {
         expectedVersion: s.version,
       }),
     });
+    settingsOriginal.value = settings.value ? { ...settings.value } : null;
+    settingsDialog.value = false;
   });
 }
 watch([workflowId, chatId, status], () => {
@@ -211,18 +231,20 @@ onBeforeUnmount(() => generation++);
 </script>
 <template>
   <section class="admin-panel scheduled-tasks">
-    <header>
+    <header class="scheduled-tasks-heading">
       <div>
         <p class="eyebrow">SCHEDULED TASKS</p>
         <h2>定时任务</h2>
         <p>按聊天和角色登记的单次提醒。修改、取消和敏感详情需要敏感验证。</p>
       </div>
       <button
-        class="button secondary"
+        class="button secondary scheduled-tasks-refresh"
+        type="button"
         :disabled="busy || mutating"
         @click="load"
       >
-        刷新
+        <RefreshCw :size="16" :class="{ 'button-spinner': busy }" />
+        {{ busy ? "刷新中…" : "刷新" }}
       </button>
     </header>
     <div class="task-filters">
@@ -520,8 +542,23 @@ onBeforeUnmount(() => generation++);
         </div>
       </div>
     </AdminDetailDialog>
-    <details v-if="settings">
-      <summary>调度与容量设置</summary>
+    <button
+      v-if="settings"
+      class="button secondary"
+      type="button"
+      @click="openSettings"
+    >
+      调度与容量设置
+    </button>
+    <AdminFormDialog
+      v-if="settings && settingsDialog"
+      title="调度与容量设置"
+      :busy="mutating"
+      :saved-version="settings.version"
+      :draft="settings"
+      @close="closeSettings"
+    >
+      <p v-if="error" role="alert">{{ error }}</p>
       <form class="task-editor" @submit.prevent="saveSettings">
         <label
           ><input v-model="settings.paused" type="checkbox" />暂停调度</label
@@ -549,7 +586,7 @@ onBeforeUnmount(() => generation++);
           保存设置
         </button>
       </form>
-    </details>
+    </AdminFormDialog>
   </section>
 </template>
 <style scoped>
@@ -564,6 +601,14 @@ footer {
   gap: 12px;
   justify-content: space-between;
   flex-wrap: wrap;
+}
+.scheduled-tasks-heading {
+  align-items: flex-start;
+}
+.scheduled-tasks-refresh {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  white-space: nowrap;
 }
 .task-filters label,
 .task-editor label {

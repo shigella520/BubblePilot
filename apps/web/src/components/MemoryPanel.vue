@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AdminFormDialog from "./AdminFormDialog.vue";
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
   apiRequest,
@@ -26,6 +27,7 @@ const emit = defineEmits<{
   authorizationChanged: [state: { chatId: string; enabled: boolean }];
 }>();
 const session = useSessionStore();
+const backfillDialog = ref(false);
 const busy = ref(false);
 const error = ref("");
 const notice = ref("");
@@ -390,6 +392,7 @@ async function backfill() {
     }),
   });
   requestKey = crypto.randomUUID();
+  backfillDialog.value = false;
   resetJobPage();
   notice.value = "补建任务已创建，可在下方任务列表查看进度。";
   await refresh();
@@ -614,41 +617,62 @@ onBeforeUnmount(() => {
         >
           {{ chat.enabled ? "停用检索" : "授权此聊天检索" }}
         </button>
-        <h3>历史补建</h3>
-        <fieldset
-          :disabled="
-            busy ||
-            !session.sensitiveActive ||
-            !chat.enabled ||
-            !settings?.enabled
+        <button
+          class="button secondary"
+          type="button"
+          :disabled="busy || !chat.enabled || !settings?.enabled"
+          @click="
+            from = '';
+            to = '';
+            backfillDialog = true;
           "
         >
-          <label
-            >开始时间（本地时区）<input
-              v-model="from"
-              type="datetime-local" /></label
-          ><label
-            >结束时间（本地时区）<input v-model="to" type="datetime-local"
-          /></label>
-          <label
-            >索引代次<select v-model="generationId">
-              <option
-                v-for="g in settings?.generations"
-                :key="g.id"
-                :value="g.id"
-              >
-                {{ g.model }} · {{ stateName(g.status) }}
-              </option>
-            </select></label
+          新建历史补建任务
+        </button>
+        <AdminFormDialog
+          v-if="backfillDialog"
+          title="新建历史补建任务"
+          :busy="busy"
+          @close="backfillDialog = false"
+        >
+          <p v-if="error" role="alert">{{ error }}</p>
+          <p v-if="notice" role="status">{{ notice }}</p>
+
+          <fieldset
+            :disabled="
+              busy ||
+              !session.sensitiveActive ||
+              !chat.enabled ||
+              !settings?.enabled
+            "
           >
-          <button
-            class="button"
-            :disabled="!generationId"
-            @click="run(backfill)"
-          >
-            补建所选范围（留空表示全部保留记录）
-          </button>
-        </fieldset>
+            <label
+              >开始时间（本地时区）<input
+                v-model="from"
+                type="datetime-local" /></label
+            ><label
+              >结束时间（本地时区）<input v-model="to" type="datetime-local"
+            /></label>
+            <label
+              >索引代次<select v-model="generationId">
+                <option
+                  v-for="g in settings?.generations"
+                  :key="g.id"
+                  :value="g.id"
+                >
+                  {{ g.model }} · {{ stateName(g.status) }}
+                </option>
+              </select></label
+            >
+            <button
+              class="button"
+              :disabled="!generationId"
+              @click="run(backfill)"
+            >
+              补建所选范围（留空表示全部保留记录）
+            </button>
+          </fieldset>
+        </AdminFormDialog>
         <h3>检索测试</h3>
         <fieldset
           :disabled="

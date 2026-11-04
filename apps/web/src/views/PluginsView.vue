@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AdminFormDialog from "../components/AdminFormDialog.vue";
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { Boxes, Plus, RefreshCw, UploadCloud } from "@lucide/vue";
 import PluginToolPicker from "../components/PluginToolPicker.vue";
@@ -429,189 +430,213 @@ async function remove() {
     <p v-if="!items.length && !busy">
       还没有安装插件。导入后检查能力、配置服务，再授权给 AI 节点。
     </p>
-    <section v-if="showImport" class="plugin-panel">
-      <h2>安装向导</h2>
-      <p>支持公开 HTTPS Git 仓库或 ZIP。不会运行包内代码。</p>
-      <fieldset :disabled="busy">
-        <label
-          >Git 仓库或插件目录链接<input
-            v-model="url"
-            placeholder="https://github.com/example/repo/tree/main/plugins/demo"
-        /></label>
-        <p>
-          支持 GitHub tree／blob
-          目录链接，自动识别分支与目录；普通仓库链接仍可选择插件。
-        </p>
-        <details>
-          <summary>高级选项（可选）</summary>
+    <AdminFormDialog
+      v-if="showImport || preview || selected"
+      :title="showImport ? '安装插件' : '管理插件'"
+      :busy="busy"
+      :saved-version="selected?.version"
+      :draft="{
+        connections,
+        approved,
+        disabledSkills,
+        disabledTools,
+        url,
+        gitRef,
+        directory,
+      }"
+      @close="
+        showImport = false;
+        preview = null;
+        selected = null;
+        connections = {};
+        content = '';
+      "
+    >
+      <p v-if="error" role="alert">{{ error }}</p>
+      <section v-if="showImport" class="plugin-panel">
+        <h2>安装向导</h2>
+        <p>支持公开 HTTPS Git 仓库或 ZIP。不会运行包内代码。</p>
+        <fieldset :disabled="busy">
           <label
-            >分支／标签／提交<input
-              v-model="gitRef"
-              placeholder="自动识别，普通仓库默认为 HEAD"
+            >Git 仓库或插件目录链接<input
+              v-model="url"
+              placeholder="https://github.com/example/repo/tree/main/plugins/demo"
           /></label>
-          <label
-            >插件目录<input
-              v-model="gitDirectory"
-              placeholder="普通仓库链接可填，例如 plugins/firecrawl"
-          /></label>
-        </details>
-        <button :disabled="!url.trim()" @click="stage()">读取插件</button
-        ><label class="plugin-upload">
-          <UploadCloud :size="28" /><strong>选择 ZIP 插件包</strong>
-          <span>仅打包插件目录 · 最大 10 MiB</span>
-          <input
-            class="plugin-file-input"
-            type="file"
-            accept=".zip"
-            aria-label="选择 ZIP 插件包"
-            @change="upload"
-          /> </label
-        ><progress v-if="progress > 0" :value="progress" max="100" />
-        <template v-if="task?.state === 'staged' && task.directories.length"
-          ><p v-if="task.source?.sha">
-            已读取：{{ task.source.url }} · {{ task.source.directory
-            }}<br />提交：{{ task.source.sha }}
+          <p>
+            支持 GitHub tree／blob
+            目录链接，自动识别分支与目录；普通仓库链接仍可选择插件。
           </p>
-          <label
-            >插件目录<select v-model="directory">
-              <option v-for="d in task.directories" :key="d">{{ d }}</option>
-            </select></label
-          ><button
-            :disabled="!canInspectPlugin(task, directory)"
-            @click="inspect"
-          >
-            检查兼容性
-          </button></template
-        >
-      </fieldset>
-    </section>
-    <section v-if="preview || selected" class="plugin-panel">
-      <h2>
-        {{ (preview ?? selected?.package)?.name }}
-        <small>{{ (preview ?? selected?.package)?.version }}</small>
-      </h2>
-      <p>{{ (preview ?? selected?.package)?.description }}</p>
-      <fieldset :disabled="busy">
-        <template v-for="(c, name) in connections" :key="name"
-          ><h3>MCP · {{ name }}</h3>
-          <label
-            >服务地址<input v-model="c.url" @input="tested = false" /></label
-          ><label
-            ><input
-              v-model="c.allowPrivate"
-              type="checkbox"
-              @change="tested = false"
-            />明确允许访问此目标的内网地址</label
-          ><label
-            >认证方式<select v-model="c.auth" @change="tested = false">
-              <option value="none">无需认证</option>
-              <option value="bearer">Bearer Token</option>
-              <option value="header">API Key 请求头</option>
-            </select></label
-          ><label v-if="c.auth === 'header'"
-            >请求头<input v-model="c.header" @input="tested = false" /></label
-          ><label v-if="c.auth !== 'none'"
-            >凭据<input
-              v-model="c.secret"
-              type="password"
-              autocomplete="new-password"
-              :placeholder="
-                c.secretConfigured ? '已配置，留空保留' : '填写服务凭据'
-              "
-              @input="tested = false" /></label
-        ></template>
-        <button v-if="Object.keys(connections).length" @click="test">
-          测试连接并发现工具
-        </button>
-        <PluginToolPicker
-          v-if="tools.length"
-          :key="preview?.hash ?? selected?.id"
-          v-model="approved"
-          :tools="tools"
-          :disabled="busy"
-        />
-        <section v-if="previous && preview">
-          <h3>
-            升级变更 {{ previous.package.version }} → {{ preview.version }}
-          </h3>
-          <ul>
-            <li v-for="change in changes" :key="change">{{ change }}</li>
-          </ul>
-          <p v-if="!changes.length">
-            未发现 Skill 或 MCP 地址变化，请测试连接后复核工具定义。
-          </p>
-        </section>
-        <details v-if="selected?.references.length" class="reference-panel">
-          <summary>
-            工作流引用 · {{ selected.references.length }} 个版本
-          </summary>
-          <div
-            v-for="group in workflowReferences"
-            :key="group.id"
-            class="reference-group"
-          >
-            <code>{{ group.id }}</code>
-            <div class="version-list">
-              <span v-for="version in group.versions" :key="version"
-                >v{{ version }}</span
-              >
-            </div>
-          </div>
-        </details>
-        <h3>Skills</h3>
-        <article
-          v-for="skill in (preview ?? selected?.package)?.skills"
-          :key="skill.id"
-          class="skill-card"
-        >
-          <strong>{{ skill.name }}</strong>
-          <p>{{ skill.description }}</p>
-          <details v-if="skill.body">
-            <summary>查看安装前指令</summary>
-            <pre class="plugin-content">{{ skill.body }}</pre>
+          <details>
+            <summary>高级选项（可选）</summary>
+            <label
+              >分支／标签／提交<input
+                v-model="gitRef"
+                placeholder="自动识别，普通仓库默认为 HEAD"
+            /></label>
+            <label
+              >插件目录<input
+                v-model="gitDirectory"
+                placeholder="普通仓库链接可填，例如 plugins/firecrawl"
+            /></label>
           </details>
-          <template v-if="selected"
-            ><label
-              ><input
-                v-model="disabledSkills"
-                type="checkbox"
-                :value="skill.id"
-              />停用</label
-            ><button @click="view(skill.file)">查看指令</button
+          <button :disabled="!url.trim()" @click="stage()">读取插件</button
+          ><label class="plugin-upload">
+            <UploadCloud :size="28" /><strong>选择 ZIP 插件包</strong>
+            <span>仅打包插件目录 · 最大 10 MiB</span>
+            <input
+              class="plugin-file-input"
+              type="file"
+              accept=".zip"
+              aria-label="选择 ZIP 插件包"
+              @change="upload"
+            /> </label
+          ><progress v-if="progress > 0" :value="progress" max="100" />
+          <template v-if="task?.state === 'staged' && task.directories.length"
+            ><p v-if="task.source?.sha">
+              已读取：{{ task.source.url }} · {{ task.source.directory
+              }}<br />提交：{{ task.source.sha }}
+            </p>
+            <label
+              >插件目录<select v-model="directory">
+                <option v-for="d in task.directories" :key="d">{{ d }}</option>
+              </select></label
             ><button
-              v-for="file in skill.references"
-              :key="file"
-              @click="view(file)"
+              :disabled="!canInspectPlugin(task, directory)"
+              @click="inspect"
             >
-              {{ file }}
+              检查兼容性
             </button></template
           >
-        </article>
-        <div class="plugin-actions">
-          <button v-if="preview" :disabled="!tested" @click="install">
-            确认安装</button
-          ><template v-if="selected"
-            ><button :disabled="!tested" @click="save">保存配置与授权</button
-            ><button @click="update({ enabled: !selected.enabled })">
-              {{ selected.enabled ? "停用插件" : "启用插件" }}</button
-            ><button @click="remove">卸载</button></template
-          >
-        </div>
-        <details v-if="selected">
-          <summary>历史版本与回退</summary>
-          <p v-for="v in selected.versions" :key="v.hash">
-            {{ v.package_version }}
-            <button
-              :disabled="v.hash === selected.revision"
-              @click="update({ revision: v.hash })"
+        </fieldset>
+      </section>
+      <section v-if="preview || selected" class="plugin-panel">
+        <h2>
+          {{ (preview ?? selected?.package)?.name }}
+          <small>{{ (preview ?? selected?.package)?.version }}</small>
+        </h2>
+        <p>{{ (preview ?? selected?.package)?.description }}</p>
+        <fieldset :disabled="busy">
+          <template v-for="(c, name) in connections" :key="name"
+            ><h3>MCP · {{ name }}</h3>
+            <label
+              >服务地址<input v-model="c.url" @input="tested = false" /></label
+            ><label
+              ><input
+                v-model="c.allowPrivate"
+                type="checkbox"
+                @change="tested = false"
+              />明确允许访问此目标的内网地址</label
+            ><label
+              >认证方式<select v-model="c.auth" @change="tested = false">
+                <option value="none">无需认证</option>
+                <option value="bearer">Bearer Token</option>
+                <option value="header">API Key 请求头</option>
+              </select></label
+            ><label v-if="c.auth === 'header'"
+              >请求头<input v-model="c.header" @input="tested = false" /></label
+            ><label v-if="c.auth !== 'none'"
+              >凭据<input
+                v-model="c.secret"
+                type="password"
+                autocomplete="new-password"
+                :placeholder="
+                  c.secretConfigured ? '已配置，留空保留' : '填写服务凭据'
+                "
+                @input="tested = false" /></label
+          ></template>
+          <button v-if="Object.keys(connections).length" @click="test">
+            测试连接并发现工具
+          </button>
+          <PluginToolPicker
+            v-if="tools.length"
+            :key="preview?.hash ?? selected?.id"
+            v-model="approved"
+            :tools="tools"
+            :disabled="busy"
+          />
+          <section v-if="previous && preview">
+            <h3>
+              升级变更 {{ previous.package.version }} → {{ preview.version }}
+            </h3>
+            <ul>
+              <li v-for="change in changes" :key="change">{{ change }}</li>
+            </ul>
+            <p v-if="!changes.length">
+              未发现 Skill 或 MCP 地址变化，请测试连接后复核工具定义。
+            </p>
+          </section>
+          <details v-if="selected?.references.length" class="reference-panel">
+            <summary>
+              工作流引用 · {{ selected.references.length }} 个版本
+            </summary>
+            <div
+              v-for="group in workflowReferences"
+              :key="group.id"
+              class="reference-group"
             >
-              回退到此版本
-            </button>
-          </p>
-        </details>
-      </fieldset>
-      <pre v-if="content" class="plugin-content">{{ content }}</pre>
-    </section>
+              <code>{{ group.id }}</code>
+              <div class="version-list">
+                <span v-for="version in group.versions" :key="version"
+                  >v{{ version }}</span
+                >
+              </div>
+            </div>
+          </details>
+          <h3>Skills</h3>
+          <article
+            v-for="skill in (preview ?? selected?.package)?.skills"
+            :key="skill.id"
+            class="skill-card"
+          >
+            <strong>{{ skill.name }}</strong>
+            <p>{{ skill.description }}</p>
+            <details v-if="skill.body">
+              <summary>查看安装前指令</summary>
+              <pre class="plugin-content">{{ skill.body }}</pre>
+            </details>
+            <template v-if="selected"
+              ><label
+                ><input
+                  v-model="disabledSkills"
+                  type="checkbox"
+                  :value="skill.id"
+                />停用</label
+              ><button @click="view(skill.file)">查看指令</button
+              ><button
+                v-for="file in skill.references"
+                :key="file"
+                @click="view(file)"
+              >
+                {{ file }}
+              </button></template
+            >
+          </article>
+          <div class="plugin-actions">
+            <button v-if="preview" :disabled="!tested" @click="install">
+              确认安装</button
+            ><template v-if="selected"
+              ><button :disabled="!tested" @click="save">保存配置与授权</button
+              ><button @click="update({ enabled: !selected.enabled })">
+                {{ selected.enabled ? "停用插件" : "启用插件" }}</button
+              ><button @click="remove">卸载</button></template
+            >
+          </div>
+          <details v-if="selected">
+            <summary>历史版本与回退</summary>
+            <p v-for="v in selected.versions" :key="v.hash">
+              {{ v.package_version }}
+              <button
+                :disabled="v.hash === selected.revision"
+                @click="update({ revision: v.hash })"
+              >
+                回退到此版本
+              </button>
+            </p>
+          </details>
+        </fieldset>
+        <pre v-if="content" class="plugin-content">{{ content }}</pre>
+      </section></AdminFormDialog
+    >
   </main>
 </template>
 <style scoped>
