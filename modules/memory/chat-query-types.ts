@@ -54,12 +54,25 @@ const cursor = z.string().uuid().optional();
 export const chatMessageQuerySchema = z
   .object({
     ...fields,
+    hasAttachments: z.boolean().optional(),
+    attachmentName: z.string().trim().min(1).max(200).optional(),
+    attachmentType: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(/^(?:[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+|\.[a-z0-9]{1,16})$/u)
+      .optional(),
+    attachmentOffset: z.number().int().min(0).max(10000).optional(),
     order: z.enum(["asc", "desc"]).default("desc"),
     limit: z.number().int().min(1).max(50).default(20),
     cursor,
   })
   .strict()
-  .refine(validFilter);
+  .refine(validFilter)
+  .refine(
+    (v) =>
+      v.hasAttachments !== false || (!v.attachmentName && !v.attachmentType),
+  );
 const groupFields = {
   ...fields,
   groupBy: z.enum(["none", "day", "sender"]).default("none"),
@@ -146,5 +159,13 @@ export function appliedFilters(query: ChatArchiveQuery): ChatFilters {
     dailyTime,
     keywords,
     keywordMode,
+    ...("order" in query
+      ? {
+          hasAttachments: query.hasAttachments,
+          attachmentName: query.attachmentName,
+          attachmentType: query.attachmentType,
+          attachmentOffset: query.attachmentOffset,
+        }
+      : {}),
   };
 }

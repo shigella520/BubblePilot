@@ -1,3 +1,4 @@
+import type { AttachmentListing } from "../attachments/attachment-policy.js";
 import { executionPolicy } from "../ai/execution-policy.js";
 import type { MessageAuthor } from "../identity/bot-identity.js";
 import { z } from "zod";
@@ -33,6 +34,7 @@ export const memorySearchSchema = z
 export const chatExcerptSchema = z
   .object({
     ref: z.string().min(1),
+    attachmentOffset: z.number().int().min(0).max(10000).default(0),
     before: z
       .number()
       .int()
@@ -63,6 +65,7 @@ export interface MemoryScope {
   generation: Generation;
 }
 export interface Evidence {
+  attachments?: AttachmentListing[];
   images?: { image_ref: string; messageId: string; attachmentIndex: number }[];
   authors?: MessageAuthor[];
   ref: string;

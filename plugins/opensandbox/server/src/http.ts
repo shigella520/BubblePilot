@@ -1,3 +1,5 @@
+import { AttachmentTransfers } from "./attachment-http.js";
+import { attachmentProtocol } from "./attachment-contract.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { createServer, type IncomingMessage } from "node:http";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
@@ -173,12 +175,17 @@ export function createMcpHttp(
       server: McpServer;
       transport: StreamableHTTPServerTransport;
       sandbox: SandboxSession;
+      attachments: AttachmentTransfers;
     }
   >();
   const expected = createHash("sha256").update(`Bearer ${token}`).digest();
   const http = createServer((req, res) => {
     void (async () => {
-      if (req.url !== "/mcp") {
+      const attachmentRoute = [
+        "/mcp/attachments",
+        "/mcp/attachments/tickets",
+      ].includes(req.url ?? "");
+      if (req.url !== "/mcp" && !attachmentRoute) {
         res.writeHead(404).end();
         return;
       }
@@ -204,6 +211,14 @@ export function createMcpHttp(
         res.writeHead(404).end();
         return;
       }
+      if (attachmentRoute) {
+        if (!pair) {
+          res.writeHead(403).end();
+          return;
+        }
+        await pair.attachments.handle(req, res);
+        return;
+      }
       const parsed = req.method === "POST" ? await body(req) : undefined;
       if (!pair) {
         if (req.method !== "POST" || !isInitializeRequest(parsed)) {
@@ -215,19 +230,39 @@ export function createMcpHttp(
           return;
         }
         const sandbox = pool.newSession();
-        const server = new McpServer({
-          name: "bubblepilot-opensandbox",
-          version: "0.1.0",
-        });
+        const server = new McpServer(
+          {
+            name: "bubblepilot-opensandbox",
+            version: "0.2.0",
+          },
+          {
+            capabilities: {
+              experimental: {
+                [attachmentProtocol]: {
+                  version: 1,
+                  fileBytes: 20 * 1024 * 1024,
+                  files: 5,
+                  totalBytes: 50 * 1024 * 1024,
+                },
+              },
+            },
+          },
+        );
+        const attachments = new AttachmentTransfers(sandbox);
         register(server, sandbox);
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: randomUUID,
           onsessioninitialized: (sessionId) => {
-            sessions.set(sessionId, { server, transport, sandbox });
+            sessions.set(sessionId, {
+              server,
+              transport,
+              sandbox,
+              attachments,
+            });
           },
         });
         await server.connect(transport as Transport);
-        pair = { server, transport, sandbox };
+        pair = { server, transport, sandbox, attachments };
       }
       if (req.method === "DELETE") {
         pair.sandbox.invalidate();
@@ -241,7 +276,7 @@ export function createMcpHttp(
       res.end();
     });
   });
-  http.requestTimeout = 15000;
+  http.requestTimeout = 45000;
   http.headersTimeout = 10000;
   const timer = setInterval(() => {
     for (const [id, pair] of sessions)

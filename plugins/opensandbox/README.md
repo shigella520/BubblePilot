@@ -68,3 +68,11 @@ pnpm security:check
 ## 可选轻量运行镜像
 
 新增 [Python 运行镜像](runtime/README.md)，提供 CLI 和轻量数据处理库。插件 0.2.0 以 `prepare_sandbox.runtime` 清单为准，旧镜像返回 `id=unknown`。不跨任务保存文件，不新增工具或附件回传。发布与切换需要单独授权。
+
+## 聊天附件传输 v1
+
+适配服务0.2.0在 MCP 初始化声明 `io.bubblepilot/attachments` 扩展。插件包0.3.0增加附件使用指引；更新服务后在插件管理页重新测试、批准能力，再在 AI 节点选择“允许使用沙箱处理聊天附件”。绑定接收附件的服务是管理员的显式授权，普通 MCP 工具批准不自动授予文件。
+
+文件走与 `/mcp` 同源的认证二进制接口 `/mcp/attachments/tickets`、`/mcp/attachments`，不新增模型工具或 Compose 端口。若反向代理仅允许精确 `/mcp`，需同时转发这两个子路径并保留 MCP 会话头、Authorization、X-BP-Transfer-Token 与 Content-Length。不要记录这些请求头或文件体。应用默认单文件10 MiB、每任务3文件／20 MiB，硬上限分别20 MiB、5文件／50 MiB；代理上传大小／超时需与管理员所选额度相容。
+
+导入器通过 OpenSandbox 的认证 Server proxy 访问本次沙箱内一次性接收器；生命周期使用现有会话，导入与命令互斥、校验实际流长度及SHA-256、受控展开归档。文件准备后再原子提交至唯一 `/workspace/attachments/<import-id>/`，无任意目标路径。任何未知／取消结果使会话失效，不重建冒充原沙箱；TTL保留兜底。普通四工具及旧 Python 镜像仍可用，缺少第三方库不能宣称支持相应解析。

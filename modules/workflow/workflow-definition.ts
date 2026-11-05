@@ -1,3 +1,4 @@
+import { attachmentHandlingSchema } from "../attachments/attachment-policy.js";
 import { scheduledTriggerSchema } from "../scheduled-tasks/task-policy.js";
 import { idleTriggerSchema } from "./idle-policy.js";
 import { validateIdlePaths } from "./idle-workflow-validation.js";
@@ -141,6 +142,7 @@ const aiChatNodeSchema = z.object({
         .optional(),
       temperature: z.number().min(0).max(2).nullable().default(null),
       allowMemes: z.boolean().optional(),
+      attachmentHandling: attachmentHandlingSchema.optional(),
       pluginIds: z.array(z.string().uuid()).max(10).optional(),
       webSearch: z.enum(["disabled", "auto", "required"]).optional(),
       webSearchSources: z.enum(["full", "compact", "hidden"]).default("full"),
@@ -150,6 +152,17 @@ const aiChatNodeSchema = z.object({
     .refine(
       (config) => !config.pluginIds?.length || config.outputFormat === "text",
       { message: "Plugins require text output" },
+    )
+    .refine(
+      (config) =>
+        !config.attachmentHandling?.enabled ||
+        (config.outputFormat === "text" &&
+          !!config.pluginIds?.includes(config.attachmentHandling.pluginId)),
+      {
+        message:
+          "Attachment handling requires text output and its explicitly bound plugin",
+        path: ["attachmentHandling"],
+      },
     )
     .refine((config) => !config.allowMemes || config.outputFormat === "text", {
       message: "Memes require text output",

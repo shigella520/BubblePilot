@@ -3016,7 +3016,10 @@ export function buildApplication(
           catalog,
           selections: body.bindings,
         });
-        if (result.definition === null || result.issues.length > 0) {
+        if (
+          result.definition === null ||
+          result.issues.some((issue) => issue.severity === "error")
+        ) {
           throw new ApplicationError(
             "WORKFLOW_MANIFEST_INVALID",
             result.issues[0]?.message ?? "The workflow manifest is invalid.",
@@ -3291,6 +3294,11 @@ export function buildApplication(
                 409,
               );
             await options.plugins.assertAvailable(node.config.pluginIds);
+            if (node.config.attachmentHandling?.enabled)
+              await options.plugins.assertAttachmentAvailable(
+                node.config.pluginIds,
+                node.config.attachmentHandling,
+              );
           }
         }
         const routePolicies = new Map<

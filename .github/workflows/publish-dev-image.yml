@@ -6,10 +6,10 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Images to publish (app does not rebuild or publish sandbox images)
+        description: Images to publish (app / app-adapter preserve the existing sandbox runtime)
         type: choice
         default: all
-        options: [all, app]
+        options: [all, app, app-adapter]
 
 env:
   REGISTRY: ghcr.io
@@ -80,7 +80,7 @@ jobs:
         run: docker compose config
 
   sandbox-runtime:
-    if: inputs.scope != 'app'
+    if: inputs.scope == 'all'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -109,10 +109,10 @@ jobs:
   docker:
     strategy:
       matrix:
-        include: ${{ fromJSON(inputs.scope == 'app' && '[{"image":"bubblepilot","dockerfile":"Dockerfile"}]' || '[{"image":"bubblepilot","dockerfile":"Dockerfile"},{"image":"bubblepilot-sandbox-python","dockerfile":"plugins/opensandbox/runtime/Dockerfile"},{"image":"bubblepilot-opensandbox-mcp","dockerfile":"plugins/opensandbox/server/Dockerfile"}]') }}
+        include: ${{ fromJSON(inputs.scope == 'app' && '[{"image":"bubblepilot","dockerfile":"Dockerfile"}]' || inputs.scope == 'app-adapter' && '[{"image":"bubblepilot","dockerfile":"Dockerfile"},{"image":"bubblepilot-opensandbox-mcp","dockerfile":"plugins/opensandbox/server/Dockerfile"}]' || '[{"image":"bubblepilot","dockerfile":"Dockerfile"},{"image":"bubblepilot-sandbox-python","dockerfile":"plugins/opensandbox/runtime/Dockerfile"},{"image":"bubblepilot-opensandbox-mcp","dockerfile":"plugins/opensandbox/server/Dockerfile"}]') }}
     runs-on: ubuntu-latest
     needs: [verify, sandbox-runtime]
-    if: ${{ always() && needs.verify.result == 'success' && ((inputs.scope == 'app' && needs.sandbox-runtime.result == 'skipped') || needs.sandbox-runtime.result == 'success') }}
+    if: ${{ always() && needs.verify.result == 'success' && ((inputs.scope != 'all' && needs.sandbox-runtime.result == 'skipped') || needs.sandbox-runtime.result == 'success') }}
     permissions:
       contents: read
       packages: write

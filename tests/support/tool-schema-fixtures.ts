@@ -1,3 +1,4 @@
+import { importChatAttachmentDefinition } from "../../modules/attachments/attachment-session.js";
 import { expect } from "vitest";
 import { AgentToolRegistry } from "../../modules/ai/agent-tool-registry.js";
 import { webSearchDefinition } from "../../modules/ai/agent-runner.js";
@@ -12,6 +13,7 @@ export function allToolDefinitions() {
   new MemeToolSession({} as MemeRepository).register(registry);
   return [
     ...memoryTools,
+    importChatAttachmentDefinition,
     ...registry.definitions(),
     webSearchDefinition,
     chatImageToolDefinition,

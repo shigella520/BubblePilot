@@ -1,3 +1,6 @@
+import { TransferFailure } from "./attachment-contract.js";
+import { workspaceUsageCommand } from "./attachment-helper.js";
+import type { TransferInput, TransferResult } from "./attachment-contract.js";
 import {
   initializeWorkspaceCommand,
   parseRuntime,
@@ -10,7 +13,7 @@ export class ToolError extends Error {}
 export class SandboxPool {
   readonly sessions = new Set<SandboxSession>();
   private readonly occupied = new Set<SandboxSession>();
-  private sweeping = false;
+  private sweeping: Promise<void> | undefined;
   constructor(
     readonly backend: Backend,
     readonly maximum: number,
@@ -36,18 +39,22 @@ export class SandboxPool {
         throw new Error("Orphan cleanup incomplete");
   }
   async sweep() {
-    if (this.sweeping) return;
-    this.sweeping = true;
+    if (this.sweeping) return this.sweeping;
+    this.sweeping = this.sweepSessions();
     try {
-      for (const session of this.sessions) {
-        if (Date.now() >= session.expiresAt) session.invalidate();
-        if (session.ended && (await session.cleanup())) {
-          this.occupied.delete(session);
-          this.sessions.delete(session);
-        }
-      }
+      await this.sweeping;
     } finally {
-      this.sweeping = false;
+      this.sweeping = undefined;
+    }
+  }
+  private async sweepSessions() {
+    for (const session of this.sessions) {
+      if (Date.now() >= session.expiresAt) session.invalidate();
+      if (!session.ended) await session.checkSpace();
+      if (session.ended && (await session.cleanup())) {
+        this.occupied.delete(session);
+        this.sessions.delete(session);
+      }
     }
   }
 }
@@ -57,6 +64,86 @@ export class SandboxSession {
   readonly abort = new AbortController();
   ended = false;
   private busy = false;
+  private imported = new Map<
+    string,
+    { input: string; result: TransferResult }
+  >();
+  private importBytes = 0;
+  private expandedBytes = 0;
+  private expandedFiles = 0;
+  private importLimits?: TransferInput["limits"];
+  importStatus(id: string, input?: TransferInput) {
+    this.check();
+    const existing = this.imported.get(id);
+    if (existing && input && existing.input !== JSON.stringify(input))
+      throw new ToolError("import_id_conflict");
+    return existing?.result ?? null;
+  }
+  async importAttachment(
+    input: TransferInput,
+    body: AsyncIterable<Uint8Array>,
+    signal: AbortSignal,
+  ) {
+    this.check();
+    signal.throwIfAborted();
+    const previous = this.imported.get(input.id);
+    if (previous) {
+      if (previous.input !== JSON.stringify(input))
+        throw new ToolError("import_id_conflict");
+      return previous.result;
+    }
+    if (
+      this.importLimits &&
+      JSON.stringify(this.importLimits) !== JSON.stringify(input.limits)
+    )
+      throw new ToolError("import_limits_changed");
+    this.importLimits ??= input.limits;
+    if (
+      this.imported.size >= input.limits.files ||
+      this.importBytes + input.size > input.limits.totalMiB * 1024 * 1024
+    )
+      throw new ToolError("attachment_quota_exceeded");
+    await this.prepare(signal);
+    this.check();
+    if (!this.handle?.upload)
+      throw new ToolError("attachment_transfer_unsupported");
+    this.busy = true;
+    const combined = AbortSignal.any([
+      signal,
+      this.abort.signal,
+      AbortSignal.timeout(45000),
+    ]);
+    const cancel = () => this.invalidate();
+    combined.addEventListener("abort", cancel, { once: true });
+    try {
+      const result = {
+        ...(await this.handle.upload(input, body, combined)),
+        sandboxGeneration: this.owner,
+        runtime: this.runtime,
+      };
+      combined.throwIfAborted();
+      this.expandedBytes += result.expandedBytes;
+      this.expandedFiles += result.expandedFiles;
+      if (
+        this.expandedBytes > input.limits.expandedMiB * 1024 * 1024 ||
+        this.expandedFiles > input.limits.expandedFiles
+      )
+        throw new ToolError("archive_quota_exceeded");
+      this.importBytes += input.size;
+      this.imported.set(input.id, { input: JSON.stringify(input), result });
+      return result;
+    } catch (error) {
+      this.invalidate();
+      throw new ToolError(
+        error instanceof TransferFailure
+          ? `attachment_${error.reason}_session_invalidated`
+          : "attachment_failed_session_invalidated_do_not_replay",
+      );
+    } finally {
+      combined.removeEventListener("abort", cancel);
+      this.busy = false;
+    }
+  }
   private handle: Handle | undefined;
   private runtime: RuntimeInfo = { id: "unknown" };
   private creating = false;
@@ -149,6 +236,26 @@ export class SandboxSession {
     } finally {
       combined.removeEventListener("abort", cancel);
       this.busy = false;
+    }
+  }
+  async checkSpace() {
+    if (!this.importLimits || !this.handle || this.ended) return;
+    try {
+      const result = await this.handle.run(
+        workspaceUsageCommand,
+        AbortSignal.any([this.abort.signal, AbortSignal.timeout(2000)]),
+        2,
+      );
+      const kib = Number(result.stdout.trim());
+      if (
+        result.status !== "completed" ||
+        !result.stdout.trim() ||
+        !Number.isFinite(kib) ||
+        kib > 256 * 1024
+      )
+        this.invalidate();
+    } catch {
+      this.invalidate();
     }
   }
   async cleanup() {

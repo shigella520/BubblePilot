@@ -29,6 +29,8 @@ services:
       - bubblepilot-memes:/app/data/memes
       - ${PLUGIN_DATA_DIR:-./data/plugins}:/app/data/plugins
     environment:
+      ATTACHMENT_TEMP_PATH: ${ATTACHMENT_TEMP_PATH:-/tmp/bubblepilot-attachments}
+      ATTACHMENT_TEMP_MAX_MIB: ${ATTACHMENT_TEMP_MAX_MIB:-256}
       PLUGIN_STORAGE_PATH: /app/data/plugins
       MEME_STORAGE_PATH: /app/data/memes
       NODE_ENV: production

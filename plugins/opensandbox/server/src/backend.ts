@@ -1,4 +1,11 @@
 import {
+  TransferFailure,
+  transferFailureReasons,
+} from "./attachment-contract.js";
+import { randomBytes } from "node:crypto";
+import { attachmentCommand } from "./attachment-helper.js";
+import type { TransferInput, TransferResult } from "./attachment-contract.js";
+import {
   ConnectionConfig,
   Sandbox,
   SandboxManager,
@@ -20,6 +27,11 @@ export interface Handle {
     signal: AbortSignal,
     seconds: number,
   ): Promise<CommandResult>;
+  upload?(
+    input: TransferInput,
+    body: AsyncIterable<Uint8Array>,
+    signal: AbortSignal,
+  ): Promise<TransferResult>;
   close(): Promise<void>;
 }
 export interface Backend {
@@ -127,6 +139,117 @@ export function sdkBackend(config: Config, apiKey: string): Backend {
               signal,
             ),
           );
+        },
+        async upload(input, body, signal) {
+          const controller = new AbortController();
+          const combined = AbortSignal.any([signal, controller.signal]);
+          let ready!: () => void;
+          let failed!: (e: unknown) => void;
+          const readiness = new Promise<void>((resolve, reject) => {
+            ready = resolve;
+            failed = reject;
+          });
+          const port = 47831;
+          const token = randomBytes(32).toString("hex");
+          const command = (async () => {
+            let seen = false;
+            let outputBytes = 0;
+            for await (const event of sandbox.commands.runStream(
+              attachmentCommand({ ...input, port, token }),
+              { background: false, timeoutSeconds: 45 },
+              combined,
+            )) {
+              outputBytes += Buffer.byteLength(event.text ?? "");
+              if (outputBytes > 8192)
+                throw new Error("Attachment helper output limit");
+              if (
+                event.type === "stdout" &&
+                event.text?.includes("ATTACHMENT_READY")
+              ) {
+                seen = true;
+                ready();
+              }
+              if (event.type === "error")
+                throw new Error("Attachment helper failed");
+            }
+            if (!seen) throw new Error("Attachment helper unavailable");
+          })();
+          void command.catch(failed);
+          try {
+            await readiness;
+            combined.throwIfAborted();
+            const endpoint = await sandbox.getEndpoint(port);
+            const target = new URL(
+              `${connectionConfig.protocol}://${endpoint.endpoint}`,
+            );
+            if (target.origin !== new URL(config.OPENSANDBOX_URL).origin)
+              throw new Error("Attachment proxy origin mismatch");
+            const response = await fetch(target, {
+              method: "POST",
+              redirect: "error",
+              signal: combined,
+              headers: {
+                ...connectionConfig.headers,
+                ...endpoint.headers,
+                "X-Transfer-Token": token,
+                "Content-Length": String(input.size),
+                "Content-Type": "application/octet-stream",
+              },
+              body,
+              duplex: "half",
+            });
+            const reader = (
+              response.body as ReadableStream<Uint8Array>
+            ).getReader();
+            const chunks: Uint8Array[] = [];
+            let bytes = 0;
+            try {
+              for (;;) {
+                const item = await reader.read();
+                if (item.done) break;
+                bytes += item.value.byteLength;
+                if (bytes > 4096) throw new Error("Invalid import result");
+                chunks.push(item.value);
+              }
+            } finally {
+              await reader.cancel().catch(() => undefined);
+            }
+            const text = Buffer.concat(chunks).toString("utf8");
+            if (text.length > 4096) throw new Error("Invalid import result");
+            if (!response.ok) {
+              const failure = JSON.parse(text) as { error?: unknown };
+              throw new TransferFailure(
+                typeof failure.error === "string" &&
+                  transferFailureReasons.has(failure.error)
+                  ? failure.error
+                  : "file_import_failed",
+              );
+            }
+            const result = JSON.parse(text) as TransferResult;
+            if (
+              result.status !== "imported" ||
+              result.sha256 !== input.sha256 ||
+              result.size !== input.size ||
+              !Number.isSafeInteger(result.expandedBytes) ||
+              result.expandedBytes < 0 ||
+              result.expandedBytes > input.limits.expandedMiB * 1024 * 1024 ||
+              !Number.isSafeInteger(result.expandedFiles) ||
+              result.expandedFiles < 0 ||
+              result.expandedFiles > input.limits.expandedFiles ||
+              (result.expandedPath !== undefined &&
+                result.expandedPath !==
+                  `/workspace/attachments/${input.id}/expanded`) ||
+              result.sandbox_path !==
+                `/workspace/attachments/${input.id}/${input.filename}`
+            )
+              throw new Error("Invalid import result");
+            await command;
+            combined.throwIfAborted();
+            return result;
+          } finally {
+            controller.abort();
+            await command.catch(() => undefined);
+          }
         },
         close: () => sandbox.close(),
       };

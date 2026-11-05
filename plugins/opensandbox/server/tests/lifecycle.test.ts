@@ -124,3 +124,50 @@ it("retains admission after losing the create response until TTL", async () => {
     vi.restoreAllMocks();
   }
 });
+
+it("serializes imports with commands, invalidates late uploads and awaits in-flight cleanup", async () => {
+  const { pool, backend } = fixture();
+  const original = backend.create;
+  let complete!: () => void;
+  vi.spyOn(backend, "create").mockImplementation(async (owner, signal) => ({
+    ...(await original(owner, signal)),
+    upload: (input) =>
+      new Promise((resolve) => {
+        complete = () =>
+          resolve({
+            status: "imported",
+            sandbox_path: `/workspace/attachments/${input.id}/${input.filename}`,
+            size: input.size,
+            sha256: input.sha256,
+            expandedBytes: 0,
+            expandedFiles: 0,
+          });
+      }),
+  }));
+  const session = pool.newSession();
+  const abort = new AbortController();
+  const pending = session.importAttachment(
+    {
+      id: "fictional",
+      filename: "data.txt",
+      size: 1,
+      sha256: "0".repeat(64),
+      limits: { files: 1, totalMiB: 1, expandedMiB: 1, expandedFiles: 1 },
+    },
+    (async function* () {
+      await Promise.resolve();
+      yield Buffer.from("x");
+    })(),
+    abort.signal,
+  );
+  await vi.waitFor(() => expect(complete).toBeTypeOf("function"));
+  await expect(session.run("other", 1, signal())).rejects.toThrow(
+    "sandbox_busy",
+  );
+  abort.abort();
+  complete();
+  await expect(pending).rejects.toThrow("invalidated");
+  expect(session.ended).toBe(true);
+  await Promise.all([pool.sweep(), pool.sweep()]);
+  expect(pool.used).toBe(0);
+});

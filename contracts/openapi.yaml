@@ -6,6 +6,19 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/plugins/attachment-targets:
+    get:
+      operationId: listAttachmentSandboxTargets
+      description: Approved enabled plugin services advertising attachment protocol v1. Metadata only; no sandbox is created. Publish and runtime independently revalidate the binding.
+      security: [{ sessionAuth: [] }]
+      responses:
+        "200":
+          {
+            description: List of pluginId,
+            pluginName,
+            server and protocol version.,
+          }
+        "401": { $ref: "#/components/responses/Error" }
   /api/v1/scheduled-tasks:
     get:
       operationId: listScheduledTasks

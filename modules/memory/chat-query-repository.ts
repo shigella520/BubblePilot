@@ -156,6 +156,21 @@ export class ChatQueryRepository {
     const filter = chatFilterSql(scope, query, timeZone);
     const direction = query.order === "asc" ? "ASC" : "DESC";
     let where = filter.where;
+    const attachments = `jsonb_array_elements(CASE WHEN jsonb_typeof(m.attachments)='array' THEN m.attachments ELSE '[]'::jsonb END)`;
+    const conditions: string[] = [];
+    if (query.attachmentName)
+      conditions.push(
+        `strpos(lower(coalesce(a->>'fileName','')),lower(${filter.parameter(query.attachmentName)}::text))>0`,
+      );
+    if (query.attachmentType)
+      conditions.push(
+        query.attachmentType.startsWith(".")
+          ? `right(lower(coalesce(a->>'fileName','')),length(${filter.parameter(query.attachmentType)}::text))=${filter.parameter(query.attachmentType)}::text`
+          : `lower(coalesce(a->>'mimeType',''))=${filter.parameter(query.attachmentType)}::text`,
+      );
+    if (query.hasAttachments !== undefined || conditions.length)
+      where += ` AND ${query.hasAttachments === false ? "NOT " : ""}EXISTS(SELECT 1 FROM ${attachments} a${conditions.length ? ` WHERE ${conditions.join(" AND ")}` : ""})`;
+
     // Keep the zone parameter typed even when there is no daily-time predicate.
     where += ` AND ${filter.zone}::text IS NOT NULL`;
     if (after)

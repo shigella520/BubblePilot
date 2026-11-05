@@ -31,6 +31,7 @@ describe("strict tool schema", () => {
       "capability_probe",
       "count_chat_messages",
       "get_chat_message_extrema",
+      "import_chat_attachment",
       "query_chat_messages",
       "read_chat_excerpt",
       "search_chat_history",

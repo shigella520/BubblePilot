@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, vue/no-mutating-props */
+import AttachmentHandlingSettings from "./AttachmentHandlingSettings.vue";
 import ScheduledTriggerSettings from "./ScheduledTriggerSettings.vue";
 import IdleTriggerSettings from "./IdleTriggerSettings.vue";
 import { ref, onMounted } from "vue";
@@ -270,6 +271,13 @@ function configVisible(item: any): boolean {
       >
       <RouterLink to="/plugins">管理插件</RouterLink>
     </section>
+    <AttachmentHandlingSettings
+      v-if="node.data.block.type === 'ai-chat'"
+      :model-value="props.config.attachmentHandling"
+      :plugin-ids="props.config.pluginIds ?? []"
+      :output-format="props.config.outputFormat ?? 'text'"
+      @update:model-value="(value) => (props.config.attachmentHandling = value)"
+    />
     <RouterLink v-if="node.data.block.type === 'ai-chat'" to="/memes"
       >管理表情包库</RouterLink
     >

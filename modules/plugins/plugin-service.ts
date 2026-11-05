@@ -1,3 +1,8 @@
+import type { AttachmentHandling } from "../attachments/attachment-policy.js";
+import {
+  attachmentTargets,
+  assertAttachmentBinding,
+} from "./plugin-attachments.js";
 import { ApplicationError } from "../../app/errors.js";
 import { pluginCatalogueUsage } from "./plugin-catalogue.js";
 import type { TrustedHostsProvider } from "../shared/network-settings.js";
@@ -438,6 +443,40 @@ export class PluginService {
       this,
       await Promise.all(rows.rows.map((row) => this.get(row.id))),
     );
+  }
+  async attachmentTargets() {
+    const rows = await this.pool.query<{ id: string }>(
+      "SELECT id FROM plugins WHERE enabled=true ORDER BY name,id",
+    );
+    return attachmentTargets(
+      await Promise.all(rows.rows.map((r) => this.get(r.id))),
+    );
+  }
+  async assertAttachmentAvailable(ids: string[], config: AttachmentHandling) {
+    const plugins = await Promise.all(ids.map((id) => this.get(id)));
+    assertAttachmentBinding(plugins, config);
+    const plugin = plugins.find((p) => p.id === config.pluginId)!;
+    const client = new PluginMcp(this.trustedHosts);
+    try {
+      await client.connect(plugin.config.connections[config.server]!);
+      if (client.attachmentVersion() !== 1)
+        pluginError("ATTACHMENT_TARGET_UPGRADE_REQUIRED", 409);
+      const tools = await client.discover(config.server);
+      for (const name of [
+        "prepare_sandbox",
+        "run_command",
+        "read_file",
+        "write_file",
+      ]) {
+        const approved = plugin.config.tools.find(
+          (t) => t.server === config.server && t.definition.name === name,
+        );
+        if (!approved || !tools.some((t) => t.hash === approved.hash))
+          pluginError("ATTACHMENT_TOOL_REVIEW_REQUIRED", 409);
+      }
+    } finally {
+      await client.close();
+    }
   }
   async assertAvailable(ids: string[]) {
     if (!ids.length) return;

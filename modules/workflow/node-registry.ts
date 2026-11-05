@@ -1314,6 +1314,25 @@ class AiChatNodeHandler extends BaseNodeHandler {
         outputFormat: idleDecision ? "json" : node.config.outputFormat,
         allowMemes: !scheduled && (node.config.allowMemes ?? false),
         pluginIds: scheduled ? [] : (node.config.pluginIds ?? []),
+        ...(node.config.attachmentHandling?.enabled &&
+        context.envelope.message &&
+        !context.envelope.message.isFromMe &&
+        !context.envelope.metadata.isReplay
+          ? {
+              attachmentInput: {
+                config: node.config.attachmentHandling,
+                scope: {
+                  provider: context.envelope.provider,
+                  providerChatId: context.envelope.chat.providerChatId,
+                  triggerMessageId: context.envelope.message.providerMessageId,
+                },
+                current: {
+                  providerMessageId: context.envelope.message.providerMessageId,
+                  attachments: context.envelope.message.attachments,
+                },
+              },
+            }
+          : {}),
         ...(node.config.webSearch === undefined
           ? {}
           : { webSearch: scheduled ? "disabled" : node.config.webSearch }),

@@ -48,6 +48,7 @@ export interface PluginPackage {
   hash: string;
 }
 export interface ApprovedTool {
+  attachmentTransferVersion?: 1;
   outputSchema?: Record<string, unknown>;
   server: string;
   definition: AiToolDefinition;

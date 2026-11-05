@@ -41,6 +41,16 @@ const environmentSchema = z
     APP_HOST: z.string().min(1).default("0.0.0.0"),
     APP_PORT: z.coerce.number().int().min(1).max(65_535).default(8080),
     DATABASE_URL: z.string().min(1),
+    ATTACHMENT_TEMP_PATH: z
+      .string()
+      .min(1)
+      .default("/tmp/bubblepilot-attachments"),
+    ATTACHMENT_TEMP_MAX_MIB: z.coerce
+      .number()
+      .int()
+      .min(64)
+      .max(1024)
+      .default(256),
     PLUGIN_STORAGE_PATH: z.string().min(1).default("./data/plugins"),
     MEME_STORAGE_PATH: z.string().min(1).default("./data/memes"),
     DATABASE_QUERY_TIMEOUT_MS: z.coerce
@@ -168,6 +178,8 @@ export interface AppConfig {
   port: number;
   memeStoragePath?: string;
   pluginStoragePath?: string;
+  attachmentTempPath?: string;
+  attachmentTempMaxMiB?: number;
   databaseUrl: string;
   databaseQueryTimeoutMs: number;
   apiAccessToken: string;
@@ -222,6 +234,8 @@ export function loadConfig(
     port: parsed.APP_PORT,
     memeStoragePath: parsed.MEME_STORAGE_PATH,
     pluginStoragePath: parsed.PLUGIN_STORAGE_PATH,
+    attachmentTempPath: parsed.ATTACHMENT_TEMP_PATH,
+    attachmentTempMaxMiB: parsed.ATTACHMENT_TEMP_MAX_MIB,
     databaseUrl: parsed.DATABASE_URL,
     databaseQueryTimeoutMs: parsed.DATABASE_QUERY_TIMEOUT_MS,
     apiAccessToken: parsed.API_ACCESS_TOKEN,

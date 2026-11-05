@@ -79,7 +79,9 @@ export function safeFetch(
         ...(init?.headers
           ? { headers: init.headers as Record<string, string> }
           : {}),
-        ...(init?.body ? { body: init.body as string } : {}),
+        ...(init?.body
+          ? { body: init.body as string, duplex: "half" as const }
+          : {}),
         signal: init?.signal ?? AbortSignal.timeout(pluginLimits.timeoutMs),
         redirect: "manual",
         dispatcher: agent,
