@@ -45,3 +45,13 @@ CVE-2026-119373 是启用 FTS5 时 `detail=none`、负 rowid 和前缀查询合�
 源码：https://www.sqlite.org/2026/sqlite-autoconf-3540100.tar.gz 。官方 SHA3-256：`b6ced585c750916b1052667239a12c25a7ff34e7f06e1e6e01ecb0427657d9c4`；下载后交叉核对并固定 SHA-256：`926ef8d3eab93fbf6e06011901273eec076b25594a4e1cdadd50c987f4f6d64e`。
 
 依据：https://security-tracker.debian.org/tracker/CVE-2026-119373 。Python sqlite3 和命令行均断言 3.54.1，运行负 rowid 的 FTS5 前缀查询回归。自编译包不属于 Debian 官方漏洞映射，不能只凭 Trivy 不再列出原包认定修复；版本、来源哈希和功能回归共同作为证据。后续须跟踪 SQLite 上游安全更新。仅更新 Dockerfile 源哈希，不新增 CVE 例外或延长有效期。
+
+## 2026-11-05 APT 与 zlib 修复
+
+PR #56 完整扫描新增 APT CVE-2026-109518（apt、libapt-pkg7.0）与 zlib CVE-2026-76844，原风险门禁保持阻断。构建阶段及最终阶段先经 HTTPS、`Acquire::Retries=0` 升级 APT 至 Debian 官方安全更新 3.0.4 或更高，再安装其余依赖；避免未修复 APT 的重定向／重试硬链接复用条件。
+
+Debian trixie 当日仍无 zlib 修复包；采用上游正式版 1.4，与 SQLite 一样制作独立 `bubblepilot-zlib` Debian 包，替换旧 `zlib1g` 并提供版本化依赖，不保留旧系统共享库或编译器。官方发布资产 SHA-256 与下载交叉核对：`02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584`，在 Dockerfile 中固定。构建运行上游 `make check`；最终镜像验证 Python 和系统加载器均为 1.4、APT 最低修复版本、gzip/zlib 往返，以及 `/dev/full` 写失败→清除错误→不同缓冲区再次写入的回归。
+
+依据：[Debian APT 公告](https://lists.debian.org/debian-security-announce/2026/msg00526.html)、[Debian zlib tracker](https://security-tracker.debian.org/tracker/CVE-2026-76844)、[zlib 1.4 正式发布](https://github.com/madler/zlib/releases/tag/v1.4)、[上游修复](https://github.com/madler/zlib/commit/df84af25dc1942490e1d1c899a07619152a46148)。Tracker 明确 CVE-2026-76844 与 CVE-2026-85091 使用同一修复。
+
+自编译库的安全证据包含来源、哈希、实际加载版本与功能回归，不以扫描器不再列出 Debian 包作为唯一依据。仅同步 Dockerfile 源哈希，不新增风险例外或延长有效期。此次修复随代码合并；已部署的 NAS 运行镜像不会随合并自动更新，后续需单独发布运行镜像并切换 digest。

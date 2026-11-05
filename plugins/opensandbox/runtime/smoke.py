@@ -1,4 +1,7 @@
 """Offline fictional workloads; run inside the runtime container, never on NAS data."""
+import ctypes
+import gzip
+import zlib
 import importlib
 import io
 import json
@@ -34,6 +37,37 @@ assert sqlite3.sqlite_version == '3.54.1'
 assert subprocess.check_output(['sqlite3', ':memory:', 'select sqlite_version();'], text=True).strip() == sqlite3.sqlite_version
 assert not installed.intersection({'sqlite3', 'libsqlite3-0'})
 assert shutil.which('gcc') is None
+# Verify the system loader and Python both use the repaired zlib, not an old copy.
+assert zlib.ZLIB_RUNTIME_VERSION == '1.4'
+assert 'zlib1g' not in installed and 'bubblepilot-zlib' in installed
+for package in ['apt', 'libapt-pkg7.0']:
+    version = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', package], text=True)
+    subprocess.run(['dpkg', '--compare-versions', version, 'ge', '3.0.4'], check=True)
+libz = ctypes.CDLL('libz.so.1')
+libz.zlibVersion.restype = ctypes.c_char_p
+assert libz.zlibVersion() == b'1.4'
+libz.gzopen.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+libz.gzopen.restype = ctypes.c_void_p
+libz.gzwrite.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint]
+libz.gzwrite.restype = ctypes.c_int
+libz.gzclearerr.argtypes = [ctypes.c_void_p]
+libz.gzclearerr.restype = None
+libz.gzclose.argtypes = [ctypes.c_void_p]
+libz.gzclose.restype = ctypes.c_int
+# Force write failure, clear the error, then write a different caller buffer.
+# This reaches the stale next_in sequence in CVE-2026-76844 / CVE-2026-85091.
+handle = libz.gzopen(b'/dev/full', b'wb0')
+assert handle
+try:
+    for value in [b'A', b'B', b'C']:
+        payload = ctypes.create_string_buffer(value * 262144)
+        assert libz.gzwrite(handle, payload, 262144) == 0
+        libz.gzclearerr(handle)
+finally:
+    assert libz.gzclose(handle) != 0
+payload = b'fictional attachment data' * 4096
+assert gzip.decompress(gzip.compress(payload)) == payload
+assert zlib.decompress(zlib.compress(payload)) == payload
 # Exercise negative rowids and detail=none prefix doclist merging (CVE-2026-119373).
 fts_sql = """CREATE VIRTUAL TABLE docs USING fts5(body, detail=none);
 INSERT INTO docs(rowid,body) VALUES(-9223372036854775808,'prefixa'),(-1,'prefixb'),(1,'prefixc');
