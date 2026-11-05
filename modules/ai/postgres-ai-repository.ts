@@ -1520,8 +1520,16 @@ export class PostgresAiRepository implements AiRepository {
     executionId: string,
     nodeId?: string,
   ): Promise<readonly AiToolExecutionView[]> {
-    const result = await this.pool.query<ToolExecutionRow>(
-      `SELECT * FROM ai_tool_executions
+    const result = await this.pool.query<
+      ToolExecutionRow & { attachment_filename: string | null }
+    >(
+      `SELECT t.*, CASE WHEN t.tool_name='import_chat_attachment' THEN
+         (SELECT m.attachments->(t.response_details->>'attachmentIndex')::int->>'fileName'
+          FROM messages m JOIN chats c ON c.id=m.chat_id
+          WHERE m.id::text=t.response_details->>'sourceMessageId'
+            AND m.content_redacted_at IS NULL AND c.deleted_at IS NULL)
+         ELSE NULL END AS attachment_filename
+       FROM ai_tool_executions t
        WHERE execution_id = $1 AND ($2::text IS NULL OR node_id = $2)
        ORDER BY created_at, id`,
       [executionId, nodeId ?? null],
@@ -1539,7 +1547,10 @@ export class PostgresAiRepository implements AiRepository {
       queryHash: row.query_hash,
       errorCode: row.error_code,
       requestDetails: row.request_details,
-      responseDetails: row.response_details,
+      responseDetails:
+        row.tool_name === "import_chat_attachment" && row.response_details
+          ? { ...row.response_details, filename: row.attachment_filename }
+          : row.response_details,
       createdAt: row.created_at.toISOString(),
     }));
   }

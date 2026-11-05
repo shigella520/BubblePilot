@@ -118,6 +118,46 @@ describe("workflow manifest", () => {
     });
   });
 
+  it("preserves node attachment settings on save but removes transfer authority on import", () => {
+    const original = structuredClone(definition);
+    const node = original.nodes.find((n) => n.type === "ai-chat")!;
+    if (node.type !== "ai-chat") throw new Error("fixture");
+    node.config.pluginIds = [routeId];
+    node.config.attachmentHandling = {
+      enabled: true,
+      pluginId: routeId,
+      server: "sandbox",
+      limits: {
+        fileMiB: 10,
+        files: 3,
+        totalMiB: 20,
+        timeoutSeconds: 30,
+        expandedMiB: 50,
+        expandedFiles: 200,
+      },
+    };
+    expect(
+      parseWorkflowDefinition(original).nodes.find((n) => n.type === "ai-chat")
+        ?.config,
+    ).toMatchObject({ attachmentHandling: node.config.attachmentHandling });
+    const manifest = exportWorkflowManifest({
+      definition: original,
+      mode: "portable",
+      catalog,
+    });
+    const imported = importWorkflowManifest({ manifest, catalog });
+    expect(
+      parseWorkflowDefinition(imported.definition).nodes.find(
+        (n) => n.type === "ai-chat",
+      )?.config,
+    ).not.toHaveProperty("attachmentHandling");
+    expect(imported.issues).toMatchObject([
+      { severity: "warning", code: "ATTACHMENT_REBIND_REQUIRED" },
+    ]);
+    node.config.outputFormat = "json";
+    expect(() => parseWorkflowDefinition(original)).toThrow();
+  });
+
   it.each(["portable", "instance-bound"] as const)(
     "preserves all data wires after JSON editing and %s reimport",
     (mode) => {

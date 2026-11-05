@@ -932,6 +932,92 @@
                       "allowMemes": {
                         "type": "boolean"
                       },
+                      "attachmentHandling": {
+                        "type": "object",
+                        "properties": {
+                          "enabled": {
+                            "default": false,
+                            "type": "boolean"
+                          },
+                          "pluginId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              }
+                            ]
+                          },
+                          "server": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "limits": {
+                            "default": {
+                              "fileMiB": 10,
+                              "files": 3,
+                              "totalMiB": 20,
+                              "timeoutSeconds": 30,
+                              "expandedMiB": 50,
+                              "expandedFiles": 200
+                            },
+                            "type": "object",
+                            "properties": {
+                              "fileMiB": {
+                                "default": 10,
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 20
+                              },
+                              "files": {
+                                "default": 3,
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5
+                              },
+                              "totalMiB": {
+                                "default": 20,
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 50
+                              },
+                              "timeoutSeconds": {
+                                "default": 30,
+                                "type": "integer",
+                                "minimum": 5,
+                                "maximum": 45
+                              },
+                              "expandedMiB": {
+                                "default": 50,
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100
+                              },
+                              "expandedFiles": {
+                                "default": 200,
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 500
+                              }
+                            },
+                            "required": [
+                              "fileMiB",
+                              "files",
+                              "totalMiB",
+                              "timeoutSeconds",
+                              "expandedMiB",
+                              "expandedFiles"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["enabled", "pluginId", "server", "limits"],
+                        "additionalProperties": false
+                      },
                       "pluginIds": {
                         "maxItems": 10,
                         "type": "array",

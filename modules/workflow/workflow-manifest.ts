@@ -391,8 +391,19 @@ export function importWorkflowManifest(input: {
     binding.resolutions.map((item) => [item.ref, item.selectedId!]),
   );
   const nodes = clone(manifest.spec.nodes);
+  const attachmentWarnings: WorkflowManifestIssue[] = [];
   for (const node of nodes) {
     const config = clone(node.config);
+    if (node.type === "ai-chat" && config.attachmentHandling) {
+      delete config.attachmentHandling;
+      attachmentWarnings.push({
+        path: `/spec/nodes/${node.id}/config/attachmentHandling`,
+        severity: "warning",
+        code: "ATTACHMENT_REBIND_REQUIRED",
+        message: "附件传输授权已移除。",
+        suggestion: "在目标实例重新选择沙箱并审阅后发布。",
+      });
+    }
     if (typeof config.providerRouteRef === "string") {
       config.providerRouteId = selected.get(config.providerRouteRef);
       delete config.providerRouteRef;
@@ -436,7 +447,7 @@ export function importWorkflowManifest(input: {
       manifest,
       definition,
       resolutions: binding.resolutions,
-      issues: [],
+      issues: attachmentWarnings,
     };
   } catch (error) {
     return {

@@ -1,3 +1,5 @@
+import { AttachmentService } from "../modules/attachments/attachment-service.js";
+import { AttachmentStore } from "../modules/attachments/attachment-store.js";
 import { TaskService } from "../modules/scheduled-tasks/task-service.js";
 import { TaskScheduler } from "../modules/scheduled-tasks/task-scheduler.js";
 import { DEFAULT_CONTEXT_SETTINGS } from "../modules/workflow/context-settings-types.js";
@@ -202,6 +204,22 @@ const plugins = new PluginService(
   networkSettings.trustedHosts,
 );
 await plugins.init();
+const attachmentStore = new AttachmentStore(
+  config.attachmentTempPath ?? "/tmp/bubblepilot-attachments",
+  (config.attachmentTempMaxMiB ?? 256) * 1024 * 1024,
+);
+await attachmentStore.init([
+  config.pluginStoragePath ?? "./data/plugins",
+  config.memeStoragePath ?? "./data/memes",
+  "./apps/web/dist",
+  "./dist",
+  "./public",
+]);
+const attachmentService = new AttachmentService(
+  memoryService.repository.pool,
+  blueBubblesSettings,
+  attachmentStore,
+);
 const aiAgent = new AgentRunner(
   aiRouting,
   webSearchTool,
@@ -212,6 +230,7 @@ const aiAgent = new AgentRunner(
   agentSettings,
   memeRepository,
   plugins,
+  attachmentService,
 );
 const imageSummaryRepository = new PostgresImageSummaryRepository(
   config.databaseUrl,

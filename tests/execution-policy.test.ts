@@ -63,6 +63,7 @@ describe("generation and retrieval policy", () => {
       ref: "M1",
       before: 8,
       after: 8,
+      attachmentOffset: 0,
     });
     expect(
       chatExcerptSchema.parse({ ref: "M1", before: 0, after: 20 }).before,

@@ -1,3 +1,8 @@
+import {
+  attachmentPageSize,
+  type AttachmentListing,
+} from "../attachments/attachment-policy.js";
+import type { ChatMessageQuery } from "./chat-query-types.js";
 import type { HistoricalImageCandidate } from "../ai/chat-image-session.js";
 import { isImageAttachment } from "../ai/image-reference.js";
 import { sha256 } from "../../app/canonical-json.js";
@@ -49,7 +54,7 @@ export const memoryTools: readonly AiToolDefinition[] = [
       name: "query_chat_messages",
       schema: chatMessageQuerySchema,
       description:
-        "Query original archived messages using exact senderId, inclusive timestamps, local dailyTime (start inclusive/end exclusive), and case-insensitive literal body keywords (all/any). Order asc for earliest or desc for latest. Follow opaque nextCursor with identical filters and order. Results are a page, not a complete transcript. No match means no matching readable archive, not no activity.",
+        "Query original archived messages; optional hasAttachments, attachmentName (literal filename substring), attachmentType (exact MIME or .extension) filter attachment metadata, with name and type matching the SAME file. attachmentOffset continues bounded file listings without changing message pagination. Does not download files. Using exact senderId, inclusive timestamps, local dailyTime (start inclusive/end exclusive), and case-insensitive literal body keywords (all/any). Order asc for earliest or desc for latest. Follow opaque nextCursor with identical filters and order. Results are a page, not a complete transcript. No match means no matching readable archive, not no activity.",
     },
     {
       name: "count_chat_messages",
@@ -112,6 +117,13 @@ export const memoryTools: readonly AiToolDefinition[] = [
       type: "object",
       properties: {
         ref: { type: "string" },
+        attachmentOffset: {
+          type: "integer",
+          minimum: 0,
+          maximum: 10000,
+          description:
+            "Continue an attachment catalogue using its nextOffset; use before/after 0 to focus on the source message.",
+        },
         before: {
           type: "integer",
           minimum: 0,
@@ -307,6 +319,48 @@ export class MemorySession {
     { fingerprint: string; position: ChatPosition }
   >();
   imagesEnabled = false;
+  attachmentCatalogue?: (
+    message: MemoryMessage,
+    offset: number,
+    query?: ChatMessageQuery,
+  ) => AttachmentListing;
+  private withAttachments(
+    item: Evidence,
+    messages: MemoryMessage[],
+    offset: number,
+    query?: ChatMessageQuery,
+  ): Evidence {
+    return {
+      ...item,
+      attachments: messages
+        .filter((m) => m.attachments?.length)
+        .map((m) =>
+          this.attachmentCatalogue
+            ? this.attachmentCatalogue(m, offset, query)
+            : {
+                messageId: m.id,
+                total: m.attachments!.length,
+                entries: m
+                  .attachments!.slice(offset, offset + attachmentPageSize)
+                  .map((a, i) => ({
+                    index: offset + i,
+                    fileName: a.fileName,
+                    mimeType: a.mimeType,
+                    sizeBytes: a.sizeBytes,
+                    availability: "not-verified" as const,
+                  })),
+                omitted: Math.max(
+                  0,
+                  m.attachments!.length - offset - attachmentPageSize,
+                ),
+                nextOffset:
+                  offset + attachmentPageSize < m.attachments!.length
+                    ? offset + attachmentPageSize
+                    : null,
+              },
+        ),
+    };
+  }
   private operationContext?: AgentToolContext;
   private elapsed = 0;
   constructor(
@@ -333,7 +387,11 @@ export class MemorySession {
       ],
     );
   }
-  private async add(messages: MemoryMessage[]): Promise<Evidence | null> {
+  private async add(
+    messages: MemoryMessage[],
+    offset = 0,
+    query?: ChatMessageQuery,
+  ): Promise<Evidence | null> {
     this.checkActive();
     if (!messages.length) return null;
     // Repeated queries reuse an identical source; deduplication is never a zero-result signal.
@@ -353,7 +411,8 @@ export class MemorySession {
           );
         }),
     );
-    if (existing) return existing.item;
+    if (existing)
+      return this.withAttachments(existing.item, messages, offset, query);
     const identities = await this.service.repository.identities(
       this.scope.chatId,
       messages.map((m) => m.senderId),
@@ -394,7 +453,7 @@ export class MemorySession {
       senderIds: messages.map((m) => m.senderId),
     };
     this.evidence.set(item.ref, { item, messages });
-    return item;
+    return this.withAttachments(item, messages, offset, query);
   }
   async search(query: MemorySearch): Promise<MemorySearchResult> {
     const result = JSON.parse(
@@ -543,7 +602,11 @@ export class MemorySession {
       queriedAt = page.queriedAt;
       databaseHasMore = page.rows.length > limit;
       for (const row of page.rows.slice(0, limit)) {
-        const evidence = await this.add([row.message]);
+        const evidence = await this.add(
+          [row.message],
+          query.attachmentOffset ?? 0,
+          query,
+        );
         if (evidence) {
           items.push({
             ...evidence,
@@ -672,7 +735,8 @@ export class MemorySession {
         await this.searchWithinBudget(memorySearchSchema.parse(parsed)),
       );
     if (name !== "read_chat_excerpt") throw new Error("Unknown memory tool");
-    const { ref, before, after } = chatExcerptSchema.parse(parsed);
+    const { ref, before, after, attachmentOffset } =
+      chatExcerptSchema.parse(parsed);
     const entry = ref ? this.evidence.get(ref) : undefined;
     const first = entry?.messages[0],
       last = entry?.messages.at(-1);
@@ -693,7 +757,7 @@ export class MemorySession {
     let truncated = false;
     for (;;) {
       const messages = [...surrounding.before, ...source, ...surrounding.after];
-      const evidence = await this.add(messages);
+      const evidence = await this.add(messages, attachmentOffset);
       const content = JSON.stringify({
         status: evidence ? "succeeded" : "unavailable",
         evidence: evidence ? [evidence] : [],

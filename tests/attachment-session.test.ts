@@ -1,0 +1,245 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { createHash, randomUUID } from "node:crypto";
+import { AttachmentSession } from "../modules/attachments/attachment-session.js";
+import { AttachmentStore } from "../modules/attachments/attachment-store.js";
+import { attachmentLimitsSchema } from "../modules/attachments/attachment-policy.js";
+import {
+  AgentToolRegistry,
+  type MultimodalToolResult,
+} from "../modules/ai/agent-tool-registry.js";
+import type { PluginSession } from "../modules/plugins/plugin-session.js";
+import {
+  strictToolParameters,
+  restoreToolArguments,
+} from "../modules/ai/tool-schema.js";
+import { assertStrictSchema } from "./support/tool-schema-fixtures.js";
+const roots: string[] = [];
+afterEach(async () => {
+  for (const root of roots.splice(0))
+    await rm(root, { recursive: true, force: true });
+});
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "bp-attachment-unit-"));
+  roots.push(root);
+  const storage = new AttachmentStore(root);
+  await storage.init();
+  const attachment = {
+    providerAttachmentId: "fictional-file",
+    fileName: "销售.csv",
+    mimeType: "text/csv",
+    sizeBytes: null,
+  };
+  let authorized = true;
+  const resolve = vi.fn(() =>
+    Promise.resolve(
+      authorized
+        ? {
+            messageId: "archive-message",
+            providerMessageId: "current",
+            attachment,
+            attachmentIndex: 0,
+          }
+        : null,
+    ),
+  );
+  const data = Buffer.from("地区,金额\n东,10\n");
+  const download = vi.fn(() => Promise.resolve(new Response(data)));
+  const transfer = vi.fn(
+    async (input: Record<string, unknown>, file: string) => {
+      expect(await readFile(file)).toEqual(data);
+      expect(input.sha256).toBe(
+        createHash("sha256").update(data).digest("hex"),
+      );
+      return {
+        status: "imported",
+        sandbox_path: `/workspace/attachments/${String(input.id)}/${String(input.filename)}`,
+        size: data.length,
+        sha256: input.sha256,
+      };
+    },
+  );
+  const invalidate = vi.fn(async () => {});
+  const channel = {
+    metadata: { pluginId: randomUUID(), server: "sandbox" },
+    check: async () => {},
+    invalidate,
+    transfer,
+  };
+  const plugins = {
+    attachmentChannel: () => channel,
+  } as unknown as PluginSession;
+  const input = {
+    config: {
+      enabled: true,
+      pluginId: channel.metadata.pluginId,
+      server: "sandbox",
+      limits: attachmentLimitsSchema.parse({}),
+    },
+    scope: {
+      provider: "bluebubbles",
+      providerChatId: "fictional-chat",
+      triggerMessageId: "current",
+    },
+    current: { providerMessageId: "current", attachments: [attachment] },
+  };
+  const session = new AttachmentSession(
+    input,
+    plugins,
+    { resolve },
+    { download },
+    storage,
+  );
+  const registry = new AgentToolRegistry();
+  session.register(registry);
+  const tool = registry.get("import_chat_attachment")!;
+  const call = async (args: Record<string, unknown>, maximum = 64000) => {
+    const raw = restoreToolArguments(
+      tool.definition.parameters,
+      JSON.stringify(args),
+    );
+    const output = (await tool.execute(raw, {
+      signal: AbortSignal.timeout(5000),
+      deadline: Date.now() + 5000,
+      maxOutputCharacters: maximum,
+    })) as MultimodalToolResult;
+    return {
+      output,
+      value: JSON.parse(output.text) as Record<string, unknown>,
+    };
+  };
+  return {
+    root,
+    session,
+    input,
+    tool,
+    call,
+    download,
+    transfer,
+    invalidate,
+    resolve,
+    storage,
+    plugins,
+    revoke: () => {
+      authorized = false;
+    },
+    ref: session.currentCatalogue().entries[0]!.attachment_ref!,
+  };
+}
+it("imports only issued references, reuses success and validates again after revocation", async () => {
+  const f = await fixture();
+  assertStrictSchema(strictToolParameters(f.tool.definition));
+  expect((await f.call({ attachment_ref: "guessed" })).value.errorCode).toBe(
+    "ATTACHMENT_REFERENCE_UNAVAILABLE",
+  );
+  expect(f.download).not.toHaveBeenCalled();
+  const first = await f.call({ attachment_ref: f.ref });
+  expect(first.value.status).toBe("imported");
+  expect(first.output.diagnostics).toMatchObject({
+    sourceMessageId: "archive-message",
+    attachmentIndex: 0,
+    outcome: "success",
+  });
+  expect(await readdir(f.root)).toEqual([]);
+  const repeated = await f.call({ attachment_ref: f.ref });
+  expect(repeated.value.reused).toBe(true);
+  expect(repeated.value.sandbox_path).toBe(first.value.sandbox_path);
+  expect(f.transfer).toHaveBeenCalledTimes(1);
+  f.revoke();
+  await expect(f.session.validate()).rejects.toThrow(
+    "ATTACHMENT_PERMISSION_REVOKED",
+  );
+  expect(f.invalidate).toHaveBeenCalled();
+  expect((await f.call({ attachment_ref: f.ref })).value.errorCode).toBe(
+    "ATTACHMENT_SESSION_INVALIDATED",
+  );
+});
+it("does not share references, grants historical candidates explicitly and caps catalogues", async () => {
+  const a = await fixture(),
+    b = await fixture();
+  expect((await b.call({ attachment_ref: a.ref })).value.errorCode).toBe(
+    "ATTACHMENT_REFERENCE_UNAVAILABLE",
+  );
+  const message = {
+    id: "history",
+    providerMessageId: "past",
+    attachments: Array.from({ length: 110 }, (_, i) => ({
+      ...a.input.current.attachments[0]!,
+      fileName: `虚构${i}.csv`,
+    })),
+  };
+  const page = a.session.catalogue(message);
+  expect(page.entries).toHaveLength(20);
+  expect(page.nextOffset).toBe(20);
+  await a.call({ attachment_ref: page.entries[0]!.attachment_ref });
+  expect(a.resolve).toHaveBeenLastCalledWith(a.input.scope, "past", 0, true);
+  for (let i = 20; i < 100; i += 20) a.session.catalogue(message, i);
+  const last = a.session.catalogue(message, 100);
+  expect(last.referenceLimitReached).toBe(true);
+  expect(last.entries.every((e) => !e.attachment_ref)).toBe(true);
+});
+it("rejects concurrent imports, count overrun and invalid body types without retaining temp files", async () => {
+  const f = await fixture();
+  f.input.config.limits.files = 1;
+  let resume!: () => void;
+  f.download.mockImplementationOnce(async () => {
+    await new Promise<void>((r) => {
+      resume = r;
+    });
+    return new Response("地区,金额\n东,10\n");
+  });
+  const pending = f.call({ attachment_ref: f.ref });
+  await vi.waitFor(() => expect(f.download).toHaveBeenCalled());
+  expect((await f.call({ attachment_ref: f.ref })).value.errorCode).toBe(
+    "ATTACHMENT_CAPACITY_BUSY",
+  );
+  resume();
+  await pending;
+  const other = f.session.catalogue({
+    id: "another",
+    providerMessageId: "another",
+    attachments: f.input.current.attachments,
+  }).entries[0]!.attachment_ref!;
+  expect((await f.call({ attachment_ref: other })).value.errorCode).toBe(
+    "ATTACHMENT_COUNT_LIMIT",
+  );
+  const bad = await fixture();
+  bad.download.mockResolvedValueOnce(new Response(new Uint8Array([0, 1, 2])));
+  expect((await bad.call({ attachment_ref: bad.ref })).value.errorCode).toBe(
+    "ATTACHMENT_TEXT_ENCODING_UNSUPPORTED",
+  );
+  expect(bad.transfer).not.toHaveBeenCalled();
+  expect(await readdir(bad.root)).toEqual([]);
+});
+it("enforces actual streaming bytes and releases temporary reservations on failure", async () => {
+  const f = await fixture();
+  const store = new AttachmentStore(f.root, 5);
+  await expect(
+    store.stage(new Response("123456"), 5, AbortSignal.timeout(1000)),
+  ).rejects.toThrow("ATTACHMENT_TOO_LARGE");
+  expect(await readdir(f.root)).toEqual([]);
+  const staged = await store.stage(
+    new Response("123"),
+    5,
+    AbortSignal.timeout(1000),
+  );
+  await expect(
+    store.stage(new Response("1"), 1, AbortSignal.timeout(1000)),
+  ).rejects.toThrow("ATTACHMENT_CAPACITY_BUSY");
+  await staged.dispose();
+  await staged.dispose();
+  const again = await store.stage(
+    new Response("1"),
+    5,
+    AbortSignal.timeout(1000),
+  );
+  await again.dispose();
+  const abort = new AbortController();
+  abort.abort();
+  await expect(
+    store.stage(new Response("1"), 5, abort.signal),
+  ).rejects.toThrow();
+  expect(await readdir(f.root)).toEqual([]);
+});

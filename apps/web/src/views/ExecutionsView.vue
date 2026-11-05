@@ -2259,6 +2259,25 @@ function contextSnapshotValue(
                       来源工具调用：{{ item.responseDetails.parentToolCallId }}
                     </p>
                   </div>
+                  <p v-if="item.toolName === 'import_chat_attachment'">
+                    {{
+                      item.responseDetails?.outcome === "success"
+                        ? "已导入；分析结果请查看后续命令。文件随任务清理。"
+                        : "附件未完成导入。"
+                    }}
+                    <template v-if="item.responseDetails?.filename"
+                      >文件：{{ item.responseDetails.filename }}；</template
+                    >
+                    <template v-if="item.responseDetails?.sizeBytes"
+                      >大小：{{
+                        item.responseDetails.sizeBytes
+                      }}
+                      字节；</template
+                    >
+                    <template v-if="item.responseDetails?.reused"
+                      >复用本次任务已有文件。</template
+                    >
+                  </p>
                   <p v-if="item.toolName === 'view_chat_image'">
                     {{ imageToolLabel(item.responseDetails) }} ·
                     {{ item.durationMs }} ms

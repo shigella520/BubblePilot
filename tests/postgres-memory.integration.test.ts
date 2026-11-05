@@ -1,3 +1,8 @@
+import { AttachmentService } from "../modules/attachments/attachment-service.js";
+import { AttachmentStore } from "../modules/attachments/attachment-store.js";
+import { attachmentLimitsSchema } from "../modules/attachments/attachment-policy.js";
+import type { BlueBubblesSettingsService } from "../modules/integrations/bluebubbles/settings-service.js";
+import type { PluginSession } from "../modules/plugins/plugin-session.js";
 import { BotIdentityService } from "../modules/identity/bot-identity-service.js";
 import {
   chatMessageQuerySchema,
@@ -63,6 +68,152 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     );
     return id;
   }
+
+  it("filters attachments on the same item, respects archive boundaries and continues bounded catalogues", async () => {
+    const id = await chat();
+    const both = await message(id, "虚构销售附件");
+    const split = await message(id, "虚构错位附件");
+    const hidden = await message(id, "虚构已清理附件");
+    const current = await message(id, "请比较历史表格");
+    const future = await message(id, "不可读取未来附件");
+    const attachmentService = new AttachmentService(
+      repo.pool,
+      {} as BlueBubblesSettingsService,
+      new AttachmentStore("/unused-fictional-attachment-directory"),
+    );
+    const pluginSession = {
+      attachmentChannel: () => ({}),
+    } as unknown as PluginSession;
+    const attachmentInput = {
+      config: {
+        enabled: true,
+        pluginId: randomUUID(),
+        server: "sandbox",
+        limits: attachmentLimitsSchema.parse({}),
+      },
+      scope: {
+        provider: "bluebubbles",
+        providerChatId: id,
+        triggerMessageId: current,
+      },
+      current: { providerMessageId: current, attachments: [] },
+    };
+    await expect(
+      attachmentService.create(attachmentInput, pluginSession),
+    ).resolves.toBeDefined();
+    await expect(
+      attachmentService.create(
+        {
+          ...attachmentInput,
+          scope: { ...attachmentInput.scope, idleExecutionId: randomUUID() },
+        },
+        pluginSession,
+      ),
+    ).rejects.toThrow("TRIGGER_NOT_AUTHORIZED");
+    await repo.pool.query("UPDATE messages SET is_from_me=true WHERE id=$1", [
+      current,
+    ]);
+    await expect(
+      attachmentService.create(attachmentInput, pluginSession),
+    ).rejects.toThrow("TRIGGER_NOT_AUTHORIZED");
+    await repo.pool.query("UPDATE messages SET is_from_me=false WHERE id=$1", [
+      current,
+    ]);
+    await expect(
+      attachmentService.create(
+        {
+          ...attachmentInput,
+          scope: { ...attachmentInput.scope, providerChatId: randomUUID() },
+        },
+        pluginSession,
+      ),
+    ).rejects.toThrow("TRIGGER_NOT_AUTHORIZED");
+
+    const file = (name: string, type: string) => ({
+      providerAttachmentId: randomUUID(),
+      fileName: name,
+      mimeType: type,
+      sizeBytes: 12,
+    });
+    await repo.pool.query(
+      "UPDATE messages SET attachments=$2 WHERE id=ANY($1::uuid[])",
+      [
+        [both, hidden, future],
+        JSON.stringify(
+          Array.from({ length: 25 }, (_, i) =>
+            file(`销售${i}.csv`, "text/csv"),
+          ),
+        ),
+      ],
+    );
+    await repo.pool.query("UPDATE messages SET attachments=$2 WHERE id=$1", [
+      split,
+      JSON.stringify([
+        file("销售.txt", "text/plain"),
+        file("其他.csv", "text/csv"),
+      ]),
+    ]);
+    await repo.pool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
+      [hidden],
+    );
+    const boundary = (
+      await repo.pool.query<{ message_index: string }>(
+        "SELECT message_index FROM messages WHERE id=$1",
+        [current],
+      )
+    ).rows[0]!;
+    const scope = (await repo.scope(id, Number(boundary.message_index), null))!;
+    const session = await service.session(scope);
+    const result = JSON.parse(
+      await session.execute(
+        "query_chat_messages",
+        JSON.stringify({
+          attachmentName: "销售",
+          attachmentType: ".csv",
+          limit: 2,
+        }),
+      ),
+    ) as {
+      evidence: Array<{
+        ref: string;
+        messageId: string;
+        attachments: Array<{ entries: unknown[]; nextOffset: number }>;
+      }>;
+    };
+    expect(result.evidence.map((e) => e.messageId)).toEqual([both]);
+    expect(result.evidence[0]?.attachments[0]?.entries).toHaveLength(20);
+    expect(result.evidence[0]?.attachments[0]?.nextOffset).toBe(20);
+    const next = JSON.parse(
+      await session.execute(
+        "read_chat_excerpt",
+        JSON.stringify({
+          ref: result.evidence[0]!.ref,
+          before: 0,
+          after: 0,
+          attachmentOffset: 20,
+        }),
+      ),
+    ) as {
+      evidence: Array<{
+        attachments: Array<{ entries: unknown[]; nextOffset: number | null }>;
+      }>;
+    };
+    expect(next.evidence[0]?.attachments[0]?.entries).toHaveLength(5);
+    expect(next.evidence[0]?.attachments[0]?.nextOffset).toBeNull();
+    const without = await repo.archiveQueries.query(
+      scope,
+      chatMessageQuerySchema.parse({ hasAttachments: false }),
+      "UTC",
+    );
+    expect(without.rows).toHaveLength(0);
+    const literal = await repo.archiveQueries.query(
+      scope,
+      chatMessageQuerySchema.parse({ attachmentName: "%_" }),
+      "UTC",
+    );
+    expect(literal.rows).toHaveLength(0);
+  });
 
   it("expands actual readable rows across gaps, preserves source and fits whole messages", async () => {
     const id = await chat();

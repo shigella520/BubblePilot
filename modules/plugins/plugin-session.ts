@@ -1,3 +1,5 @@
+import type { AttachmentHandling } from "../attachments/attachment-policy.js";
+import { assertAttachmentBinding } from "./plugin-attachments.js";
 import {
   PluginResultStore,
   resultLimits,
@@ -20,6 +22,7 @@ import {
   type ApprovedTool,
 } from "./plugin-types.js";
 export class PluginSession {
+  private closed = false;
   private readonly results = new PluginResultStore();
   private readonly clients = new Map<string, PluginMcp>();
   private readonly loaded = new Set<string>();
@@ -57,6 +60,7 @@ export class PluginSession {
     );
   }
   private async check(p: InstalledPlugin, skill?: string, tool?: ApprovedTool) {
+    if (this.closed) pluginError("SESSION_INVALIDATED");
     const current = await this.service.get(p.id);
     const pinned = await this.service.get(p.id, p.revision);
     if (
@@ -87,6 +91,78 @@ export class PluginSession {
         pluginError("PERMISSION_REVOKED", 403);
     }
   }
+  guard?: () => Promise<void>;
+  private async clientFor(
+    p: InstalledPlugin,
+    tool: ApprovedTool,
+    signal: AbortSignal,
+  ) {
+    await this.check(p, undefined, tool);
+    const key = `${p.id}:${tool.server}`;
+    let client = this.clients.get(key);
+    if (!client) {
+      client = new PluginMcp(this.service.trustedHosts);
+      this.clients.set(key, client);
+      await client.connect(p.config.connections[tool.server]!, signal);
+    }
+    const tools = await client.discover(tool.server, signal);
+    if (!tools.some((t) => t.hash === tool.hash)) {
+      await this.service.markToolReview(
+        p.id,
+        p.revision,
+        `${tool.server}/${tool.definition.name}`,
+      );
+      pluginError("TOOL_REVIEW_REQUIRED", 409);
+    }
+    return client;
+  }
+  attachmentChannel(config: AttachmentHandling) {
+    assertAttachmentBinding(this.plugins, config);
+    const p = this.plugins.find((p) => p.id === config.pluginId)!;
+    const tools = p.config.tools.filter(
+      (t) =>
+        t.server === config.server &&
+        ["prepare_sandbox", "run_command", "read_file", "write_file"].includes(
+          t.definition.name,
+        ),
+    );
+    const prepare = tools.find((t) => t.definition.name === "prepare_sandbox")!;
+    const check = async () => {
+      try {
+        for (const tool of tools) await this.check(p, undefined, tool);
+      } catch (error) {
+        await this.close();
+        throw error;
+      }
+    };
+    return {
+      metadata: {
+        pluginId: p.id,
+        pluginName: p.name,
+        revision: p.revision,
+        server: config.server,
+      },
+      check,
+      invalidate: () => this.close(),
+      transfer: async (
+        input: Record<string, unknown>,
+        file: string,
+        signal: AbortSignal,
+      ) => {
+        await check();
+        const client = await this.clientFor(p, prepare, signal);
+        try {
+          const result = await client.transferAttachment(input, file, signal);
+          await check();
+          signal.throwIfAborted();
+          return result;
+        } catch (error) {
+          await this.close();
+          throw error;
+        }
+      },
+    };
+  }
   register(registry: AgentToolRegistry) {
     const register = (
       name: string,
@@ -111,7 +187,9 @@ export class PluginSession {
             const args: unknown = JSON.parse(raw);
             if (!args || typeof args !== "object" || Array.isArray(args))
               pluginError("INVALID_ARGUMENTS");
+            await this.guard?.();
             const result = await fn(args as Record<string, unknown>, ctx);
+            await this.guard?.();
             ctx.signal.throwIfAborted();
             if (Date.now() >= ctx.deadline) pluginError("MCP_TIMEOUT");
             if (result.text.length > ctx.maxOutputCharacters)
@@ -304,25 +382,7 @@ export class PluginSession {
           async (args, ctx) => {
             const mcpArgs = decodeMcpArguments(args);
             await this.check(p, undefined, tool);
-            const key = `${p.id}:${tool.server}`;
-            let client = this.clients.get(key);
-            if (!client) {
-              client = new PluginMcp(this.service.trustedHosts);
-              this.clients.set(key, client);
-              await client.connect(
-                p.config.connections[tool.server]!,
-                ctx.signal,
-              );
-            }
-            const tools = await client.discover(tool.server, ctx.signal);
-            if (!tools.some((t) => t.hash === tool.hash)) {
-              await this.service.markToolReview(
-                p.id,
-                p.revision,
-                `${tool.server}/${tool.definition.name}`,
-              );
-              pluginError("TOOL_REVIEW_REQUIRED", 409);
-            }
+            const client = await this.clientFor(p, tool, ctx.signal);
             const result = await client.call(
               tool,
               mcpArgs,
@@ -371,6 +431,7 @@ export class PluginSession {
       }
   }
   async close() {
+    this.closed = true;
     this.results.close();
     await Promise.all([...this.clients.values()].map((c) => c.close()));
   }

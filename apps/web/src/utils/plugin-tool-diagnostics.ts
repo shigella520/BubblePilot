@@ -14,7 +14,8 @@ export function pluginToolPresentation(
   item: ToolRecord,
   nodes: Array<{ nodeId: string; outputSummary: unknown }> = [],
 ) {
-  if (item.requestDetails?.kind !== "plugin") return null;
+  if (!["plugin", "attachment"].includes(String(item.requestDetails?.kind)))
+    return null;
   const field = (key: string) => {
     const value = item.requestDetails?.[key] ?? item.responseDetails?.[key];
     return typeof value === "string" && value ? value : null;
@@ -41,11 +42,14 @@ export function pluginToolPresentation(
   const server = field("server");
   const tool = field("tool");
   return {
-    title: ["read_tool_result", "search_tool_result"].includes(item.toolName)
-      ? `${item.toolName === "read_tool_result" ? "读取结果" : "搜索结果"} · ${server ?? ""} / ${tool ?? ""}`
-      : server && tool
-        ? `${server} / ${tool}`
-        : (tool ?? item.toolName),
+    title:
+      item.toolName === "import_chat_attachment"
+        ? `附件导入 · ${server ?? "沙箱"}`
+        : ["read_tool_result", "search_tool_result"].includes(item.toolName)
+          ? `${item.toolName === "read_tool_result" ? "读取结果" : "搜索结果"} · ${server ?? ""} / ${tool ?? ""}`
+          : server && tool
+            ? `${server} / ${tool}`
+            : (tool ?? item.toolName),
     plugin:
       field("pluginName") ??
       (names.size === 1 ? [...names][0] : "未记录插件名称"),
@@ -57,6 +61,20 @@ export function pluginToolPresentation(
 
 export function pluginToolErrorLabel(code: string | null) {
   const labels: Record<string, string> = {
+    ATTACHMENT_REFERENCE_UNAVAILABLE: "附件引用不属于本次运行，或尚未发现",
+    ATTACHMENT_PERMISSION_REVOKED: "附件来源或聊天授权已失效",
+    ATTACHMENT_TYPE_UNSUPPORTED_OR_CONFLICTING: "附件类型不支持或声明冲突",
+    ATTACHMENT_TYPE_MISMATCH: "文件内容与声明类型不符",
+    ATTACHMENT_TEXT_ENCODING_UNSUPPORTED: "暂不支持此文本编码或内容不是文本",
+    ATTACHMENT_TOO_LARGE: "附件超过单文件或任务剩余额度",
+    ATTACHMENT_COUNT_LIMIT: "本次任务的文件数量已达上限",
+    ATTACHMENT_CAPACITY_BUSY: "附件临时存储容量不足或正在导入",
+    ATTACHMENT_UNAVAILABLE: "网关已不再保留此附件",
+    ATTACHMENT_DOWNLOAD_FAILED: "附件下载失败",
+    ATTACHMENT_TIMEOUT_OR_CANCELLED: "附件导入超时或已取消，会话已清理",
+    ATTACHMENT_IMPORT_FAILED: "附件传输未完成，请查看服务状态",
+    ATTACHMENT_SESSION_INVALIDATED: "本次任务的附件会话已失效",
+
     PLUGIN_REMOTE_TOOL_ERROR: "MCP 服务返回工具执行失败；未记录具体原因",
     PLUGIN_REMOTE_AUTH_DENIED: "MCP 服务拒绝认证，请检查凭据",
     PLUGIN_QUOTA_EXHAUSTED: "服务额度已耗尽",

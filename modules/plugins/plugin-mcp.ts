@@ -1,3 +1,5 @@
+import { createReadStream } from "node:fs";
+import { attachmentProtocol } from "../attachments/attachment-policy.js";
 import { boundedClose } from "./bounded-close.js";
 import type { TrustedHostsProvider } from "../shared/network-settings.js";
 import {
@@ -44,6 +46,35 @@ function mcpFailure(error: unknown, signal?: AbortSignal): never {
   }
   pluginError("MCP_TRANSPORT_ERROR", 502);
 }
+async function attachmentFailure(
+  response: Response,
+  fallback: string,
+): Promise<never> {
+  const payload = (await response.json().catch(() => null)) as {
+    error?: unknown;
+  } | null;
+  const code = typeof payload?.error === "string" ? payload.error : "";
+  const allowed = new Set([
+    "attachment_quota_exceeded",
+    "archive_quota_exceeded",
+    "import_id_conflict",
+    "import_limits_changed",
+    "session_expired_or_invalidated",
+    "sandbox_busy",
+    "capacity_busy",
+    "prepare_failed_session_invalidated",
+    "attachment_hash_mismatch_session_invalidated",
+    "attachment_archive_path_denied_session_invalidated",
+    "attachment_archive_type_denied_session_invalidated",
+    "attachment_archive_file_limit_session_invalidated",
+    "attachment_archive_byte_limit_session_invalidated",
+    "attachment_xlsx_invalid_or_macros_session_invalidated",
+    "attachment_staging_changed_session_invalidated",
+    "attachment_directory_changed_session_invalidated",
+    "attachment_failed_session_invalidated_do_not_replay",
+  ]);
+  pluginError(allowed.has(code) ? code.toUpperCase() : fallback);
+}
 export class PluginMcp {
   constructor(
     private readonly trustedHosts: TrustedHostsProvider = () =>
@@ -54,6 +85,96 @@ export class PluginMcp {
     { capabilities: {}, jsonSchemaValidator: mcpSchemaValidator },
   );
   private transport?: StreamableHTTPClientTransport;
+  private binaryFetch?: typeof fetch;
+  private connectionUrl?: string;
+  private authHeaders: Record<string, string> = {};
+  attachmentVersion() {
+    const capability =
+      this.client.getServerCapabilities()?.experimental?.[attachmentProtocol];
+    return capability && "version" in capability && capability.version === 1
+      ? 1
+      : null;
+  }
+  async transferAttachment(
+    input: Record<string, unknown>,
+    file: string,
+    signal: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    if (
+      this.attachmentVersion() !== 1 ||
+      !this.transport?.sessionId ||
+      !this.binaryFetch ||
+      !this.connectionUrl
+    )
+      pluginError("ATTACHMENT_TRANSFER_UNSUPPORTED");
+    const url = this.connectionUrl.replace(/\/$/u, "") + "/attachments";
+    const headers = {
+      ...this.authHeaders,
+      "mcp-session-id": this.transport.sessionId,
+    };
+    const requestTicket = async () => {
+      const response = await this.binaryFetch!(url + "/tickets", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify(input),
+        signal,
+      });
+      if (!response.ok)
+        await attachmentFailure(response, "ATTACHMENT_TICKET_FAILED");
+      return (await response.json()) as {
+        token?: string;
+        result?: Record<string, unknown>;
+      };
+    };
+    const validate = (result: Record<string, unknown> | undefined) => {
+      signal.throwIfAborted();
+      if (
+        !result ||
+        result.status !== "imported" ||
+        result.sha256 !== input.sha256 ||
+        result.size !== input.size
+      )
+        pluginError("ATTACHMENT_RESULT_INVALID");
+      return result;
+    };
+    const ticket = await requestTicket();
+    if (ticket.result) return validate(ticket.result);
+    if (!ticket.token || !/^[a-f0-9]{64}$/u.test(ticket.token))
+      pluginError("ATTACHMENT_TICKET_INVALID");
+    const source = createReadStream(file, { signal });
+    try {
+      let response: Response;
+      try {
+        response = await this.binaryFetch(url, {
+          method: "POST",
+          headers: {
+            ...headers,
+            "x-bp-transfer-token": ticket.token,
+            "content-length": String(input.size),
+            "content-type": "application/octet-stream",
+          },
+          body: source as unknown as NonNullable<RequestInit["body"]>,
+          signal,
+        });
+      } catch (error) {
+        source.destroy();
+        signal.throwIfAborted();
+        // The upload may have committed before the response was lost. Query
+        // the same id once within the original deadline; never replay bytes.
+        const status = await requestTicket();
+        if (status.result) return validate(status.result);
+        throw error;
+      }
+      if (!response.ok)
+        await attachmentFailure(response, "ATTACHMENT_TRANSFER_FAILED");
+      const result = (await response.json()) as {
+        result?: Record<string, unknown>;
+      };
+      return validate(result.result);
+    } finally {
+      source.destroy();
+    }
+  }
   private callMetrics:
     { responseBytes: number; tooLarge: boolean; abort: () => void } | undefined;
   async connect(connection: Connection, signal?: AbortSignal) {
@@ -75,6 +196,13 @@ export class PluginMcp {
           ? `Bearer ${connection.secret}`
           : connection.secret;
     }
+    this.authHeaders = headers;
+    this.connectionUrl = connection.url;
+    this.binaryFetch = safeFetch(
+      connection.url,
+      connection.allowPrivate,
+      this.trustedHosts,
+    );
     this.transport = new StreamableHTTPClientTransport(
       new URL(connection.url),
       {
@@ -148,10 +276,17 @@ export class PluginMcp {
         };
         compileMcpSchema(tool.inputSchema);
         if (tool.outputSchema) compileMcpSchema(tool.outputSchema);
+        const attachmentTransferVersion =
+          this.attachmentVersion() === 1 && tool.name === "prepare_sandbox"
+            ? (1 as const)
+            : undefined;
         tools.push({
+          ...(attachmentTransferVersion ? { attachmentTransferVersion } : {}),
           server,
           definition,
           ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+          // Transport extensions are approved separately by workflow binding;
+          // adding one must not invalidate previously approved ordinary tools.
           hash: digest(
             tool.outputSchema
               ? { definition, outputSchema: tool.outputSchema }

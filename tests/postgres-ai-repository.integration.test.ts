@@ -509,6 +509,63 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         },
       },
     ]);
+    const attachmentChat = randomUUID();
+    const attachmentMessage = randomUUID();
+    const attachmentEvent = randomUUID();
+    await inspectionPool.query(
+      "INSERT INTO chats(id,provider,provider_chat_id,type,enabled) VALUES($1::uuid,'fictional',$1::text,'group',true)",
+      [attachmentChat],
+    );
+    await inspectionPool.query(
+      "INSERT INTO inbound_events(id,provider,external_event_id,correlation_id,event_type,status,payload_hash) VALUES($1::uuid,'fictional',$1::text,$1::uuid,'message','accepted','fixture')",
+      [attachmentEvent],
+    );
+    await inspectionPool.query(
+      `INSERT INTO messages(id,provider,provider_message_id,chat_id,sender_id,sent_at,body,content_type,is_from_me,content_hash,source_event_id,attachments)
+       VALUES($1::uuid,'fictional',$1::text,$2,'fixture-sender',now(),'fixture','text',false,'fixture',$3,$4)`,
+      [
+        attachmentMessage,
+        attachmentChat,
+        attachmentEvent,
+        JSON.stringify([{ fileName: "fictional-report.csv" }]),
+      ],
+    );
+    await repository.recordToolExecution({
+      executionId: diagnosticExecutionId,
+      nodeId: "attachment-node",
+      providerId: primary.value.id,
+      toolCallId: "fictional-attachment-call",
+      toolName: "import_chat_attachment",
+      status: "succeeded",
+      durationMs: 1,
+      resultCount: 1,
+      queryHash: "a".repeat(64),
+      errorCode: null,
+      requestDetails: null,
+      responseDetails: {
+        sourceMessageId: attachmentMessage,
+        attachmentIndex: 0,
+      },
+    });
+    const attachmentAudit = () =>
+      repository.listToolExecutions(diagnosticExecutionId, "attachment-node");
+    expect((await attachmentAudit())[0]?.responseDetails).toMatchObject({
+      filename: "fictional-report.csv",
+    });
+    await inspectionPool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
+      [attachmentMessage],
+    );
+    expect((await attachmentAudit())[0]?.responseDetails).toMatchObject({
+      filename: null,
+    });
+    const stored = await inspectionPool.query<{
+      response_details: Record<string, unknown>;
+    }>(
+      "SELECT response_details FROM ai_tool_executions WHERE execution_id=$1 AND node_id='attachment-node'",
+      [diagnosticExecutionId],
+    );
+    expect(stored.rows[0]?.response_details).not.toHaveProperty("filename");
     await repository.recordImageInput({
       id: diagnosticExecutionId,
       diagnostics: {
