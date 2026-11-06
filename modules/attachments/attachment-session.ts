@@ -78,6 +78,64 @@ export class AttachmentSession {
     query?: ChatMessageQuery,
     current = false,
   ): AttachmentListing {
+    return this.buildCatalogue(
+      message,
+      offset,
+      query,
+      current,
+      this.candidates,
+      this.keys,
+    );
+  }
+  // A history operation may time out or discard evidence to fit its output budget.
+  // Keep its proposed references private until the returned listings are committed.
+  stageCatalogue() {
+    const candidates = new Map(this.candidates);
+    const keys = new Map(this.keys);
+    let committed = false;
+    return {
+      catalogue: (
+        message: Pick<
+          MemoryMessage,
+          "id" | "providerMessageId" | "attachments"
+        >,
+        offset = 0,
+        query?: ChatMessageQuery,
+      ) => this.buildCatalogue(message, offset, query, false, candidates, keys),
+      commit: (listings: readonly AttachmentListing[]) => {
+        if (this.ended || committed)
+          throw new AttachmentError("ATTACHMENT_SESSION_INVALIDATED");
+        const nextCandidates = new Map(this.candidates);
+        const nextKeys = new Map(this.keys);
+        for (const listing of listings)
+          for (const entry of listing.entries) {
+            const ref = entry.attachment_ref;
+            if (!ref) continue;
+            const candidate = candidates.get(ref);
+            if (!candidate)
+              throw new AttachmentError("ATTACHMENT_REFERENCE_UNAVAILABLE");
+            const key = `${candidate.providerMessageId}:${candidate.index}`;
+            if (nextKeys.has(key) && nextKeys.get(key) !== ref)
+              throw new AttachmentError("ATTACHMENT_REFERENCE_UNAVAILABLE");
+            nextCandidates.set(ref, candidate);
+            nextKeys.set(key, ref);
+          }
+        if (nextCandidates.size > attachmentReferenceLimit)
+          throw new AttachmentError("ATTACHMENT_REFERENCE_UNAVAILABLE");
+        this.candidates = nextCandidates;
+        this.keys = nextKeys;
+        committed = true;
+      },
+    };
+  }
+  private buildCatalogue(
+    message: Pick<MemoryMessage, "id" | "providerMessageId" | "attachments">,
+    offset: number,
+    query: ChatMessageQuery | undefined,
+    current: boolean,
+    candidates: Map<string, Candidate>,
+    keys: Map<string, string>,
+  ): AttachmentListing {
     const attachments = message.attachments ?? [];
     const limit = current ? attachmentReferenceLimit : attachmentPageSize;
     const entries = attachments
@@ -85,15 +143,15 @@ export class AttachmentSession {
       .map((a, index) => {
         const actualIndex = offset + index;
         const key = `${message.providerMessageId}:${actualIndex}`;
-        let ref = this.keys.get(key);
+        let ref = keys.get(key);
         if (
           !ref &&
           message.providerMessageId &&
-          this.candidates.size < attachmentReferenceLimit
+          candidates.size < attachmentReferenceLimit
         ) {
           ref = `A${randomUUID()}`;
-          this.keys.set(key, ref);
-          this.candidates.set(ref, {
+          keys.set(key, ref);
+          candidates.set(ref, {
             providerMessageId: message.providerMessageId,
             index: actualIndex,
             attachment: structuredClone(a),
@@ -228,7 +286,9 @@ export class AttachmentSession {
               errorCode: code,
               retryable: false,
               guidance:
-                "Do not claim the file was read. Explain the limitation; do not replay unknown imports or commands.",
+                code === "ATTACHMENT_REFERENCE_UNAVAILABLE"
+                  ? "No download or import was started. Query the attachment again with query_chat_messages or read_chat_excerpt and use the exact attachment_ref returned in THIS run. Context display IDs, message IDs and references from earlier runs are not import references. If no valid reference is returned, explain the limitation; do not guess a reference or assume the user must resend the file."
+                  : "Do not claim the file was read. Explain the limitation; do not replay unknown imports or commands.",
             }),
             diagnostics: {
               ...this.channel.metadata,

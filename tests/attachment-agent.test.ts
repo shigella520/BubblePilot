@@ -1,3 +1,10 @@
+import { MemoryService } from "../modules/memory/memory-service.js";
+import type { MemoryRepository } from "../modules/memory/memory-repository.js";
+import {
+  defaultMemoryConfig,
+  type MemoryScope,
+} from "../modules/memory/memory-types.js";
+import type { MemoryMessage } from "../modules/memory/chunking.js";
 import { it, expect } from "vitest";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, readdir } from "node:fs/promises";
@@ -23,9 +30,14 @@ import { attachmentLimitsSchema } from "../modules/attachments/attachment-policy
 import { createMcpHttp } from "../plugins/opensandbox/server/src/http.js";
 import { SandboxPool } from "../plugins/opensandbox/server/src/lifecycle.js";
 import type { Backend } from "../plugins/opensandbox/server/src/backend.js";
-it.each(["responses", "chat-completions"] as const)(
-  "pairs attachment and MCP calls under the shared Agent budget (%s)",
-  async (apiKind) => {
+it.each([
+  { apiKind: "responses" as const, historical: false },
+  { apiKind: "chat-completions" as const, historical: false },
+  { apiKind: "responses" as const, historical: true },
+  { apiKind: "chat-completions" as const, historical: true },
+])(
+  "pairs attachment and MCP calls under the shared Agent budget ($apiKind, historical=$historical)",
+  async ({ apiKind, historical }) => {
     const repo = new InMemoryAiRepository();
     const provider = await repo.createProvider({
       name: "Fictional",
@@ -151,6 +163,54 @@ it.each(["responses", "chat-completions"] as const)(
         mimeType: "text/csv",
         sizeBytes: null,
       };
+      const sourceId = historical ? "earlier-message" : "current";
+      const source: MemoryMessage = {
+        id: "fixture-message",
+        providerMessageId: sourceId,
+        attachments: [attachment],
+        index: 1,
+        sentAt: "2026-01-01T00:00:00Z",
+        senderId: "fictional-user",
+        role: "user",
+        text: "虚构销售数据附件",
+        hash: "fixture",
+      };
+      const scope: MemoryScope = {
+        chatId: "fictional",
+        upperIndex: 2,
+        executionId: null,
+        generation: {
+          id: "fictional-generation",
+          config: defaultMemoryConfig,
+          encrypted_secret: null,
+          identity: "fixture",
+          status: "active",
+        },
+      };
+      const sql = () => Promise.resolve({ rows: [] });
+      const memory = new MemoryService({
+        scopeForEvent: () => Promise.resolve(scope),
+        allowed: () => Promise.resolve(true),
+        identities: () => Promise.resolve([]),
+        messages: () => Promise.resolve([source]),
+        archiveQueries: {
+          query: () =>
+            Promise.resolve({
+              queriedAt: "2026-01-02T00:00:00Z",
+              rows: [
+                {
+                  message: source,
+                  senderId: source.senderId,
+                  position: { sentAt: source.sentAt, messageId: source.id },
+                },
+              ],
+            }),
+        },
+        pool: {
+          query: sql,
+          connect: () => Promise.resolve({ query: sql, release: () => {} }),
+        },
+      } as unknown as MemoryRepository);
       const attachments: Pick<AttachmentService, "create"> = {
         create: (input, session) =>
           Promise.resolve(
@@ -161,7 +221,7 @@ it.each(["responses", "chat-completions"] as const)(
                 resolve: () =>
                   Promise.resolve({
                     messageId: "fixture-message",
-                    providerMessageId: "current",
+                    providerMessageId: sourceId,
                     attachment,
                     attachmentIndex: 0,
                   }),
@@ -179,16 +239,45 @@ it.each(["responses", "chat-completions"] as const)(
         call: (_p, r) => {
           requests.push(r);
           let call;
-          if (requests.length === 1) {
+          const turn = requests.length - (historical ? 1 : 0);
+          if (historical && requests.length === 1) {
+            call = {
+              id: "history",
+              name: "query_chat_messages",
+              arguments: JSON.stringify({ hasAttachments: true }),
+            };
+          } else if (turn === 1) {
             const text = r.messages.find(
               (m) =>
                 typeof m.content === "string" &&
                 m.content.startsWith("Attachment metadata"),
             )?.content;
             if (typeof text !== "string") throw new Error("metadata");
-            const catalog = JSON.parse(text.slice(text.indexOf("{"))) as {
+            const currentCatalog = JSON.parse(
+              text.slice(text.indexOf("{")),
+            ) as {
               entries: Array<{ attachment_ref: string }>;
             };
+            const history = r.messages.find(
+              (m) => m.role === "tool" && m.toolCallId === "history",
+            );
+            const catalog = historical
+              ? (
+                  JSON.parse(
+                    typeof history?.content === "string"
+                      ? history.content
+                      : "{}",
+                  ) as {
+                    evidence: Array<{
+                      attachments: Array<typeof currentCatalog>;
+                    }>;
+                  }
+                ).evidence[0]!.attachments[0]!
+              : currentCatalog;
+            if (historical) expect(currentCatalog.entries).toEqual([]);
+            expect(catalog.entries[0]!.attachment_ref).toMatch(
+              /^A[0-9a-f-]{36}$/,
+            );
             call = {
               id: "import",
               name: "import_chat_attachment",
@@ -196,7 +285,7 @@ it.each(["responses", "chat-completions"] as const)(
                 attachment_ref: catalog.entries[0]!.attachment_ref,
               }),
             };
-          } else if (requests.length === 2) {
+          } else if (turn === 2) {
             const imported = r.messages.find(
               (m) => m.role === "tool" && m.toolCallId === "import",
             );
@@ -235,7 +324,7 @@ it.each(["responses", "chat-completions"] as const)(
         repo,
         undefined,
         undefined,
-        undefined,
+        historical ? memory : undefined,
         undefined,
         undefined,
         plugins,
@@ -252,6 +341,9 @@ it.each(["responses", "chat-completions"] as const)(
         outputFormat: "text",
         protectedPrompt: null,
         pluginIds: [plugin.id],
+        ...(historical
+          ? { memoryEvent: { provider: "bluebubbles", messageId: "current" } }
+          : {}),
         attachmentInput: {
           config: {
             enabled: true,
@@ -264,12 +356,15 @@ it.each(["responses", "chat-completions"] as const)(
             providerChatId: "fictional",
             triggerMessageId: "current",
           },
-          current: { providerMessageId: "current", attachments: [attachment] },
+          current: {
+            providerMessageId: "current",
+            attachments: historical ? [] : [attachment],
+          },
         },
       });
       expect(result.status).toBe("succeeded");
-      expect(result.agentBudget?.toolCalls).toBe(2);
-      expect(requests).toHaveLength(3);
+      expect(result.agentBudget?.toolCalls).toBe(historical ? 3 : 2);
+      expect(requests).toHaveLength(historical ? 4 : 3);
       const names = requests[0]!.tools!.map((t) => t.name);
       for (const r of requests)
         expect(r.tools!.map((t) => t.name)).toEqual(names);

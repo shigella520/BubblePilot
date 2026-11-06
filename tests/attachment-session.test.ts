@@ -156,6 +156,75 @@ it("imports only issued references, reuses success and validates again after rev
     "ATTACHMENT_SESSION_INVALIDATED",
   );
 });
+it("only grants staged references actually returned, without spending capacity on discarded operations", async () => {
+  const f = await fixture();
+  const message = {
+    id: "history",
+    providerMessageId: "past",
+    attachments: f.input.current.attachments,
+  };
+  for (let i = 0; i < 110; i++) {
+    const pending = f.session.stageCatalogue();
+    const listing = pending.catalogue({
+      ...message,
+      providerMessageId: `discarded-${i}`,
+    });
+    const denied = await f.call({
+      attachment_ref: listing.entries[0]!.attachment_ref,
+    });
+    expect(denied.value.errorCode).toBe("ATTACHMENT_REFERENCE_UNAVAILABLE");
+    expect(denied.value.guidance).toContain(
+      "No download or import was started",
+    );
+    pending.commit([]);
+  }
+  const pending = f.session.stageCatalogue();
+  const returned = pending.catalogue(message);
+  const dropped = pending.catalogue({
+    ...message,
+    providerMessageId: "cropped",
+  });
+  const ref = returned.entries[0]!.attachment_ref!;
+  expect(ref).toMatch(/^A/);
+  pending.commit([returned]);
+  expect(
+    (await f.call({ attachment_ref: dropped.entries[0]!.attachment_ref })).value
+      .errorCode,
+  ).toBe("ATTACHMENT_REFERENCE_UNAVAILABLE");
+  expect(f.download).not.toHaveBeenCalled();
+  expect((await f.call({ attachment_ref: ref })).value.status).toBe("imported");
+  expect(f.resolve).toHaveBeenLastCalledWith(f.input.scope, "past", 0, true);
+  expect(
+    f.session.stageCatalogue().catalogue(message).entries[0]!.attachment_ref,
+  ).toBe(ref);
+});
+it("cannot publish staged references after the run ends or partially commit conflicting catalogues", async () => {
+  const f = await fixture();
+  const message = {
+    id: "history",
+    providerMessageId: "past",
+    attachments: f.input.current.attachments,
+  };
+  const first = f.session.stageCatalogue(),
+    second = f.session.stageCatalogue();
+  const a = first.catalogue(message),
+    b = second.catalogue(message);
+  const extra = second.catalogue({ ...message, providerMessageId: "extra" });
+  first.commit([a]);
+  expect(() => second.commit([extra, b])).toThrow(
+    "ATTACHMENT_REFERENCE_UNAVAILABLE",
+  );
+  expect(
+    (await f.call({ attachment_ref: extra.entries[0]!.attachment_ref })).value
+      .errorCode,
+  ).toBe("ATTACHMENT_REFERENCE_UNAVAILABLE");
+  const late = f.session.stageCatalogue();
+  const listing = late.catalogue({ ...message, providerMessageId: "late" });
+  await f.session.close();
+  expect(() => late.commit([listing])).toThrow(
+    "ATTACHMENT_SESSION_INVALIDATED",
+  );
+});
 it("does not share references, grants historical candidates explicitly and caps catalogues", async () => {
   const a = await fixture(),
     b = await fixture();

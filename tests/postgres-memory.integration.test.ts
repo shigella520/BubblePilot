@@ -1,3 +1,10 @@
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AttachmentSession } from "../modules/attachments/attachment-session.js";
+import { ChatImageSourceRepository } from "../modules/ai/chat-image-source.js";
+import { AgentToolRegistry } from "../modules/ai/agent-tool-registry.js";
+import type { AttachmentListing } from "../modules/attachments/attachment-policy.js";
 import { AttachmentService } from "../modules/attachments/attachment-service.js";
 import { AttachmentStore } from "../modules/attachments/attachment-store.js";
 import { attachmentLimitsSchema } from "../modules/attachments/attachment-policy.js";
@@ -68,6 +75,153 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     );
     return id;
   }
+
+  function observeAttachmentStage(
+    session: Awaited<ReturnType<typeof service.session>>,
+  ) {
+    const catalogue = vi.fn((m: { id: string }): AttachmentListing => ({
+      messageId: m.id,
+      entries: [
+        {
+          index: 0,
+          fileName: "fictional.csv",
+          mimeType: "text/csv",
+          sizeBytes: 4,
+          availability: "not-verified",
+          attachment_ref: `A${m.id}`,
+        },
+      ],
+      total: 1,
+      omitted: 0,
+      nextOffset: null,
+    }));
+    const commit = vi.fn();
+    session.stageAttachmentCatalogue = () => ({ catalogue, commit });
+    return { catalogue, commit };
+  }
+
+  it.each(["query_chat_messages", "search_chat_history"])(
+    "imports an earlier XLSX after %s and excerpt expansion, with a separate attachment-free trigger",
+    async (toolName) => {
+      const id = await chat();
+      const source = await message(id, "虚构销售附件");
+      const current = await message(id, "请汇总之前的销售表格");
+      const data = await readFile(
+        new URL("./fixtures/fictional-sales.xlsx", import.meta.url),
+      );
+      const attachment = {
+        providerAttachmentId: "fictional-xlsx",
+        fileName: "fictional-sales.xlsx",
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        sizeBytes: data.length,
+      };
+      await repo.pool.query("UPDATE messages SET attachments=$2 WHERE id=$1", [
+        source,
+        JSON.stringify([attachment]),
+      ]);
+      const root = await mkdtemp(join(tmpdir(), "bp-history-xlsx-"));
+      const storage = new AttachmentStore(root);
+      await storage.init();
+      const transfer = vi.fn(
+        async (input: Record<string, unknown>, file: string) => {
+          expect(await readFile(file)).toEqual(data);
+          return {
+            status: "imported",
+            sandbox_path: "/workspace/attachments/fixture/fictional-sales.xlsx",
+            size: data.length,
+            sha256: input.sha256,
+          };
+        },
+      );
+      const download = vi.fn(() => Promise.resolve(new Response(data)));
+      const channel = {
+        metadata: { pluginId: randomUUID(), server: "sandbox" },
+        check: async () => {},
+        invalidate: async () => {},
+        transfer,
+      };
+      const attachments = new AttachmentSession(
+        {
+          config: {
+            enabled: true,
+            pluginId: channel.metadata.pluginId,
+            server: "sandbox",
+            limits: attachmentLimitsSchema.parse({}),
+          },
+          scope: {
+            provider: "bluebubbles",
+            providerChatId: id,
+            triggerMessageId: current,
+          },
+          current: { providerMessageId: current, attachments: [] },
+        },
+        { attachmentChannel: () => channel } as unknown as PluginSession,
+        new ChatImageSourceRepository(repo.pool),
+        { download },
+        storage,
+      );
+      try {
+        const boundary = await repo.pool.query<{ message_index: string }>(
+          "SELECT message_index FROM messages WHERE id=$1",
+          [current],
+        );
+        const scope = (await repo.scope(
+          id,
+          Number(boundary.rows[0]!.message_index),
+          null,
+        ))!;
+        const memory = await service.session(scope);
+        memory.stageAttachmentCatalogue = () => attachments.stageCatalogue();
+        expect(attachments.currentCatalogue().entries).toEqual([]);
+        const result = JSON.parse(
+          await memory.execute(
+            toolName,
+            JSON.stringify(
+              toolName === "search_chat_history"
+                ? { query: "虚构销售附件" }
+                : { hasAttachments: true, attachmentType: ".xlsx" },
+            ),
+          ),
+        ) as {
+          evidence: Array<{ ref: string; attachments: AttachmentListing[] }>;
+        };
+        const found = result.evidence.find((e) =>
+          e.attachments.some((a) => a.messageId === source),
+        )!;
+        expect(found).toBeDefined();
+        const ref = found.attachments[0]!.entries[0]!.attachment_ref;
+        expect(ref).toMatch(/^A[0-9a-f-]{36}$/);
+        const excerpt = JSON.parse(
+          await memory.execute(
+            "read_chat_excerpt",
+            JSON.stringify({ ref: found.ref, before: 0, after: 0 }),
+          ),
+        ) as { evidence: Array<{ attachments: AttachmentListing[] }> };
+        expect(
+          excerpt.evidence[0]!.attachments[0]!.entries[0]!.attachment_ref,
+        ).toBe(ref);
+        const registry = new AgentToolRegistry();
+        attachments.register(registry);
+        const output = await registry
+          .get("import_chat_attachment")!
+          .execute(JSON.stringify({ attachment_ref: ref }), {
+            signal: AbortSignal.timeout(5000),
+            deadline: Date.now() + 5000,
+            maxOutputCharacters: 64000,
+          });
+        expect(typeof output === "string" ? output : output.text).toContain(
+          '"status":"imported"',
+        );
+        expect(download).toHaveBeenCalledTimes(1);
+        expect(transfer).toHaveBeenCalledTimes(1);
+        expect(await readdir(root)).toEqual([]);
+      } finally {
+        await attachments.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("filters attachments on the same item, respects archive boundaries and continues bounded catalogues", async () => {
     const id = await chat();
@@ -752,6 +906,21 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     const id = await chat();
     await message(id, "虚构取消中的来源");
     const session = await service.session((await repo.scope(id, 999, null))!);
+    await repo.pool.query(
+      "UPDATE messages SET attachments=$2 WHERE chat_id=$1",
+      [
+        id,
+        JSON.stringify([
+          {
+            providerAttachmentId: "fictional",
+            fileName: "fictional.csv",
+            mimeType: "text/csv",
+            sizeBytes: 4,
+          },
+        ]),
+      ],
+    );
+    const stage = observeAttachmentStage(session);
     const controller = new AbortController();
     await repo.pool.query(
       "CREATE OR REPLACE FUNCTION agent_fixture_delay_source() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(1); RETURN NEW; END $$",
@@ -780,6 +949,8 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       controller.abort();
       await assertion;
       expect(waiting).toBe(true);
+      expect(stage.catalogue).toHaveBeenCalled();
+      expect(stage.commit).not.toHaveBeenCalled();
       expect(session.references()).toEqual([]);
       expect(
         (
@@ -804,6 +975,21 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     await message(id, "虚构大消息".repeat(3000));
     await message(id, "虚构小消息");
     const session = await service.session((await repo.scope(id, 999, null))!);
+    await repo.pool.query(
+      "UPDATE messages SET attachments=$2 WHERE chat_id=$1",
+      [
+        id,
+        JSON.stringify([
+          {
+            providerAttachmentId: "fictional",
+            fileName: "fictional.csv",
+            mimeType: "text/csv",
+            sizeBytes: 4,
+          },
+        ]),
+      ],
+    );
+    const stage = observeAttachmentStage(session);
     const context = {
       signal: new AbortController().signal,
       deadline: Date.now() + 5000,
@@ -818,6 +1004,10 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       evidence: [{ ref: "M1" }],
     });
     expect(result.evidence).toHaveLength(1);
+    expect(stage.catalogue.mock.calls.length).toBeGreaterThan(1);
+    expect(stage.commit).toHaveBeenCalledWith(
+      (result.evidence[0] as { attachments: AttachmentListing[] }).attachments,
+    );
     expect(session.references()).toEqual(["M1"]);
     expect(
       (
@@ -833,6 +1023,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
         maxOutputCharacters: 1,
       }),
     ) as unknown;
+    expect(stage.commit).toHaveBeenLastCalledWith([]);
     expect(tiny).toMatchObject({
       status: "unavailable",
       reason: "tool-output",
