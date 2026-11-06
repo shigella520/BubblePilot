@@ -1,3 +1,7 @@
+import {
+  connectionSchema,
+  connectionCallTimeoutMs,
+} from "../modules/plugins/plugin-types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PluginSession } from "../modules/plugins/plugin-session.js";
 import { PluginMcp } from "../modules/plugins/plugin-mcp.js";
@@ -44,8 +48,10 @@ const plugin: InstalledPlugin = {
     },
   },
 };
-function fixture() {
+function fixture(callTimeoutSeconds?: number) {
   const p = structuredClone(plugin);
+  if (callTimeoutSeconds !== undefined)
+    p.config.connections.mock!.callTimeoutSeconds = callTimeoutSeconds;
   const session = new PluginSession(
     { get: () => Promise.resolve(p) } as unknown as PluginService,
     [structuredClone(p)],
@@ -142,3 +148,43 @@ function parsePayload(text: string) {
     matches: Array<{ matchOffset: number }>;
   };
 }
+
+it("uses the service timeout, caps it by the remaining budget and reports it on failure", async () => {
+  const f = fixture(150);
+  try {
+    f.ctx.deadline = Date.now() + 180000;
+    await f.ext.execute('{"arguments_json":"{}"}', f.ctx);
+    expect(f.call.mock.calls[0]?.[3]).toBe(150000);
+    f.ctx.deadline = Date.now() + 1200;
+    f.call.mockRejectedValueOnce(new Error("fictional transport failure"));
+    const failed = (await f.ext.execute(
+      '{"arguments_json":"{}"}',
+      f.ctx,
+    )) as MultimodalToolResult;
+    expect(f.call.mock.calls[1]?.[3]).toBeGreaterThan(0);
+    expect(f.call.mock.calls[1]?.[3]).toBeLessThanOrEqual(1200);
+    expect(failed.diagnostics).toMatchObject({
+      outcome: "error",
+      callTimeoutMs: 150000,
+    });
+    f.ctx.deadline = Date.now() - 1;
+    await f.ext.execute('{"arguments_json":"{}"}', f.ctx);
+    expect(f.call).toHaveBeenCalledTimes(2);
+  } finally {
+    await f.session.close();
+  }
+});
+
+it("validates per-service timeout values and preserves defaults for older connections", () => {
+  const base = { url: "https://example.test/mcp" };
+  expect(connectionCallTimeoutMs(connectionSchema.parse(base))).toBe(45000);
+  expect(
+    connectionCallTimeoutMs(
+      connectionSchema.parse({ ...base, callTimeoutSeconds: 180 }),
+    ),
+  ).toBe(180000);
+  for (const callTimeoutSeconds of [4, 181, 5.5, "150", null])
+    expect(
+      connectionSchema.safeParse({ ...base, callTimeoutSeconds }).success,
+    ).toBe(false);
+});

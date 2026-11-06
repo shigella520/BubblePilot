@@ -1,7 +1,8 @@
+import type { SandboxTimeouts } from "../src/config.js";
 import { vi } from "vitest";
 import { SandboxPool } from "../src/lifecycle.js";
 import type { Backend, Handle } from "../src/backend.js";
-export function fixture(max = 1, ttl = 600000) {
+export function fixture(max = 1, ttl = 600000, timeouts?: SandboxTimeouts) {
   const live = new Map<string, string>();
   const run = vi.fn<Handle["run"]>().mockResolvedValue({
     status: "completed",
@@ -30,5 +31,10 @@ export function fixture(max = 1, ttl = 600000) {
     }),
     close: () => Promise.resolve(),
   };
-  return { pool: new SandboxPool(backend, max, ttl), backend, live, run };
+  return {
+    pool: new SandboxPool(backend, max, ttl, timeouts),
+    backend,
+    live,
+    run,
+  };
 }

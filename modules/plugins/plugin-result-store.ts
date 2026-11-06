@@ -8,7 +8,6 @@ export const resultLimits = {
   storedBytes: 30 * 1024 * 1024,
   outputCharacters: 16_000,
   readCharacters: 8_000,
-  callTimeoutMs: 45_000,
 } as const;
 
 export function normalizeMcpResult<

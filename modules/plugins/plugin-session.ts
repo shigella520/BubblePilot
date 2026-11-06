@@ -16,6 +16,7 @@ import type { PluginService } from "./plugin-service.js";
 import { PluginMcp } from "./plugin-mcp.js";
 import { digest } from "./plugin-package.js";
 import {
+  connectionCallTimeoutMs,
   pluginError,
   pluginLimits,
   type InstalledPlugin,
@@ -243,7 +244,9 @@ export class PluginSession {
                   text.length <= ctx.maxOutputCharacters ? text.length : 0,
                 responseLimitBytes: resultLimits.responseBytes,
                 storageLimitBytes: resultLimits.storedBytes,
-                callTimeoutMs: resultLimits.callTimeoutMs,
+                ...(metadata.callTimeoutMs !== undefined
+                  ? { callTimeoutMs: metadata.callTimeoutMs }
+                  : {}),
               },
             };
           }
@@ -374,6 +377,9 @@ export class PluginSession {
           )
         )
           continue;
+        const callTimeoutMs = connectionCallTimeoutMs(
+          p.config.connections[tool.server],
+        );
         const name = `ext_${digest([p.id, tool.server, tool.definition.name]).slice(0, 24)}`;
         register(
           name,
@@ -383,11 +389,14 @@ export class PluginSession {
             const mcpArgs = decodeMcpArguments(args);
             await this.check(p, undefined, tool);
             const client = await this.clientFor(p, tool, ctx.signal);
+            const remainingMs = ctx.deadline - Date.now();
+            ctx.signal.throwIfAborted();
+            if (remainingMs <= 0) pluginError("MCP_TIMEOUT");
             const result = await client.call(
               tool,
               mcpArgs,
               ctx.signal,
-              Math.min(resultLimits.callTimeoutMs, ctx.deadline - Date.now()),
+              Math.min(callTimeoutMs, remainingMs),
             );
             await this.check(p, undefined, tool);
             ctx.signal.throwIfAborted();
@@ -426,6 +435,7 @@ export class PluginSession {
             revision: p.revision,
             server: tool.server,
             tool: tool.definition.name,
+            callTimeoutMs,
           },
         );
       }

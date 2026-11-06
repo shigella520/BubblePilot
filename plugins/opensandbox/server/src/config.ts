@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 
+export const sandboxTimeoutDefaults = { createSeconds: 40, importSeconds: 45 };
+export type SandboxTimeouts = typeof sandboxTimeoutDefaults;
+
 const integer = (value: number, min: number, max: number) =>
   z.coerce.number().int().min(min).max(max).default(value);
 export const configSchema = z.object({
@@ -8,6 +11,16 @@ export const configSchema = z.object({
   MAX_CONCURRENT_SANDBOXES: integer(1, 1, 8),
   MAX_MCP_SESSIONS: integer(64, 1, 256),
   SANDBOX_TTL_SECONDS: integer(600, 60, 1800),
+  SANDBOX_CREATE_TIMEOUT_SECONDS: integer(
+    sandboxTimeoutDefaults.createSeconds,
+    5,
+    180,
+  ),
+  ATTACHMENT_IMPORT_TIMEOUT_SECONDS: integer(
+    sandboxTimeoutDefaults.importSeconds,
+    5,
+    180,
+  ),
   SANDBOX_MEMORY_MIB: integer(512, 128, 4096),
   SANDBOX_IMAGE: z
     .string()

@@ -10,6 +10,10 @@ async function main() {
     backend,
     config.MAX_CONCURRENT_SANDBOXES,
     config.SANDBOX_TTL_SECONDS * 1000,
+    {
+      createSeconds: config.SANDBOX_CREATE_TIMEOUT_SECONDS,
+      importSeconds: config.ATTACHMENT_IMPORT_TIMEOUT_SECONDS,
+    },
   );
   await pool.reconcile();
   const service = createMcpHttp(pool, token, config.MAX_MCP_SESSIONS);

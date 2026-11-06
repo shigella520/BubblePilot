@@ -114,7 +114,10 @@ export function sdkBackend(config: Config, apiKey: string): Backend {
   const connectionConfig = new ConnectionConfig({
     domain: config.OPENSANDBOX_URL,
     apiKey,
-    requestTimeoutSeconds: 40,
+    requestTimeoutSeconds: Math.max(
+      config.SANDBOX_CREATE_TIMEOUT_SECONDS,
+      config.ATTACHMENT_IMPORT_TIMEOUT_SECONDS,
+    ),
     useServerProxy: true,
   });
   const manager = SandboxManager.create({ connectionConfig });
@@ -125,6 +128,7 @@ export function sdkBackend(config: Config, apiKey: string): Backend {
         connectionConfig,
         image: config.SANDBOX_IMAGE,
         timeoutSeconds: config.SANDBOX_TTL_SECONDS,
+        readyTimeoutSeconds: config.SANDBOX_CREATE_TIMEOUT_SECONDS,
         resource: { memory: `${config.SANDBOX_MEMORY_MIB}Mi` },
         metadata: { ...metadata, "bubblepilot.session": owner },
         signal,
@@ -155,8 +159,16 @@ export function sdkBackend(config: Config, apiKey: string): Backend {
             let seen = false;
             let outputBytes = 0;
             for await (const event of sandbox.commands.runStream(
-              attachmentCommand({ ...input, port, token }),
-              { background: false, timeoutSeconds: 45 },
+              attachmentCommand({
+                ...input,
+                port,
+                token,
+                acceptTimeoutSeconds: config.ATTACHMENT_IMPORT_TIMEOUT_SECONDS,
+              }),
+              {
+                background: false,
+                timeoutSeconds: config.ATTACHMENT_IMPORT_TIMEOUT_SECONDS,
+              },
               combined,
             )) {
               outputBytes += Buffer.byteLength(event.text ?? "");

@@ -48,7 +48,12 @@ async function fixture() {
   const data = Buffer.from("地区,金额\n东,10\n");
   const download = vi.fn(() => Promise.resolve(new Response(data)));
   const transfer = vi.fn(
-    async (input: Record<string, unknown>, file: string) => {
+    async (
+      input: Record<string, unknown>,
+      file: string,
+      signal: AbortSignal,
+    ) => {
+      signal.throwIfAborted();
       expect(await readFile(file)).toEqual(data);
       expect(input.sha256).toBe(
         createHash("sha256").update(data).digest("hex"),
@@ -311,4 +316,47 @@ it("enforces actual streaming bytes and releases temporary reservations on failu
     store.stage(new Response("1"), 5, abort.signal),
   ).rejects.toThrow();
   expect(await readdir(f.root)).toEqual([]);
+});
+
+it("extended import time cannot outlive the remaining Agent budget or caller cancellation", async () => {
+  for (const cancel of [false, true]) {
+    const f = await fixture();
+    f.input.config.limits.timeoutSeconds = 150;
+    const controller = new AbortController();
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    f.transfer.mockImplementationOnce(async (input, _file, signal) => {
+      entered();
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      // A transport may return a result after cancellation; it must not be committed.
+      return {
+        status: "imported",
+        sandbox_path: "/workspace/late.csv",
+        size: 1,
+        sha256: input.sha256,
+      };
+    });
+    const pending = f.tool.execute(JSON.stringify({ attachment_ref: f.ref }), {
+      signal: controller.signal,
+      deadline: Date.now() + 1000,
+      maxOutputCharacters: 64000,
+    });
+    await ready;
+    if (cancel) controller.abort();
+    const output = (await pending) as MultimodalToolResult;
+    expect(JSON.parse(output.text)).toMatchObject({
+      status: "unavailable",
+      errorCode: cancel
+        ? "ATTACHMENT_CANCELLED"
+        : "ATTACHMENT_TIMEOUT_OR_CANCELLED",
+    });
+    expect(f.invalidate).toHaveBeenCalledOnce();
+    expect(await readdir(f.root)).toEqual([]);
+    await f.session.close();
+  }
 });

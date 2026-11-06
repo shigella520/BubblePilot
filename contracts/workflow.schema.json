@@ -989,7 +989,7 @@
                                 "default": 30,
                                 "type": "integer",
                                 "minimum": 5,
-                                "maximum": 45
+                                "maximum": 180
                               },
                               "expandedMiB": {
                                 "default": 50,

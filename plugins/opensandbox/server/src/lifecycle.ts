@@ -1,3 +1,4 @@
+import { sandboxTimeoutDefaults, type SandboxTimeouts } from "./config.js";
 import { TransferFailure } from "./attachment-contract.js";
 import { workspaceUsageCommand } from "./attachment-helper.js";
 import type { TransferInput, TransferResult } from "./attachment-contract.js";
@@ -18,6 +19,7 @@ export class SandboxPool {
     readonly backend: Backend,
     readonly maximum: number,
     readonly ttlMs: number,
+    readonly timeouts: SandboxTimeouts = sandboxTimeoutDefaults,
   ) {}
   newSession() {
     const session = new SandboxSession(this);
@@ -72,6 +74,9 @@ export class SandboxSession {
   private expandedBytes = 0;
   private expandedFiles = 0;
   private importLimits?: TransferInput["limits"];
+  get importTimeoutMs() {
+    return this.pool.timeouts.importSeconds * 1000;
+  }
   importStatus(id: string, input?: TransferInput) {
     this.check();
     const existing = this.imported.get(id);
@@ -111,7 +116,7 @@ export class SandboxSession {
     const combined = AbortSignal.any([
       signal,
       this.abort.signal,
-      AbortSignal.timeout(45000),
+      AbortSignal.timeout(this.importTimeoutMs),
     ]);
     const cancel = () => this.invalidate();
     combined.addEventListener("abort", cancel, { once: true });
@@ -177,7 +182,7 @@ export class SandboxSession {
     const combined = AbortSignal.any([
       signal,
       this.abort.signal,
-      AbortSignal.timeout(40000),
+      AbortSignal.timeout(this.pool.timeouts.createSeconds * 1000),
     ]);
     const cancel = () => this.invalidate();
     combined.addEventListener("abort", cancel, { once: true });

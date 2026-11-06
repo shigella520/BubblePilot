@@ -1,5 +1,8 @@
 import { expect, it } from "vitest";
-import { attachmentHandlingSchema } from "../modules/attachments/attachment-policy.js";
+import {
+  attachmentHandlingSchema,
+  attachmentLimitsSchema,
+} from "../modules/attachments/attachment-policy.js";
 import {
   attachmentTargets,
   assertAttachmentBinding,
@@ -102,4 +105,15 @@ it("rejects executables and conflicting MIME, and sanitizes names as data", () =
   expect(() => attachmentFilename({ ...file, mimeType: "image/png" })).toThrow(
     "CONFLICTING",
   );
+});
+
+it("keeps the old import timeout default and accepts bounded cold-start waits", () => {
+  expect(attachmentLimitsSchema.parse({}).timeoutSeconds).toBe(30);
+  expect(
+    attachmentLimitsSchema.parse({ timeoutSeconds: 180 }).timeoutSeconds,
+  ).toBe(180);
+  for (const timeoutSeconds of [4, 181, 5.5])
+    expect(attachmentLimitsSchema.safeParse({ timeoutSeconds }).success).toBe(
+      false,
+    );
 });

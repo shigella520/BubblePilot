@@ -7,7 +7,10 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { createMcpHttp } from "../src/http.js";
 import { fixture } from "./support.js";
 it("binds single-use transfer tickets to the authenticated MCP session and preserves imports", async () => {
-  const { pool, backend } = fixture();
+  const { pool, backend } = fixture(1, 600000, {
+    createSeconds: 120,
+    importSeconds: 150,
+  });
   const original = backend.create;
   const uploads = vi.fn(
     async (input: TransferInput, body: AsyncIterable<Uint8Array>) => {
@@ -69,6 +72,7 @@ it("binds single-use transfer tickets to the authenticated MCP session and prese
     });
     const ticket = (await response.json()) as { token: string };
     expect(response.status).toBe(200);
+    expect(ticket).toMatchObject({ expiresInSeconds: 150 });
     const upload = async (session: string) =>
       fetch(url + "/attachments", {
         method: "POST",
