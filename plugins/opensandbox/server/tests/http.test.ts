@@ -1,4 +1,5 @@
-import { it, expect } from "vitest";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { it, expect, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -38,6 +39,10 @@ it("authenticates, discovers without allocation, separates sessions and revokes 
       "read_file",
       "write_file",
     ]);
+    expect(
+      listed.tools.find((t) => t.name === "run_command")!.inputSchema.properties
+        ?.timeout_seconds,
+    ).toMatchObject({ default: 60, maximum: 120 });
     expect(backend.create).not.toHaveBeenCalled();
     expect(
       (await a.client.callTool({ name: "prepare_sandbox", arguments: {} }))
@@ -86,3 +91,74 @@ it("authenticates, discovers without allocation, separates sessions and revokes 
     await service.close();
   }
 });
+
+it("sends timeout errors before closing the invalidated MCP session, even with a stalled backend and slow response", async () => {
+  const { pool, run } = fixture(1, 600000, undefined, {
+    defaultSeconds: 1,
+    maxSeconds: 2,
+  });
+  const service = createMcpHttp(pool, "fictional-token");
+  await new Promise<void>((r) => service.http.listen(0, "127.0.0.1", r));
+  const address = service.http.address();
+  if (!address || typeof address === "string") throw new Error("address");
+  const url = new URL(`http://127.0.0.1:${address.port}/mcp`);
+  const client = new Client({ name: "deadline-test", version: "1" });
+  const transport = new StreamableHTTPClientTransport(url, {
+    requestInit: { headers: { Authorization: "Bearer fictional-token" } },
+  });
+  // Preserve the method for explicit .call(this) inside the transport spy.
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const originalSend = StreamableHTTPServerTransport.prototype.send;
+  vi.spyOn(StreamableHTTPServerTransport.prototype, "send").mockImplementation(
+    async function (this: StreamableHTTPServerTransport, message, options) {
+      if ("result" in message && message.result.isError)
+        await new Promise((r) => setTimeout(r, 1300));
+      return originalSend.call(this, message, options);
+    },
+  );
+  try {
+    await client.connect(transport as Transport);
+    const listed = await client.listTools();
+    expect(
+      listed.tools.find((t) => t.name === "run_command")!.inputSchema.properties
+        ?.timeout_seconds,
+    ).toMatchObject({ default: 1, maximum: 2 });
+    await client.callTool({ name: "prepare_sandbox", arguments: {} });
+    const count = run.mock.calls.length;
+    const invalid = await client.callTool({
+      name: "run_command",
+      arguments: { command: "ignored", timeout_seconds: 3 },
+    });
+    expect(invalid.isError).toBe(true);
+    expect(run).toHaveBeenCalledTimes(count);
+    // Ignore cancellation forever, as a broken remote stream might do.
+    run.mockImplementationOnce(() => new Promise(() => {}));
+    const start = Date.now();
+    const result = await client.callTool(
+      { name: "run_command", arguments: { command: "fictional slow command" } },
+      undefined,
+      { timeout: 6000 },
+    );
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: {
+        status: "command_timeout_session_invalidated_do_not_replay",
+      },
+    });
+    expect(Date.now() - start).toBeLessThan(5000);
+    await expect(
+      client.callTool(
+        { name: "run_command", arguments: { command: "no replay" } },
+        undefined,
+        { timeout: 1000 },
+      ),
+    ).rejects.toThrow();
+    expect(run).toHaveBeenCalledTimes(count + 1);
+    await pool.sweep();
+    expect(pool.used).toBe(0);
+  } finally {
+    vi.restoreAllMocks();
+    await client.close();
+    await service.close();
+  }
+}, 10000);

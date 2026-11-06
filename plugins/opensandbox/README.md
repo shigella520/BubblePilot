@@ -24,7 +24,9 @@
 | `SANDBOX_IMAGE` | 必填 Python 3.12 digest；示例固定多架构镜像索引 |
 | 创建 | `SANDBOX_CREATE_TIMEOUT_SECONDS`，默认40秒，可设5～180秒 |
 | 附件传输 | `ATTACHMENT_IMPORT_TIMEOUT_SECONDS`，默认45秒，可设5～180秒 |
-| 命令/文件 | 默认20、最大30秒 / 10秒（保持原值） |
+| 命令默认时限 | `SANDBOX_COMMAND_TIMEOUT_SECONDS`，默认60秒，范围1～180秒，不得超过命令上限 |
+| 命令最大时限 | `SANDBOX_COMMAND_MAX_TIMEOUT_SECONDS`，默认120秒，范围1～180秒 |
+| 文件读写时限 | 10秒 |
 | 命令输出 | stdout + stderr 最多 1 MiB；流式读取，超限停止并使沙箱失效 |
 | 文件读写 | 每次最多 64 KiB UTF-8；读取按字节，使用 nextOffset 继续 |
 | MCP 请求正文 | 最大 512 KiB；不保存请求正文或普通输出日志 |
@@ -85,3 +87,12 @@ pnpm security:check
 缺失镜像时，创建调用需要等待 OpenSandbox 拉取镜像。先确保 Docker 能访问镜像仓库；延长等待不能修复网络、认证或连接错误，也不能保证任意镜像都能在时限内拉取。建议预拉取并保留固定 digest 的运行镜像。
 
 若希望容忍一次较慢的冷启动，可按[部署说明](../../doc/部署与运维.md#沙箱冷启动等待配置)协调调整各层时限。仅增加适配器参数无法覆盖应用更短的截止时间。Compose 示例保留原默认值，更新代码或镜像不会自行放宽 NAS 运行参数。无需更新 Python 运行镜像或插件 Skill；需要更新应用与 MCP 适配器镜像。
+
+
+### 命令超时与工具重新批准
+
+命令缺省使用管理员配置的60秒，模型可通过 `timeout_seconds` 申请至120秒（以服务实际返回的 Schema 为准）。SDK 请求时限覆盖创建、传输及命令上限，应用的 MCP 时限和本轮剩余工具预算仍可提前取消调用。命令超时返回 `command_timeout_session_invalidated_do_not_replay`，调用方取消返回 `command_cancelled_session_invalidated_do_not_replay`，其他不确定失败保留 unknown 状态；三者都不能据此断言命令没有产生副作用，不自动重放。
+
+失效沙箱立即拒绝新调用，已受理的错误响应发送完成或客户端断开后再关闭 MCP 会话，后台清理不阻塞错误返回。即使底层命令流未及时响应取消，调用也不会继续等待它的迟到结果。文件读写10秒、空间保护、512 MiB默认内存与会话TTL不随命令时限扩大。
+
+这次默认值从20/30秒调整为60/120秒，必须重新发现并审阅 `run_command` 的 Schema。插件0.3.1的 Skill 不再写死数字，改为以实时工具契约为准；升级包后审阅现有四工具和凭据，不新增权限。其他版本的旧 Skill 若仍写20/30秒，也应主动升级。无主应用API或数据库迁移，Python运行镜像保持原digest。

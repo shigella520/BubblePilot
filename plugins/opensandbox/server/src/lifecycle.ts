@@ -1,4 +1,9 @@
-import { sandboxTimeoutDefaults, type SandboxTimeouts } from "./config.js";
+import {
+  sandboxTimeoutDefaults,
+  sandboxCommandDefaults,
+  type CommandTimeouts,
+  type SandboxTimeouts,
+} from "./config.js";
 import { TransferFailure } from "./attachment-contract.js";
 import { workspaceUsageCommand } from "./attachment-helper.js";
 import type { TransferInput, TransferResult } from "./attachment-contract.js";
@@ -20,6 +25,7 @@ export class SandboxPool {
     readonly maximum: number,
     readonly ttlMs: number,
     readonly timeouts: SandboxTimeouts = sandboxTimeoutDefaults,
+    readonly commandTimeouts: CommandTimeouts = sandboxCommandDefaults,
   ) {}
   newSession() {
     const session = new SandboxSession(this);
@@ -220,15 +226,15 @@ export class SandboxSession {
     signal.throwIfAborted();
     if (!this.handle) throw new ToolError("prepare_sandbox_required");
     this.busy = true;
-    const combined = AbortSignal.any([
-      signal,
-      this.abort.signal,
-      AbortSignal.timeout(seconds * 1000),
-    ]);
+    const timeout = AbortSignal.timeout(seconds * 1000);
+    const combined = AbortSignal.any([signal, this.abort.signal, timeout]);
     const cancel = () => this.invalidate();
     combined.addEventListener("abort", cancel, { once: true });
     try {
-      const result = await this.handle.run(command, combined, seconds);
+      const result = await abortable(
+        this.handle.run(command, combined, seconds),
+        combined,
+      );
       combined.throwIfAborted();
       if (result.truncated || result.status === "result_unknown")
         this.invalidate();
@@ -236,7 +242,11 @@ export class SandboxSession {
     } catch {
       this.invalidate();
       throw new ToolError(
-        "command_result_unknown_session_invalidated_do_not_replay",
+        signal.aborted
+          ? "command_cancelled_session_invalidated_do_not_replay"
+          : timeout.aborted
+            ? "command_timeout_session_invalidated_do_not_replay"
+            : "command_result_unknown_session_invalidated_do_not_replay",
       );
     } finally {
       combined.removeEventListener("abort", cancel);
@@ -278,4 +288,27 @@ export class SandboxSession {
       return false;
     }
   }
+}
+
+// Some transports take time to unwind an aborted stream. Return the bounded
+// tool failure now; consume late settlement without ever delivering its result.
+function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new Error("operation_aborted"));
+    signal.addEventListener("abort", abort, { once: true });
+    operation.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error instanceof Error ? error : new Error("operation_failed"));
+      },
+    );
+    if (signal.aborted) {
+      signal.removeEventListener("abort", abort);
+      abort();
+    }
+  });
 }

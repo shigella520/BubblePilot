@@ -117,6 +117,7 @@ export function sdkBackend(config: Config, apiKey: string): Backend {
     requestTimeoutSeconds: Math.max(
       config.SANDBOX_CREATE_TIMEOUT_SECONDS,
       config.ATTACHMENT_IMPORT_TIMEOUT_SECONDS,
+      config.SANDBOX_COMMAND_MAX_TIMEOUT_SECONDS,
     ),
     useServerProxy: true,
   });

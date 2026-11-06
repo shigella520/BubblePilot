@@ -61,7 +61,7 @@ it("invalidates on cancellation and never replays an uncertain command", async (
   const controller = new AbortController();
   const pending = a.run("side effect", 20, controller.signal);
   controller.abort();
-  await expect(pending).rejects.toThrow("result_unknown");
+  await expect(pending).rejects.toThrow("command_cancelled");
   await expect(a.prepare(signal())).rejects.toThrow("invalidated");
   expect(run).toHaveBeenCalledTimes(2);
 });
@@ -309,3 +309,37 @@ it.each([45, 150])(
     }
   },
 );
+
+it("returns cancellation without waiting for the backend and discards late success", async () => {
+  const { pool, run, backend } = fixture();
+  const session = pool.newSession();
+  await session.prepare(signal());
+  let finish!: (value: Awaited<ReturnType<Handle["run"]>>) => void;
+  run.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const controller = new AbortController();
+  const pending = session.run("fictional slow command", 120, controller.signal);
+  controller.abort();
+  await expect(pending).rejects.toThrow(
+    "command_cancelled_session_invalidated_do_not_replay",
+  );
+  expect(session.ended).toBe(true);
+  await pool.sweep();
+  expect(backend.remove).toHaveBeenCalledOnce();
+  finish({
+    status: "completed",
+    exitCode: 0,
+    stdout: "late",
+    stderr: "",
+    durationMs: 1,
+    truncated: false,
+  });
+  await expect(session.run("do not replay", 1, signal())).rejects.toThrow(
+    "invalidated",
+  );
+  expect(run).toHaveBeenCalledTimes(2);
+});
