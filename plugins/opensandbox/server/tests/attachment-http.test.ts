@@ -32,6 +32,8 @@ it("binds single-use transfer tickets to the authenticated MCP session and prese
     upload: uploads,
   }));
   const server = createMcpHttp(pool, "fictional-token");
+  expect(server.http.requestTimeout).toBe(150000);
+  expect(server.http.headersTimeout).toBe(10000);
   await new Promise<void>((r) => server.http.listen(0, "127.0.0.1", r));
   const a = server.http.address();
   if (!a || typeof a === "string") throw new Error("address");

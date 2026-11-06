@@ -276,7 +276,9 @@ export function createMcpHttp(
       res.end();
     });
   });
-  http.requestTimeout = 45000;
+  // Node also limits receiving the request body. A cold start can pause upload
+  // consumption, so this outer guard must cover the configured import window.
+  http.requestTimeout = Math.max(45000, pool.timeouts.importSeconds * 1000);
   http.headersTimeout = 10000;
   const timer = setInterval(() => {
     for (const [id, pair] of sessions)
