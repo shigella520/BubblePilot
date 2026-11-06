@@ -1,3 +1,8 @@
+import { MemeDeliveryService } from "../modules/memes/meme-delivery-service.js";
+import { PostgresMemeRepository } from "../modules/memes/postgres-meme-repository.js";
+import type { MemeService } from "../modules/memes/meme-service.js";
+import { SettingsCipher } from "../modules/integrations/bluebubbles/settings-cipher.js";
+import type { IdleTriggerConfig } from "../modules/workflow/idle-policy.js";
 import {
   ConversationContextService,
   type ConversationContextSnapshot,
@@ -68,6 +73,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     },
     dailyLimit = 2,
     loadContext = false,
+    quietPeriods: IdleTriggerConfig["quietPeriods"] = [],
   ) {
     const chatId = `fictional-idle-${randomUUID()}`;
     let now = new Date(Date.now() + 60_000);
@@ -77,7 +83,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
       timeZone: "UTC",
       idleMinutes: 10,
       dailyLimit,
-      quietPeriods: [],
+      quietPeriods,
     };
     const definition = parseWorkflowDefinition({
       schemaVersion: "1",
@@ -194,6 +200,9 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
       send,
       message,
       advance,
+      setNow: (date: Date) => {
+        now = date;
+      },
       engine,
       version,
       trigger,
@@ -316,7 +325,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     await s.scheduler.tick();
     expect(run).toHaveBeenCalledTimes(1);
   });
-  it("cancels when an own message arrives during generation", async () => {
+  it("continues when an own message arrives during generation", async () => {
     const s = await setup();
     vi.spyOn(AgentRunner.prototype, "run").mockImplementation(async () => {
       await s.message({ isFromMe: true });
@@ -325,7 +334,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     await s.message();
     s.advance(11);
     await s.scheduler.tick();
-    expect(s.send).not.toHaveBeenCalled();
+    expect(s.send).toHaveBeenCalledTimes(1);
   });
   it("confirmed bot activity blocks eligibility but a late acknowledgement cannot overwrite a newer human", async () => {
     const s = await setup();
@@ -392,7 +401,6 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     expect(rows.rows.map((r: { state: string }) => r.state)).toEqual([
       "confirmed",
       "confirmed",
-      "released",
     ]);
   });
   it("allows more than the retired instance limit and reports only workflow quota", async () => {
@@ -410,7 +418,7 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     expect(preview[0]?.workflowRemaining).toBe(0);
     expect(preview[0]).not.toHaveProperty("instanceRemaining");
   });
-  it("cancels when a human speaks during generation", async () => {
+  it("continues when a human speaks during generation", async () => {
     const s = await setup();
     vi.spyOn(AgentRunner.prototype, "run").mockImplementation(async () => {
       await s.message();
@@ -419,7 +427,160 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
     await s.message();
     s.advance(11);
     await s.scheduler.tick();
+    expect(s.send).toHaveBeenCalledTimes(1);
+  });
+  it.each(["workflow", "chat", "trigger"] as const)(
+    "checks %s authorization at acceptance but does not revoke accepted sends",
+    async (target) => {
+      const s = await setup();
+      vi.spyOn(AgentRunner.prototype, "run").mockImplementation(async () => {
+        const state = await pool.query<{
+          state: string;
+          workflow_day: Date | null;
+        }>(
+          "SELECT a.state,a.workflow_day FROM idle_attempts a JOIN workflow_versions v ON v.id=a.workflow_version_id WHERE v.workflow_id=$1",
+          [s.version.workflowId],
+        );
+        expect(state.rows[0]!.state).toBe("reserved");
+        expect(state.rows[0]!.workflow_day).not.toBeNull();
+        if (target === "workflow")
+          await repository.setWorkflowEnabled(s.version.workflowId, false);
+        if (target === "chat")
+          await pool.query(
+            "UPDATE chats SET enabled=false WHERE provider_chat_id=$1",
+            [s.chatId],
+          );
+        if (target === "trigger")
+          await pool.query(
+            "UPDATE bot_triggers SET enabled=false,updated_at=now() WHERE id=$1",
+            [s.trigger!.id],
+          );
+        await s.scheduler.tick();
+        return success('{"action":"send","text":"已受理问候"}');
+      });
+      await s.message();
+      s.advance(11);
+      await s.scheduler.tick();
+      expect(s.send).toHaveBeenCalledTimes(1);
+      await s.message();
+      s.advance(11);
+      await s.scheduler.tick();
+      expect(s.send).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("does not cancel an accepted send upon entering quiet hours", async () => {
+    const s = await setup(undefined, 2, false, [
+      { days: [1, 2, 3, 4, 5, 6, 7], start: "23:00", end: "09:00" },
+    ]);
+    const date = new Date(Date.now() + 86400000);
+    date.setUTCHours(22, 40, 0, 0);
+    s.setNow(date);
+    vi.spyOn(AgentRunner.prototype, "run").mockImplementation(() => {
+      s.advance(20);
+      return Promise.resolve(success('{"action":"send","text":"已受理问候"}'));
+    });
+    await s.message();
+    s.advance(11);
+    await s.scheduler.tick();
+    expect(s.send).toHaveBeenCalledTimes(1);
+    await s.message();
+    s.advance(11);
+    await s.scheduler.tick();
+    expect(s.send).toHaveBeenCalledTimes(1);
+  });
+  it("rejects a candidate if quiet hours begin before queue acceptance", async () => {
+    const s = await setup(undefined, 2, false, [
+      { days: [1, 2, 3, 4, 5, 6, 7], start: "23:00", end: "09:00" },
+    ]);
+    const date = new Date(Date.now() + 86400000);
+    date.setUTCHours(22, 40, 0, 0);
+    s.setNow(date);
+    const handle = s.engine.handleBackground.bind(s.engine);
+    vi.spyOn(s.engine, "handleBackground").mockImplementation((input) => {
+      s.advance(20);
+      return handle(input);
+    });
+    const run = vi
+      .spyOn(AgentRunner.prototype, "run")
+      .mockResolvedValue(success('{"action":"send","text":"不应发送"}'));
+    await s.message();
+    s.advance(11);
+    await s.scheduler.tick();
+    expect(run).not.toHaveBeenCalled();
     expect(s.send).not.toHaveBeenCalled();
+  });
+  it("sends the companion meme after its own text changes chat activity and still honors manual closure", async () => {
+    const s = await setup();
+    const memes = new PostgresMemeRepository(url!);
+    try {
+      // This fixture tests delivery only; do not enqueue a global summary job.
+      const assetId = randomUUID();
+      await pool.query(
+        "INSERT INTO meme_assets(id,name,mime_type,size,width,height,hash,storage_key) VALUES($1,'虚构开心','image/png',1,1,1,$2,$3)",
+        [assetId, randomUUID(), randomUUID()],
+      );
+      const asset = (await memes.get(assetId))!;
+      const gateway = {
+        sendReply: vi.fn(async () => {
+          await s.message({ isFromMe: true });
+          return {
+            status: "confirmed" as const,
+            providerMessageId: "fixture-text",
+          };
+        }),
+        sendAttachment: vi.fn(() =>
+          Promise.resolve({
+            status: "confirmed" as const,
+            providerMessageId: "fixture-image",
+          }),
+        ),
+      };
+      const delivery = new MemeDeliveryService(
+        pool,
+        {
+          repository: memes,
+          files: { read: () => Promise.resolve(Buffer.from("fixture")) },
+        } as unknown as MemeService,
+        gateway,
+        new SettingsCipher("fictional-key"),
+      );
+      let closedReason: string | null | undefined;
+      let partStatuses: string[] = [];
+      delivery.setIdleSendGuard((id) => s.scheduler.guardExecution(id));
+      vi.spyOn(AgentRunner.prototype, "run").mockImplementation(async () => {
+        const r = await pool.query<{ execution_id: string }>(
+          "SELECT a.execution_id FROM idle_attempts a JOIN workflow_versions v ON v.id=a.workflow_version_id WHERE v.workflow_id=$1",
+          [s.version.workflowId],
+        );
+        const executionId = r.rows[0]!.execution_id;
+        const sent = await delivery.deliver(
+          {
+            executionId,
+            nodeId: "fixture-reply",
+            chatId: s.chatId,
+            text: "虚构问候",
+            meme: { id: asset.id, name: asset.name, hash: asset.hash },
+          },
+          "fixture",
+        );
+        partStatuses = [sent.text.status, sent.image?.status ?? "missing"];
+        await pool.query(
+          "UPDATE workflow_executions SET status='closed' WHERE id=$1",
+          [executionId],
+        );
+        closedReason = await s.scheduler.guardExecution(executionId);
+        return success('{"action":"skip"}');
+      });
+      await s.message();
+      s.advance(11);
+      await s.scheduler.tick();
+      expect(gateway.sendReply).toHaveBeenCalledTimes(1);
+      expect(gateway.sendAttachment).toHaveBeenCalledTimes(1);
+      expect(partStatuses).toEqual(["confirmed", "confirmed"]);
+      expect(closedReason).toBe("idle-execution-ended");
+    } finally {
+      await memes.close();
+    }
   });
   it("rejects invalid decisions and ignores replay and old messages", async () => {
     const s = await setup();
@@ -490,6 +651,8 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
       "UPDATE idle_attempts SET state='accepted' WHERE execution_id=$1",
       [row.id],
     );
+    await s.message({ isFromMe: true });
+    await repository.setWorkflowEnabled(s.version.workflowId, false);
     await s.scheduler.tick();
     expect(run).toHaveBeenCalledTimes(2);
     const detail = await repository.getExecution(row.id);
@@ -543,16 +706,16 @@ describe.runIf(!!url)("idle scheduling with PostgreSQL", () => {
       await context.close();
     }
   });
-  it("cancels after workflow revocation and source cleanup", async () => {
+  it("finishes accepted work after revocation but does not accept redacted source activity", async () => {
     const s = await setup();
     vi.spyOn(AgentRunner.prototype, "run").mockImplementation(async () => {
       await repository.setWorkflowEnabled(s.version.workflowId, false);
-      return success('{"action":"send","text":"must not send"}');
+      return success('{"action":"send","text":"已受理问候"}');
     });
     await s.message();
     s.advance(11);
     await s.scheduler.tick();
-    expect(s.send).not.toHaveBeenCalled();
+    expect(s.send).toHaveBeenCalledTimes(1);
     const s2 = await setup();
     await s2.message();
     s2.advance(11);
