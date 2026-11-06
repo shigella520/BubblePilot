@@ -104,7 +104,35 @@ it("binds single-use transfer tickets to the authenticated MCP session and prese
       (await first.client.callTool({ name: "prepare_sandbox", arguments: {} }))
         .structuredContent,
     ).toMatchObject({ status: "reused" });
-    await first.transport.terminateSession();
+    // A failure after receiving the upload must return JSON, not destroy the
+    // client socket as a side effect of invalidating the sandbox session.
+    const failedInput = { ...input, id: randomUUID() };
+    const failedTicketResponse = await fetch(url + "/attachments/tickets", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(failedInput),
+    });
+    const failedTicket = (await failedTicketResponse.json()) as {
+      token: string;
+    };
+    uploads.mockImplementationOnce(async (_input, body) => {
+      for await (const chunk of body) expect(chunk.length).toBeGreaterThan(0);
+      throw new Error("fictional upload failure");
+    });
+    const failedUpload = await fetch(url + "/attachments", {
+      method: "POST",
+      headers: {
+        ...headers,
+        "x-bp-transfer-token": failedTicket.token,
+        "content-length": String(data.length),
+      },
+      body: data,
+    });
+    expect(failedUpload.status).toBe(422);
+    expect(await failedUpload.json()).toMatchObject({
+      error: "attachment_failed_session_invalidated_do_not_replay",
+    });
+    await first.transport.terminateSession().catch(() => undefined);
     await pool.sweep();
     expect(pool.used).toBe(0);
   } finally {

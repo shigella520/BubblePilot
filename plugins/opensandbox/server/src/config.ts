@@ -3,6 +3,7 @@ import { z } from "zod";
 
 export const sandboxTimeoutDefaults = { createSeconds: 40, importSeconds: 45 };
 export const sandboxCommandDefaults = { defaultSeconds: 60, maxSeconds: 120 };
+export const workspaceCheckTimeoutDefaultSeconds = 10;
 export type CommandTimeouts = typeof sandboxCommandDefaults;
 export type SandboxTimeouts = typeof sandboxTimeoutDefaults;
 
@@ -33,6 +34,11 @@ export const configSchema = z
       sandboxCommandDefaults.maxSeconds,
       1,
       180,
+    ),
+    SANDBOX_WORKSPACE_CHECK_TIMEOUT_SECONDS: integer(
+      workspaceCheckTimeoutDefaultSeconds,
+      1,
+      30,
     ),
     SANDBOX_MEMORY_MIB: integer(512, 128, 4096),
     SANDBOX_IMAGE: z

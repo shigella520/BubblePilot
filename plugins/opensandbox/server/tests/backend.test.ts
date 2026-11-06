@@ -111,3 +111,11 @@ it("bounds command defaults and rejects a default above the configured maximum",
         false,
       );
 });
+
+it("bounds the workspace scan deadline without changing disk limits", () => {
+  const schema = configSchema.shape.SANDBOX_WORKSPACE_CHECK_TIMEOUT_SECONDS;
+  expect(schema.parse(undefined)).toBe(10);
+  expect(schema.parse("30")).toBe(30);
+  for (const value of ["0", "31", "1.5", "invalid"])
+    expect(schema.safeParse(value).success).toBe(false);
+});

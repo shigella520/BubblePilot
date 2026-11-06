@@ -343,3 +343,86 @@ it("returns cancellation without waiting for the backend and discards late succe
   );
   expect(run).toHaveBeenCalledTimes(2);
 });
+
+it.each([
+  { seconds: 2, kib: 4, stalled: false, invalidated: true },
+  { seconds: 10, kib: 4, stalled: false, invalidated: false },
+  { seconds: 10, kib: 262145, stalled: false, invalidated: true },
+  { seconds: 10, kib: 4, stalled: true, invalidated: true },
+])(
+  "bounds workspace checks independently and still enforces quota: $seconds/$kib/$stalled",
+  async ({ seconds, kib, stalled, invalidated }) => {
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), ms);
+      return controller.signal;
+    });
+    try {
+      const { pool, backend, run } = fixture(
+        1,
+        600000,
+        undefined,
+        undefined,
+        seconds,
+      );
+      const original = backend.create;
+      vi.spyOn(backend, "create").mockImplementation(async (owner, abort) => ({
+        ...(await original(owner, abort)),
+        upload: (input) =>
+          Promise.resolve({
+            status: "imported",
+            sandbox_path: "/workspace/fixture.txt",
+            size: input.size,
+            sha256: input.sha256,
+            expandedBytes: 0,
+            expandedFiles: 0,
+          }),
+      }));
+      const session = pool.newSession();
+      await session.importAttachment(
+        {
+          id: "fixture",
+          filename: "fixture.txt",
+          size: 1,
+          sha256: "0".repeat(64),
+          limits: { files: 1, totalMiB: 1, expandedMiB: 1, expandedFiles: 1 },
+        },
+        (async function* () {
+          await Promise.resolve();
+          yield Buffer.from("x");
+        })(),
+        signal(),
+      );
+      run.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            if (!stalled)
+              setTimeout(
+                () =>
+                  resolve({
+                    status: "completed",
+                    exitCode: 0,
+                    stdout: String(kib),
+                    stderr: "",
+                    durationMs: 3000,
+                    truncated: false,
+                  }),
+                3000,
+              );
+          }),
+      );
+      const check = session.checkSpace();
+      await vi.advanceTimersByTimeAsync(11000);
+      await check;
+      expect(session.ended).toBe(invalidated);
+      expect(run.mock.calls.at(-1)?.[2]).toBe(seconds);
+      session.invalidate();
+      await pool.sweep();
+      expect(pool.used).toBe(0);
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  },
+);

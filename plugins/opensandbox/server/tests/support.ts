@@ -7,6 +7,7 @@ export function fixture(
   ttl = 600000,
   timeouts?: SandboxTimeouts,
   commands?: CommandTimeouts,
+  workspaceCheckSeconds?: number,
 ) {
   const live = new Map<string, string>();
   const run = vi.fn<Handle["run"]>().mockResolvedValue({
@@ -37,7 +38,14 @@ export function fixture(
     close: () => Promise.resolve(),
   };
   return {
-    pool: new SandboxPool(backend, max, ttl, timeouts, commands),
+    pool: new SandboxPool(
+      backend,
+      max,
+      ttl,
+      timeouts,
+      commands,
+      workspaceCheckSeconds,
+    ),
     backend,
     live,
     run,

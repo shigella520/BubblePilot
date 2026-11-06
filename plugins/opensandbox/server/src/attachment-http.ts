@@ -29,7 +29,11 @@ export class AttachmentTransfers {
       this.session.abort.signal,
       AbortSignal.timeout(this.session.importTimeoutMs),
     ]);
-    const abortBody = () => req.destroy();
+    const abortBody = () => {
+      // Destroy an incomplete incoming body to unblock reads, but preserve the
+      // connection for the explicit failure response once the body is received.
+      if (!req.complete) req.destroy();
+    };
     signal.addEventListener("abort", abortBody, { once: true });
     try {
       for (const [key, ticket] of this.tickets)

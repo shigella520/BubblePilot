@@ -18,6 +18,7 @@ async function main() {
       defaultSeconds: config.SANDBOX_COMMAND_TIMEOUT_SECONDS,
       maxSeconds: config.SANDBOX_COMMAND_MAX_TIMEOUT_SECONDS,
     },
+    config.SANDBOX_WORKSPACE_CHECK_TIMEOUT_SECONDS,
   );
   await pool.reconcile();
   const service = createMcpHttp(pool, token, config.MAX_MCP_SESSIONS);

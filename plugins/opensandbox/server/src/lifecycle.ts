@@ -1,6 +1,7 @@
 import {
   sandboxTimeoutDefaults,
   sandboxCommandDefaults,
+  workspaceCheckTimeoutDefaultSeconds,
   type CommandTimeouts,
   type SandboxTimeouts,
 } from "./config.js";
@@ -26,6 +27,7 @@ export class SandboxPool {
     readonly ttlMs: number,
     readonly timeouts: SandboxTimeouts = sandboxTimeoutDefaults,
     readonly commandTimeouts: CommandTimeouts = sandboxCommandDefaults,
+    readonly workspaceCheckTimeoutSeconds = workspaceCheckTimeoutDefaultSeconds,
   ) {}
   newSession() {
     const session = new SandboxSession(this);
@@ -256,11 +258,19 @@ export class SandboxSession {
   async checkSpace() {
     if (!this.importLimits || !this.handle || this.ended) return;
     try {
-      const result = await this.handle.run(
-        workspaceUsageCommand,
-        AbortSignal.any([this.abort.signal, AbortSignal.timeout(2000)]),
-        2,
+      const signal = AbortSignal.any([
+        this.abort.signal,
+        AbortSignal.timeout(this.pool.workspaceCheckTimeoutSeconds * 1000),
+      ]);
+      const result = await abortable(
+        this.handle.run(
+          workspaceUsageCommand,
+          signal,
+          this.pool.workspaceCheckTimeoutSeconds,
+        ),
+        signal,
       );
+      signal.throwIfAborted();
       const kib = Number(result.stdout.trim());
       if (
         result.status !== "completed" ||
