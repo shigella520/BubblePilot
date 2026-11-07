@@ -31,7 +31,7 @@ export class ChatImageSourceRepository {
        JOIN chats c ON c.id=m.chat_id
        LEFT JOIN messages trigger ON trigger.chat_id=c.id AND trigger.provider=$1 AND trigger.provider_message_id=$3
        LEFT JOIN workflow_executions idle ON idle.id=$6 AND idle.target_chat_id=c.id
-         AND idle.trigger_event->>'schemaVersion' IN ('chat-idle-v1','scheduled-task-v1')
+         AND idle.trigger_event->>'schemaVersion' IN ('chat-idle-v1','scheduled-task-v1','scheduled-task-v2')
        WHERE m.provider=$1 AND c.provider=$1 AND c.provider_chat_id=$2 AND m.provider_message_id=$4
        AND c.enabled AND c.deleted_at IS NULL AND m.content_redacted_at IS NULL
        AND ((trigger.id IS NOT NULL AND trigger.content_redacted_at IS NULL AND m.message_index<=trigger.message_index)

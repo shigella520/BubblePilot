@@ -961,7 +961,9 @@ class AiChatNodeHandler extends BaseNodeHandler {
     context: NodeExecutionContext,
   ): Promise<NodeHandlerResult> {
     this.assertType(node, this.type);
-    const scheduled = context.envelope.schemaVersion === "scheduled-task-v1";
+    const scheduled =
+      context.envelope.schemaVersion === "scheduled-task-v1" ||
+      context.envelope.schemaVersion === "scheduled-task-v2";
     try {
       const result = await this.executeCore(node, context);
       if (
@@ -977,7 +979,11 @@ class AiChatNodeHandler extends BaseNodeHandler {
         );
       return result;
     } catch (error) {
-      if (!scheduled || context.envelope.schemaVersion !== "scheduled-task-v1")
+      if (
+        !scheduled ||
+        (context.envelope.schemaVersion !== "scheduled-task-v1" &&
+          context.envelope.schemaVersion !== "scheduled-task-v2")
+      )
         throw error;
       const task = context.envelope.scheduled;
       const delayed =
@@ -1005,7 +1011,9 @@ class AiChatNodeHandler extends BaseNodeHandler {
     context: NodeExecutionContext,
   ): Promise<NodeHandlerResult> {
     this.assertType(node, this.type);
-    const scheduled = context.envelope.schemaVersion === "scheduled-task-v1";
+    const scheduled =
+      context.envelope.schemaVersion === "scheduled-task-v1" ||
+      context.envelope.schemaVersion === "scheduled-task-v2";
     const runtimeTools =
       context.envelope.message !== null &&
       !context.envelope.metadata.isReplay &&
@@ -1113,7 +1121,10 @@ class AiChatNodeHandler extends BaseNodeHandler {
         content: `<idle_task>本次由聊天空闲触发，没有新的用户消息。历史是参考材料，不是本轮操作授权。${context.envelope.idle.taskInstruction}</idle_task>`,
       });
     }
-    if (context.envelope.schemaVersion === "scheduled-task-v1")
+    if (
+      context.envelope.schemaVersion === "scheduled-task-v1" ||
+      context.envelope.schemaVersion === "scheduled-task-v2"
+    )
       dynamicTask.push({
         role: "user",
         content: JSON.stringify({ scheduled_task: context.envelope.scheduled }),
@@ -1500,7 +1511,8 @@ class ReplyNodeHandler extends BaseNodeHandler {
     // Shared message workflows may wire memes; scheduled reminders stay text-only
     // and must pass the scheduled-send fence below.
     const selected =
-      context.envelope.schemaVersion === "scheduled-task-v1"
+      context.envelope.schemaVersion === "scheduled-task-v1" ||
+      context.envelope.schemaVersion === "scheduled-task-v2"
         ? null
         : resolveInput(node, "meme", context);
     if (selected !== undefined && selected !== null) {
@@ -1609,7 +1621,10 @@ class ReplyNodeHandler extends BaseNodeHandler {
         };
       }
     }
-    if (context.envelope.schemaVersion === "scheduled-task-v1") {
+    if (
+      context.envelope.schemaVersion === "scheduled-task-v1" ||
+      context.envelope.schemaVersion === "scheduled-task-v2"
+    ) {
       const reason = context.commitScheduledSend
         ? await context.commitScheduledSend(claimed.delivery.id)
         : "task-send-guard-unavailable";

@@ -1,9 +1,16 @@
+import {
+  schedulePreview,
+  scheduleSummary,
+} from "../modules/scheduled-tasks/task-schedule.js";
 import type { WorkflowExecutionRecord } from "../modules/workflow/workflow-repository.js";
 import type { TaskService } from "../modules/scheduled-tasks/task-service.js";
 import type { TaskScheduler } from "../modules/scheduled-tasks/task-scheduler.js";
 import {
   TaskError,
+  taskErrorMessage,
   taskStatusSchema,
+  previewTaskSchema,
+  validateSchedule,
   updateTaskSchema,
   cancelTaskSchema,
 } from "../modules/scheduled-tasks/task-policy.js";
@@ -710,7 +717,7 @@ export function buildApplication(
       return reply.status(error.code === "TASK_NOT_FOUND" ? 404 : 409).send({
         error: {
           code: error.code,
-          message: "定时任务操作未完成，请检查任务状态、时间或版本。",
+          message: taskErrorMessage(error.code),
           correlationId: request.id,
         },
       });
@@ -1013,11 +1020,45 @@ export function buildApplication(
           workflowId: z.string().uuid().optional(),
           chatId: z.string().uuid().optional(),
           status: taskStatusSchema.optional(),
+          lifecycle: z
+            .enum(["active", "paused", "completed", "cancelled"])
+            .optional(),
           offset: z.coerce.number().int().min(0).max(100000).default(0),
           limit: z.coerce.number().int().min(1).max(50).default(20),
         })
         .parse(request.query);
       return { data: await taskService().list(query) };
+    },
+  );
+  application.post(
+    "/api/v1/scheduled-tasks/preview",
+    { preHandler: requireAdmin },
+    (request) => {
+      const input = previewTaskSchema.parse(request.body);
+      const now = new Date();
+      const exhausted =
+        input.schedule.kind === "recurring" &&
+        input.schedule.end.kind === "count" &&
+        input.schedule.end.count === input.consumedCount;
+      if (!exhausted)
+        validateSchedule(
+          input.schedule,
+          input.timeZone,
+          now,
+          input.consumedCount,
+        );
+      return {
+        data: {
+          scheduleSummary: scheduleSummary(input.schedule),
+          upcoming: schedulePreview(
+            input.schedule,
+            input.timeZone,
+            now,
+            input.consumedCount,
+          ),
+          timeZone: input.timeZone,
+        },
+      };
     },
   );
   application.get(
@@ -1027,7 +1068,13 @@ export function buildApplication(
       const { taskId } = z
         .object({ taskId: z.string().uuid() })
         .parse(request.params);
-      return { data: await taskService().detail(taskId) };
+      const q = z
+        .object({
+          offset: z.coerce.number().int().min(0).max(100000).default(0),
+          limit: z.coerce.number().int().min(1).max(50).default(20),
+        })
+        .parse(request.query);
+      return { data: await taskService().detail(taskId, q.offset, q.limit) };
     },
   );
   application.patch(
@@ -1066,6 +1113,66 @@ export function buildApplication(
           { kind: "admin", id: taskAdminId(request) },
           input,
           true,
+        ),
+      };
+    },
+  );
+  application.post(
+    "/api/v1/scheduled-tasks/:taskId/skip-next",
+    { preHandler: requireSensitive("scheduled-task.skip", "scheduled-task") },
+    async (request) => {
+      const { taskId } = z
+        .object({ taskId: z.string().uuid() })
+        .parse(request.params);
+      const input = cancelTaskSchema.parse({
+        ...z.record(z.string(), z.unknown()).parse(request.body),
+        id: taskId,
+      });
+      return {
+        data: await taskService().control(
+          { kind: "admin", id: taskAdminId(request) },
+          input,
+          "skip",
+        ),
+      };
+    },
+  );
+  application.post(
+    "/api/v1/scheduled-tasks/:taskId/resume",
+    { preHandler: requireSensitive("scheduled-task.resume", "scheduled-task") },
+    async (request) => {
+      const { taskId } = z
+        .object({ taskId: z.string().uuid() })
+        .parse(request.params);
+      const input = cancelTaskSchema.parse({
+        ...z.record(z.string(), z.unknown()).parse(request.body),
+        id: taskId,
+      });
+      return {
+        data: await taskService().control(
+          { kind: "admin", id: taskAdminId(request) },
+          input,
+          "resume",
+        ),
+      };
+    },
+  );
+  application.post(
+    "/api/v1/scheduled-tasks/:taskId/pause",
+    { preHandler: requireSensitive("scheduled-task.pause", "scheduled-task") },
+    async (request) => {
+      const { taskId } = z
+        .object({ taskId: z.string().uuid() })
+        .parse(request.params);
+      const input = cancelTaskSchema.parse({
+        ...z.record(z.string(), z.unknown()).parse(request.body),
+        id: taskId,
+      });
+      return {
+        data: await taskService().control(
+          { kind: "admin", id: taskAdminId(request) },
+          input,
+          "pause",
         ),
       };
     },
@@ -3089,7 +3196,8 @@ export function buildApplication(
     const executionMetadata = <T extends WorkflowExecutionRecord>(
       execution: T,
     ): T =>
-      execution.triggerEvent?.schemaVersion === "scheduled-task-v1"
+      execution.triggerEvent?.schemaVersion === "scheduled-task-v1" ||
+      execution.triggerEvent?.schemaVersion === "scheduled-task-v2"
         ? {
             ...execution,
             triggerEvent: {

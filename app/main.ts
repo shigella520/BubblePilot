@@ -329,12 +329,13 @@ const taskScheduler = new TaskScheduler(tasks, workflowEngine, () =>
     "Task scheduling failed",
   ),
 );
-memeDelivery.setIdleSendGuard(async (id) =>
-  (await workflowRepository.getExecution(id))?.triggerEvent?.schemaVersion ===
-  "scheduled-task-v1"
+memeDelivery.setIdleSendGuard(async (id) => {
+  const event = (await workflowRepository.getExecution(id))?.triggerEvent;
+  return event?.schemaVersion === "scheduled-task-v1" ||
+    event?.schemaVersion === "scheduled-task-v2"
     ? "scheduled-manual-redelivery-not-supported"
-    : idleScheduler.guardExecution(id),
-);
+    : idleScheduler.guardExecution(id);
+});
 const application = buildApplication(config, repository, {
   networkSettings,
   auth: authService,

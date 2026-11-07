@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import TaskScheduleEditor from "./TaskScheduleEditor.vue";
+import type { TaskSchedule } from "../../../../../modules/scheduled-tasks/task-schedule";
 import AdminFormDialog from "../AdminFormDialog.vue";
 import AdminDetailDialog from "../AdminDetailDialog.vue";
 import {
@@ -29,12 +31,28 @@ interface Task {
   timeZone: string;
   status: string;
   version: number;
+  schedule?: TaskSchedule;
+  lifecycle?: string;
+  scheduleSummary?: string;
+  upcoming?: string[];
+  consumedCount?: number;
+  sendingAlreadyStarted?: boolean;
   chatName: string | null;
   chatId: string;
   workflowName: string;
   creatorSenderId: string;
 }
 interface TaskDetail {
+  summary?: Task;
+  hasMore?: boolean;
+  occurrences?: Array<{
+    id: string;
+    occurrence_number: string;
+    scheduled_at: string;
+    status: string;
+    reason_code: string | null;
+    execution_id: string | null;
+  }>;
   task: {
     content: string | null;
     request_snapshot: string | null;
@@ -79,7 +97,6 @@ const workflowId = ref(""),
   detailTask = ref<Task | null>(null),
   editing = ref<Task | null>(null),
   content = ref(""),
-  at = ref(""),
   settings = ref<Settings | null>(null);
 const session = useSessionStore();
 watch(
@@ -100,13 +117,25 @@ const labels: Record<string, string> = {
   expired: "已过期",
   failed: "失败",
   delivery_unknown: "发送结果未知",
+  paused: "已暂停",
+  completed: "已完成",
+  skipped: "已跳过",
 };
+const taskLabels = Object.fromEntries(
+  Object.entries(labels).filter(([key]) => key !== "skipped"),
+);
 function eventLabel(type: string) {
   return (
     (
       {
         created: "创建",
         updated: "修改",
+        update: "修改",
+        cancel: "取消",
+        pause: "暂停",
+        resume: "恢复",
+        skip: "跳过下一次",
+        "missed-occurrences": "错过周期",
         accepted: "到期受理",
         ...labels,
       } as Record<string, string>
@@ -150,42 +179,136 @@ async function action(operation: () => Promise<void>) {
     mutating.value = false;
   }
 }
+const draftSchedule = ref<TaskSchedule>({ kind: "once", scheduledAt: "" });
+const draftZone = ref("UTC");
+const preview = ref<{ scheduleSummary: string; upcoming: string[] } | null>(
+  null,
+);
+const notice = ref("");
+const previewBusy = ref(false);
+const previewKey = ref("");
+const detailOffset = ref(0);
+let previewGeneration = 0;
+function scheduleKey() {
+  return JSON.stringify({
+    schedule: draftSchedule.value,
+    timeZone: draftZone.value,
+    consumedCount: editing.value?.consumedCount ?? 0,
+  });
+}
+watch(
+  [draftSchedule, draftZone],
+  () => {
+    preview.value = null;
+    previewKey.value = "";
+    previewGeneration++;
+    previewBusy.value = false;
+  },
+  { deep: true, flush: "sync" },
+);
+watch(
+  editing,
+  () => {
+    previewGeneration++;
+    previewBusy.value = false;
+  },
+  { flush: "sync" },
+);
 function edit(task: Task) {
   error.value = "";
   detail.value = null;
   editing.value = task;
   content.value = task.content ?? "";
-  at.value = task.scheduledAt;
+  draftSchedule.value = JSON.parse(
+    JSON.stringify(
+      task.schedule ?? { kind: "once", scheduledAt: task.scheduledAt },
+    ),
+  ) as TaskSchedule;
+  draftZone.value = task.timeZone;
+  preview.value = {
+    scheduleSummary: task.scheduleSummary ?? "单次提醒",
+    upcoming: task.upcoming ?? [task.scheduledAt],
+  };
+  previewKey.value = scheduleKey();
+}
+async function previewSchedule() {
+  const ticket = ++previewGeneration;
+  const key = scheduleKey();
+  previewBusy.value = true;
+  error.value = "";
+  try {
+    const result = await apiRequest<{
+      scheduleSummary: string;
+      upcoming: string[];
+    }>("/api/v1/scheduled-tasks/preview", { method: "POST", body: key });
+    if (ticket === previewGeneration && editing.value) {
+      preview.value = result;
+      previewKey.value = key;
+    }
+  } catch (e) {
+    if (ticket === previewGeneration) error.value = errorMessage(e);
+  } finally {
+    if (ticket === previewGeneration) previewBusy.value = false;
+  }
 }
 async function save() {
-  if (!editing.value) return;
+  if (!editing.value || previewKey.value !== scheduleKey()) return;
   const task = editing.value;
+  const changed =
+    JSON.stringify(draftSchedule.value) !==
+      JSON.stringify(
+        task.schedule ?? { kind: "once", scheduledAt: task.scheduledAt },
+      ) || draftZone.value !== task.timeZone;
   await action(async () => {
     await apiRequest(`/api/v1/scheduled-tasks/${task.id}`, {
       method: "PATCH",
       body: JSON.stringify({
         expectedVersion: task.version,
         content: content.value,
-        ...(at.value !== task.scheduledAt
-          ? { scheduledAt: at.value, timeZone: task.timeZone }
+        ...(changed
+          ? { schedule: draftSchedule.value, timeZone: draftZone.value }
           : {}),
       }),
     });
     editing.value = null;
   });
 }
-async function cancel(task: Task) {
+async function control(
+  task: Task,
+  operation: "pause" | "resume" | "skip-next",
+) {
   await action(async () => {
-    await apiRequest(`/api/v1/scheduled-tasks/${task.id}/cancel`, {
-      method: "POST",
-      body: JSON.stringify({ expectedVersion: task.version }),
-    });
+    const result = await apiRequest<Task>(
+      `/api/v1/scheduled-tasks/${task.id}/${operation}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: task.version }),
+      },
+    );
+    notice.value = result.sendingAlreadyStarted
+      ? "未来周期已更新；本次发送已经提交，仍可能送达，最终结果请查看详情。"
+      : "操作成功。";
   });
 }
-async function inspect(task: Task) {
+async function cancel(task: Task) {
+  await action(async () => {
+    const result = await apiRequest<Task>(
+      `/api/v1/scheduled-tasks/${task.id}/cancel`,
+      {
+        method: "POST",
+        body: JSON.stringify({ expectedVersion: task.version }),
+      },
+    );
+    notice.value = result.sendingAlreadyStarted
+      ? "未来周期已更新；本次发送已经提交，仍可能送达，最终结果请查看详情。"
+      : "操作成功。";
+  });
+}
+async function inspect(task: Task, page = 0) {
+  detailOffset.value = page;
   await action(async () => {
     const value = await apiRequest<TaskDetail>(
-      `/api/v1/scheduled-tasks/${task.id}`,
+      `/api/v1/scheduled-tasks/${task.id}?offset=${page}&limit=20`,
     );
     if (session.sensitiveActive) {
       detail.value = value;
@@ -230,12 +353,15 @@ onMounted(async () => {
 onBeforeUnmount(() => generation++);
 </script>
 <template>
+  <p v-if="notice" role="status">{{ notice }}</p>
   <section class="admin-panel scheduled-tasks">
     <header class="scheduled-tasks-heading">
       <div>
         <p class="eyebrow">SCHEDULED TASKS</p>
         <h2>定时任务</h2>
-        <p>按聊天和角色登记的单次提醒。修改、取消和敏感详情需要敏感验证。</p>
+        <p>
+          按聊天和角色登记的单次与周期提醒。修改、暂停、跳过及取消需要敏感验证。
+        </p>
       </div>
       <button
         class="button secondary scheduled-tasks-refresh"
@@ -265,7 +391,7 @@ onBeforeUnmount(() => generation++);
       ><label
         >状态<select v-model="status">
           <option value="">全部状态</option>
-          <option v-for="(label, key) in labels" :key="key" :value="key">
+          <option v-for="(label, key) in taskLabels" :key="key" :value="key">
             {{ label }}
           </option>
         </select></label
@@ -288,7 +414,13 @@ onBeforeUnmount(() => generation++);
         </thead>
         <tbody>
           <tr v-for="task in items" :key="task.id">
-            <td>{{ task.content ?? "内容已清理" }}</td>
+            <td>
+              {{ task.content ?? "内容已清理" }}
+              <p class="task-help">{{ task.scheduleSummary ?? "单次提醒" }}</p>
+              <small v-if="task.schedule?.kind === 'recurring'"
+                >已消耗 {{ task.consumedCount ?? 0 }} 次</small
+              >
+            </td>
             <td>
               {{ task.workflowName }}<br />{{ task.chatName ?? task.chatId }}
             </td>
@@ -307,7 +439,8 @@ onBeforeUnmount(() => generation++);
                 @click="inspect(task)"
               >
                 详情</button
-              ><template v-if="['pending', 'running'].includes(task.status)"
+              ><template
+                v-if="['pending', 'running', 'paused'].includes(task.status)"
                 ><button
                   class="button secondary"
                   :disabled="mutating || !session.sensitiveActive"
@@ -319,8 +452,30 @@ onBeforeUnmount(() => generation++);
                   :disabled="mutating || !session.sensitiveActive"
                   @click="cancel(task)"
                 >
-                  取消任务
-                </button></template
+                  取消整个任务
+                </button>
+                <template v-if="task.schedule?.kind === 'recurring'">
+                  <button
+                    class="button secondary"
+                    :disabled="mutating || !session.sensitiveActive"
+                    @click="
+                      control(
+                        task,
+                        task.lifecycle === 'paused' ? 'resume' : 'pause',
+                      )
+                    "
+                  >
+                    {{ task.lifecycle === "paused" ? "恢复周期" : "暂停周期" }}
+                  </button>
+                  <button
+                    v-if="task.lifecycle === 'active'"
+                    class="button secondary"
+                    :disabled="mutating || !session.sensitiveActive"
+                    @click="control(task, 'skip-next')"
+                  >
+                    跳过下一次
+                  </button>
+                </template></template
               >
             </td>
           </tr>
@@ -389,26 +544,41 @@ onBeforeUnmount(() => generation++);
           >
         </section>
         <section class="task-card">
+          <TaskScheduleEditor v-model="draftSchedule" :disabled="mutating" />
           <label class="task-field"
-            ><span class="task-field-title"
-              ><CalendarClock :size="18" />计划时间</span
-            ><input
-              v-model="at"
-              required
+            >提醒时区<input
+              v-model="draftZone"
               :disabled="mutating"
-              spellcheck="false"
-              aria-describedby="task-time-hint"
+              required
+              placeholder="Asia/Shanghai"
           /></label>
-          <div class="task-timezone">
-            提醒时区 <strong>{{ editing.timeZone }}</strong>
+          <button
+            type="button"
+            class="button secondary"
+            :disabled="previewBusy || mutating"
+            @click="previewSchedule"
+          >
+            {{ previewBusy ? "正在计算…" : "预览未来时间" }}
+          </button>
+          <div v-if="preview" class="task-timezone">
+            <strong>{{ preview.scheduleSummary }}</strong>
+            <ol>
+              <li v-for="time in preview.upcoming" :key="time">
+                {{
+                  new Date(time).toLocaleString("zh-CN", {
+                    timeZone: draftZone,
+                  })
+                }}（{{ draftZone }}）
+              </li>
+            </ol>
+            <p v-if="!preview.upcoming.length">没有后续计划时间。</p>
           </div>
-          <p id="task-time-hint" class="task-help">
-            填写完整日期、时间与时区偏移，例如
-            2030-06-09T05:00:00+08:00。保存后以新时间为准。
+          <p v-else class="task-help">
+            时间规则修改后，请先预览并核对未来时间，再保存。
           </p>
         </section>
         <div class="task-dialog-actions">
-          <p>只修改当前任务，聊天和角色保持不变。</p>
+          <p>修改作用于未来安排，已发送记录不变。</p>
           <div>
             <button
               type="button"
@@ -419,7 +589,11 @@ onBeforeUnmount(() => generation++);
               取消</button
             ><button
               class="button primary"
-              :disabled="mutating || !session.sensitiveActive"
+              :disabled="
+                mutating ||
+                !session.sensitiveActive ||
+                previewKey !== scheduleKey()
+              "
             >
               <Save :size="16" />{{ mutating ? "正在保存…" : "保存修改" }}
             </button>
@@ -468,6 +642,66 @@ onBeforeUnmount(() => generation++);
           <blockquote class="task-quote">
             {{ detail.task.request_snapshot ?? "内容已清理" }}
           </blockquote>
+        </section>
+        <section v-if="detail.occurrences" class="task-card">
+          <h3 class="task-section-label">
+            <CalendarClock :size="17" />调度规则与逐次记录
+          </h3>
+          <p>{{ detail.summary?.scheduleSummary }}</p>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>序号</th>
+                  <th>计划时间</th>
+                  <th>结果</th>
+                  <th>执行</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="o in detail.occurrences" :key="o.id">
+                  <td>{{ o.occurrence_number }}</td>
+                  <td>
+                    {{
+                      new Date(o.scheduled_at).toLocaleString("zh-CN", {
+                        timeZone: detail.task.timezone,
+                      })
+                    }}
+                  </td>
+                  <td>
+                    {{ labels[o.status] ?? o.status
+                    }}<small v-if="o.reason_code"> · {{ o.reason_code }}</small>
+                  </td>
+                  <td>
+                    <a
+                      v-if="o.execution_id"
+                      :href="`#/executions?executionId=${encodeURIComponent(o.execution_id)}`"
+                      @click="detail = null"
+                      >详情</a
+                    ><span v-else>—</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <footer>
+            <button
+              class="button secondary"
+              :disabled="mutating || detailOffset === 0"
+              @click="
+                detailTask &&
+                inspect(detailTask, Math.max(0, detailOffset - 20))
+              "
+            >
+              上一页</button
+            ><button
+              class="button secondary"
+              :disabled="mutating || !detail.hasMore"
+              @click="detailTask && inspect(detailTask, detailOffset + 20)"
+            >
+              下一页
+            </button>
+          </footer>
         </section>
         <section class="task-card">
           <h3 class="task-section-label">
@@ -576,7 +810,7 @@ onBeforeUnmount(() => generation++);
             max="1440"
         /></label>
         <p>
-          修改补发窗口仅影响新建或改期任务。0
+          修改补发窗口影响新建、改期及后续周期实例。0
           表示只允许当前分钟内发送。恢复数据库后需先核对历史发送，再解除暂停。
         </p>
         <button

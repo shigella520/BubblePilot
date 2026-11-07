@@ -150,7 +150,10 @@ export class WorkflowEngine implements MessageAutomation {
     staleRetryBefore: Date,
   ): Promise<ExecutionRecoveryClaim> {
     const source = await this.repository.getExecution(executionId);
-    if (source?.triggerEvent?.schemaVersion === "scheduled-task-v1")
+    if (
+      source?.triggerEvent?.schemaVersion === "scheduled-task-v1" ||
+      source?.triggerEvent?.schemaVersion === "scheduled-task-v2"
+    )
       return { status: "conflict", reason: "execution-not-recoverable" };
     if (
       source?.status === "retrying" &&
@@ -249,7 +252,8 @@ export class WorkflowEngine implements MessageAutomation {
     const participantIdentities = {};
     const outputs: Record<string, Record<string, unknown>> = {};
     const timeZone =
-      (envelope.schemaVersion === "scheduled-task-v1"
+      (envelope.schemaVersion === "scheduled-task-v1" ||
+      envelope.schemaVersion === "scheduled-task-v2"
         ? envelope.scheduled.timeZone
         : undefined) ??
       (envelope.message === null
@@ -306,7 +310,10 @@ export class WorkflowEngine implements MessageAutomation {
       try {
         handler = this.registry.resolve(node);
         retry = handler.retryPolicy(node);
-        if (envelope.schemaVersion === "scheduled-task-v1")
+        if (
+          envelope.schemaVersion === "scheduled-task-v1" ||
+          envelope.schemaVersion === "scheduled-task-v2"
+        )
           retry = { ...retry, maxAttempts: Math.min(3, retry.maxAttempts) };
       } catch (error) {
         const workflowError = safeError(error);
