@@ -12,6 +12,7 @@ interface Connection {
   allowPrivate: boolean;
   auth: string;
   header: string;
+  callTimeoutSeconds?: number;
   secret?: string;
   secretConfigured?: boolean;
 }
@@ -234,6 +235,7 @@ function setup(pkg: Package) {
       {
         url: s.url,
         allowPrivate: false,
+        callTimeoutSeconds: 45,
         auth: Object.keys(s.headers).length
           ? Object.keys(s.headers)[0]?.toLowerCase() === "authorization"
             ? "bearer"
@@ -267,6 +269,8 @@ async function open(id: string) {
     connections.value = JSON.parse(
       JSON.stringify(selected.value!.config.connections),
     ) as Record<string, Connection>;
+    for (const c of Object.values(connections.value))
+      c.callTimeoutSeconds ??= 45;
     tools.value = selected.value!.config.tools;
     approved.value = tools.value.map(
       (t) => `${t.server}/${t.definition.name}#${t.hash}`,
@@ -286,6 +290,7 @@ function connectionPayload() {
         allowPrivate: c.allowPrivate,
         auth: c.auth,
         header: c.header,
+        callTimeoutSeconds: c.callTimeoutSeconds ?? 45,
         ...(c.secret ? { secret: c.secret } : {}),
       },
     ]),
@@ -362,6 +367,8 @@ async function save() {
     connections.value = JSON.parse(
       JSON.stringify(selected.value!.config.connections),
     ) as Record<string, Connection>;
+    for (const c of Object.values(connections.value))
+      c.callTimeoutSeconds ??= 45;
     await load();
   });
 }
@@ -526,6 +533,18 @@ async function remove() {
                 type="checkbox"
                 @change="tested = false"
               />明确允许访问此目标的内网地址</label
+            ><label
+              >工具调用超时（秒）<input
+                v-model.number="c.callTimeoutSeconds"
+                type="number"
+                min="5"
+                max="180"
+                step="1"
+                @input="tested = false"
+              /><small
+                >5～180 秒，默认 45
+                秒；仍受本轮工具剩余时间限制。连接测试只握手并发现工具。</small
+              ></label
             ><label
               >认证方式<select v-model="c.auth" @change="tested = false">
                 <option value="none">无需认证</option>

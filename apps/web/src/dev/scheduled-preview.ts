@@ -1,5 +1,10 @@
 // Development-only fictional data. No request is forwarded to a real service.
 import { createApp, h } from "vue";
+import {
+  schedulePreview,
+  scheduleSummary,
+  type TaskSchedule,
+} from "../../../../modules/scheduled-tasks/task-schedule";
 import { createPinia } from "pinia";
 import { useSessionStore } from "../stores/session";
 import ScheduledTasksPanel from "../components/workflow/ScheduledTasksPanel.vue";
@@ -14,8 +19,21 @@ const tasks = Array.from({ length: 5 }, (_, i) => ({
     "提醒提交周末计划",
     "提醒喝水",
   ][i],
-  scheduledAt: new Date(Date.now() + (i - 2) * 3600000).toISOString(),
-  timeZone: "Asia/Shanghai",
+  schedule: (i === 0
+    ? {
+        kind: "recurring",
+        startsAt: new Date(Date.now() + 3600000).toISOString(),
+        rule: { type: "weekly", weekdays: [1, 3, 5], localTime: "09:00" },
+        end: { kind: "count", count: 12 },
+      }
+    : {
+        kind: "once",
+        scheduledAt: new Date(Date.now() + 3600000).toISOString(),
+      }) satisfies TaskSchedule,
+  lifecycle: i === 0 ? "active" : i === 2 ? "cancelled" : "completed",
+  consumedCount: i === 0 ? 2 : 1,
+  scheduledAt: new Date(Date.now() + 3600000).toISOString(),
+  timeZone: "UTC",
   status: ["pending", "sent", "cancelled", "delivery_unknown", "failed"][i],
   version: 1,
   chatId: i % 2 ? "chat-book" : "chat-travel",
@@ -23,6 +41,15 @@ const tasks = Array.from({ length: 5 }, (_, i) => ({
   workflowId: i % 2 ? "role-book" : "role-lanbo",
   workflowName: i % 2 ? "书友" : "兰博",
   creatorSenderId: "fictional-member",
+})).map((t) => ({
+  ...t,
+  scheduleSummary: scheduleSummary(t.schedule),
+  upcoming: schedulePreview(
+    t.schedule,
+    t.timeZone,
+    new Date(),
+    t.consumedCount,
+  ),
 }));
 window.fetch = (input, init) => {
   const url = new URL(
@@ -71,10 +98,38 @@ window.fetch = (input, init) => {
       ),
       hasMore: false,
     };
-  else if (url.pathname.startsWith("/api/v1/scheduled-tasks/")) {
+  else if (url.pathname === "/api/v1/scheduled-tasks/preview") {
+    const body = JSON.parse(
+      typeof init?.body === "string" ? init.body : "{}",
+    ) as {
+      schedule: TaskSchedule;
+      timeZone: string;
+      consumedCount: number;
+    };
+    data = {
+      scheduleSummary: scheduleSummary(body.schedule),
+      upcoming: schedulePreview(
+        body.schedule,
+        body.timeZone,
+        new Date(),
+        body.consumedCount,
+      ),
+    };
+  } else if (url.pathname.startsWith("/api/v1/scheduled-tasks/")) {
     const task = tasks.find((t) => url.pathname.includes(t.id));
     if (task && init?.method === "POST") {
-      task.status = "cancelled";
+      task.status = url.pathname.endsWith("/pause")
+        ? "paused"
+        : url.pathname.endsWith("/cancel")
+          ? "cancelled"
+          : "pending";
+      task.lifecycle =
+        task.status === "paused"
+          ? "paused"
+          : task.status === "cancelled"
+            ? "cancelled"
+            : "active";
+      if (url.pathname.endsWith("/skip-next")) task.consumedCount++;
       task.version++;
       data = task;
     } else if (task && init?.method === "PATCH") {
@@ -88,6 +143,21 @@ window.fetch = (input, init) => {
       data = task;
     } else if (task)
       data = {
+        summary: task,
+        occurrences:
+          task.schedule.kind === "recurring"
+            ? [0, 1].map((i) => ({
+                id: `occurrence-${i}`,
+                occurrence_number: String(2 - i),
+                scheduled_at: new Date(
+                  Date.now() - (i + 1) * 86400000,
+                ).toISOString(),
+                status: i === 0 ? "sent" : "skipped",
+                reason_code: i === 0 ? null : "member-skipped",
+                execution_id: null,
+              }))
+            : [],
+        hasMore: false,
         task: {
           content: task.content,
           request_snapshot: "兰博，明天早上五点提醒我抢火车票。",

@@ -7,7 +7,10 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { createMcpHttp } from "../src/http.js";
 import { fixture } from "./support.js";
 it("binds single-use transfer tickets to the authenticated MCP session and preserves imports", async () => {
-  const { pool, backend } = fixture();
+  const { pool, backend } = fixture(1, 600000, {
+    createSeconds: 120,
+    importSeconds: 150,
+  });
   const original = backend.create;
   const uploads = vi.fn(
     async (input: TransferInput, body: AsyncIterable<Uint8Array>) => {
@@ -29,6 +32,8 @@ it("binds single-use transfer tickets to the authenticated MCP session and prese
     upload: uploads,
   }));
   const server = createMcpHttp(pool, "fictional-token");
+  expect(server.http.requestTimeout).toBe(150000);
+  expect(server.http.headersTimeout).toBe(10000);
   await new Promise<void>((r) => server.http.listen(0, "127.0.0.1", r));
   const a = server.http.address();
   if (!a || typeof a === "string") throw new Error("address");
@@ -69,6 +74,7 @@ it("binds single-use transfer tickets to the authenticated MCP session and prese
     });
     const ticket = (await response.json()) as { token: string };
     expect(response.status).toBe(200);
+    expect(ticket).toMatchObject({ expiresInSeconds: 150 });
     const upload = async (session: string) =>
       fetch(url + "/attachments", {
         method: "POST",
@@ -98,7 +104,35 @@ it("binds single-use transfer tickets to the authenticated MCP session and prese
       (await first.client.callTool({ name: "prepare_sandbox", arguments: {} }))
         .structuredContent,
     ).toMatchObject({ status: "reused" });
-    await first.transport.terminateSession();
+    // A failure after receiving the upload must return JSON, not destroy the
+    // client socket as a side effect of invalidating the sandbox session.
+    const failedInput = { ...input, id: randomUUID() };
+    const failedTicketResponse = await fetch(url + "/attachments/tickets", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(failedInput),
+    });
+    const failedTicket = (await failedTicketResponse.json()) as {
+      token: string;
+    };
+    uploads.mockImplementationOnce(async (_input, body) => {
+      for await (const chunk of body) expect(chunk.length).toBeGreaterThan(0);
+      throw new Error("fictional upload failure");
+    });
+    const failedUpload = await fetch(url + "/attachments", {
+      method: "POST",
+      headers: {
+        ...headers,
+        "x-bp-transfer-token": failedTicket.token,
+        "content-length": String(data.length),
+      },
+      body: data,
+    });
+    expect(failedUpload.status).toBe(422);
+    expect(await failedUpload.json()).toMatchObject({
+      error: "attachment_failed_session_invalidated_do_not_replay",
+    });
+    await first.transport.terminateSession().catch(() => undefined);
     await pool.sweep();
     expect(pool.used).toBe(0);
   } finally {

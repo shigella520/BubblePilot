@@ -278,8 +278,7 @@ export class AgentRunner {
     attachments?.register(registry);
     if (attachments) {
       if (memory)
-        memory.attachmentCatalogue = (m, offset, query) =>
-          attachments.catalogue(m, offset, query);
+        memory.stageAttachmentCatalogue = () => attachments.stageCatalogue();
       request = {
         ...request,
         messages: [

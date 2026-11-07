@@ -47,7 +47,7 @@ const fields: Array<{
   { key: "fileMiB", label: "单文件上限（MiB）", min: 1, max: 20 },
   { key: "files", label: "每次任务文件数", min: 1, max: 5 },
   { key: "totalMiB", label: "每次任务累计（MiB）", min: 1, max: 50 },
-  { key: "timeoutSeconds", label: "导入时限（秒）", min: 5, max: 45 },
+  { key: "timeoutSeconds", label: "导入时限（秒）", min: 5, max: 180 },
   { key: "expandedMiB", label: "解压累计（MiB）", min: 1, max: 100 },
   { key: "expandedFiles", label: "解压文件数", min: 1, max: 500 },
 ];

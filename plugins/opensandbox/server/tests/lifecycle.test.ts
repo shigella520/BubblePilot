@@ -61,7 +61,7 @@ it("invalidates on cancellation and never replays an uncertain command", async (
   const controller = new AbortController();
   const pending = a.run("side effect", 20, controller.signal);
   controller.abort();
-  await expect(pending).rejects.toThrow("result_unknown");
+  await expect(pending).rejects.toThrow("command_cancelled");
   await expect(a.prepare(signal())).rejects.toThrow("invalidated");
   expect(run).toHaveBeenCalledTimes(2);
 });
@@ -171,3 +171,258 @@ it("serializes imports with commands, invalidates late uploads and awaits in-fli
   await Promise.all([pool.sweep(), pool.sweep()]);
   expect(pool.used).toBe(0);
 });
+
+it.each([
+  { configured: false, completes: false },
+  { configured: true, completes: true },
+])(
+  "bounds slow creation while allowing configured cold starts: $configured",
+  async ({ configured, completes }) => {
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), ms);
+      return controller.signal;
+    });
+    try {
+      const { pool, backend } = fixture(
+        1,
+        600000,
+        configured ? { createSeconds: 120, importSeconds: 150 } : undefined,
+      );
+      const create = backend.create;
+      vi.spyOn(backend, "create").mockImplementation(async (owner, signal) => {
+        await new Promise<void>((resolve, reject) => {
+          setTimeout(resolve, 51000);
+          signal.addEventListener(
+            "abort",
+            () => reject(new Error("cancelled")),
+            { once: true },
+          );
+        });
+        return create(owner, signal);
+      });
+      const session = pool.newSession();
+      const outcome = session.prepare(signal()).then(
+        () => "created",
+        () => "failed",
+      );
+      await vi.advanceTimersByTimeAsync(52000);
+      expect(await outcome).toBe(completes ? "created" : "failed");
+      expect(session.ended).toBe(!completes);
+      session.invalidate();
+      await pool.sweep();
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it("honors caller cancellation during extended creation and rejects the late handle", async () => {
+  const { pool, backend, run } = fixture(1, 600000, {
+    createSeconds: 120,
+    importSeconds: 150,
+  });
+  let complete!: (handle: Handle) => void;
+  vi.mocked(backend.create).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  const session = pool.newSession();
+  const controller = new AbortController();
+  const pending = session.prepare(controller.signal);
+  controller.abort();
+  expect(session.ended).toBe(true);
+  complete({ id: "late", run, close: async () => {} });
+  await expect(pending).rejects.toThrow("prepare_failed");
+  expect(run).not.toHaveBeenCalled();
+  await pool.sweep();
+  expect(backend.remove).toHaveBeenCalledWith("late");
+});
+
+it.each([45, 150])(
+  "bounds an upload with configured %s seconds",
+  async (importSeconds) => {
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), ms);
+      return controller.signal;
+    });
+    try {
+      const { pool, backend } = fixture(1, 600000, {
+        createSeconds: 120,
+        importSeconds,
+      });
+      const create = backend.create;
+      vi.spyOn(backend, "create").mockImplementation(async (owner, signal) => ({
+        ...(await create(owner, signal)),
+        upload: async (input, _body, signal) => {
+          await new Promise<void>((resolve, reject) => {
+            setTimeout(resolve, 51000);
+            signal.addEventListener(
+              "abort",
+              () => reject(new Error("cancelled")),
+              { once: true },
+            );
+          });
+          return {
+            status: "imported",
+            sandbox_path: "/workspace/attachments/fixture/data.txt",
+            size: input.size,
+            sha256: input.sha256,
+            expandedBytes: 0,
+            expandedFiles: 0,
+          };
+        },
+      }));
+      const session = pool.newSession();
+      const outcome = session
+        .importAttachment(
+          {
+            id: "fixture",
+            filename: "data.txt",
+            size: 1,
+            sha256: "0".repeat(64),
+            limits: { files: 1, totalMiB: 1, expandedMiB: 1, expandedFiles: 1 },
+          },
+          (async function* () {
+            await Promise.resolve();
+            yield Buffer.from("x");
+          })(),
+          signal(),
+        )
+        .then(
+          () => "imported",
+          () => "failed",
+        );
+      await vi.advanceTimersByTimeAsync(52000);
+      expect(await outcome).toBe(importSeconds > 51 ? "imported" : "failed");
+      session.invalidate();
+      await pool.sweep();
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it("returns cancellation without waiting for the backend and discards late success", async () => {
+  const { pool, run, backend } = fixture();
+  const session = pool.newSession();
+  await session.prepare(signal());
+  let finish!: (value: Awaited<ReturnType<Handle["run"]>>) => void;
+  run.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const controller = new AbortController();
+  const pending = session.run("fictional slow command", 120, controller.signal);
+  controller.abort();
+  await expect(pending).rejects.toThrow(
+    "command_cancelled_session_invalidated_do_not_replay",
+  );
+  expect(session.ended).toBe(true);
+  await pool.sweep();
+  expect(backend.remove).toHaveBeenCalledOnce();
+  finish({
+    status: "completed",
+    exitCode: 0,
+    stdout: "late",
+    stderr: "",
+    durationMs: 1,
+    truncated: false,
+  });
+  await expect(session.run("do not replay", 1, signal())).rejects.toThrow(
+    "invalidated",
+  );
+  expect(run).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  { seconds: 2, kib: 4, stalled: false, invalidated: true },
+  { seconds: 10, kib: 4, stalled: false, invalidated: false },
+  { seconds: 10, kib: 262145, stalled: false, invalidated: true },
+  { seconds: 10, kib: 4, stalled: true, invalidated: true },
+])(
+  "bounds workspace checks independently and still enforces quota: $seconds/$kib/$stalled",
+  async ({ seconds, kib, stalled, invalidated }) => {
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), ms);
+      return controller.signal;
+    });
+    try {
+      const { pool, backend, run } = fixture(
+        1,
+        600000,
+        undefined,
+        undefined,
+        seconds,
+      );
+      const original = backend.create;
+      vi.spyOn(backend, "create").mockImplementation(async (owner, abort) => ({
+        ...(await original(owner, abort)),
+        upload: (input) =>
+          Promise.resolve({
+            status: "imported",
+            sandbox_path: "/workspace/fixture.txt",
+            size: input.size,
+            sha256: input.sha256,
+            expandedBytes: 0,
+            expandedFiles: 0,
+          }),
+      }));
+      const session = pool.newSession();
+      await session.importAttachment(
+        {
+          id: "fixture",
+          filename: "fixture.txt",
+          size: 1,
+          sha256: "0".repeat(64),
+          limits: { files: 1, totalMiB: 1, expandedMiB: 1, expandedFiles: 1 },
+        },
+        (async function* () {
+          await Promise.resolve();
+          yield Buffer.from("x");
+        })(),
+        signal(),
+      );
+      run.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            if (!stalled)
+              setTimeout(
+                () =>
+                  resolve({
+                    status: "completed",
+                    exitCode: 0,
+                    stdout: String(kib),
+                    stderr: "",
+                    durationMs: 3000,
+                    truncated: false,
+                  }),
+                3000,
+              );
+          }),
+      );
+      const check = session.checkSpace();
+      await vi.advanceTimersByTimeAsync(11000);
+      await check;
+      expect(session.ended).toBe(invalidated);
+      expect(run.mock.calls.at(-1)?.[2]).toBe(seconds);
+      session.invalidate();
+      await pool.sweep();
+      expect(pool.used).toBe(0);
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  },
+);

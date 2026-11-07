@@ -324,6 +324,10 @@ export class MemorySession {
     offset: number,
     query?: ChatMessageQuery,
   ) => AttachmentListing;
+  stageAttachmentCatalogue?: () => {
+    catalogue: NonNullable<MemorySession["attachmentCatalogue"]>;
+    commit: (listings: readonly AttachmentListing[]) => void;
+  };
   private withAttachments(
     item: Evidence,
     messages: MemoryMessage[],
@@ -825,6 +829,8 @@ export class MemorySession {
     }
     // Each operation owns a staging map. Timed-out work cannot modify the live session.
     const staged = new MemorySession(this.service, this.scope, this.id);
+    const attachments = this.stageAttachmentCatalogue?.();
+    if (attachments) staged.attachmentCatalogue = attachments.catalogue;
     staged.imagesEnabled = this.imagesEnabled;
     staged.evidence = new Map(this.evidence);
     staged.cursors = new Map(this.cursors);
@@ -848,8 +854,8 @@ export class MemorySession {
           truncated: true,
         });
       const payload = JSON.parse(content) as {
-        evidence?: { ref: string }[];
-        groups?: { message?: { ref: string } | null }[];
+        evidence?: Pick<Evidence, "ref" | "attachments">[];
+        groups?: { message?: Pick<Evidence, "ref" | "attachments"> | null }[];
         status: string;
         retrievalMode?: string;
       };
@@ -907,6 +913,7 @@ export class MemorySession {
         staged.checkActive();
         await client.query("COMMIT");
         staged.checkActive();
+        attachments?.commit(refs.flatMap((item) => item.attachments ?? []));
         for (const entry of accepted) this.evidence.set(entry.item.ref, entry);
         this.cursors = staged.cursors;
       } catch (error) {

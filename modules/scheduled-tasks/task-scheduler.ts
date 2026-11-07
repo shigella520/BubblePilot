@@ -5,7 +5,10 @@ import type { ScheduledTaskEvent } from "../workflow/workflow-event.js";
 import { DEFAULT_CONTEXT_SETTINGS } from "../workflow/context-settings-types.js";
 import { type TaskService, taskConfig, type TaskRow } from "./task-service.js";
 
+import { nextScheduledTime } from "./task-schedule.js";
+
 interface Run {
+  occurrence_id: string;
   id: string;
   task_id: string;
   task_version: number;
@@ -51,17 +54,192 @@ export class TaskScheduler {
     const tasks = (
       await this.service.pool
         .query<TaskRow>(`SELECT t.* FROM scheduled_tasks t WHERE
-   (t.status='pending' AND t.scheduled_at<=now()) OR (t.status='running' AND EXISTS(SELECT 1 FROM scheduled_task_runs r WHERE r.task_id=t.id AND r.outcome IS NULL AND r.lease_expires_at<now())) ORDER BY t.scheduled_at,t.id LIMIT 20`)
+   (t.lifecycle='active' AND t.status='pending' AND t.scheduled_at<=now()) OR (EXISTS(SELECT 1 FROM scheduled_task_runs r WHERE r.task_id=t.id AND r.outcome IS NULL AND r.lease_expires_at<now())) ORDER BY t.scheduled_at,t.id LIMIT 20`)
     ).rows;
     for (const task of tasks) {
       try {
-        await this.dispatch(task);
+        const prepared = await this.prepare(task.id);
+        if (prepared) await this.dispatch(prepared);
       } catch {
         this.reportError();
       }
     }
   }
-  private async dispatch(task: TaskRow) {
+  private async prepare(
+    id: string,
+  ): Promise<
+    (TaskRow & { occurrenceId: string; occurrenceNumber: string }) | null
+  > {
+    return this.service.transaction(async (db) => {
+      let t = (
+        await db.query<TaskRow & { now: Date }>(
+          "SELECT *,now() AS now FROM scheduled_tasks WHERE id=$1 FOR UPDATE",
+          [id],
+        )
+      ).rows[0];
+      if (!t) return null;
+      const running = (
+        await db.query<Run>(
+          "SELECT * FROM scheduled_task_runs WHERE task_id=$1 AND outcome IS NULL",
+          [id],
+        )
+      ).rows[0];
+      if (running) {
+        if (running.lease_expires_at > t.now) return null;
+        const deliveries = (
+          await db.query<{ status: string }>(
+            "SELECT status FROM outbound_deliveries WHERE execution_id=$1",
+            [running.execution_id],
+          )
+        ).rows;
+        if (deliveries.length || t.lifecycle !== "active" || t.resume_after) {
+          const result = deliveries.length
+            ? deliveries.every((d) => d.status === "confirmed")
+              ? "sent"
+              : deliveries.some((d) =>
+                    ["pending", "sending", "unknown"].includes(d.status),
+                  )
+                ? "delivery_unknown"
+                : "failed"
+            : "cancelled";
+          await this.endLocked(
+            db,
+            t,
+            result,
+            "task-recovered-delivery",
+            running.occurrence_id,
+          );
+          await db.query(
+            "UPDATE workflow_executions SET status=$2,completed_at=now(),error_code=$3 WHERE id=$1 AND status IN ('created','running','retrying')",
+            [
+              running.execution_id,
+              result === "sent" ? "succeeded" : "failed",
+              result === "sent" ? null : "TASK_RECOVERED_DELIVERY",
+            ],
+          );
+          return null;
+        }
+        const o = (
+          await db.query<{ occurrence_number: string }>(
+            "SELECT occurrence_number FROM scheduled_task_occurrences WHERE id=$1",
+            [running.occurrence_id],
+          )
+        ).rows[0]!;
+        return {
+          ...t,
+          occurrenceId: running.occurrence_id,
+          occurrenceNumber: o.occurrence_number,
+        };
+      }
+      if (t.lifecycle !== "active") return null;
+      const settings = (
+        await db.query<{ catchup_minutes: number }>(
+          "SELECT catchup_minutes FROM scheduled_task_settings WHERE id=1",
+        )
+      ).rows[0]!;
+      if (t.resume_after) {
+        const next = nextScheduledTime(
+          t.schedule,
+          t.timezone,
+          t.resume_after,
+          t.schedule.kind === "once" ? 0 : t.consumed_count,
+        );
+        await db.query(
+          "UPDATE scheduled_task_occurrences SET status='cancelled',reason_code='global-pause',finished_at=now() WHERE task_id=$1 AND status='pending'",
+          [id],
+        );
+        if (!next) {
+          await db.query(
+            "UPDATE scheduled_tasks SET lifecycle='completed',status='expired',finished_at=now(),resume_after=NULL WHERE id=$1",
+            [id],
+          );
+          return null;
+        }
+        t = (
+          await db.query<TaskRow & { now: Date }>(
+            "UPDATE scheduled_tasks SET scheduled_at=$2,expires_at=$3,resume_after=NULL,status='pending' WHERE id=$1 RETURNING *,now() AS now",
+            [
+              id,
+              next,
+              new Date(
+                next.getTime() + Math.max(1, settings.catchup_minutes) * 60000,
+              ),
+            ],
+          )
+        ).rows[0]!;
+      }
+      if (t.status !== "pending" || t.scheduled_at > t.now) return null;
+      if (t.schedule.kind === "recurring") {
+        // Compress missed slots into one event. Bounded batches also bound lock time
+        // after exceptionally long outages; never send an old slot from a batch.
+        const first = t.scheduled_at;
+        let at: Date | null = first;
+        let missed = 0;
+        while (at && missed < 512) {
+          const next = nextScheduledTime(
+            t.schedule,
+            t.timezone,
+            at,
+            t.consumed_count + missed + 1,
+          );
+          if (
+            (!next || next > t.now) &&
+            at.getTime() + Math.max(1, settings.catchup_minutes) * 60000 >
+              t.now.getTime()
+          )
+            break;
+          if (at > t.now) break;
+          missed++;
+          at = next;
+        }
+        if (missed) {
+          await db.query(
+            "UPDATE scheduled_task_occurrences SET status='expired',consumed=true,reason_code='missed-window',finished_at=now() WHERE task_id=$1 AND status='pending'",
+            [id],
+          );
+          await db.query(
+            `INSERT INTO scheduled_task_events(id,task_id,event_type,actor_type,to_version,change_data) VALUES($1,$2,'missed-occurrences','system',$3,$4::jsonb)`,
+            [
+              randomUUID(),
+              id,
+              t.version,
+              JSON.stringify({
+                from: first.toISOString(),
+                before: at?.toISOString() ?? null,
+                count: missed,
+              }),
+            ],
+          );
+          t = (
+            await db.query<TaskRow & { now: Date }>(
+              `UPDATE scheduled_tasks SET consumed_count=consumed_count+$2,scheduled_at=COALESCE($3,scheduled_at),expires_at=COALESCE($4,expires_at),lifecycle=CASE WHEN $3::timestamptz IS NULL THEN 'completed' ELSE lifecycle END,status=CASE WHEN $3::timestamptz IS NULL THEN 'completed' ELSE 'pending' END,finished_at=CASE WHEN $3::timestamptz IS NULL THEN now() ELSE NULL END,updated_at=now() WHERE id=$1 RETURNING *,now() AS now`,
+              [
+                id,
+                missed,
+                at,
+                at
+                  ? new Date(
+                      at.getTime() +
+                        Math.max(1, settings.catchup_minutes) * 60000,
+                    )
+                  : null,
+              ],
+            )
+          ).rows[0]!;
+          if (!at || at > t.now || missed === 512) return null;
+        }
+      }
+      const o = await this.service.ensureOccurrence(db, t);
+      return {
+        ...t,
+        occurrenceId: o.id,
+        occurrenceNumber: o.occurrence_number,
+      };
+    });
+  }
+  private async dispatch(
+    task: TaskRow & { occurrenceId: string; occurrenceNumber: string },
+  ) {
     const chat = (
       await this.service.pool.query<{
         provider_chat_id: string;
@@ -88,9 +266,9 @@ export class TaskScheduler {
       );
       return;
     }
-    const event: ScheduledTaskEvent = {
-      schemaVersion: "scheduled-task-v1",
-      eventId: `scheduled:${task.id}:${task.version}`,
+    let event: ScheduledTaskEvent = {
+      schemaVersion: "scheduled-task-v2",
+      eventId: `scheduled:${task.occurrenceId}`,
       correlationId: randomUUID(),
       provider: "bluebubbles",
       chat: {
@@ -100,6 +278,8 @@ export class TaskScheduler {
       },
       message: null,
       scheduled: {
+        occurrenceId: task.occurrenceId,
+        occurrenceNumber: task.occurrenceNumber,
         taskId: task.id,
         taskVersion: task.version,
         chatId: task.chat_id,
@@ -113,6 +293,40 @@ export class TaskScheduler {
         workflowVersionId: binding.workflowVersionId,
       },
     };
+    const recovering = (
+      await this.service.pool.query<Run>(
+        "SELECT * FROM scheduled_task_runs WHERE occurrence_id=$1 AND outcome IS NULL",
+        [task.occurrenceId],
+      )
+    ).rows[0];
+    if (recovering) {
+      if (recovering.workflow_version_id !== binding.workflowVersionId) {
+        await this.service.transaction(async (db) => {
+          const locked = (
+            await db.query<TaskRow>(
+              "SELECT * FROM scheduled_tasks WHERE id=$1 FOR UPDATE",
+              [task.id],
+            )
+          ).rows[0]!;
+          await this.endLocked(
+            db,
+            locked,
+            "cancelled",
+            "task-workflow-changed",
+            recovering.occurrence_id,
+          );
+        });
+        return;
+      }
+      const previous = await this.service.workflows.getExecution(
+        recovering.execution_id,
+      );
+      if (
+        previous?.triggerEvent &&
+        previous.triggerEvent.schemaVersion !== "chat-idle-v1"
+      )
+        event = previous.triggerEvent;
+    }
     let generation = 0;
     let executionId: string | undefined;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -131,8 +345,26 @@ export class TaskScheduler {
             if (
               !current ||
               current.version !== task.version ||
+              current.lifecycle !== "active" ||
+              current.resume_after !== null ||
               !["pending", "running"].includes(current.status)
             )
+              return undefined;
+            if (
+              (
+                await db.query<{ paused: boolean }>(
+                  "SELECT paused FROM scheduled_task_settings WHERE id=1",
+                )
+              ).rows[0]!.paused
+            )
+              return undefined;
+            const instance = (
+              await db.query<{ status: string }>(
+                "SELECT status FROM scheduled_task_occurrences WHERE id=$1 AND task_version=$2",
+                [task.occurrenceId, current.version],
+              )
+            ).rows[0];
+            if (!instance || !["pending", "running"].includes(instance.status))
               return undefined;
             if (current.expires_at <= current.now) {
               await this.endLocked(db, current, "expired", "task-expired");
@@ -140,8 +372,8 @@ export class TaskScheduler {
             }
             const existing = (
               await db.query<Run>(
-                "SELECT * FROM scheduled_task_runs WHERE task_id=$1 AND task_version=$2 FOR UPDATE",
-                [task.id, task.version],
+                "SELECT * FROM scheduled_task_runs WHERE occurrence_id=$1 FOR UPDATE",
+                [task.occurrenceId],
               )
             ).rows[0];
             if (existing) {
@@ -240,7 +472,7 @@ export class TaskScheduler {
               ],
             );
             await db.query(
-              `INSERT INTO scheduled_task_runs(id,task_id,task_version,execution_id,workflow_version_id,task_snapshot,history_boundary,lease_owner,lease_expires_at) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,now()+interval '60 seconds')`,
+              `INSERT INTO scheduled_task_runs(id,task_id,task_version,execution_id,workflow_version_id,task_snapshot,history_boundary,lease_owner,lease_expires_at,occurrence_id) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8,now()+interval '60 seconds',$9)`,
               [
                 randomUUID(),
                 task.id,
@@ -250,10 +482,15 @@ export class TaskScheduler {
                 JSON.stringify(event.scheduled),
                 boundary,
                 this.owner,
+                task.occurrenceId,
               ],
             );
             await db.query(
-              "UPDATE scheduled_tasks SET status='running',updated_at=now() WHERE id=$1",
+              "UPDATE scheduled_task_occurrences SET status='running',consumed=true,scheduled_at=$2,expires_at=$3 WHERE id=$1",
+              [task.occurrenceId, current.scheduled_at, current.expires_at],
+            );
+            await db.query(
+              "UPDATE scheduled_tasks SET status='running',consumed_count=consumed_count+1,updated_at=now() WHERE id=$1",
               [task.id],
             );
             await db.query(
@@ -294,7 +531,7 @@ export class TaskScheduler {
   async guard(executionId: string, generation: number): Promise<string | null> {
     const row = (
       await this.service.pool.query<TaskRow & { workflow_version_id: string }>(
-        `SELECT t.*,r.workflow_version_id FROM scheduled_task_runs r JOIN scheduled_tasks t ON t.id=r.task_id JOIN chats c ON c.id=t.chat_id JOIN workflow_executions e ON e.id=r.execution_id WHERE e.status IN ('created','running','retrying') AND r.execution_id=$1 AND r.lease_owner=$2 AND r.lease_generation=$3 AND r.lease_expires_at>now() AND r.outcome IS NULL AND t.version=r.task_version AND t.status='running' AND t.expires_at>now() AND c.enabled AND c.deleted_at IS NULL AND NOT (SELECT paused FROM scheduled_task_settings WHERE id=1)`,
+        `SELECT t.*,r.workflow_version_id FROM scheduled_task_runs r JOIN scheduled_tasks t ON t.id=r.task_id JOIN chats c ON c.id=t.chat_id JOIN workflow_executions e ON e.id=r.execution_id WHERE e.status IN ('created','running','retrying') AND r.execution_id=$1 AND r.lease_owner=$2 AND r.lease_generation=$3 AND r.lease_expires_at>now() AND r.outcome IS NULL AND t.version=r.task_version AND t.status='running' AND t.resume_after IS NULL AND t.expires_at>now() AND c.enabled AND c.deleted_at IS NULL AND NOT (SELECT paused FROM scheduled_task_settings WHERE id=1)`,
         [executionId, this.owner, generation],
       )
     ).rows[0];
@@ -338,7 +575,7 @@ export class TaskScheduler {
       ).rows[0];
       if (!task || task.status !== "running") return "task-cancelled";
       const claimed = await db.query(
-        `UPDATE scheduled_task_runs SET phase='sending' WHERE execution_id=$1 AND task_version=$2 AND lease_owner=$3 AND lease_generation=$4 AND lease_expires_at>now() AND outcome IS NULL AND EXISTS(SELECT 1 FROM scheduled_tasks t JOIN chats c ON c.id=t.chat_id JOIN workflows w ON w.id=t.workflow_id JOIN bot_triggers b ON b.workflow_version_id=w.published_version_id WHERE t.id=scheduled_task_runs.task_id AND t.expires_at>now() AND c.enabled AND c.deleted_at IS NULL AND w.status='active' AND w.deleted_at IS NULL AND b.enabled AND b.deleted_at IS NULL AND b.workflow_version_id=scheduled_task_runs.workflow_version_id) RETURNING id`,
+        `UPDATE scheduled_task_runs SET phase='sending' WHERE execution_id=$1 AND task_version=$2 AND lease_owner=$3 AND lease_generation=$4 AND lease_expires_at>now() AND outcome IS NULL AND EXISTS(SELECT 1 FROM scheduled_tasks t JOIN chats c ON c.id=t.chat_id JOIN workflows w ON w.id=t.workflow_id JOIN bot_triggers b ON b.workflow_version_id=w.published_version_id WHERE t.id=scheduled_task_runs.task_id AND t.resume_after IS NULL AND NOT (SELECT paused FROM scheduled_task_settings WHERE id=1) AND t.expires_at>now() AND c.enabled AND c.deleted_at IS NULL AND w.status='active' AND w.deleted_at IS NULL AND b.enabled AND b.deleted_at IS NULL AND b.workflow_version_id=scheduled_task_runs.workflow_version_id) RETURNING id`,
         [executionId, task.version, this.owner, generation],
       );
       if (!claimed.rowCount) return "task-no-longer-eligible";
@@ -356,18 +593,89 @@ export class TaskScheduler {
     task: TaskRow,
     status: string,
     reason: string,
+    occurrenceId?: string,
   ) {
+    const o = (
+      await db.query<{ id: string; consumed: boolean; scheduled_at: Date }>(
+        "SELECT * FROM scheduled_task_occurrences WHERE task_id=$1 AND status IN ('pending','running') AND ($2::uuid IS NULL OR id=$2) FOR UPDATE",
+        [task.id, occurrenceId ?? null],
+      )
+    ).rows[0];
+    if (!o) return;
     await db.query(
-      "UPDATE scheduled_tasks SET status=$2,finished_at=now(),updated_at=now() WHERE id=$1",
-      [task.id, status],
+      "UPDATE scheduled_task_occurrences SET status=$2,consumed=true,reason_code=$3,finished_at=now() WHERE id=$1",
+      [o.id, status, reason],
     );
     await db.query(
-      "UPDATE scheduled_task_runs SET outcome=$2,reason_code=$3,phase='finished',finished_at=now() WHERE task_id=$1 AND outcome IS NULL",
-      [task.id, status, reason],
+      "UPDATE scheduled_task_runs SET outcome=$2,reason_code=$3,phase='finished',finished_at=now() WHERE occurrence_id=$1 AND outcome IS NULL",
+      [o.id, status, reason],
     );
     await db.query(
-      `INSERT INTO scheduled_task_events(id,task_id,event_type,actor_type,to_version,reason_code) VALUES($1,$2,$3,'system',$4,$5)`,
-      [randomUUID(), task.id, status, task.version, reason],
+      "UPDATE workflow_executions e SET status=$2,completed_at=now(),error_code=$3 FROM scheduled_task_runs r WHERE r.execution_id=e.id AND r.occurrence_id=$1 AND e.status IN ('created','running','retrying')",
+      [
+        o.id,
+        status === "sent"
+          ? "succeeded"
+          : ["cancelled", "expired"].includes(status)
+            ? "skipped"
+            : "failed",
+        status === "sent" ? null : "TASK_EXECUTION_FINISHED",
+      ],
+    );
+    const consumed = task.consumed_count + (o.consumed ? 0 : 1);
+    const next =
+      task.lifecycle === "active" && task.schedule.kind === "recurring"
+        ? nextScheduledTime(
+            task.schedule,
+            task.timezone,
+            task.resume_after && task.resume_after > o.scheduled_at
+              ? task.resume_after
+              : o.scheduled_at,
+            consumed,
+          )
+        : null;
+    const settings = (
+      await db.query<{ catchup_minutes: number }>(
+        "SELECT catchup_minutes FROM scheduled_task_settings WHERE id=1",
+      )
+    ).rows[0]!;
+    const lifecycle =
+      task.lifecycle === "active"
+        ? next
+          ? "active"
+          : "completed"
+        : task.lifecycle;
+    await db.query(
+      `UPDATE scheduled_tasks SET consumed_count=$2,lifecycle=$3,status=$4,scheduled_at=COALESCE($5,scheduled_at),expires_at=COALESCE($6,expires_at),finished_at=CASE WHEN $3 IN ('completed','cancelled') THEN now() ELSE NULL END,resume_after=NULL,updated_at=now() WHERE id=$1`,
+      [
+        task.id,
+        consumed,
+        lifecycle,
+        next
+          ? "pending"
+          : task.lifecycle !== "active"
+            ? task.lifecycle
+            : task.schedule.kind === "once"
+              ? status
+              : "completed",
+        next,
+        next
+          ? new Date(
+              next.getTime() + Math.max(1, settings.catchup_minutes) * 60000,
+            )
+          : null,
+      ],
+    );
+    await db.query(
+      `INSERT INTO scheduled_task_events(id,task_id,event_type,actor_type,to_version,reason_code,change_data) VALUES($1,$2,$3,'system',$4,$5,$6::jsonb)`,
+      [
+        randomUUID(),
+        task.id,
+        status,
+        task.version,
+        reason,
+        JSON.stringify({ occurrenceId: o.id }),
+      ],
     );
   }
   private async terminate(id: string, status: string, reason: string) {
@@ -378,19 +686,32 @@ export class TaskScheduler {
           [id],
         )
       ).rows[0];
-      if (task && task.status === "pending")
+      if (task) {
+        await db.query(
+          "UPDATE scheduled_tasks SET lifecycle='cancelled' WHERE id=$1",
+          [id],
+        );
+        task.lifecycle = "cancelled";
         await this.endLocked(db, task, status, reason);
+      }
     });
   }
   async reconcile() {
+    await this.service.pool.query(
+      "UPDATE scheduled_task_occurrences SET snapshot=NULL WHERE finished_at<now()-interval '90 days' AND snapshot IS NOT NULL",
+    );
+    await this.service.pool.query(
+      "DELETE FROM scheduled_task_operations WHERE created_at<now()-interval '90 days'",
+    );
     const rows = (
       await this.service.pool.query<{
         task_id: string;
+        occurrence_id: string;
         execution_id: string;
         status: string;
         error_code: string | null;
       }>(
-        `SELECT r.task_id,r.execution_id,e.status,e.error_code FROM scheduled_task_runs r JOIN workflow_executions e ON e.id=r.execution_id WHERE r.outcome IS NULL AND e.status NOT IN ('created','running','retrying')`,
+        `SELECT r.task_id,r.occurrence_id,r.execution_id,e.status,e.error_code FROM scheduled_task_runs r JOIN workflow_executions e ON e.id=r.execution_id WHERE r.outcome IS NULL AND e.status NOT IN ('created','running','retrying')`,
       )
     ).rows;
     for (const row of rows)
@@ -401,7 +722,7 @@ export class TaskScheduler {
             [row.task_id],
           )
         ).rows[0];
-        if (!task || task.status !== "running") return;
+        if (!task) return;
         const deliveries = (
           await db.query<{ status: string }>(
             "SELECT status FROM outbound_deliveries WHERE execution_id=$1",
@@ -424,19 +745,20 @@ export class TaskScheduler {
           task,
           outcome,
           row.error_code ?? `execution-${row.status}`,
+          row.occurrence_id,
         );
       });
     await this.service.pool.query(
-      `UPDATE workflow_executions e SET trigger_event=jsonb_set(jsonb_set(e.trigger_event,'{scheduled,content}','""'::jsonb),'{scheduled,requestSnapshot}','""'::jsonb) FROM scheduled_task_runs r JOIN scheduled_tasks t ON t.id=r.task_id WHERE r.execution_id=e.id AND t.finished_at<now()-interval '90 days' AND e.trigger_event->>'schemaVersion'='scheduled-task-v1' AND (e.trigger_event->'scheduled'->>'content'<>'' OR e.trigger_event->'scheduled'->>'requestSnapshot'<>'')`,
+      `UPDATE workflow_executions e SET trigger_event=jsonb_set(jsonb_set(e.trigger_event,'{scheduled,content}','""'::jsonb),'{scheduled,requestSnapshot}','""'::jsonb) FROM scheduled_task_runs r JOIN scheduled_tasks t ON t.id=r.task_id WHERE r.execution_id=e.id AND r.finished_at<now()-interval '90 days' AND e.trigger_event->>'schemaVersion' IN ('scheduled-task-v1','scheduled-task-v2') AND (e.trigger_event->'scheduled'->>'content'<>'' OR e.trigger_event->'scheduled'->>'requestSnapshot'<>'')`,
     );
     await this.service.pool.query(
       `UPDATE scheduled_tasks SET request_snapshot=NULL,content=NULL WHERE finished_at<now()-interval '90 days' AND (request_snapshot IS NOT NULL OR content IS NOT NULL)`,
     );
     await this.service.pool.query(
-      `UPDATE scheduled_task_events SET change_data=NULL WHERE change_data IS NOT NULL AND task_id IN(SELECT id FROM scheduled_tasks WHERE finished_at<now()-interval '90 days')`,
+      `UPDATE scheduled_task_events SET change_data=NULL WHERE change_data IS NOT NULL AND created_at<now()-interval '90 days'`,
     );
     await this.service.pool.query(
-      `UPDATE scheduled_task_runs SET task_snapshot=NULL WHERE task_snapshot IS NOT NULL AND task_id IN(SELECT id FROM scheduled_tasks WHERE finished_at<now()-interval '90 days')`,
+      `UPDATE scheduled_task_runs SET task_snapshot=NULL WHERE task_snapshot IS NOT NULL AND finished_at<now()-interval '90 days'`,
     );
   }
 }
