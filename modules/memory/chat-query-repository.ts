@@ -248,6 +248,11 @@ export class ChatQueryRepository {
     const groupKey = query.breakdownBy
       ? `jsonb_build_array(k.pkey,k.skey)::text`
       : `k.pkey`;
+    // Sparse member groups already exist in aggregated. Joining that CTE to
+    // itself can produce a quadratic nested-loop plan before group-limit checks.
+    const groups = dense
+      ? `SELECT ${groupKey} AS key,k.pkey,k.skey,coalesce(a.count,0) AS count,a.representative FROM keys k LEFT JOIN aggregated a ON a.pkey=k.pkey AND a.skey=k.skey`
+      : `SELECT ${groupKey} AS key,k.pkey,k.skey,k.count,k.representative FROM aggregated k`;
     const descending = query.orderBy === "countDesc";
     const position =
       typeof after === "string" ? { key: after, count: 0 } : after;
@@ -276,7 +281,7 @@ export class ChatQueryRepository {
       filtered AS MATERIALIZED (SELECT m.id,${primary} AS pkey,${secondary} AS skey FROM messages m WHERE ${f.where} AND ${f.zone}::text IS NOT NULL),
       aggregated AS (SELECT pkey,skey,count(*) AS count,min(id::text)::uuid AS representative FROM filtered GROUP BY pkey,skey),
       keys AS (${keys}),
-      groups AS (SELECT ${groupKey} AS key,k.pkey,k.skey,coalesce(a.count,0) AS count,a.representative FROM keys k LEFT JOIN aggregated a ON a.pkey=k.pkey AND a.skey=k.skey),
+      groups AS (${groups}),
       stats AS (SELECT (SELECT count(*)::text FROM filtered) AS total_count,(SELECT count(*) FROM (SELECT 1 FROM groups LIMIT ${countGroupLimit + 1}) bounded) AS total_groups),
       selected AS (SELECT g.key,g.pkey,g.skey,g.count::text,${withMember ? "bot_message_author(g.representative)" : "NULL::jsonb"} AS author FROM groups g CROSS JOIN stats s WHERE s.total_groups<=${countGroupLimit} AND ${predicate} ORDER BY ${order} LIMIT ${f.parameter(query.limit + 1)})
       SELECT s.total_count,s.total_groups::text,coalesce((SELECT json_agg(selected) FROM selected),'[]'::json) AS items FROM stats s`,
