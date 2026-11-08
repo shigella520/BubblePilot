@@ -356,8 +356,42 @@ describe.runIf(url)("Postgres Bot identity lifecycle", () => {
     );
     await a.link(ma.id);
     await b.link(mb.id);
+    await db.query(
+      "UPDATE message_bot_attributions SET nickname='同名角色' WHERE message_id=ANY($1::uuid[])",
+      [[ma.id, mb.id]],
+    );
+    const scope = { chatId: a.chat, upperIndex: 3 } as MemoryScope;
+    for (const [authorKind, total] of [
+      ["bot", 2],
+      ["participant", 0],
+      ["unknown", 0],
+    ] as const) {
+      const counts = await new ChatQueryRepository(db).aggregate(
+        scope,
+        chatCountQuerySchema.parse({ authorKind }),
+        "UTC",
+      );
+      expect(counts.totalCount).toBe(total);
+    }
+    const combo = await new ChatQueryRepository(db).aggregate(
+      scope,
+      chatCountQuerySchema.parse({
+        groupBy: "day",
+        breakdownBy: "sender",
+        authorKind: "bot",
+        orderBy: "countDesc",
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-01-01T23:59:59.999999Z",
+      }),
+      "UTC",
+    );
+    expect(combo.rows).toHaveLength(2);
+    expect(new Set(combo.rows.map((r) => r.memberKey)).size).toBe(2);
+    expect(combo.rows.map((r) => r.key)).toEqual(
+      [...combo.rows.map((r) => r.key)].sort(),
+    );
     const page = await new ChatQueryRepository(db).aggregate(
-      { chatId: a.chat, upperIndex: 3 } as MemoryScope,
+      scope,
       chatCountQuerySchema.parse({ groupBy: "sender" }),
       "UTC",
     );

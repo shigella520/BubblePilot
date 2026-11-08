@@ -1,3 +1,4 @@
+import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
 import type { MemoryService } from "../modules/memory/memory-service.js";
 import { randomUUID } from "node:crypto";
 
@@ -116,6 +117,160 @@ async function setup(answer?: string) {
 }
 
 describe("AgentRunner", () => {
+  it.each(["responses", "chat-completions"] as const)(
+    "pairs paginated count results on the %s wire without fetching message bodies",
+    async (apiKind) => {
+      const { repository, request } = await setup();
+      [...repository.providers.values()][0]!.apiKind = apiKind;
+      const args = {
+        from: "2026-11-07T00:00:00+08:00",
+        to: "2026-11-07T23:59:59+08:00",
+        groupBy: "hour",
+        limit: 12,
+      };
+      const execute = vi
+        .fn<(name: string, args: string) => Promise<string>>()
+        .mockImplementation((_name: string, argumentsJson: string) => {
+          const input = JSON.parse(argumentsJson) as { cursor?: string };
+          const offset = input.cursor ? 12 : 0;
+          return Promise.resolve(
+            JSON.stringify({
+              status: "succeeded",
+              totalCount: 285,
+              totalGroups: 24,
+              returnedGroupCount: 12,
+              groups: Array.from({ length: 12 }, (_, i) => ({
+                hour: offset + i,
+                count: offset + i < 21 ? 12 : 11,
+              })),
+              countsExact: true,
+              hasMore: !input.cursor,
+              nextCursor: input.cursor ? null : "fictional-page",
+              truncated: false,
+            }),
+          );
+        });
+      const memory = {
+        repository: { scopeForEvent: vi.fn().mockResolvedValue({}) },
+        session: vi.fn().mockResolvedValue({
+          id: "fictional-retrieval",
+          execute,
+          validate: vi.fn().mockResolvedValue(true),
+          render: (text: string) => text,
+        }),
+      } as unknown as MemoryService;
+      const payloads: Array<Record<string, unknown>> = [];
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+        const payload = JSON.parse(
+          typeof init?.body === "string" ? init.body : "{}",
+        ) as Record<string, unknown>;
+        payloads.push(payload);
+        const turn = payloads.length;
+        const call = {
+          name: "count_chat_messages",
+          arguments: JSON.stringify({
+            ...args,
+            ...(turn === 2 ? { cursor: "fictional-page" } : {}),
+          }),
+        };
+        const response =
+          apiKind === "responses"
+            ? turn < 3
+              ? {
+                  output: [
+                    {
+                      type: "function_call",
+                      call_id: "count-" + turn,
+                      ...call,
+                    },
+                  ],
+                }
+              : { output_text: "共285条，已取得24个小时的完整统计。" }
+            : {
+                choices: [
+                  {
+                    finish_reason: turn < 3 ? "tool_calls" : "stop",
+                    message:
+                      turn < 3
+                        ? {
+                            content: null,
+                            tool_calls: [
+                              {
+                                id: "count-" + turn,
+                                type: "function",
+                                function: call,
+                              },
+                            ],
+                          }
+                        : { content: "共285条，已取得24个小时的完整统计。" },
+                  },
+                ],
+              };
+        return Promise.resolve(Response.json(response));
+      });
+      const secrets = new EnvironmentSecretResolver({
+        FICTIONAL_KEY: "fictional-secret",
+      });
+      const routing = new AiRoutingService(
+        repository,
+        new OpenAiCompatibleClient(secrets, fetcher),
+        secrets,
+        true,
+      );
+      const result = await new AgentRunner(
+        routing,
+        undefined,
+        repository,
+        undefined,
+        undefined,
+        memory,
+      ).run({
+        ...request,
+        webSearch: "disabled",
+        messages: [{ role: "user", content: "按小时统计虚构日期的聊天数" }],
+        memoryEvent: { provider: "bluebubbles", messageId: "fictional" },
+      });
+      expect(result).toMatchObject({
+        status: "succeeded",
+        text: "共285条，已取得24个小时的完整统计。",
+      });
+      expect(result.agentBudget).toMatchObject({
+        toolCalls: 2,
+        finalizingDueToBudget: false,
+      });
+      expect(execute.mock.calls.map((c) => c[0])).toEqual([
+        "count_chat_messages",
+        "count_chat_messages",
+      ]);
+      expect(payloads).toHaveLength(3);
+      for (const payload of payloads)
+        expect(payload.tools).toEqual(payloads[0]!.tools);
+      const outputs = (
+        apiKind === "responses" ? payloads[2]!.input : payloads[2]!.messages
+      ) as Array<Record<string, unknown>>;
+      for (const id of ["count-1", "count-2"]) {
+        expect(
+          outputs.filter((p) =>
+            apiKind === "responses"
+              ? p.type === "function_call_output" && p.call_id === id
+              : p.role === "tool" && p.tool_call_id === id,
+          ),
+        ).toHaveLength(1);
+      }
+      expect(repository.toolExecutions).toHaveLength(2);
+      expect(repository.toolExecutions[0]?.responseDetails).toMatchObject({
+        metadataOnly: true,
+        groupBy: "hour",
+        returnedGroupCount: 12,
+        hasMore: true,
+        truncated: false,
+      });
+      expect(JSON.stringify(repository.toolExecutions)).not.toContain(
+        "2026-11-07",
+      );
+    },
+  );
+
   it("keeps application tools stable even when the provider also supports hosted search", async () => {
     const { repository, client, routing, search, request } = await setup();
     const provider = [...repository.providers.values()][0]!;

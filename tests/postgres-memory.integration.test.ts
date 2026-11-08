@@ -1,3 +1,4 @@
+import { AgentBudget } from "../modules/ai/agent-budget.js";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,7 +18,15 @@ import {
   chatExtremaQuerySchema,
 } from "../modules/memory/chat-query-types.js";
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  it,
+  expect,
+  vi,
+} from "vitest";
 import { MemoryRepository } from "../modules/memory/memory-repository.js";
 import { MemoryService } from "../modules/memory/memory-service.js";
 import { defaultMemoryConfig } from "../modules/memory/memory-types.js";
@@ -608,6 +617,313 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     );
     expect(last.rows[0]?.message?.message.id).toBe(b);
   });
+  const statisticsChats: string[] = [];
+  afterEach(async () => {
+    if (statisticsChats.length)
+      await repo.pool.query(
+        "DELETE FROM memory_jobs WHERE chat_id=ANY($1::uuid[])",
+        [statisticsChats.splice(0)],
+      );
+  });
+  async function statisticsFixture(
+    size: number,
+    longBody = false,
+    uniqueSenders = false,
+  ) {
+    const id = await chat();
+    statisticsChats.push(id);
+    const seed = await message(
+      id,
+      longBody ? "fictional " + "x".repeat(5000) : "fictional statistic",
+    );
+    await repo.pool.query(
+      "UPDATE messages SET sent_at='2026-11-07T00:00:00+08:00',sender_id='member-0' WHERE id=$1",
+      [seed],
+    );
+    // Batch fixture writes so trigger work never needs a relaxed SQL timeout.
+    for (let offset = 1; offset < size; offset += 1000) {
+      await repo.pool.query(
+        `INSERT INTO messages(id,provider,provider_message_id,chat_id,sender_id,sent_at,body,content_type,is_from_me,content_hash,source_event_id)
+        SELECT gen_random_uuid(),'bluebubbles',gen_random_uuid()::text,chat_id,'member-'||(CASE WHEN $3::boolean THEN n ELSE n%5 END),'2026-11-07T00:00:00+08:00'::timestamptz+n*interval '1 minute',body,'text',false,'fixture',source_event_id
+        FROM messages CROSS JOIN generate_series($2::int,$4::int) n WHERE id=$1`,
+        [seed, offset, uniqueSenders, Math.min(offset + 999, size - 1)],
+      );
+    }
+    const scope = {
+      ...(await repo.scope(id, Number.MAX_SAFE_INTEGER, null))!,
+      timeZone: "Asia/Shanghai",
+    };
+    const session = await service.session(scope);
+    const call = async (input: unknown, maximum = 64000) => {
+      const raw = await session.execute(
+        "count_chat_messages",
+        JSON.stringify(input),
+        {
+          signal: new AbortController().signal,
+          deadline: Date.now() + 10000,
+          maxOutputCharacters: maximum,
+        },
+      );
+      return {
+        raw,
+        data: JSON.parse(raw) as {
+          count?: number;
+          totalCount: number;
+          totalGroups: number;
+          returnedGroupCount: number;
+          groups: Array<{ count: number; hour: string; senderKey: string }>;
+          members: Record<string, unknown>;
+          hasMore: boolean;
+          truncated: boolean;
+          nextCursor: string | null;
+          reason?: string;
+        },
+      };
+    };
+    return { id, seed, scope, session, call };
+  }
+  const statisticsRange = {
+    from: "2026-11-07T00:00:00+08:00",
+    to: "2026-11-07T23:59:59.999999+08:00",
+  };
+  it("counts 285 long messages hourly in one small body-free response", async () => {
+    const f = await statisticsFixture(285, true);
+    const { raw, data } = await f.call({
+      ...statisticsRange,
+      groupBy: "hour",
+      limit: 24,
+    });
+    expect(data).toMatchObject({
+      totalCount: 285,
+      totalGroups: 24,
+      returnedGroupCount: 24,
+      hasMore: false,
+      complete: true,
+      truncated: false,
+      countsExact: true,
+    });
+    expect(data.groups.map((g: { count: number }) => g.count)).toEqual([
+      60,
+      60,
+      60,
+      60,
+      45,
+      ...Array.from({ length: 19 }, () => 0),
+    ]);
+    expect(raw.length).toBeLessThanOrEqual(12000);
+    expect(raw).not.toMatch(/fictional|xxxxx|body|messageId/);
+    expect(f.session.references()).toEqual([]);
+    for (const groupBy of ["day", "week", "month", "hourOfDay", "weekday"]) {
+      const { data: r } = await f.call({ ...statisticsRange, groupBy });
+      expect(r.totalCount).toBe(285);
+      expect(
+        r.groups.reduce((n: number, g: { count: number }) => n + g.count, 0),
+      ).toBe(285);
+    }
+  });
+  it("pages dense heatmaps and sparse member rankings with stable ties", async () => {
+    const f = await statisticsFixture(285);
+    const args = {
+      ...statisticsRange,
+      groupBy: "weekday",
+      breakdownBy: "hourOfDay",
+      limit: 100,
+    };
+    const a = (await f.call(args)).data;
+    const b = (await f.call({ ...args, cursor: a.nextCursor })).data;
+    expect(a.totalGroups).toBe(168);
+    expect([...a.groups, ...b.groups]).toHaveLength(168);
+    expect(
+      [...a.groups, ...b.groups].reduce(
+        (n: number, g: { count: number }) => n + g.count,
+        0,
+      ),
+    ).toBe(285);
+    expect(b.hasMore).toBe(false);
+    const ranking = {
+      ...statisticsRange,
+      groupBy: "hour",
+      breakdownBy: "sender",
+      orderBy: "countDesc",
+      limit: 3,
+    };
+    const groups: { hour: string; senderKey: string; count: number }[] = [];
+    let cursor: string | undefined;
+    do {
+      const r = (await f.call({ ...ranking, ...(cursor ? { cursor } : {}) }))
+        .data;
+      expect(r.totalCount).toBe(285);
+      expect(r.totalGroups).toBe(25);
+      expect(Object.keys(r.members).length).toBeLessThanOrEqual(
+        r.groups.length,
+      );
+      groups.push(...r.groups);
+      cursor = r.nextCursor ?? undefined;
+    } while (cursor);
+    expect(new Set(groups.map((g) => g.hour + g.senderKey)).size).toBe(25);
+    expect(groups.reduce((n, g) => n + g.count, 0)).toBe(285);
+    expect(groups.map((g) => g.count)).toEqual(
+      [...groups.map((g) => g.count)].sort((x, y) => y - x),
+    );
+    const first = (await f.call(ranking)).data;
+    expect(
+      (await f.call({ ...ranking, orderBy: "group", cursor: first.nextCursor }))
+        .data.reason,
+    ).toBe("invalid-cursor");
+    for (const groupBy of ["day", "week", "month", "hourOfDay", "weekday"]) {
+      const r = (
+        await f.call({
+          ...statisticsRange,
+          groupBy,
+          breakdownBy: "sender",
+          limit: 100,
+        })
+      ).data;
+      expect(
+        r.groups.reduce((n: number, g: { count: number }) => n + g.count, 0),
+      ).toBe(285);
+    }
+  });
+  it("counts attachment matches once, respects identities, redaction and runtime boundary", async () => {
+    const f = await statisticsFixture(4);
+    const attachments = [
+      { fileName: "report.pdf", mimeType: "application/pdf" },
+      { fileName: "second.pdf", mimeType: "application/pdf" },
+      { fileName: "other.csv", mimeType: "text/csv" },
+    ];
+    await repo.pool.query(
+      "UPDATE messages SET attachments=$2::jsonb WHERE id=$1",
+      [f.seed, JSON.stringify(attachments)],
+    );
+    expect(
+      (await f.call({ hasAttachments: true, attachmentType: ".pdf" })).data
+        .count,
+    ).toBe(1);
+    expect(
+      (
+        await f.call({
+          attachmentName: "REPORT",
+          attachmentType: "application/pdf",
+        })
+      ).data.count,
+    ).toBe(1);
+    expect(
+      (await f.call({ attachmentName: "report", attachmentType: ".csv" })).data
+        .count,
+    ).toBe(0);
+    expect((await f.call({ hasAttachments: false })).data.count).toBe(3);
+    await repo.pool.query("UPDATE messages SET sender_id=NULL WHERE id=$1", [
+      f.seed,
+    ]);
+    expect((await f.call({ authorKind: "unknown" })).data.count).toBe(1);
+    expect((await f.call({ authorKind: "participant" })).data.count).toBe(3);
+    expect((await f.call({ authorKind: "bot" })).data.count).toBe(0);
+    await repo.pool.query(
+      "UPDATE messages SET is_from_me=true,sender_id='self' WHERE id=$1",
+      [f.seed],
+    );
+    expect((await f.call({ authorKind: "unknown" })).data.count).toBe(1);
+    await repo.pool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
+      [f.seed],
+    );
+    expect((await f.call({})).data.count).toBe(3);
+    const hidden = await message(f.id, "future-message");
+    const index = await repo.pool.query<{ message_index: string }>(
+      "SELECT message_index FROM messages WHERE id=$1",
+      [hidden],
+    );
+    const boundary = await repo.archiveQueries.aggregate(
+      { ...f.scope, upperIndex: Number(index.rows[0]!.message_index) },
+      chatCountQuerySchema.parse({}),
+      "UTC",
+    );
+    expect(boundary.totalCount).toBe(3);
+    await repo.authorize(f.id, false, 1);
+    expect((await f.call({})).data).toMatchObject({
+      status: "unavailable",
+      reason: "source-unavailable",
+    });
+  });
+  it("soft-pages large statistics without exhausting global budget and rejects excessive groups", async () => {
+    const f = await statisticsFixture(120);
+    await repo.pool.query(
+      "UPDATE messages SET sender_id=repeat('s',200)||id::text WHERE chat_id=$1",
+      [f.id],
+    );
+    const args = {
+      ...statisticsRange,
+      groupBy: "day",
+      breakdownBy: "sender",
+      limit: 100,
+    };
+    const first = await f.call(args);
+    expect(first.raw.length).toBeLessThanOrEqual(12000);
+    expect(first.data).toMatchObject({
+      hasMore: true,
+      truncated: false,
+      totalCount: 120,
+      totalGroups: 120,
+    });
+    expect(first.data.groups.length).toBeLessThan(100);
+    const budget = new AgentBudget({
+      source: "defaults",
+      version: 0,
+      updatedAt: null,
+      maxToolCalls: 10,
+      maxToolOutputCharacters: 64000,
+      maxToolDurationMs: 90000,
+    });
+    budget.append(first.raw);
+    expect(budget.exhausted).toBe(false);
+
+    const found = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const r = (await f.call({ ...args, ...(cursor ? { cursor } : {}) })).data;
+      expect(r.truncated).toBe(false);
+      for (const g of r.groups) {
+        expect(found.has(g.senderKey)).toBe(false);
+        found.add(g.senderKey);
+      }
+      cursor = r.nextCursor ?? undefined;
+    } while (cursor);
+    expect(found.size).toBe(120);
+    expect((await f.call(args, 100)).data).toMatchObject({
+      status: "unavailable",
+      reason: "tool-output",
+    });
+    const many = await statisticsFixture(10001, false, true);
+    expect((await many.call({ groupBy: "sender" })).data).toMatchObject({
+      status: "unavailable",
+      reason: "group-limit",
+    });
+  }, 20000);
+  it("counts repeated DST hours separately and merges their clock-hour groups", async () => {
+    const f = await statisticsFixture(2);
+    await repo.pool.query(
+      "UPDATE messages SET sent_at=CASE WHEN id=$2 THEN '2026-11-01T05:30:00Z'::timestamptz ELSE '2026-11-01T06:30:00Z'::timestamptz END WHERE chat_id=$1",
+      [f.id, f.seed],
+    );
+    const filter = {
+      from: "2026-11-01T00:00:00-04:00",
+      to: "2026-11-01T23:59:59.999999-05:00",
+    };
+    const result = await repo.archiveQueries.aggregate(
+      f.scope,
+      chatCountQuerySchema.parse({ ...filter, groupBy: "hour" }),
+      "America/New_York",
+    );
+    expect(result.rows).toHaveLength(25);
+    expect(result.rows.slice(1, 3).map((r) => r.count)).toEqual([1, 1]);
+    const clock = await repo.archiveQueries.aggregate(
+      f.scope,
+      chatCountQuerySchema.parse({ ...filter, groupBy: "hourOfDay" }),
+      "America/New_York",
+    );
+    expect(clock.rows[1]?.count).toBe(2);
+  });
+
   it("binds session cursors, fits actual returned pages and expands extrema sources offline", async () => {
     const id = await chat();
     for (let i = 0; i < 4; i++)

@@ -31,7 +31,7 @@ it("keeps attachment filters optional and requires matching values on one attach
     chatMessageQuerySchema.safeParse({ attachmentType: "text/*" }).success,
   ).toBe(false);
   expect(chatCountQuerySchema.safeParse({ hasAttachments: true }).success).toBe(
-    false,
+    true,
   );
 });
 it("defaults quotas and forbids enabled bindings without a target or invalid totals", () => {

@@ -1,3 +1,8 @@
+import {
+  countBuckets,
+  countGroupLimit,
+  type CountBucket,
+} from "./chat-count-buckets.js";
 import type { MessageAuthor } from "../identity/bot-identity.js";
 import { AgentToolTimeout, type AgentToolContext } from "../ai/agent-budget.js";
 import type { Pool } from "pg";
@@ -16,6 +21,7 @@ import {
   type ChatCountQuery,
   type ChatExtremaQuery,
   type MessagePosition,
+  type CountPosition,
 } from "./chat-query-types.js";
 
 /** All raw queries and aggregates use exactly these predicates, before LIMIT. */
@@ -57,6 +63,33 @@ export function chatFilterSql(
     predicates.push(
       `(${query.keywords.map((word) => `strpos(lower(coalesce(m.body,'')),lower(${parameter(word)}::text))>0`).join(query.keywordMode === "all" ? " AND " : " OR ")})`,
     );
+  const attachments = `jsonb_array_elements(CASE WHEN jsonb_typeof(m.attachments)='array' THEN m.attachments ELSE '[]'::jsonb END)`;
+  const attachmentConditions: string[] = [];
+  if (query.attachmentName)
+    attachmentConditions.push(
+      `strpos(lower(coalesce(a->>'fileName','')),lower(${parameter(query.attachmentName)}::text))>0`,
+    );
+  if (query.attachmentType)
+    attachmentConditions.push(
+      query.attachmentType.startsWith(".")
+        ? `right(lower(coalesce(a->>'fileName','')),length(${parameter(query.attachmentType)}::text))=${parameter(query.attachmentType)}::text`
+        : `lower(coalesce(a->>'mimeType',''))=${parameter(query.attachmentType)}::text`,
+    );
+  if (query.hasAttachments !== undefined || attachmentConditions.length)
+    predicates.push(
+      `${query.hasAttachments === false ? "NOT " : ""}EXISTS(SELECT 1 FROM ${attachments} a${attachmentConditions.length ? ` WHERE ${attachmentConditions.join(" AND ")}` : ""})`,
+    );
+  if (query.authorKind) {
+    const knownBot = `m.is_from_me AND EXISTS(SELECT 1 FROM message_bot_attributions a WHERE a.message_id=m.id)`;
+    const participant = `NOT m.is_from_me AND m.sender_id IS NOT NULL`;
+    predicates.push(
+      query.authorKind === "bot"
+        ? `(${knownBot})`
+        : query.authorKind === "participant"
+          ? `(${participant})`
+          : `NOT ((${knownBot}) OR (${participant}))`,
+    );
+  }
   return { values, parameter, where: predicates.join(" AND "), zone };
 }
 const exactTime = `to_char(m.sent_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
@@ -80,10 +113,15 @@ export interface ArchiveQueryGroup {
   senderId: string | null;
   count: number;
   message: ArchiveQueryMessage | null;
+  dimensions?: Record<string, unknown>;
+  memberKey?: string;
+  position?: CountPosition;
 }
 export interface ArchivePage<T> {
   queriedAt: string;
   rows: T[];
+  totalCount?: number;
+  totalGroups?: number;
 }
 function archived(row: QueryMessageRow): ArchiveQueryMessage {
   return {
@@ -156,20 +194,6 @@ export class ChatQueryRepository {
     const filter = chatFilterSql(scope, query, timeZone);
     const direction = query.order === "asc" ? "ASC" : "DESC";
     let where = filter.where;
-    const attachments = `jsonb_array_elements(CASE WHEN jsonb_typeof(m.attachments)='array' THEN m.attachments ELSE '[]'::jsonb END)`;
-    const conditions: string[] = [];
-    if (query.attachmentName)
-      conditions.push(
-        `strpos(lower(coalesce(a->>'fileName','')),lower(${filter.parameter(query.attachmentName)}::text))>0`,
-      );
-    if (query.attachmentType)
-      conditions.push(
-        query.attachmentType.startsWith(".")
-          ? `right(lower(coalesce(a->>'fileName','')),length(${filter.parameter(query.attachmentType)}::text))=${filter.parameter(query.attachmentType)}::text`
-          : `lower(coalesce(a->>'mimeType',''))=${filter.parameter(query.attachmentType)}::text`,
-      );
-    if (query.hasAttachments !== undefined || conditions.length)
-      where += ` AND ${query.hasAttachments === false ? "NOT " : ""}EXISTS(SELECT 1 FROM ${attachments} a${conditions.length ? ` WHERE ${conditions.join(" AND ")}` : ""})`;
 
     // Keep the zone parameter typed even when there is no daily-time predicate.
     where += ` AND ${filter.zone}::text IS NOT NULL`;
@@ -182,13 +206,146 @@ export class ChatQueryRepository {
     );
     return { ...page, rows: page.rows.map(archived) };
   }
+  private async count(
+    scope: MemoryScope,
+    query: ChatCountQuery,
+    timeZone: string,
+    after?: string | CountPosition,
+    context?: AgentToolContext,
+  ): Promise<ArchivePage<ArchiveQueryGroup>> {
+    const buckets = countBuckets(query, timeZone);
+    const f = chatFilterSql(scope, query, timeZone);
+    const bucketParam = f.parameter(JSON.stringify(buckets));
+    const senderKey = `CASE WHEN EXISTS(SELECT 1 FROM message_bot_attributions a WHERE a.message_id=m.id) THEN '2'||(SELECT a.workflow_id::text FROM message_bot_attributions a WHERE a.message_id=m.id) WHEN m.is_from_me THEN '0self' WHEN m.sender_id IS NULL THEN '0' ELSE '1'||m.sender_id END`;
+    const clock = `m.sent_at AT TIME ZONE ${f.zone}::text`;
+    const hour = `lpad(extract(hour FROM ${clock})::int::text,2,'0')`;
+    const weekday = `lpad(extract(isodow FROM ${clock})::int::text,2,'0')`;
+    const calendar = ["hour", "day", "week", "month"].includes(query.groupBy);
+    const primary =
+      query.groupBy === "none"
+        ? `'all'::text`
+        : query.groupBy === "sender"
+          ? senderKey
+          : query.groupBy === "hourOfDay"
+            ? hour
+            : query.groupBy === "weekday"
+              ? weekday
+              : `(SELECT keys FROM bucket_arrays)[width_bucket(m.sent_at,(SELECT starts FROM bucket_arrays))]`;
+    const secondary =
+      query.breakdownBy === "sender"
+        ? senderKey
+        : query.breakdownBy === "hourOfDay"
+          ? hour
+          : `''::text`;
+    const dense = query.groupBy !== "sender" && query.breakdownBy !== "sender";
+    const keys = !dense
+      ? `SELECT pkey,skey FROM aggregated`
+      : query.groupBy === "none"
+        ? `SELECT 'all'::text AS pkey,''::text AS skey`
+        : query.breakdownBy === "hourOfDay"
+          ? `SELECT b.key AS pkey,lpad(h::text,2,'0') AS skey FROM buckets b CROSS JOIN generate_series(0,23) h`
+          : `SELECT key AS pkey,''::text AS skey FROM buckets`;
+    const groupKey = query.breakdownBy
+      ? `jsonb_build_array(k.pkey,k.skey)::text`
+      : `k.pkey`;
+    const descending = query.orderBy === "countDesc";
+    const position =
+      typeof after === "string" ? { key: after, count: 0 } : after;
+    const predicate = position
+      ? descending
+        ? `(g.count<${f.parameter(position.count)}::bigint OR (g.count=${f.parameter(position.count)}::bigint AND g.key COLLATE "C">${f.parameter(position.key)}::text COLLATE "C"))`
+        : `g.key COLLATE "C">${f.parameter(position.key)}::text COLLATE "C"`
+      : "TRUE";
+    const order = `${descending ? "g.count DESC," : ""}g.key COLLATE "C"`;
+    const withMember =
+      query.groupBy === "sender" || query.breakdownBy === "sender";
+    interface CountRow {
+      key: string;
+      pkey: string;
+      skey: string;
+      count: string;
+      author: MessageAuthor | null;
+    }
+    const page = await this.page<{
+      total_count: string;
+      total_groups: string;
+      items: CountRow[];
+    }>(
+      `WITH buckets AS (SELECT * FROM jsonb_to_recordset(${bucketParam}::jsonb) AS b(key text,start timestamptz)),
+      bucket_arrays AS (SELECT array_agg(key ORDER BY start) AS keys,array_agg(start ORDER BY start) AS starts FROM buckets),
+      filtered AS MATERIALIZED (SELECT m.id,${primary} AS pkey,${secondary} AS skey FROM messages m WHERE ${f.where} AND ${f.zone}::text IS NOT NULL),
+      aggregated AS (SELECT pkey,skey,count(*) AS count,min(id::text)::uuid AS representative FROM filtered GROUP BY pkey,skey),
+      keys AS (${keys}),
+      groups AS (SELECT ${groupKey} AS key,k.pkey,k.skey,coalesce(a.count,0) AS count,a.representative FROM keys k LEFT JOIN aggregated a ON a.pkey=k.pkey AND a.skey=k.skey),
+      stats AS (SELECT (SELECT count(*)::text FROM filtered) AS total_count,(SELECT count(*) FROM (SELECT 1 FROM groups LIMIT ${countGroupLimit + 1}) bounded) AS total_groups),
+      selected AS (SELECT g.key,g.pkey,g.skey,g.count::text,${withMember ? "bot_message_author(g.representative)" : "NULL::jsonb"} AS author FROM groups g CROSS JOIN stats s WHERE s.total_groups<=${countGroupLimit} AND ${predicate} ORDER BY ${order} LIMIT ${f.parameter(query.limit + 1)})
+      SELECT s.total_count,s.total_groups::text,coalesce((SELECT json_agg(selected) FROM selected),'[]'::json) AS items FROM stats s`,
+      f.values,
+      context,
+    );
+    const result = page.rows[0]!;
+    const exact = (s: string) => {
+      const n = Number(s);
+      if (!Number.isSafeInteger(n) || n < 0)
+        throw new ChatQueryError("count-out-of-range");
+      return n;
+    };
+    const totalGroups = exact(result.total_groups);
+    if (totalGroups > countGroupLimit) throw new ChatQueryError("group-limit");
+    const byKey = new Map<string, CountBucket>(buckets.map((b) => [b.key, b]));
+    return {
+      queriedAt: page.queriedAt,
+      totalCount: exact(result.total_count),
+      totalGroups,
+      rows: result.items.map((row) => {
+        const count = exact(row.count);
+        const memberKey =
+          query.groupBy === "sender"
+            ? row.pkey
+            : query.breakdownBy === "sender"
+              ? row.skey
+              : undefined;
+        const bucket = byKey.get(row.pkey);
+        const dimensions: Record<string, unknown> = {};
+        if (query.groupBy === "sender") {
+          dimensions.senderId = memberKey?.startsWith("1")
+            ? memberKey.slice(1)
+            : null;
+          dimensions.author = row.author;
+        } else if (query.groupBy === "day") dimensions.date = row.pkey;
+        else if (query.groupBy !== "none")
+          dimensions[query.groupBy] = bucket?.value ?? row.pkey;
+        if (calendar && query.groupBy !== "day") {
+          dimensions.bucketStart = bucket?.start;
+          dimensions.bucketEnd = bucket?.end;
+        }
+        if (calendar) dimensions.partialBucket = bucket?.partialBucket ?? false;
+        if (query.breakdownBy === "sender") dimensions.senderKey = row.skey;
+        if (query.breakdownBy === "hourOfDay")
+          dimensions.hourOfDay = Number(row.skey);
+        return {
+          key: row.key,
+          count,
+          message: null,
+          author: row.author,
+          senderId: memberKey?.startsWith("1") ? memberKey.slice(1) : null,
+          dimensions,
+          ...(memberKey === undefined ? {} : { memberKey }),
+          position: { key: row.key, count },
+        };
+      }),
+    };
+  }
+
   async aggregate(
     scope: MemoryScope,
     query: ChatCountQuery | ChatExtremaQuery,
     timeZone: string,
-    after?: string,
+    after?: string | CountPosition,
     context?: AgentToolContext,
   ): Promise<ArchivePage<ArchiveQueryGroup>> {
+    if (!("pick" in query))
+      return this.count(scope, query, timeZone, after, context);
     const f = chatFilterSql(scope, query, timeZone);
     const bounds = query.groupBy === "day" ? dayBounds(query, timeZone) : null;
     const key =
