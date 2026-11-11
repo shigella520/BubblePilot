@@ -1797,7 +1797,8 @@ onBeforeUnmount(() =>
 </template>
 
 <style scoped>
-.message-quote {
+.message-quote,
+.message-revision-body {
   margin: 12px 0;
   padding: 12px 16px;
   border-left: 3px solid #95a7bd;
@@ -1809,14 +1810,8 @@ onBeforeUnmount(() =>
   white-space: pre-wrap;
   margin: 6px 0;
 }
-</style>
-
-<style scoped>
-.message-revision-body {
-  border-left: 3px solid var(--color-border, #d6cbb8);
-  padding-left: 12px;
-}
 .message-revision-body p {
+  margin: 8px 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
