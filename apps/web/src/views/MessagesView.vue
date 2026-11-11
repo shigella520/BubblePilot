@@ -1801,10 +1801,17 @@ onBeforeUnmount(() =>
 .message-revision-body {
   margin: 12px 0;
   padding: 12px 16px;
-  border-left: 3px solid #95a7bd;
+  border-left: 3px solid;
   border-radius: 8px;
-  background: #f1f4f8;
   overflow-wrap: anywhere;
+}
+.message-quote {
+  border-left-color: #95a7bd;
+  background: #f1f4f8;
+}
+.message-revision-body {
+  border-left-color: #d6cbb8;
+  background: #f7f3ec;
 }
 .message-quote p {
   white-space: pre-wrap;
