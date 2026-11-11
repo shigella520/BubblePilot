@@ -34,6 +34,7 @@ export interface AttachmentListing {
   entries: Array<{
     index: number;
     fileName: string | null;
+    fileNameTruncated?: boolean;
     mimeType: string | null;
     sizeBytes: number | null;
     availability: "not-verified";

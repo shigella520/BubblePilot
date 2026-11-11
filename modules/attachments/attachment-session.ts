@@ -1,3 +1,8 @@
+import {
+  attachmentEntry,
+  initialAttachmentCatalogue,
+  type AttachmentContextMessage,
+} from "./attachment-catalogue.js";
 import { ApplicationError } from "../../app/errors.js";
 import type { AiToolDefinition } from "../ai/ai-types.js";
 import { randomUUID } from "node:crypto";
@@ -45,10 +50,8 @@ type Candidate = {
 export interface AttachmentRunInput {
   config: AttachmentHandling;
   scope: ChatImageScope;
-  current: {
-    providerMessageId: string;
-    attachments: readonly MessageAttachment[];
-  };
+  current: AttachmentContextMessage;
+  history?: readonly AttachmentContextMessage[];
 }
 export class AttachmentSession {
   private candidates = new Map<string, Candidate>();
@@ -102,7 +105,9 @@ export class AttachmentSession {
         >,
         offset = 0,
         query?: ChatMessageQuery,
-      ) => this.buildCatalogue(message, offset, query, false, candidates, keys),
+        current = false,
+      ) =>
+        this.buildCatalogue(message, offset, query, current, candidates, keys),
       commit: (listings: readonly AttachmentListing[]) => {
         if (this.ended || committed)
           throw new AttachmentError("ATTACHMENT_SESSION_INVALIDATED");
@@ -161,14 +166,7 @@ export class AttachmentSession {
         }
         const type = query?.attachmentType;
         return {
-          index: actualIndex,
-          fileName: a.fileName?.slice(0, 512) ?? null,
-          ...(a.fileName && a.fileName.length > 512
-            ? { fileNameTruncated: true }
-            : {}),
-          mimeType: a.mimeType,
-          sizeBytes: a.sizeBytes,
-          availability: "not-verified" as const,
+          ...attachmentEntry(a, actualIndex),
           ...(ref ? { attachment_ref: ref } : {}),
           ...(query
             ? {
@@ -196,6 +194,40 @@ export class AttachmentSession {
       entries.some((e) => !e.attachment_ref)
         ? { referenceLimitReached: true }
         : {}),
+    };
+  }
+  async initialCatalogue(maxBytes: number) {
+    const stage = this.stageCatalogue();
+    const prepared = await initialAttachmentCatalogue(
+      { current: this.input.current, history: this.input.history ?? [] },
+      maxBytes,
+      async (message, current) => {
+        // Historical references require explicit archive authorization. No permissive
+        // fallback when a repository does not implement the authorization contract.
+        if (
+          !current &&
+          (!this.sources.authorized ||
+            !(await this.sources.authorized(
+              this.input.scope,
+              message.providerMessageId,
+              true,
+            )))
+        )
+          return null;
+        return stage.catalogue(
+          {
+            id: current ? "current-message" : message.providerMessageId,
+            ...message,
+          },
+          0,
+          undefined,
+          current,
+        );
+      },
+    );
+    return {
+      text: prepared.text,
+      commit: () => stage.commit(prepared.listings),
     };
   }
   currentCatalogue() {

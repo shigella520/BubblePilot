@@ -1,3 +1,7 @@
+import {
+  attachmentContextMessage,
+  attachmentMetadataCharacters,
+} from "../attachments/attachment-catalogue.js";
 import { messageRevisionNotice } from "../archive/message-revision.js";
 import type {
   ReplyPreview,
@@ -181,13 +185,8 @@ function messageCharacters(message: ContextMessage): number {
       (item.siteName?.length ?? 0),
     0,
   );
-  const attachmentCharacters = message.attachments.reduce(
-    (total, attachment) =>
-      total +
-      attachment.providerAttachmentId.length +
-      (attachment.mimeType?.length ?? 0) +
-      (attachment.fileName?.length ?? 0),
-    0,
+  const attachmentCharacters = attachmentMetadataCharacters(
+    attachmentContextMessage(message),
   );
   const imageSummaryCharacters = (message.imageSummaries ?? []).reduce(
     (total, summary) =>

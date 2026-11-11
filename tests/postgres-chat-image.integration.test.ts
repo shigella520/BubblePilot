@@ -1,3 +1,7 @@
+import { AttachmentSession } from "../modules/attachments/attachment-session.js";
+import { AttachmentStore } from "../modules/attachments/attachment-store.js";
+import { attachmentLimitsSchema } from "../modules/attachments/attachment-policy.js";
+import type { PluginSession } from "../modules/plugins/plugin-session.js";
 import { readdir, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -154,5 +158,79 @@ describe.runIf(!!url)("chat image archive authorization", () => {
     ]);
     expect(await sources.resolve(f.scope, f.ids[0]!, 0, true)).toBeNull();
     expect(await session.validate()).toBe(false);
+  });
+  it("issues initial file refs only inside authorized chat history and rechecks revocation", async () => {
+    const f = await fixture();
+    const other = await fixture();
+    const attachment = {
+      providerAttachmentId: "fictional-file",
+      fileName: "report.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 12,
+    };
+    const input = {
+      config: {
+        enabled: true,
+        pluginId: randomUUID(),
+        server: "sandbox",
+        limits: attachmentLimitsSchema.parse({}),
+      },
+      scope: f.scope,
+      current: { providerMessageId: f.ids[1]!, attachments: [] },
+      history: [f.ids[0]!, f.ids[2]!, other.ids[0]!].map(
+        (providerMessageId) => ({
+          providerMessageId,
+          attachments: [attachment],
+        }),
+      ),
+    };
+    const plugin = {
+      attachmentChannel: () => ({
+        check: async () => {},
+        invalidate: async () => {},
+      }),
+    } as unknown as PluginSession;
+    const session = new AttachmentSession(
+      input,
+      plugin,
+      sources,
+      {
+        download: () => {
+          throw new Error("must not download");
+        },
+      },
+      new AttachmentStore("/unused-fictional-attachment-path"),
+    );
+    const parsed = (text: string) =>
+      JSON.parse(text.slice(text.indexOf("{"))) as {
+        history: Array<{
+          messageId: string;
+          entries: Array<{ attachment_ref?: string }>;
+        }>;
+      };
+    const denied = await session.initialCatalogue(20000);
+    expect(
+      parsed(denied.text).history.every((m) => !m.entries[0]?.attachment_ref),
+    ).toBe(true);
+    await memory.authorize(f.chatId, true, 0);
+    const allowed = await session.initialCatalogue(20000);
+    const entries = parsed(allowed.text).history;
+    expect(
+      entries.find((m) => m.messageId === f.ids[0])?.entries[0]?.attachment_ref,
+    ).toMatch(/^A/);
+    expect(
+      entries
+        .filter((m) => m.messageId !== f.ids[0])
+        .every((m) => !m.entries[0]?.attachment_ref),
+    ).toBe(true);
+    allowed.commit();
+    await pool.query("UPDATE memory_chats SET enabled=false WHERE chat_id=$1", [
+      f.chatId,
+    ]);
+    const revoked = await session.initialCatalogue(20000);
+    expect(
+      parsed(revoked.text).history.every((m) => !m.entries[0]?.attachment_ref),
+    ).toBe(true);
+    await session.close();
   });
 });

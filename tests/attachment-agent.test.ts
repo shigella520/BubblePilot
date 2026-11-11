@@ -31,13 +31,15 @@ import { createMcpHttp } from "../plugins/opensandbox/server/src/http.js";
 import { SandboxPool } from "../plugins/opensandbox/server/src/lifecycle.js";
 import type { Backend } from "../plugins/opensandbox/server/src/backend.js";
 it.each([
-  { apiKind: "responses" as const, historical: false },
-  { apiKind: "chat-completions" as const, historical: false },
-  { apiKind: "responses" as const, historical: true },
-  { apiKind: "chat-completions" as const, historical: true },
+  { apiKind: "responses" as const, historical: false, visible: false },
+  { apiKind: "chat-completions" as const, historical: false, visible: false },
+  { apiKind: "responses" as const, historical: true, visible: false },
+  { apiKind: "chat-completions" as const, historical: true, visible: false },
+  { apiKind: "responses" as const, historical: true, visible: true },
+  { apiKind: "chat-completions" as const, historical: true, visible: true },
 ])(
-  "pairs attachment and MCP calls under the shared Agent budget ($apiKind, historical=$historical)",
-  async ({ apiKind, historical }) => {
+  "pairs attachment and MCP calls under the shared Agent budget ($apiKind, historical=$historical, visible=$visible)",
+  async ({ apiKind, historical, visible }) => {
     const repo = new InMemoryAiRepository();
     const provider = await repo.createProvider({
       name: "Fictional",
@@ -67,6 +69,7 @@ it.each([
     if (route.status !== "ok") throw new Error("fixture");
     const live = new Map<string, string>();
     let imported = false;
+    const expectedOutput = visible ? "虚构 PDF 报告：样本共30条。" : "30";
     const backend: Backend = {
       create: (owner) => {
         const id = randomUUID();
@@ -78,7 +81,7 @@ it.each([
             Promise.resolve({
               status: "completed",
               exitCode: 0,
-              stdout: imported ? "30" : "{}",
+              stdout: imported ? expectedOutput : "{}",
               stderr: "",
               durationMs: 1,
               truncated: false,
@@ -159,8 +162,8 @@ it.each([
       } as unknown as PluginService;
       const attachment = {
         providerAttachmentId: "fictional",
-        fileName: "sample.csv",
-        mimeType: "text/csv",
+        fileName: visible ? "fictional-report.pdf" : "sample.csv",
+        mimeType: visible ? "application/pdf" : "text/csv",
         sizeBytes: null,
       };
       const sourceId = historical ? "earlier-message" : "current";
@@ -218,6 +221,7 @@ it.each([
               input,
               session,
               {
+                authorized: () => Promise.resolve(true),
                 resolve: () =>
                   Promise.resolve({
                     messageId: "fixture-message",
@@ -228,7 +232,13 @@ it.each([
               },
               {
                 download: () =>
-                  Promise.resolve(new Response("sales\n10\n20\n")),
+                  Promise.resolve(
+                    new Response(
+                      visible
+                        ? "%PDF-1.4\nfictional fixture"
+                        : "sales\n10\n20\n",
+                    ),
+                  ),
               },
               store,
             ),
@@ -239,8 +249,8 @@ it.each([
         call: (_p, r) => {
           requests.push(r);
           let call;
-          const turn = requests.length - (historical ? 1 : 0);
-          if (historical && requests.length === 1) {
+          const turn = requests.length - (historical && !visible ? 1 : 0);
+          if (historical && !visible && requests.length === 1) {
             call = {
               id: "history",
               name: "query_chat_messages",
@@ -257,23 +267,26 @@ it.each([
               text.slice(text.indexOf("{")),
             ) as {
               entries: Array<{ attachment_ref: string }>;
+              history: Array<{ entries: Array<{ attachment_ref: string }> }>;
             };
             const history = r.messages.find(
               (m) => m.role === "tool" && m.toolCallId === "history",
             );
-            const catalog = historical
-              ? (
-                  JSON.parse(
-                    typeof history?.content === "string"
-                      ? history.content
-                      : "{}",
-                  ) as {
-                    evidence: Array<{
-                      attachments: Array<typeof currentCatalog>;
-                    }>;
-                  }
-                ).evidence[0]!.attachments[0]!
-              : currentCatalog;
+            const catalog = visible
+              ? currentCatalog.history[0]!
+              : historical
+                ? (
+                    JSON.parse(
+                      typeof history?.content === "string"
+                        ? history.content
+                        : "{}",
+                    ) as {
+                      evidence: Array<{
+                        attachments: Array<typeof currentCatalog>;
+                      }>;
+                    }
+                  ).evidence[0]!.attachments[0]!
+                : currentCatalog;
             if (historical) expect(currentCatalog.entries).toEqual([]);
             expect(catalog.entries[0]!.attachment_ref).toMatch(
               /^A[0-9a-f-]{36}$/,
@@ -295,7 +308,9 @@ it.each([
               name: `ext_${digest([plugin.id, "sandbox", "run_command"]).slice(0, 24)}`,
               arguments: JSON.stringify({
                 arguments_json: JSON.stringify({
-                  command: "python analysis.py",
+                  command: visible
+                    ? "python read_pdf.py"
+                    : "python analysis.py",
                 }),
               }),
             };
@@ -304,10 +319,10 @@ it.each([
               r.messages.find(
                 (m) => m.role === "tool" && m.toolCallId === "calculate",
               )?.content,
-            ).toContain("30");
+            ).toContain(expectedOutput);
           return Promise.resolve({
             status: "succeeded" as const,
-            text: call ? "" : "合计30。",
+            text: call ? "" : expectedOutput,
             durationMs: 1,
             ...(call ? { toolCalls: [call] } : {}),
           });
@@ -334,7 +349,14 @@ it.each([
         executionId: randomUUID(),
         nodeId: "ai",
         routeId: route.value.id,
-        messages: [{ role: "user", content: "汇总附件金额" }],
+        messages: visible
+          ? [
+              {
+                role: "user",
+                content: "旧截图中显示42；这次请分析刚发送的 PDF，不是截图。",
+              },
+            ]
+          : [{ role: "user", content: "汇总附件金额" }],
         maxOutputTokens: 256,
         temperature: null,
         maxOutputCharacters: 4000,
@@ -356,6 +378,16 @@ it.each([
             providerChatId: "fictional",
             triggerMessageId: "current",
           },
+          history: visible
+            ? [
+                {
+                  providerMessageId: sourceId,
+                  attachments: [attachment],
+                  sentAt: source.sentAt,
+                  senderId: source.senderId,
+                },
+              ]
+            : [],
           current: {
             providerMessageId: "current",
             attachments: historical ? [] : [attachment],
@@ -363,8 +395,12 @@ it.each([
         },
       });
       expect(result.status).toBe("succeeded");
-      expect(result.agentBudget?.toolCalls).toBe(historical ? 3 : 2);
-      expect(requests).toHaveLength(historical ? 4 : 3);
+      if (result.status === "succeeded")
+        expect(result.text).toBe(expectedOutput);
+      expect(result.agentBudget?.toolCalls).toBe(
+        historical && !visible ? 3 : 2,
+      );
+      expect(requests).toHaveLength(historical && !visible ? 4 : 3);
       const names = requests[0]!.tools!.map((t) => t.name);
       for (const r of requests)
         expect(r.tools!.map((t) => t.name)).toEqual(names);

@@ -1,3 +1,4 @@
+import type { AttachmentContext } from "../attachments/attachment-catalogue.js";
 import type { AttachmentRunInput } from "../attachments/attachment-session.js";
 import type { RegisteredAgentTool } from "./agent-tool-registry.js";
 import type { ChatImageSession } from "./chat-image-session.js";
@@ -643,6 +644,7 @@ export interface AiRouteFailure {
 export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 
 export interface AiRouteRequest {
+  attachmentContext?: AttachmentContext;
   attachmentInput?: AttachmentRunInput;
   runtimeTools?: RegisteredAgentTool[];
   idleDecision?: boolean;

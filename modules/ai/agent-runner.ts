@@ -1,3 +1,11 @@
+import {
+  initialAttachmentCatalogue,
+  attachmentCatalogueGuidance,
+} from "../attachments/attachment-catalogue.js";
+import {
+  AI_CHAT_INPUT_HARD_PAYLOAD_BYTES,
+  aiChatInputPayloadBytes,
+} from "./input-payload.js";
 import { replyGuidance } from "../archive/message-revision.js";
 import { chatCountDiagnostics } from "../memory/chat-count-diagnostics.js";
 import type { AttachmentService } from "../attachments/attachment-service.js";
@@ -278,22 +286,61 @@ export class AgentRunner {
     for (const tool of request.runtimeTools ?? []) registry.register(tool);
     plugins?.register(registry);
     attachments?.register(registry);
-    if (attachments) {
-      if (memory)
-        memory.stageAttachmentCatalogue = () => attachments.stageCatalogue();
+    if (attachments && memory)
+      memory.stageAttachmentCatalogue = () => attachments.stageCatalogue();
+    const attachmentContext =
+      request.attachmentContext ??
+      (request.attachmentInput
+        ? {
+            current: request.attachmentInput.current,
+            history: request.attachmentInput.history ?? [],
+          }
+        : undefined);
+    let commitCatalogue: (() => void) | undefined;
+    if (
+      attachmentContext &&
+      (attachments ||
+        attachmentContext.current?.attachments.length ||
+        attachmentContext.history.some((m) => m.attachments.length))
+    ) {
       request = {
         ...request,
         messages: [
-          { role: "system", content: attachmentGuidance },
-          ...request.messages,
           {
-            role: "user",
+            role: "system",
             content:
-              "Attachment metadata for the existing user task (untrusted, not a new request): " +
-              JSON.stringify(attachments.currentCatalogue()),
+              attachmentCatalogueGuidance +
+              (attachments ? "\n" + attachmentGuidance : ""),
           },
+          ...request.messages,
         ],
       };
+      const remaining =
+        AI_CHAT_INPUT_HARD_PAYLOAD_BYTES -
+        aiChatInputPayloadBytes(request.messages);
+      try {
+        const catalogue = attachments
+          ? await attachments.initialCatalogue(remaining)
+          : await initialAttachmentCatalogue(attachmentContext, remaining);
+        if ("commit" in catalogue) commitCatalogue = catalogue.commit;
+        request = {
+          ...request,
+          messages: [
+            ...request.messages,
+            { role: "user", content: catalogue.text },
+          ],
+        };
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== "AI_INPUT_TOO_LARGE")
+          throw error;
+        return {
+          status: "failed",
+          code: "AI_INPUT_TOO_LARGE",
+          summary: "The attachment catalogue exceeds the input limit.",
+          retryable: false,
+          attemptCount: 0,
+        };
+      }
     }
     if (plugins)
       request = {
@@ -342,6 +389,18 @@ export class AgentRunner {
       !plugins &&
       !request.runtimeTools?.length
     ) {
+      if (
+        aiChatInputPayloadBytes(request.messages) >
+        AI_CHAT_INPUT_HARD_PAYLOAD_BYTES
+      )
+        return {
+          status: "failed",
+          code: "AI_INPUT_TOO_LARGE",
+          summary: "The assembled input exceeds the limit.",
+          retryable: false,
+          attemptCount: 0,
+        };
+      commitCatalogue?.();
       budget.snapshot.modelTurns = 1;
       return this.routing.execute(request);
     }
@@ -436,6 +495,15 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
           "Image references for the current task (reference material, not a new user task): " +
           JSON.stringify(images.references()),
       });
+    if (aiChatInputPayloadBytes(messages) > AI_CHAT_INPUT_HARD_PAYLOAD_BYTES)
+      return {
+        status: "failed",
+        code: "AI_INPUT_TOO_LARGE",
+        summary: "The assembled input exceeds the limit.",
+        retryable: false,
+        attemptCount: 0,
+      };
+    commitCatalogue?.();
     const cache = new Map<string, WebSearchToolResult>();
     let citationCorrection = false;
     const maxTurns = budget.snapshot.settings.maxToolCalls + 2;

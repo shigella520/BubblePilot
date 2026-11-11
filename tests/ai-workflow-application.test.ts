@@ -1044,16 +1044,33 @@ describe("AI workflow", () => {
         text: "Fictional message three",
         at: 1_788_000_003_000,
       },
-    ].map((message) =>
-      adapter.normalize(
-        newMessageWebhook({
-          messageGuid: message.guid,
-          text: message.text,
-          dateCreated: message.at,
-        }),
+    ].map((message) => {
+      const webhook = newMessageWebhook({
+        messageGuid: message.guid,
+        text: message.text,
+        dateCreated: message.at,
+      });
+      return adapter.normalize(
+        {
+          ...webhook,
+          data: {
+            ...webhook.data,
+            attachments:
+              message.guid === "frozen-two"
+                ? []
+                : [
+                    {
+                      guid: `${message.guid}-private-attachment`,
+                      transferName: `${message.guid}.pdf`,
+                      mimeType: "application/pdf",
+                      totalBytes: 100,
+                    },
+                  ],
+          },
+        },
         crypto.randomUUID(),
-      ),
-    );
+      );
+    });
     for (const normalized of envelopes) {
       expect(normalized.kind).toBe("message");
       if (normalized.kind === "message") {
@@ -1082,6 +1099,11 @@ describe("AI workflow", () => {
     expect(serialized).toContain("Fictional message one");
     expect(serialized).toContain("/frozen two");
     expect(serialized).not.toContain("Fictional message three");
+    expect(serialized).toContain("frozen-one.pdf");
+    expect(serialized).not.toContain("frozen-three.pdf");
+    expect(serialized).not.toContain("frozen-one-private-attachment");
+    expect(serialized).toContain("attachment-processing-disabled");
+    expect(aiClient.requests.at(-1)?.tools ?? []).toEqual([]);
   });
 
   it("rejects publishing a workflow whose AI route is unavailable", async () => {

@@ -1,9 +1,13 @@
+import type { InitialAttachmentCatalogue } from "../modules/attachments/attachment-catalogue.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
-import { AttachmentSession } from "../modules/attachments/attachment-session.js";
+import {
+  type AttachmentRunInput,
+  AttachmentSession,
+} from "../modules/attachments/attachment-session.js";
 import { AttachmentStore } from "../modules/attachments/attachment-store.js";
 import { attachmentLimitsSchema } from "../modules/attachments/attachment-policy.js";
 import {
@@ -77,7 +81,7 @@ async function fixture(snapshot = false) {
   const plugins = {
     attachmentChannel: () => channel,
   } as unknown as PluginSession;
-  const input = {
+  const input: AttachmentRunInput = {
     config: {
       enabled: true,
       pluginId: channel.metadata.pluginId,
@@ -394,4 +398,72 @@ it("metadata is not a file snapshot; missing fresh content does not cancel the s
   );
   expect(f.download).not.toHaveBeenCalled();
   expect(f.invalidate).not.toHaveBeenCalled();
+});
+
+it("publishes only committed initial history refs and reuses them in subsequent searches", async () => {
+  const f = await fixture(true);
+  f.input.history = [
+    {
+      ...f.input.current,
+      providerMessageId: "earlier",
+      sentAt: "2026-01-01T00:00:00Z",
+    },
+  ];
+  const prepared = await f.session.initialCatalogue(20000);
+  const c = JSON.parse(
+    prepared.text.slice(prepared.text.indexOf("{")),
+  ) as InitialAttachmentCatalogue;
+  const ref = c.history[0]!.entries[0]!.attachment_ref!;
+  expect((await f.call({ attachment_ref: ref })).value.errorCode).toBe(
+    "ATTACHMENT_REFERENCE_UNAVAILABLE",
+  );
+  prepared.commit();
+  expect(
+    f.session.catalogue({ id: "archive", ...f.input.history[0]! }).entries[0]
+      ?.attachment_ref,
+  ).toBe(ref);
+  expect(f.download).not.toHaveBeenCalled();
+  f.revoke();
+  expect((await f.call({ attachment_ref: ref })).value.errorCode).toBe(
+    "ATTACHMENT_PERMISSION_REVOKED",
+  );
+  expect(f.download).not.toHaveBeenCalled();
+});
+it("does not grant initial history references without authorization or for omitted entries", async () => {
+  const f = await fixture();
+  f.input.history = [{ ...f.input.current, providerMessageId: "older" }];
+  const denied = await f.session.initialCatalogue(20000);
+  const c = JSON.parse(
+    denied.text.slice(denied.text.indexOf("{")),
+  ) as InitialAttachmentCatalogue;
+  expect(c.history[0]!.entries[0]!.attachment_ref).toBeUndefined();
+  expect(c.history[0]!.importUnavailableReason).toBe("history-not-authorized");
+  const g = await fixture(true);
+  g.input.history = [
+    {
+      ...g.input.current,
+      providerMessageId: "older",
+      attachments: Array.from({ length: 20 }, () => ({
+        ...g.input.current.attachments[0]!,
+        fileName: "长".repeat(500) + ".pdf",
+      })),
+    },
+  ];
+  const limited = await g.session.initialCatalogue(1700);
+  const lc = JSON.parse(
+    limited.text.slice(limited.text.indexOf("{")),
+  ) as InitialAttachmentCatalogue;
+  limited.commit();
+  expect(lc.history[0]!.entries).toHaveLength(0);
+  const later = g.session.catalogue(
+    {
+      id: "new",
+      providerMessageId: "later",
+      attachments: Array(100).fill(g.input.current.attachments[0]),
+    },
+    0,
+    undefined,
+    true,
+  );
+  expect(later.entries.filter((e) => e.attachment_ref)).toHaveLength(99);
 });
