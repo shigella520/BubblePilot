@@ -1395,6 +1395,35 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       ).status,
     ).toBe("unavailable");
   });
+  it("history tools report edited and withdrawn states without admin-only retained text", async () => {
+    const id = await chat();
+    const source = await message(id, "虚构早期正文");
+    const scope = (await repo.scope(id, 999, null))!;
+    const session = await service.session(scope);
+    await repo.pool.query(
+      "UPDATE messages SET edited_at='2026-08-10T00:01:00Z',body='虚构最新正文' WHERE id=$1",
+      [source],
+    );
+    const edited = await session.execute("query_chat_messages", "{}");
+    expect(edited).toContain("该消息已编辑");
+    expect(edited).toContain("虚构最新正文");
+    expect(edited).not.toContain("虚构早期正文");
+    await repo.pool.query(
+      "UPDATE messages SET body=NULL,revision_state='retracted',retracted_body='仅供管理员查看的虚构正文' WHERE id=$1",
+      [source],
+    );
+    const withdrawn = await session.execute("query_chat_messages", "{}");
+    expect(withdrawn).toContain("该消息已撤回；原文不提供");
+    expect(withdrawn).not.toContain("仅供管理员");
+    expect(withdrawn).not.toContain("虚构最新正文");
+    await repo.pool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
+      [source],
+    );
+    const fresh = await service.session((await repo.scope(id, 999, null))!);
+    const expired = await fresh.execute("query_chat_messages", "{}");
+    expect(expired).not.toContain("该消息已撤回");
+  });
   it("keeps already-read evidence across revisions while invalidating shared indexes", async () => {
     const id = await chat();
     const source = await message(id, "虚构备份计划原文");

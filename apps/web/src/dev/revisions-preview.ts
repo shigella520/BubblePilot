@@ -37,7 +37,19 @@ const messages = [
       truncated: false,
     },
   },
-  { id: "fictional-retracted", body: null, revisionState: "retracted" },
+  {
+    id: "fictional-retracted",
+    body: null,
+    revisionState: "retracted",
+    retractedBody:
+      "虚构示例：周末活动改在下午三点。这段留存正文只向管理页提供。",
+  },
+  {
+    id: "fictional-retracted-old",
+    body: null,
+    revisionState: "retracted",
+    retractedBody: null,
+  },
   {
     id: "fictional-partial",
     body: null,

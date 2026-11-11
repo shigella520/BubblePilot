@@ -317,7 +317,9 @@ export class MessageRevisionService implements RevisionIngestion {
               : detail.state;
           if (detail.sourceTime) {
             await db.query(
-              `UPDATE messages SET body=$2,attachments=$3::jsonb,content_hash=$4,
+              `UPDATE messages SET
+              retracted_body=CASE WHEN $5 IN ('retracted','partial') THEN COALESCE(retracted_body,body) ELSE retracted_body END,
+              body=$2,attachments=$3::jsonb,content_hash=$4,
               content_type=CASE WHEN $2::text IS NOT NULL THEN CASE WHEN jsonb_array_length($3::jsonb)>0 THEN 'mixed' ELSE 'text' END ELSE CASE WHEN jsonb_array_length($3::jsonb)>0 THEN 'attachment' ELSE 'unknown' END END,
               revision_state=$5,revision_number=revision_number+1,revision_source_at=$6,edited_at=CASE WHEN $5='active' THEN $6::timestamptz ELSE edited_at END,revision_hash=$4,
               reply_target_guid=COALESCE($7,reply_target_guid),reply_part=COALESCE($8,reply_part),

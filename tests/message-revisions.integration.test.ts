@@ -147,6 +147,61 @@ describe.runIf(!!url)("archive-only message revisions", () => {
       ).rows[0]?.n,
     ).toBe("0");
   });
+  it("retains only the last archived pre-withdrawal text for administrators, clears it on retention", async () => {
+    const f = await fixture();
+    f.set(1788000001000, { text: "编辑后的虚构留存正文" });
+    await f.notify(1788000001000);
+    await service.tick();
+    expect((await archive.findMessage(f.id))?.retractedBody).toBeNull();
+    f.set(1788000002000, {
+      partCount: 0,
+      messageSummaryInfo: [{ retractedParts: [0] }],
+    });
+    await f.notify(1788000002000);
+    await service.tick();
+    expect(await archive.findMessage(f.id)).toMatchObject({
+      body: null,
+      retractedBody: "编辑后的虚构留存正文",
+      revisionState: "retracted",
+    });
+    const query = {
+      chatId: null,
+      keyword: null,
+      senderId: null,
+      sentFrom: null,
+      sentTo: null,
+      limit: 100,
+      cursor: null,
+    };
+    const chatId = (
+      await db.query<{ chat_id: string }>(
+        "SELECT chat_id FROM messages WHERE id=$1",
+        [f.id],
+      )
+    ).rows[0]!.chat_id;
+    expect(
+      (await archive.searchMessages({ ...query, chatId }))[0]?.retractedBody,
+    ).toBe("编辑后的虚构留存正文");
+    f.set(1788000003000, { text: "不应恢复或覆盖留存正文" });
+    await f.notify(1788000003000);
+    await service.tick();
+    expect((await archive.findMessage(f.id))?.retractedBody).toBe(
+      "编辑后的虚构留存正文",
+    );
+    await db.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
+      [f.id],
+    );
+    expect(
+      (
+        await db.query<{ retracted_body: string | null }>(
+          "SELECT retracted_body FROM messages WHERE id=$1",
+          [f.id],
+        )
+      ).rows[0]?.retracted_body,
+    ).toBeNull();
+    expect((await archive.findMessage(f.id))?.retractedBody).toBeNull();
+  });
   it("withdraws text and derived content without restoring it on later edits", async () => {
     const f = await fixture();
     f.set(1788000002000, {

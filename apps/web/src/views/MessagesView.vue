@@ -156,6 +156,7 @@ watch(
 onBeforeUnmount(closeQuote);
 
 interface MessageResult {
+  retractedBody?: string | null;
   revisionState?: "active" | "retracted" | "partial" | "unresolved";
   editedAt?: string | null;
   replyTo?: {
@@ -1246,9 +1247,38 @@ onBeforeUnmount(() =>
               <span v-else>{{ quoteLabel(item.replyTo.status) }}</span>
             </blockquote>
             <p v-if="item.contentRedactedAt">【内容已按保留策略清理】</p>
-            <p v-else-if="revisionLabel(item.revisionState)">
-              {{ revisionLabel(item.revisionState) }}
-            </p>
+            <div
+              v-else-if="revisionLabel(item.revisionState)"
+              class="message-revision-body"
+            >
+              <span class="message-revision-badge">{{
+                revisionLabel(item.revisionState)
+              }}</span>
+              <template v-if="item.retractedBody != null">
+                <p class="muted">撤回前留存正文 · 仅管理页可见</p>
+                <template v-if="isLongMessage(item.retractedBody)">
+                  <p class="message-body-collapsed">
+                    {{ messagePreview(item.retractedBody) }}
+                  </p>
+                  <details class="message-body-details">
+                    <summary>
+                      展开留存正文（{{ item.retractedBody.length }} 字符）
+                    </summary>
+                    <p>{{ item.retractedBody }}</p>
+                  </details>
+                </template>
+                <p v-else>{{ item.retractedBody || "【空正文】" }}</p>
+              </template>
+              <p
+                v-else-if="
+                  item.revisionState === 'retracted' ||
+                  item.revisionState === 'partial'
+                "
+                class="muted"
+              >
+                原文未保留
+              </p>
+            </div>
             <template v-else-if="item.body && isLongMessage(item.body)">
               <p class="message-body-collapsed">
                 {{ messagePreview(item.body) }}
@@ -1576,9 +1606,27 @@ onBeforeUnmount(() =>
         {{ new Date(quotedMessage.sentAt).toLocaleString() }}
       </p>
       <p v-if="quotedMessage.contentRedactedAt">内容已按保留策略清理</p>
-      <p v-else-if="revisionLabel(quotedMessage.revisionState)">
-        {{ revisionLabel(quotedMessage.revisionState) }}
-      </p>
+      <div
+        v-else-if="revisionLabel(quotedMessage.revisionState)"
+        class="message-revision-body"
+      >
+        <span class="message-revision-badge">{{
+          revisionLabel(quotedMessage.revisionState)
+        }}</span>
+        <template v-if="quotedMessage.retractedBody != null">
+          <p class="muted">撤回前留存正文 · 仅管理页可见</p>
+          <p>{{ quotedMessage.retractedBody || "【空正文】" }}</p>
+        </template>
+        <p
+          v-else-if="
+            quotedMessage.revisionState === 'retracted' ||
+            quotedMessage.revisionState === 'partial'
+          "
+          class="muted"
+        >
+          原文未保留
+        </p>
+      </div>
       <p v-else style="white-space: pre-wrap; overflow-wrap: anywhere">
         {{ quotedMessage.body || "非文本消息" }}
       </p>
@@ -1760,5 +1808,25 @@ onBeforeUnmount(() =>
 .message-quote p {
   white-space: pre-wrap;
   margin: 6px 0;
+}
+</style>
+
+<style scoped>
+.message-revision-body {
+  border-left: 3px solid var(--color-border, #d6cbb8);
+  padding-left: 12px;
+}
+.message-revision-body p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.message-revision-badge {
+  display: inline-flex;
+  padding: 3px 9px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--color-text-muted, #776d60);
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

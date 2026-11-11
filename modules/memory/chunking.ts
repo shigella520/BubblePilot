@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 export interface MemoryMessage {
   replyTo?: ReplyPreview;
   revisionState?: RevisionState;
+  editedAt?: string | null;
   providerMessageId?: string;
   attachments?: readonly MessageAttachment[];
   id: string;

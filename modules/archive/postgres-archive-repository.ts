@@ -1,3 +1,4 @@
+import { messageRevisionNotice } from "./message-revision.js";
 import type { ReplyPreview, RevisionState } from "./message-revision.js";
 import type { MessageAuthor } from "../identity/bot-identity.js";
 import { randomUUID } from "node:crypto";
@@ -75,6 +76,7 @@ interface ChatRow {
 }
 
 interface MessageRow {
+  retracted_body: string | null;
   revision_state: RevisionState;
   edited_at: Date | null;
   reply_to: ReplyPreview | null;
@@ -104,6 +106,7 @@ interface MessageSearchRow extends MessageRow {
 
 interface ContextMessageRow {
   revision_state: RevisionState;
+  edited_at: Date | null;
   reply_to: ReplyPreview | null;
   message_index: string;
   provider_message_id: string;
@@ -148,6 +151,11 @@ function chatSummary(row: ChatRow): ChatSummary {
 
 function archivedMessage(row: MessageRow): ArchivedMessage {
   return {
+    retractedBody:
+      !row.content_redacted_at &&
+      ["retracted", "partial"].includes(row.revision_state)
+        ? (row.retracted_body ?? null)
+        : null,
     revisionState: row.revision_state,
     editedAt: row.edited_at?.toISOString() ?? null,
     ...(row.reply_to ? { replyTo: row.reply_to } : {}),
@@ -795,7 +803,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
-         m.revision_state,m.edited_at,message_reply_preview(m.id,0,m.message_index) AS reply_to, m.content_type,
+         m.revision_state,m.edited_at,m.retracted_body,message_reply_preview(m.id,0,m.message_index) AS reply_to, m.content_type,
          m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.link_preview_status, m.link_previews,
          m.link_preview_error_code, m.link_preview_diagnostics,
          m.link_preview_fetched_at, m.content_redacted_at, m.created_at
@@ -826,7 +834,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageSearchRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
-         m.revision_state,m.edited_at,message_reply_preview(m.id,0,m.message_index) AS reply_to,
+         m.revision_state,m.edited_at,m.retracted_body,message_reply_preview(m.id,0,m.message_index) AS reply_to,
          m.content_type, m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.content_redacted_at,
          m.created_at, m.link_preview_status, m.link_previews,
          m.link_preview_error_code, m.link_preview_diagnostics,
@@ -873,7 +881,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
-         m.revision_state,m.edited_at,message_reply_preview(m.id,0,m.message_index) AS reply_to,
+         m.revision_state,m.edited_at,m.retracted_body,message_reply_preview(m.id,0,m.message_index) AS reply_to,
          m.content_type, m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.link_preview_status,
          m.link_previews, m.link_preview_error_code,
          m.link_preview_diagnostics, m.link_preview_fetched_at,
@@ -892,11 +900,11 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     options: ContextWindowOptions,
   ): Promise<readonly ContextMessage[]> {
     const result = await this.pool.query<ContextMessageRow>(
-      `SELECT message_index::text, provider_message_id, sender_id, sent_at, body, is_from_me, author, attachments,revision_state,reply_to,
+      `SELECT message_index::text, provider_message_id, sender_id, sent_at, body, is_from_me, author, attachments,revision_state,edited_at,reply_to,
               link_preview_status, link_previews, link_preview_error_code
        FROM (
          SELECT m.message_index, m.provider_message_id, m.sender_id, m.sent_at,
-                m.revision_state,message_reply_preview(m.id,0,m.message_index) AS reply_to,
+                m.revision_state,m.edited_at,message_reply_preview(m.id,0,m.message_index) AS reply_to,
                 LEFT(COALESCE(m.body, ''), $5) AS body,
                 m.is_from_me, bot_message_author(m.id) AS author, m.id, m.attachments, m.link_preview_status, m.link_previews,
                 m.link_preview_error_code
@@ -905,7 +913,8 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          WHERE c.provider = 'bluebubbles'
            AND c.provider_chat_id = $1
            AND c.enabled = TRUE
-           AND ((m.body IS NOT NULL AND m.body <> '')
+           AND m.content_redacted_at IS NULL
+           AND (m.revision_state IN ('retracted','partial','unresolved') OR (m.body IS NOT NULL AND m.body <> '')
                 OR m.link_preview_status = 'available'
                 OR m.attachments <> '[]'::jsonb)
            AND ($2::boolean OR m.is_from_me = FALSE)
@@ -939,8 +948,13 @@ export class PostgresArchiveRepository implements ArchiveRepository {
           (item.siteName?.length ?? 0),
         0,
       );
+      const revisionCharacters = messageRevisionNotice({
+        revisionState: row.revision_state,
+        editedAt: row.edited_at?.toISOString() ?? null,
+      }).length;
       if (
         characters +
+          revisionCharacters +
           row.body.length +
           previewCharacters +
           JSON.stringify(row.reply_to ?? null).length >
@@ -949,11 +963,13 @@ export class PostgresArchiveRepository implements ArchiveRepository {
         continue;
       }
       characters +=
+        revisionCharacters +
         row.body.length +
         previewCharacters +
         JSON.stringify(row.reply_to ?? null).length;
       selected.push({
         revisionState: row.revision_state,
+        editedAt: row.edited_at?.toISOString() ?? null,
         ...(row.reply_to ? { replyTo: row.reply_to } : {}),
         providerMessageId: row.provider_message_id,
         senderId: row.sender_id,
@@ -1025,6 +1041,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          )
          UPDATE messages m
          SET body = NULL,
+             retracted_body = NULL,
              attachments = '[]'::jsonb,
              link_preview_status = 'redacted',
              link_previews = '[]'::jsonb,

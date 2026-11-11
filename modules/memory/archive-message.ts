@@ -7,6 +7,7 @@ import { contentHash, type MemoryMessage } from "./chunking.js";
 export interface MessageRow {
   reply_to?: ReplyPreview | null;
   revision_state?: RevisionState;
+  edited_at?: Date | string | null;
   provider_message_id?: string;
   id: string;
   message_index: string;
@@ -31,6 +32,7 @@ export function memoryMessage(row: MessageRow): MemoryMessage {
     .join("\n");
   return {
     id: row.id,
+    editedAt: row.edited_at ? new Date(row.edited_at).toISOString() : null,
     ...(row.reply_to ? { replyTo: row.reply_to } : {}),
     ...(row.revision_state ? { revisionState: row.revision_state } : {}),
     ...(row.provider_message_id
@@ -61,5 +63,5 @@ export function memoryMessage(row: MessageRow): MemoryMessage {
     ),
   };
 }
-export const messageColumns = `m.revision_state,message_reply_preview(m.id,0,m.message_index) AS reply_to,m.id,m.provider_message_id,m.message_index,m.sent_at,m.sender_id,m.is_from_me,bot_message_author(m.id) AS author,m.body,m.attachments,m.link_previews,
+export const messageColumns = `m.revision_state,m.edited_at,message_reply_preview(m.id,0,m.message_index) AS reply_to,m.id,m.provider_message_id,m.message_index,m.sent_at,m.sender_id,m.is_from_me,bot_message_author(m.id) AS author,m.body,m.attachments,m.link_previews,
  (SELECT string_agg(s.summary,E'\n' ORDER BY s.id) FROM message_image_summaries s WHERE s.message_id=m.id AND s.status='succeeded') images`;

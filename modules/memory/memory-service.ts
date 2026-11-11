@@ -1,3 +1,7 @@
+import {
+  messageRevisionNotice,
+  visibleRevisionText,
+} from "../archive/message-revision.js";
 import { countPageCharacters } from "./chat-count-buckets.js";
 import {
   attachmentPageSize,
@@ -409,6 +413,8 @@ export class MemorySession {
           return (
             other?.id === m.id &&
             other.hash === m.hash &&
+            other.revisionState === m.revisionState &&
+            other.editedAt === m.editedAt &&
             other.text === m.text &&
             (other.excerptStart ?? 0) === (m.excerptStart ?? 0) &&
             (other.excerptEnd ??
@@ -434,7 +440,7 @@ export class MemorySession {
       text: messages
         .map(
           (m) =>
-            `${m.sentAt} sender_id=${m.senderId} author=${m.author ? authorLabel(m.author) : "unknown"}\n${m.text}${m.replyTo ? `\nreply_to=${JSON.stringify(m.replyTo)}` : ""}${m.revisionState && m.revisionState !== "active" ? `\nmessage_state=${m.revisionState}` : ""}`,
+            `${m.sentAt} sender_id=${m.senderId} author=${m.author ? authorLabel(m.author) : "unknown"}\n${[messageRevisionNotice(m), visibleRevisionText(m, m.text)].filter(Boolean).join("\n")}${m.replyTo ? `\nreply_to=${JSON.stringify(m.replyTo)}` : ""}${m.revisionState && m.revisionState !== "active" ? `\nmessage_state=${m.revisionState}` : ""}`,
         )
         .join("\n"),
       ...(this.imagesEnabled

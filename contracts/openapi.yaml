@@ -14,7 +14,7 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: getArchivedMessage
-      description: Requires sensitive unlock and an enabled chat. Returns current archived message with revisionState, editedAt and optional replyTo. Quote previews are bounded to earlier messages in the same authorized chat; withdrawn content is not returned.
+      description: Requires sensitive unlock and an enabled chat. Returns current archived message with revisionState, editedAt and optional replyTo. Quote previews are bounded to earlier messages in the same authorized chat; withdrawn content is never included in quote previews. Sensitive admin responses may include retractedBody containing the locally retained pre-withdrawal text; null when unavailable or expired.
       security: [{ sessionAuth: [] }]
       responses:
         "200": { description: Current message and revision metadata }

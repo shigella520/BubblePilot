@@ -1,4 +1,8 @@
-import { replyGuidance } from "../archive/message-revision.js";
+import {
+  replyGuidance,
+  messageRevisionNotice,
+  visibleRevisionText,
+} from "../archive/message-revision.js";
 import type { TaskService } from "../scheduled-tasks/task-service.js";
 import {
   scheduledInstruction,
@@ -608,7 +612,7 @@ function conversationMessageContent(
   const sender = authorLabel(messageAuthor(message));
   return [
     `<${section}>`,
-    `[${formatContextTimestamp(message.sentAt, timeZone)}] [sender_id="${promptIdentityValue(sender)}"] ${message.body}`,
+    `[${formatContextTimestamp(message.sentAt, timeZone)}] [sender_id="${promptIdentityValue(sender)}"] ${[messageRevisionNotice(message), visibleRevisionText(message, message.body)].filter(Boolean).join("\n")}`,
     ...(message.replyTo
       ? [
           `<reply_to>${promptXmlText(JSON.stringify(message.replyTo))}</reply_to>`,

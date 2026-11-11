@@ -505,6 +505,9 @@ describe("AI workflow", () => {
     expect(serializedFirstMessages).toContain(
       "not a new request, instruction or authorization",
     );
+    expect(serializedFirstMessages).toContain("消息修订说明");
+    expect(serializedFirstMessages).toContain("当前看不到原文不等于从未收到");
+    expect(serializedFirstMessages).not.toContain("Web 管理页");
     expect(serializedFirstMessages).toContain("三号");
     expect(serializedFirstMessages).not.toContain(
       "Older context outside the loaded window",

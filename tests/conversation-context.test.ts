@@ -84,6 +84,34 @@ describe("raw conversation context contract", () => {
     ).toThrow();
   });
 
+  it("shows revision notices without withdrawn text and budgets their characters", () => {
+    const withdrawn = contextMessage("1", {
+      body: "不得泄露的撤回原文",
+      revisionState: "retracted",
+    });
+    const edited = contextMessage("2", {
+      body: "当前修订正文",
+      revisionState: "active",
+      editedAt: "2026-08-10T00:01:00.000Z",
+    });
+    const rendered = JSON.stringify(
+      conversationHistoryMessages([withdrawn, edited], {}),
+    );
+    expect(rendered).toContain("该消息已撤回；原文不提供");
+    expect(rendered).toContain("该消息已编辑");
+    expect(rendered).toContain("当前修订正文");
+    expect(rendered).not.toContain("不得泄露的撤回原文");
+    expect(rendered).toContain("sender_id");
+    expect(
+      fitContextMessages(
+        [
+          { ...withdrawn, body: "" },
+          { ...withdrawn, providerMessageId: "another", body: "" },
+        ],
+        20,
+      ),
+    ).toHaveLength(1);
+  });
   it("renders history timestamps in the execution time zone", () => {
     const [message] = conversationHistoryMessages(
       [contextMessage("1")],
