@@ -178,7 +178,7 @@ describe.runIf(!!url)("archive-only message revisions", () => {
         data: {
           ...replyInput.data,
           threadOriginatorGuid: f.guid,
-          threadOriginatorPart: "0",
+          threadOriginatorPart: "0:0:2",
         },
       },
       randomUUID(),
@@ -215,11 +215,99 @@ describe.runIf(!!url)("archive-only message revisions", () => {
       message_id: f.guid,
     });
   });
+  it.each(["0", "0:0:1", "0:0:12", "0:2:12"])(
+    "hydrates composite text quote %s before the current execution reads it",
+    async (part) => {
+      const f = await fixture();
+      const input = newMessageWebhook({
+        chatGuid: f.chat,
+        messageGuid: `quote-${randomUUID()}`,
+        text: "请解释我引用的内容",
+      });
+      const n = adapter.normalize(
+        { ...input, data: { ...input.data, threadOriginatorGuid: f.guid } },
+        randomUUID(),
+      );
+      if (n.kind !== "message") throw new Error("fixture");
+      const guid = n.envelope.message.providerMessageId;
+      testGuids.add(guid);
+      const saved = await archive.ingestMessage(n.envelope, true);
+      details.set(
+        guid,
+        parseMessageDetail({
+          guid,
+          chats: [{ guid: f.chat }],
+          attachments: [],
+          text: n.envelope.message.text,
+          partCount: 1,
+          threadOriginatorGuid: f.guid,
+          threadOriginatorPart: part,
+        }),
+      );
+      expect(await service.attachReply(n.envelope, "0")).toMatchObject({
+        status: "available",
+        text_preview: "原文",
+        part_id: part,
+      });
+      expect(
+        (await archive.findMessage(saved.messageId!))?.replyTo,
+      ).toMatchObject({
+        status: "available",
+        text_preview: "原文",
+        part_id: part,
+      });
+      // Previously archived raw identifiers work without replaying the webhook.
+      await db.query("UPDATE messages SET body='更新后的原文' WHERE id=$1", [
+        f.id,
+      ]);
+      expect(
+        (await archive.findMessage(saved.messageId!))?.replyTo,
+      ).toMatchObject({
+        status: "available",
+        text_preview: "更新后的原文",
+      });
+      await db.query("UPDATE messages SET attachments=$2::jsonb WHERE id=$1", [
+        f.id,
+        JSON.stringify([{ providerAttachmentId: "fictional-attachment" }]),
+      ]);
+      expect(
+        (await archive.findMessage(saved.messageId!))?.replyTo?.status,
+      ).toBe("unresolved");
+    },
+  );
+  it.each([
+    null,
+    "",
+    "1",
+    "1:0:1",
+    "10:0:1",
+    "00:0:1",
+    "0:0",
+    "0:0:1:2",
+    "0:-1:1",
+    "0:0:x",
+    "0:0:1junk",
+    "0:0:1\n",
+  ])(
+    "keeps unsupported or malformed reply part %s unresolved",
+    async (part) => {
+      const f = await fixture();
+      const source = await fixture();
+      await db.query(
+        "UPDATE messages SET chat_id=(SELECT chat_id FROM messages WHERE id=$2),message_index=2,reply_target_guid=$3,reply_part=$4 WHERE id=$1",
+        [source.id, f.id, f.guid, part],
+      );
+      expect((await archive.findMessage(source.id))?.replyTo).toEqual({
+        status: "unresolved",
+        message_id: f.guid,
+      });
+    },
+  );
   it("does not expose cross-chat targets and hides ambiguous partial content", async () => {
     const f = await fixture();
     const other = await fixture();
     await db.query(
-      "UPDATE messages SET reply_target_guid=$2,reply_part='0' WHERE id=$1",
+      "UPDATE messages SET reply_target_guid=$2,reply_part='0:0:2' WHERE id=$1",
       [other.id, f.guid],
     );
     expect((await archive.findMessage(other.id))?.replyTo).toEqual({
