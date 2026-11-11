@@ -1,3 +1,6 @@
+import { MessageRevisionService } from "../modules/archive/message-revision-service.js";
+import { ManagedMessageDetailClient } from "../modules/integrations/bluebubbles/message-detail.js";
+import { createPostgresPool } from "../modules/shared/postgres-pool.js";
 import { AttachmentService } from "../modules/attachments/attachment-service.js";
 import { AttachmentStore } from "../modules/attachments/attachment-store.js";
 import { TaskService } from "../modules/scheduled-tasks/task-service.js";
@@ -368,7 +371,14 @@ const application = buildApplication(config, repository, {
     repository: dataExportRepository,
     service: new DataExportService(dataExportRepository),
   },
-  blueBubbles: { settings: blueBubblesSettings, linkPreviewEnricher },
+  blueBubbles: {
+    settings: blueBubblesSettings,
+    linkPreviewEnricher,
+    revisions: new MessageRevisionService(
+      createPostgresPool(config.databaseUrl, 2, config.databaseQueryTimeoutMs),
+      new ManagedMessageDetailClient(blueBubblesSettings),
+    ),
+  },
   ...(messageRetention === undefined ? {} : { messageRetention }),
   imageSummary: {
     scheduler: imageSummaryWorker,

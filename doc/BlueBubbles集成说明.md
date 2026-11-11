@@ -39,9 +39,9 @@ BlueBubbles 不附加自定义签名或共享密钥请求头，因此 Webhook UR
 https://bubblepilot.example.com/api/v1/webhooks/bluebubbles?token=<BLUEBUBBLES_WEBHOOK_SECRET>
 ```
 
-在 BlueBubbles Server 中订阅 `New Messages`。生产环境必须使用 HTTPS 或受控私网，并关闭反向代理对该路径查询串的访问日志。支持自定义 Header 的其他调用方可使用 `X-BubblePilot-Webhook-Secret`。
+在 BlueBubbles Server 中订阅 `New Messages`；接收编辑／撤回还需订阅 `Updated Messages`。生产环境必须使用 HTTPS 或受控私网，并关闭反向代理对该路径查询串的访问日志。支持自定义 Header 的其他调用方可使用 `X-BubblePilot-Webhook-Secret`。
 
-处理顺序：
+新消息处理顺序（内容更新使用文末的独立归档修订分支）：
 
 ```text
 校验 Secret 和请求大小
@@ -141,10 +141,20 @@ correlationId
 
 ### Agent 看图读取
 
-`view_chat_image` 复用附件下载服务，以 `original=false` 获取网关的兼容图片版本；“查看图片”不承诺原始分辨率或原文件。只接收运行内已授权附件引用，不开放任意 URL。下载超时受图片设置和 Agent 剩余工具时间双重限制，源失效或取消后的迟到响应不交给模型。网关成功返回图片与模型正确理解图片是不同的验收项目。
+`view_chat_image` 复用附件下载服务，以 `original=false` 获取网关的兼容图片版本；“查看图片”不承诺原始分辨率或原文件。只接收运行内已授权附件引用，不开放任意 URL。下载超时受图片设置和 Agent 剩余工具时间双重限制，首次读取时源不可用、真正撤权或取消后的迟到响应不交给模型；已获准并完整读取的图片遵循本轮读取快照，不因后来原消息修订被丢弃。网关成功返回图片与模型正确理解图片是不同的验收项目。
 
 ## 受控附件下载
 
 归档附件元数据是发现与授权依据，BlueBubbles 只负责按受控附件 ID 交付文件。`BlueBubblesAttachmentDownloader` 在确认应用侧授权后使用配置的网关调用附件 download，指定 `original=true`；不向沙箱透传网关口令，不跟随下载重定向。下载流实际大小、哈希与内容由附件模块校验，不能只信任 totalBytes／Content-Length。404／410 表示网关文件已不可用；归档元数据不会因此自动删除。
 
 图片理解仍使用原有兼容图片链路，与“原文件进入任务沙箱”独立。附件实现的本地验收使用虚构 HTTP 网关；真实 BlueBubbles 下载、网络代理与 NAS 联调另行验收，不能把模拟网关通过等同于所有网关版本兼容。
+
+## 编辑、撤回与引用接入
+
+新增 `updated-message` 内容修订分支：只在存在有效编辑／撤回时间时归一化为 `message-revision-v1`，仅送达／已读事件继续忽略。新消息读取 `threadOriginatorGuid`／`threadOriginatorPart`，保存引用关系，不生成额外自动化事件。
+
+固定上游提交的[可行性证据](experiments/message-revisions/README.md)表明 Webhook 使用通知序列化，更新事件省略 `chats`，摘要及引用部分可能缺失。不能复用新消息必填合同或依靠空正文判断撤回。适配器仅对本地已归档目标调用单条详情接口，显式请求 `chats,attachments,attributedBody,messageSummaryInfo`；不补拉未归档的引用目标。请求最多 8 秒（同时受现有网关超时限制）、响应最多 2 MiB、禁止重定向，不记录凭据或完整摘要；只提取当前状态，不保存编辑历史。
+
+引用新消息缺少部分标识时可以进行一次有界详情查询；失败返回未解析引用并由队列有限重试，不导致新消息自动化失败。更新详情可能比通知更新，以详情源时间为准；404／网络失败不是撤回证据。`dateEdited`、`dateRetracted`、`partCount` 与 `messageSummaryInfo[0].retractedParts` 综合判断。多部分精确映射未获目标环境验证时，返回 partial／unresolved 并隐藏无法确认的内容；引用仅对显式部分 `0` 的无附件文本目标展开，其余保留未解析状态。禁止按附件顺序猜部分标识。
+
+部署需订阅 `new-message` 与 `updated-message`。本地虚构数据验证与实际 macOS／BlueBubbles 联调分开记录，不假定部署网关与调研的上游提交完全一致。

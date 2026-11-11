@@ -1,3 +1,7 @@
+import type {
+  ReplyPreview,
+  RevisionState,
+} from "../archive/message-revision.js";
 import type { Pool, PoolClient } from "pg";
 import type { MessageAuthor } from "../identity/bot-identity.js";
 import type { ImageSummaryRepository } from "../ai/image-summary-repository.js";
@@ -11,6 +15,8 @@ import {
 import { createPostgresPool } from "../shared/postgres-pool.js";
 import type { ContextRuntimeSettings } from "./context-settings-types.js";
 interface MessageRow {
+  revision_state: RevisionState;
+  reply_to: ReplyPreview | null;
   message_index: string;
   provider_message_id: string;
   sender_id: string | null;
@@ -148,6 +154,8 @@ function attachments(value: unknown): readonly MessageAttachment[] {
 
 function contextMessage(row: MessageRow): IndexedContextMessage {
   return {
+    revisionState: row.revision_state,
+    ...(row.reply_to ? { replyTo: row.reply_to } : {}),
     messageIndex: row.message_index,
     providerMessageId: row.provider_message_id,
     senderId: row.sender_id,
@@ -186,6 +194,7 @@ function messageCharacters(message: ContextMessage): number {
   );
   return (
     message.body.length +
+    (message.replyTo ? JSON.stringify(message.replyTo).length : 0) +
     previewCharacters +
     attachmentCharacters +
     imageSummaryCharacters
@@ -432,7 +441,7 @@ export class ConversationContextService {
         snapshot.afterMessageIndex,
       ];
       const rows = await db.query<MessageRow>(
-        `SELECT m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()} ORDER BY m.message_index`,
+        `SELECT m.revision_state,message_reply_preview(m.id,$4,LEAST(m.message_index,$2)) AS reply_to,m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()} ORDER BY m.message_index`,
         values,
       );
       const windowEvicted = await this.evictedRange(db, values);

@@ -6,6 +6,21 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/messages/{messageId}:
+    parameters:
+      - in: path
+        name: messageId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getArchivedMessage
+      description: Requires sensitive unlock and an enabled chat. Returns current archived message with revisionState, editedAt and optional replyTo. Quote previews are bounded to earlier messages in the same authorized chat; withdrawn content is not returned.
+      security: [{ sessionAuth: [] }]
+      responses:
+        "200": { description: Current message and revision metadata }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/plugins/attachment-targets:
     get:
       operationId: listAttachmentSandboxTargets

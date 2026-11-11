@@ -1,3 +1,4 @@
+import type { ReplyPreview, RevisionState } from "./message-revision.js";
 import type { MessageAuthor } from "../identity/bot-identity.js";
 import { randomUUID } from "node:crypto";
 
@@ -46,6 +47,11 @@ interface ClaimedEventRow extends IdentifierRow {
 }
 
 interface InboundEventRow {
+  archive_update?: {
+    status: string;
+    reason: string | null;
+    attempts: number;
+  } | null;
   id: string;
   provider: string;
   external_event_id: string;
@@ -69,6 +75,9 @@ interface ChatRow {
 }
 
 interface MessageRow {
+  revision_state: RevisionState;
+  edited_at: Date | null;
+  reply_to: ReplyPreview | null;
   id: string;
   provider_message_id: string;
   sender_id: string | null;
@@ -94,6 +103,8 @@ interface MessageSearchRow extends MessageRow {
 }
 
 interface ContextMessageRow {
+  revision_state: RevisionState;
+  reply_to: ReplyPreview | null;
   message_index: string;
   provider_message_id: string;
   sender_id: string | null;
@@ -137,6 +148,9 @@ function chatSummary(row: ChatRow): ChatSummary {
 
 function archivedMessage(row: MessageRow): ArchivedMessage {
   return {
+    revisionState: row.revision_state,
+    editedAt: row.edited_at?.toISOString() ?? null,
+    ...(row.reply_to ? { replyTo: row.reply_to } : {}),
     id: row.id,
     providerMessageId: row.provider_message_id,
     senderId: row.sender_id,
@@ -195,6 +209,7 @@ function messageAttachments(value: unknown): readonly MessageAttachment[] {
 
 function inboundEventSummary(row: InboundEventRow): InboundEventSummary {
   return {
+    ...(row.archive_update ? { archiveUpdate: row.archive_update } : {}),
     id: row.id,
     provider: row.provider,
     eventId: row.external_event_id,
@@ -329,9 +344,9 @@ export class PostgresArchiveRepository implements ArchiveRepository {
            id, provider, provider_message_id, chat_id, sender_id, sent_at, body,
            content_type, is_from_me, content_hash, attachments, source_event_id,
            link_preview_status, link_previews, link_preview_error_code,
-           message_index
+           message_index,reply_target_guid,reply_part
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12,
-                   $13, $14::jsonb, $15, $16)
+                   $13, $14::jsonb, $15, $16, $17, $18)
          ON CONFLICT (provider, provider_message_id) DO NOTHING
          RETURNING id`,
         [
@@ -351,6 +366,8 @@ export class PostgresArchiveRepository implements ArchiveRepository {
           JSON.stringify(envelope.message.linkPreview.items),
           envelope.message.linkPreview.errorCode,
           messageIndex,
+          envelope.message.replyReference?.targetGuid ?? null,
+          envelope.message.replyReference?.part ?? null,
         ],
       );
 
@@ -411,7 +428,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
            link_preview_diagnostics = $5::jsonb,
            link_preview_fetched_at = $6
        WHERE provider = 'bluebubbles' AND provider_message_id = $1
-         AND link_preview_status = 'pending'
+         AND link_preview_status = 'pending' AND revision_number=0 AND content_redacted_at IS NULL
        RETURNING link_preview_status, link_previews, link_preview_error_code`,
       [
         input.providerMessageId,
@@ -503,7 +520,9 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<InboundEventRow>(
       `SELECT
          id, provider, external_event_id, correlation_id, event_type, status,
-         automation_outcome, received_at
+         automation_outcome, received_at,
+         (SELECT jsonb_build_object('status',j.status,'reason',j.reason,'attempts',j.attempts)
+          FROM message_revision_jobs j WHERE j.event_key=inbound_events.external_event_id) archive_update
        FROM inbound_events
        WHERE (
          $1::timestamptz IS NULL
@@ -775,7 +794,8 @@ export class PostgresArchiveRepository implements ArchiveRepository {
   ): Promise<readonly ArchivedMessage[]> {
     const result = await this.pool.query<MessageRow>(
       `SELECT
-         m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body, m.content_type,
+         m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
+         m.revision_state,m.edited_at,message_reply_preview(m.id,0,m.message_index) AS reply_to, m.content_type,
          m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.link_preview_status, m.link_previews,
          m.link_preview_error_code, m.link_preview_diagnostics,
          m.link_preview_fetched_at, m.content_redacted_at, m.created_at
@@ -806,6 +826,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageSearchRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
+         m.revision_state,m.edited_at,message_reply_preview(m.id,0,m.message_index) AS reply_to,
          m.content_type, m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.content_redacted_at,
          m.created_at, m.link_preview_status, m.link_previews,
          m.link_preview_error_code, m.link_preview_diagnostics,
@@ -852,6 +873,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<MessageRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
+         m.revision_state,m.edited_at,message_reply_preview(m.id,0,m.message_index) AS reply_to,
          m.content_type, m.is_from_me, bot_message_author(m.id) AS author, m.attachments, m.link_preview_status,
          m.link_previews, m.link_preview_error_code,
          m.link_preview_diagnostics, m.link_preview_fetched_at,
@@ -870,10 +892,11 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     options: ContextWindowOptions,
   ): Promise<readonly ContextMessage[]> {
     const result = await this.pool.query<ContextMessageRow>(
-      `SELECT message_index::text, provider_message_id, sender_id, sent_at, body, is_from_me, author, attachments,
+      `SELECT message_index::text, provider_message_id, sender_id, sent_at, body, is_from_me, author, attachments,revision_state,reply_to,
               link_preview_status, link_previews, link_preview_error_code
        FROM (
          SELECT m.message_index, m.provider_message_id, m.sender_id, m.sent_at,
+                m.revision_state,message_reply_preview(m.id,0,m.message_index) AS reply_to,
                 LEFT(COALESCE(m.body, ''), $5) AS body,
                 m.is_from_me, bot_message_author(m.id) AS author, m.id, m.attachments, m.link_preview_status, m.link_previews,
                 m.link_preview_error_code
@@ -917,13 +940,21 @@ export class PostgresArchiveRepository implements ArchiveRepository {
         0,
       );
       if (
-        characters + row.body.length + previewCharacters >
+        characters +
+          row.body.length +
+          previewCharacters +
+          JSON.stringify(row.reply_to ?? null).length >
         options.maxCharacters
       ) {
         continue;
       }
-      characters += row.body.length + previewCharacters;
+      characters +=
+        row.body.length +
+        previewCharacters +
+        JSON.stringify(row.reply_to ?? null).length;
       selected.push({
+        revisionState: row.revision_state,
+        ...(row.reply_to ? { replyTo: row.reply_to } : {}),
         providerMessageId: row.provider_message_id,
         senderId: row.sender_id,
         sentAt: row.sent_at.toISOString(),

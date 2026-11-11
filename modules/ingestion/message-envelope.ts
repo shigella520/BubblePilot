@@ -1,3 +1,8 @@
+import type {
+  ReplyReference,
+  ReplyPreview,
+  RevisionNotification,
+} from "../archive/message-revision.js";
 import type { LinkPreviewBundle } from "./link-preview.js";
 
 export const MESSAGE_ENVELOPE_SCHEMA_VERSION = "3" as const;
@@ -29,6 +34,8 @@ export interface MessageEnvelope {
     attachments: readonly MessageAttachment[];
     linkPreview: LinkPreviewBundle;
     contentHash: string;
+    replyReference?: ReplyReference;
+    replyTo?: ReplyPreview;
   };
   metadata: {
     isReplay: boolean;
@@ -48,5 +55,6 @@ export interface IgnoredInboundEvent {
 }
 
 export type NormalizedInboundEvent =
+  | { kind: "revision"; notification: RevisionNotification }
   | { kind: "message"; envelope: MessageEnvelope }
   | { kind: "ignored"; event: IgnoredInboundEvent };

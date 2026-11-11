@@ -53,6 +53,8 @@ const newMessageSchema = z
     chats: z.array(chatSchema).min(1),
     attachments: z.array(attachmentSchema).default([]),
     hasPayloadData: z.boolean().optional(),
+    threadOriginatorGuid: z.string().max(1024).nullable().optional(),
+    threadOriginatorPart: z.string().max(256).nullable().optional(),
   })
   .passthrough();
 
@@ -124,6 +126,47 @@ export class BlueBubblesWebhookAdapter {
 
     const event = eventResult.data;
     const payloadHash = hashJson(payload);
+    if (event.type === "updated-message") {
+      const update = z
+        .object({
+          guid: z.string().min(1).max(1024),
+          dateEdited: z
+            .number()
+            .int()
+            .nonnegative()
+            .max(8_640_000_000_000_000)
+            .nullable()
+            .optional(),
+          dateRetracted: z
+            .number()
+            .int()
+            .nonnegative()
+            .max(8_640_000_000_000_000)
+            .nullable()
+            .optional(),
+          text: z.string().nullable().optional(),
+          partCount: z.number().int().nonnegative().optional(),
+        })
+        .safeParse(event.data);
+      if (!update.success)
+        throw new InvalidWebhookError("Invalid message update.");
+      const time = Math.max(
+        update.data.dateEdited ?? 0,
+        update.data.dateRetracted ?? 0,
+      );
+      if (time > 0)
+        return {
+          kind: "revision",
+          notification: {
+            schemaVersion: "message-revision-v1",
+            correlationId,
+            payloadHash,
+            providerMessageId: update.data.guid,
+            eventId: `updated-message:${update.data.guid}:${hashJson(update.data)}`,
+            sourceTime: new Date(time).toISOString(),
+          },
+        };
+    }
     if (event.type !== "new-message") {
       return {
         kind: "ignored",
@@ -199,6 +242,14 @@ export class BlueBubblesWebhookAdapter {
           linkPreview: emptyLinkPreview(
             linkPreviewRequested ? "pending" : "not-requested",
           ),
+          ...(data.threadOriginatorGuid
+            ? {
+                replyReference: {
+                  targetGuid: data.threadOriginatorGuid,
+                  part: data.threadOriginatorPart ?? null,
+                },
+              }
+            : {}),
           contentHash: sha256(JSON.stringify({ text, attachments })),
         },
         metadata: {

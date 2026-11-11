@@ -62,7 +62,7 @@ export const memoryTools: readonly AiToolDefinition[] = [
       name: "count_chat_messages",
       schema: chatCountQuerySchema,
       description:
-        "Count archived MESSAGES exactly in SQL without reading their bodies. Prefer this tool for totals, trends, rankings and activity heatmaps; never fetch message bodies merely to count. groupBy: none, hour (dated timeline with offsets), day, week (Monday start), month, sender, hourOfDay (merge local clock hours across dates), weekday (ISO 1-7). Time dimensions require from/to, at most 366 local dates. Optional breakdownBy: sender with any time dimension, or hourOfDay with weekday. orderBy=countDesc ranks groups, ties use stable keys. Attachment filters count each matching MESSAGE once, not files; filename and type must match the SAME file. authorKind=participant is an archive identity, not verified humanity; unknown includes unidentified senders and unknown-self. Time groups have zero counts for empty readable archive; sender combinations are sparse. totalCount covers ALL matches, not only this page or top N; countsExact applies to returned counts. Follow nextCursor with unchanged filters/grouping/order for more groups, but every page has its own queriedAt snapshot and may change after archive edits. Partial buckets are not full periods; weekday/hourOfDay counts are sums, not daily averages. Results have no message citations. If unavailable or budget exhausted, explain limits; do not fall back to bulk transcript retrieval.",
+        "Count archived MESSAGES exactly in SQL without reading their bodies. Withdrawn message placeholders still count as sends; keyword and attachment filters use only current retained content. Prefer this tool for totals, trends, rankings and activity heatmaps; never fetch message bodies merely to count. groupBy: none, hour (dated timeline with offsets), day, week (Monday start), month, sender, hourOfDay (merge local clock hours across dates), weekday (ISO 1-7). Time dimensions require from/to, at most 366 local dates. Optional breakdownBy: sender with any time dimension, or hourOfDay with weekday. orderBy=countDesc ranks groups, ties use stable keys. Attachment filters count each matching MESSAGE once, not files; filename and type must match the SAME file. authorKind=participant is an archive identity, not verified humanity; unknown includes unidentified senders and unknown-self. Time groups have zero counts for empty readable archive; sender combinations are sparse. totalCount covers ALL matches, not only this page or top N; countsExact applies to returned counts. Follow nextCursor with unchanged filters/grouping/order for more groups, but every page has its own queriedAt snapshot and may change after archive edits. Partial buckets are not full periods; weekday/hourOfDay counts are sums, not daily averages. Results have no message citations. If unavailable or budget exhausted, explain limits; do not fall back to bulk transcript retrieval.",
     },
     {
       name: "get_chat_message_extrema",
@@ -434,7 +434,7 @@ export class MemorySession {
       text: messages
         .map(
           (m) =>
-            `${m.sentAt} sender_id=${m.senderId} author=${m.author ? authorLabel(m.author) : "unknown"}\n${m.text}`,
+            `${m.sentAt} sender_id=${m.senderId} author=${m.author ? authorLabel(m.author) : "unknown"}\n${m.text}${m.replyTo ? `\nreply_to=${JSON.stringify(m.replyTo)}` : ""}${m.revisionState && m.revisionState !== "active" ? `\nmessage_state=${m.revisionState}` : ""}`,
         )
         .join("\n"),
       ...(this.imagesEnabled
@@ -978,7 +978,9 @@ export class MemorySession {
             m.index,
           )
         )[0];
-        if (current?.hash !== m.hash) return false;
+        // Already returned evidence is a run snapshot. Revision is not revocation;
+        // deletion/retention and chat authorization still invalidate access.
+        if (!current) return false;
       }
     return true;
   }

@@ -1,3 +1,4 @@
+import type { MessageRevisionService } from "../modules/archive/message-revision-service.js";
 import {
   schedulePreview,
   scheduleSummary,
@@ -394,6 +395,7 @@ export interface ApplicationOptions {
   blueBubbles?: {
     settings: BlueBubblesSettingsService;
     linkPreviewEnricher?: LinkPreviewEnricher;
+    revisions?: MessageRevisionService;
   };
   messageRetention?: MessageRetentionWorker;
   imageSummary?: {
@@ -667,6 +669,7 @@ export function buildApplication(
     options.imageSummary?.scheduler,
     options.workflow?.conversationContext,
     options.ai?.contextSettings,
+    options.blueBubbles?.revisions,
   );
   const adminRateLimiter = new FixedWindowRateLimiter(
     config.adminRateLimitMax,
@@ -677,6 +680,7 @@ export function buildApplication(
     config.rateLimitWindowSeconds * 1_000,
   );
   application.addHook("onReady", () => {
+    options.blueBubbles?.revisions?.start();
     options.memory?.start();
     options.memes?.start();
     options.memeDelivery?.start();
@@ -2092,6 +2096,24 @@ export function buildApplication(
         })),
         page: messagePage.page,
       };
+    },
+  );
+
+  application.get(
+    "/api/v1/messages/:messageId",
+    {
+      preHandler: requireSensitive("message.content.view", "message"),
+    },
+    async (request) => {
+      const { messageId } = messageParametersSchema.parse(request.params);
+      const message = await repository.findMessage(messageId);
+      if (!message)
+        throw new ApplicationError(
+          "MESSAGE_NOT_FOUND",
+          "Message unavailable",
+          404,
+        );
+      return { data: message };
     },
   );
 
@@ -4247,6 +4269,7 @@ export function buildApplication(
   );
 
   application.addHook("onClose", async () => {
+    await options.blueBubbles?.revisions?.stop();
     await options.memory?.stop();
     await options.imageSummary?.worker.stop();
     await options.memeDelivery?.stop();

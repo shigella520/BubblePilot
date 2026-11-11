@@ -179,6 +179,25 @@ describe("BubblePilot application", () => {
       headers: { authorization: `Bearer ${apiAccessToken}` },
     });
     expect(messagesResponse.statusCode).toBe(200);
+    const archivedId = messagesResponse.json<{ data: Array<{ id: string }> }>()
+      .data[0]!.id;
+    expect(
+      (
+        await application.inject({
+          method: "GET",
+          url: `/api/v1/messages/${archivedId}`,
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await application.inject({
+          method: "GET",
+          url: `/api/v1/messages/${archivedId}`,
+          headers: { authorization: `Bearer ${apiAccessToken}` },
+        })
+      ).json(),
+    ).toMatchObject({ data: { id: archivedId } });
     expect(messagesResponse.json()).toMatchObject({
       data: [
         {

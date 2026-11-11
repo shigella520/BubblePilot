@@ -34,7 +34,7 @@ const scope: MemoryScope = {
 };
 try {
   await pool.query(
-    "CREATE TEMP TABLE messages(id uuid,chat_id uuid,message_index bigint,sent_at timestamptz,sender_id text,body text,content_redacted_at timestamptz,is_from_me boolean,attachments jsonb,link_previews jsonb,bot_attribution_issue text,provider_message_id text)",
+    "CREATE TEMP TABLE messages(id uuid,chat_id uuid,message_index bigint,sent_at timestamptz,sender_id text,body text,content_redacted_at timestamptz,is_from_me boolean,attachments jsonb,link_previews jsonb,bot_attribution_issue text,provider_message_id text,revision_state text default 'active')",
   );
   await pool.query(
     "CREATE TEMP TABLE message_image_summaries(id uuid,message_id uuid,status text,summary text)",

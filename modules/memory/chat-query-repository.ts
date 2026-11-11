@@ -200,7 +200,7 @@ export class ChatQueryRepository {
     if (after)
       where += ` AND (m.sent_at,m.message_index) ${query.order === "asc" ? ">" : "<"} (${filter.parameter(after.sentAt)}::timestamptz,${filter.parameter(after.index)}::bigint)`;
     const page = await this.page<QueryMessageRow>(
-      `SELECT ${messageColumns.replace("m.message_index", "m.message_index::text AS message_index")}, ${exactTime} AS sort_time FROM messages m WHERE ${where} ORDER BY m.sent_at ${direction},m.message_index ${direction} LIMIT ${filter.parameter(query.limit + 1)}`,
+      `SELECT ${messageColumns.replace("m.message_index,", "m.message_index::text AS message_index,")}, ${exactTime} AS sort_time FROM messages m WHERE ${where} ORDER BY m.sent_at ${direction},m.message_index ${direction} LIMIT ${filter.parameter(query.limit + 1)}`,
       filter.values,
       context,
     );
@@ -377,7 +377,7 @@ export class ChatQueryRepository {
       `WITH filtered AS (SELECT m.id,m.sent_at,m.message_index,${key} AS group_key FROM messages m WHERE ${f.where} AND ${f.zone}::text IS NOT NULL), keys AS (${keys}), aggregated AS (${aggregated})
       SELECT k.group_key, ${query.groupBy === "sender" ? "CASE WHEN left(k.group_key,1)='1' THEN substr(k.group_key,2) ELSE NULL END" : "NULL::text"} AS group_sender,
       ${query.groupBy === "sender" ? "(SELECT bot_message_author(f.id) FROM filtered f WHERE f.group_key=k.group_key ORDER BY f.message_index LIMIT 1)" : "NULL::jsonb"} AS group_author,
-      ${extrema ? `NULL::text AS count,${messageColumns.replace("m.message_index", "m.message_index::text AS message_index")},${exactTime} AS sort_time` : "coalesce(a.count,'0') AS count"}
+      ${extrema ? `NULL::text AS count,${messageColumns.replace("m.message_index,", "m.message_index::text AS message_index,")},${exactTime} AS sort_time` : "coalesce(a.count,'0') AS count"}
       FROM keys k LEFT JOIN aggregated a ON a.group_key=k.group_key ${extrema ? "LEFT JOIN messages m ON m.id=a.id" : ""}
       WHERE ${condition} ORDER BY k.group_key COLLATE "C" LIMIT ${f.parameter(query.groupBy === "none" ? 1 : query.limit + 1)}`,
       f.values,

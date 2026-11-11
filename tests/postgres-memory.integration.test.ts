@@ -1395,6 +1395,26 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       ).status,
     ).toBe("unavailable");
   });
+  it("keeps already-read evidence across revisions while invalidating shared indexes", async () => {
+    const id = await chat();
+    const source = await message(id, "虚构备份计划原文");
+    await drain();
+    const scope = (await repo.scope(id, 999, null))!;
+    const session = await service.session(scope);
+    const read = await session.search({ query: "备份" });
+    expect(read.evidence.length).toBeGreaterThan(0);
+    await repo.pool.query(
+      "UPDATE messages SET body=NULL,attachments='[]',revision_state='retracted',revision_number=revision_number+1 WHERE id=$1",
+      [source],
+    );
+    expect(await session.validate()).toBe(true);
+    expect(read.evidence.some((e) => e.text.includes("虚构备份计划原文"))).toBe(
+      true,
+    );
+    expect(await repo.candidates(scope, { query: "备份" }, [1, 0])).toEqual([]);
+    await repo.pool.query("UPDATE chats SET enabled=false WHERE id=$1", [id]);
+    expect(await session.validate()).toBe(false);
+  });
   it("invalidates text, vectors visibility and cached evidence on redaction", async () => {
     const id = await chat();
     const source = await message(id, "虚构备份计划");

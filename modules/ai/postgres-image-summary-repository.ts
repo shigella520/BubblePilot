@@ -135,7 +135,8 @@ export class PostgresImageSummaryRepository implements ImageSummaryRepository {
     const result = await this.pool.query(
       `INSERT INTO message_image_summaries (
          id, message_id, source_type, source_key, attachment_ref, status
-       ) VALUES ($1, $2, $3, $4, $5, 'pending')
+       ) SELECT $1, $2, $3, $4, $5, 'pending' FROM messages m
+       WHERE m.id=$2 AND m.revision_number=0 AND m.content_redacted_at IS NULL
        ON CONFLICT (message_id, source_type, source_key) DO NOTHING`,
       [
         randomUUID(),

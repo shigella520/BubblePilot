@@ -1,3 +1,7 @@
+import type {
+  ReplyPreview,
+  RevisionState,
+} from "../archive/message-revision.js";
 import type { Pool, PoolClient } from "pg";
 
 import { createPostgresPool } from "../shared/postgres-pool.js";
@@ -41,6 +45,9 @@ interface CountRow {
 }
 
 interface MessageRow {
+  revision_state: RevisionState;
+  edited_at: Date | null;
+  reply_to: ReplyPreview | null;
   id: string;
   provider_message_id: string;
   chat_id: string;
@@ -127,6 +134,9 @@ function jobView(row: ExportJobRow, now: Date): DataExportJob {
 
 function messageView(row: MessageRow): DataExportMessage {
   return {
+    revisionState: row.revision_state,
+    editedAt: row.edited_at?.toISOString() ?? null,
+    ...(row.reply_to ? { replyTo: row.reply_to } : {}),
     id: row.id,
     providerMessageId: row.provider_message_id,
     chatId: row.chat_id,
@@ -561,6 +571,7 @@ export class PostgresDataExportRepository implements DataExportRepository {
           `SELECT m.id, m.provider_message_id, m.chat_id, c.provider_chat_id,
                   c.display_name AS chat_display_name, m.sender_id, m.sent_at,
                   m.body, m.content_type, m.is_from_me, m.attachments,
+                  m.revision_state,m.edited_at,message_reply_preview(m.id,0,m.message_index) AS reply_to,
                   m.link_preview_status, m.link_previews,
                   m.link_preview_error_code,
                   m.content_redacted_at, m.created_at

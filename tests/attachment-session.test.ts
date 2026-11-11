@@ -21,7 +21,7 @@ afterEach(async () => {
   for (const root of roots.splice(0))
     await rm(root, { recursive: true, force: true });
 });
-async function fixture() {
+async function fixture(snapshot = false) {
   const root = await mkdtemp(join(tmpdir(), "bp-attachment-unit-"));
   roots.push(root);
   const storage = new AttachmentStore(root);
@@ -33,9 +33,10 @@ async function fixture() {
     sizeBytes: null,
   };
   let authorized = true;
+  let contentAvailable = true;
   const resolve = vi.fn(() =>
     Promise.resolve(
-      authorized
+      authorized && contentAvailable
         ? {
             messageId: "archive-message",
             providerMessageId: "current",
@@ -93,7 +94,10 @@ async function fixture() {
   const session = new AttachmentSession(
     input,
     plugins,
-    { resolve },
+    {
+      resolve,
+      ...(snapshot ? { authorized: () => Promise.resolve(authorized) } : {}),
+    },
     { download },
     storage,
   );
@@ -129,6 +133,9 @@ async function fixture() {
     plugins,
     revoke: () => {
       authorized = false;
+    },
+    removeContent: () => {
+      contentAvailable = false;
     },
     ref: session.currentCatalogue().entries[0]!.attachment_ref!,
   };
@@ -359,4 +366,32 @@ it("extended import time cannot outlive the remaining Agent budget or caller can
     expect(await readdir(f.root)).toEqual([]);
     await f.session.close();
   }
+});
+
+it("keeps read bytes when the archive changes before transfer, but still revokes permissions", async () => {
+  const f = await fixture(true);
+  f.download.mockImplementationOnce(() => {
+    f.removeContent();
+    return Promise.resolve(new Response(Buffer.from("地区,金额\n东,10\n")));
+  });
+  expect((await f.call({ attachment_ref: f.ref })).value.status).toBe(
+    "imported",
+  );
+  await expect(f.session.validate()).resolves.toBeUndefined();
+  expect((await f.call({ attachment_ref: f.ref })).value.reused).toBe(true);
+  expect(f.invalidate).not.toHaveBeenCalled();
+  f.revoke();
+  await expect(f.session.validate()).rejects.toThrow(
+    "ATTACHMENT_PERMISSION_REVOKED",
+  );
+  expect(f.invalidate).toHaveBeenCalled();
+});
+it("metadata is not a file snapshot; missing fresh content does not cancel the session", async () => {
+  const f = await fixture(true);
+  f.removeContent();
+  expect((await f.call({ attachment_ref: f.ref })).value.errorCode).toBe(
+    "ATTACHMENT_REFERENCE_UNAVAILABLE",
+  );
+  expect(f.download).not.toHaveBeenCalled();
+  expect(f.invalidate).not.toHaveBeenCalled();
 });

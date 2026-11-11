@@ -183,14 +183,20 @@ export class ChatImageSession {
   async validate() {
     for (const candidate of this.accepted.values())
       if (
-        (
-          await this.sources.resolve(
-            this.scope,
-            candidate.providerMessageId,
-            candidate.attachmentIndex,
-            candidate.historical,
-          )
-        )?.attachment.providerAttachmentId !== candidate.attachmentId
+        this.sources.authorized
+          ? !(await this.sources.authorized(
+              this.scope,
+              candidate.providerMessageId,
+              candidate.historical,
+            ))
+          : (
+              await this.sources.resolve(
+                this.scope,
+                candidate.providerMessageId,
+                candidate.attachmentIndex,
+                candidate.historical,
+              )
+            )?.attachment.providerAttachmentId !== candidate.attachmentId
       )
         return false;
     return true;
@@ -237,6 +243,50 @@ export class ChatImageSession {
     active();
     if (!(await capable()))
       return output("unavailable", "image-capability-unavailable", ref);
+    if (
+      !this.sources.authorized &&
+      !(await this.sources.resolve(
+        this.scope,
+        candidate.providerMessageId,
+        candidate.attachmentIndex,
+        candidate.historical,
+      ))
+    )
+      return output("unavailable", "source-unavailable", ref);
+    const existing =
+      this.loaded.get(ref) ??
+      [...this.accepted.entries()].flatMap(([key, c]) =>
+        c.providerMessageId === candidate.providerMessageId &&
+        c.attachmentIndex === candidate.attachmentIndex
+          ? [this.loaded.get(key)!]
+          : [],
+      )[0];
+    if (
+      existing &&
+      this.sources.authorized &&
+      !(await this.sources.authorized(
+        this.scope,
+        candidate.providerMessageId,
+        candidate.historical,
+      ))
+    )
+      return output("unavailable", "source-unavailable", ref);
+    if (existing)
+      return {
+        ...output("already-loaded", "already-in-context", ref),
+        text: JSON.stringify({
+          version: 1,
+          status: "already-loaded",
+          reason: "already-in-context",
+          image_ref: ref,
+          imageInputId: existing.imageInput?.imageInputId,
+        }),
+        commit: () => {
+          active();
+          this.strictImages = true;
+          return existing;
+        },
+      };
     const source = await this.sources.resolve(
       this.scope,
       candidate.providerMessageId,
@@ -250,31 +300,6 @@ export class ChatImageSession {
       !isImageAttachment(source.attachment)
     )
       return output("unavailable", "source-unavailable", ref);
-    const existing =
-      this.loaded.get(ref) ??
-      [...this.accepted.entries()].flatMap(([key, c]) =>
-        c.providerMessageId === candidate.providerMessageId &&
-        c.attachmentIndex === candidate.attachmentIndex
-          ? [this.loaded.get(key)!]
-          : [],
-      )[0];
-    if (existing)
-      return {
-        ...output("already-loaded", "already-in-context", ref),
-        text: JSON.stringify({
-          version: 1,
-          status: "already-loaded",
-          reason: "already-in-context",
-          image_ref: ref,
-          imageInputId: existing.imageInput?.imageInputId,
-          sourceMessageId: source.messageId,
-        }),
-        commit: () => {
-          active();
-          this.strictImages = true;
-          return existing;
-        },
-      };
     if (
       this.count >= this.settings.maxTotalImages ||
       this.bytes >= this.settings.maxTotalBytes
@@ -343,19 +368,23 @@ export class ChatImageSession {
     });
     if (text.length > context.maxOutputCharacters)
       return output("unavailable", "tool-output", ref);
-    const current = await this.sources.resolve(
-      this.scope,
-      candidate.providerMessageId,
-      candidate.attachmentIndex,
-      candidate.historical,
-    );
+    const authorized = this.sources.authorized
+      ? await this.sources.authorized(
+          this.scope,
+          candidate.providerMessageId,
+          candidate.historical,
+        )
+      : (
+          await this.sources.resolve(
+            this.scope,
+            candidate.providerMessageId,
+            candidate.attachmentIndex,
+            candidate.historical,
+          )
+        )?.attachment.providerAttachmentId ===
+        source.attachment.providerAttachmentId;
     active();
-    if (
-      !current ||
-      current.attachment.providerAttachmentId !==
-        source.attachment.providerAttachmentId
-    )
-      return output("unavailable", "source-unavailable", ref);
+    if (!authorized) return output("unavailable", "source-unavailable", ref);
     return {
       text,
       commit: () => {

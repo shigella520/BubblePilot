@@ -1,3 +1,4 @@
+import type { ReplyPreview, RevisionState } from "./message-revision.js";
 import type { MessageAuthor } from "../identity/bot-identity.js";
 import type {
   IgnoredInboundEvent,
@@ -30,6 +31,7 @@ export interface IngestionResult {
 }
 
 export interface InboundEventSummary {
+  archiveUpdate?: { status: string; reason: string | null; attempts: number };
   id: string;
   provider: string;
   eventId: string;
@@ -53,6 +55,9 @@ export interface ChatSummary {
 }
 
 export interface ArchivedMessage {
+  revisionState?: RevisionState;
+  editedAt?: string | null;
+  replyTo?: ReplyPreview;
   id: string;
   providerMessageId: string;
   senderId: string | null;
@@ -111,6 +116,8 @@ export interface PageOptions {
 }
 
 export interface ContextMessage {
+  revisionState?: RevisionState;
+  replyTo?: ReplyPreview;
   providerMessageId: string;
   senderId: string | null;
   sentAt: string;

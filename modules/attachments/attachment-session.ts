@@ -62,7 +62,8 @@ export class AttachmentSession {
   constructor(
     readonly input: AttachmentRunInput,
     plugins: PluginSession,
-    private readonly sources: Pick<ChatImageSourceRepository, "resolve">,
+    private readonly sources: Pick<ChatImageSourceRepository, "resolve"> &
+      Partial<Pick<ChatImageSourceRepository, "authorized">>,
     private readonly downloader: Pick<
       BlueBubblesAttachmentDownloader,
       "download"
@@ -205,10 +206,23 @@ export class AttachmentSession {
       true,
     );
   }
-  private async check(candidate?: Candidate) {
+  private async check(candidate?: Candidate, snapshot = false) {
     if (this.ended) throw new AttachmentError("ATTACHMENT_SESSION_INVALIDATED");
     await this.channel.check();
     if (candidate) {
+      if (this.sources.authorized) {
+        if (
+          !(await this.sources.authorized(
+            this.input.scope,
+            candidate.providerMessageId,
+            candidate.historical,
+          ))
+        ) {
+          await this.close();
+          throw new AttachmentError("ATTACHMENT_PERMISSION_REVOKED");
+        }
+        if (snapshot) return null;
+      }
       const source = await this.sources.resolve(
         this.input.scope,
         candidate.providerMessageId,
@@ -221,8 +235,14 @@ export class AttachmentSession {
           ["providerAttachmentId", "fileName", "mimeType", "sizeBytes"] as const
         ).some((key) => source.attachment[key] !== candidate.attachment[key])
       ) {
-        await this.close();
-        throw new AttachmentError("ATTACHMENT_PERMISSION_REVOKED");
+        // Source revision is not permission revocation. Previously read files
+        // continue to use their task snapshot; fresh reads report unavailable.
+        if (!this.sources.authorized) await this.close();
+        throw new AttachmentError(
+          this.sources.authorized
+            ? "ATTACHMENT_REFERENCE_UNAVAILABLE"
+            : "ATTACHMENT_PERMISSION_REVOKED",
+        );
       }
       return source;
     }
@@ -230,7 +250,7 @@ export class AttachmentSession {
   }
   async validate() {
     for (const ref of this.imported.keys())
-      await this.check(this.candidates.get(ref));
+      await this.check(this.candidates.get(ref), true);
   }
   register(registry: AgentToolRegistry) {
     registry.register({
@@ -325,9 +345,12 @@ export class AttachmentSession {
     let stage: Awaited<ReturnType<AttachmentStore["stage"]>> | undefined;
     try {
       signal.throwIfAborted();
-      const source = await this.check(candidate);
       const previous = this.imported.get(ref);
-      if (previous) return { ...previous, reused: true };
+      if (previous) {
+        await this.check(candidate, true);
+        return { ...previous, reused: true };
+      }
+      const source = await this.check(candidate);
       if (this.imported.size >= limits.files)
         throw new AttachmentError("ATTACHMENT_COUNT_LIMIT");
       const maximum = Math.min(
@@ -350,7 +373,7 @@ export class AttachmentSession {
       const validationStarted = Date.now();
       await validateAttachmentFile(stage.file, extension, signal);
       const validationMs = Date.now() - validationStarted;
-      await this.check(candidate);
+      await this.check(candidate, true);
       signal.throwIfAborted();
       const transferStarted = Date.now();
       const result = await this.channel.transfer(
@@ -369,7 +392,7 @@ export class AttachmentSession {
         stage.file,
         signal,
       );
-      await this.check(candidate);
+      await this.check(candidate, true);
       signal.throwIfAborted();
       if (Date.now() >= ctx.deadline)
         throw new AttachmentError("ATTACHMENT_TIMEOUT");

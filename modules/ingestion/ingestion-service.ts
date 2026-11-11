@@ -1,3 +1,4 @@
+import type { RevisionIngestion } from "../archive/message-revision-service.js";
 import type {
   ArchiveRepository,
   IngestionResult,
@@ -37,6 +38,7 @@ export class IngestionService {
     private readonly imageSummary?: ImageSummaryScheduler,
     private readonly conversationContext?: ConversationContextService,
     private readonly contextSettings?: ContextSettingsService,
+    private readonly revisions?: RevisionIngestion,
   ) {}
 
   async ingest(
@@ -44,6 +46,14 @@ export class IngestionService {
     correlationId: string,
   ): Promise<IngestionOutcome> {
     const normalized = this.adapter.normalize(payload, correlationId);
+    if (normalized.kind === "revision") {
+      if (!this.revisions)
+        throw new Error("Message revision service unavailable");
+      return {
+        result: await this.revisions.enqueue(normalized.notification),
+        automationEnvelope: null,
+      };
+    }
     if (normalized.kind === "ignored") {
       return {
         result: await this.repository.recordIgnoredEvent(normalized.event),
@@ -84,6 +94,21 @@ export class IngestionService {
         });
       } catch {
         // Archive ingestion remains available; load-context persists a bounded fallback.
+      }
+    }
+    if (
+      result.messageId &&
+      normalized.envelope.message.replyReference &&
+      this.revisions
+    ) {
+      try {
+        const reply = await this.revisions.attachReply(
+          normalized.envelope,
+          contextTrigger?.contextSnapshot.afterMessageIndex ?? null,
+        );
+        if (reply) normalized.envelope.message.replyTo = reply;
+      } catch {
+        normalized.envelope.message.replyTo = { status: "unresolved" };
       }
     }
     let automationEnvelope = normalized.envelope;
