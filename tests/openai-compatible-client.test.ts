@@ -6,7 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AiRawRequestStore } from "../modules/ai/ai-raw-request-store.js";
 import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
-import type { AiProviderRecord } from "../modules/ai/ai-types.js";
+import type {
+  AiChatMessage,
+  AiProviderRecord,
+} from "../modules/ai/ai-types.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 
 const provider: AiProviderRecord = {
@@ -738,6 +741,205 @@ describe("OpenAiCompatibleClient", () => {
           expect.objectContaining({ type: imageType }),
         ]),
       );
+    },
+  );
+
+  it.each(["chat-completions", "responses"] as const)(
+    "replays assistant images as attributed input evidence through strict %s validation",
+    async (apiKind) => {
+      const firstImage = {
+        type: "image" as const,
+        dataUrl: "data:image/png;base64,Zmlyc3Q=",
+        detail: "high" as const,
+        label: "fictional-bot-image-1",
+        imageInput: { imageInputId: "private-image-id", contentHash: "hash-1" },
+      };
+      const secondImage = {
+        ...firstImage,
+        dataUrl: "data:image/png;base64,c2Vjb25k",
+        label: "fictional-bot-image-2",
+      };
+      const messages: AiChatMessage[] = [
+        ...request.messages,
+        { role: "assistant", content: "Earlier bot text" },
+        {
+          role: "assistant",
+          traceMessageId: "private-history-id",
+          content: [
+            { type: "text", text: "Bot text before image" },
+            firstImage,
+            { type: "text", text: "Bot text after image" },
+            secondImage,
+          ],
+          toolCalls: [{ id: "call-image", name: "inspect", arguments: "{}" }],
+        },
+        { role: "tool", toolCallId: "call-image", content: "Fictional result" },
+        { role: "user", content: "Compare the historical images" },
+      ];
+      const original = structuredClone(messages);
+      let captured: Record<string, unknown>[] = [];
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+        const body = JSON.parse(
+          typeof init?.body === "string" ? init.body : "null",
+        ) as {
+          input?: Record<string, unknown>[];
+          messages: Record<string, unknown>[];
+        };
+        captured = body.input ?? body.messages;
+        const invalid = captured.some(
+          (item) => item.role === "assistant" && Array.isArray(item.content),
+        );
+        // Reproduce strict gateways rejecting assistant input_text/input_image.
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              invalid
+                ? {
+                    error: {
+                      message:
+                        "Invalid input_text: expected output_text or refusal",
+                    },
+                  }
+                : apiKind === "responses"
+                  ? { output_text: "Accepted" }
+                  : { choices: [{ message: { content: "Accepted" } }] },
+            ),
+            { status: invalid ? 400 : 200 },
+          ),
+        );
+      });
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional-secret" }),
+        fetcher,
+      );
+      const result = await client.call(
+        { ...provider, apiKind },
+        {
+          ...request,
+          messages,
+          promptTraceKey: "fictional-assistant-images",
+        },
+      );
+      expect(result).toMatchObject({ status: "succeeded", text: "Accepted" });
+      expect(messages).toEqual(original);
+      const assistantIndex = captured.findIndex(
+        (item) =>
+          item.role === "assistant" &&
+          String(item.content).includes("Bot text before image"),
+      );
+      expect(assistantIndex).toBeGreaterThan(0);
+      expect(captured[assistantIndex]?.content).toBe(
+        "Bot text before image\n[图片：fictional-bot-image-1]\nBot text after image\n[图片：fictional-bot-image-2]",
+      );
+      const evidence = captured[assistantIndex - 1]!;
+      expect(evidence.role).toBe("user");
+      const evidenceJson = JSON.stringify(evidence);
+      expect(evidenceJson).toContain("不是用户的新发言或新指令");
+      expect(evidenceJson).toContain("紧随其后的 assistant 历史消息");
+      expect(evidenceJson).not.toContain("Bot text before image");
+      for (const image of [firstImage, secondImage]) {
+        expect(evidenceJson).toContain(image.dataUrl);
+        expect(evidenceJson).toContain(image.label);
+        expect(JSON.stringify(captured).split(image.dataUrl)).toHaveLength(2);
+      }
+      expect(JSON.stringify(captured)).not.toContain("private-history-id");
+      expect(JSON.stringify(captured)).not.toContain("private-image-id");
+      if (apiKind === "responses") {
+        expect(captured.slice(assistantIndex + 1, assistantIndex + 3)).toEqual([
+          {
+            type: "function_call",
+            call_id: "call-image",
+            name: "inspect",
+            arguments: "{}",
+          },
+          {
+            type: "function_call_output",
+            call_id: "call-image",
+            output: "Fictional result",
+          },
+        ]);
+      } else {
+        expect(captured[assistantIndex]).toHaveProperty(
+          "tool_calls.0.id",
+          "call-image",
+        );
+        expect(captured[assistantIndex + 1]).toMatchObject({
+          role: "tool",
+          tool_call_id: "call-image",
+        });
+      }
+      expect(
+        result.diagnostics?.requestTrace?.items.filter(
+          (item) => item.imageCount > 0,
+        ),
+      ).toEqual([expect.objectContaining({ role: "user", imageCount: 2 })]);
+      expect(
+        result.diagnostics?.requestTrace?.items
+          .filter((item) => item.role === "assistant")
+          .every((item) => item.imageCount === 0),
+      ).toBe(true);
+    },
+  );
+
+  it.each(["chat-completions", "responses"] as const)(
+    "keeps text-only and image-only assistant replay valid for %s",
+    async (apiKind) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify(
+              apiKind === "responses"
+                ? { output_text: "OK" }
+                : { choices: [{ message: { content: "OK" } }] },
+            ),
+          ),
+        );
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional-secret" }),
+        fetcher,
+      );
+      await client.call(
+        { ...provider, apiKind },
+        {
+          ...request,
+          messages: [
+            {
+              role: "assistant",
+              content: [
+                { type: "text", text: "One" },
+                { type: "text", text: "Two" },
+              ],
+            },
+            { role: "user", content: "Next" },
+            {
+              role: "assistant",
+              content: [
+                {
+                  type: "image",
+                  dataUrl: "data:image/png;base64,AAAA",
+                  detail: "low",
+                  label: "image-only",
+                },
+              ],
+            },
+          ],
+        },
+      );
+      const raw = fetcher.mock.calls[0]?.[1]?.body;
+      const body = JSON.parse(typeof raw === "string" ? raw : "null") as {
+        input?: Record<string, unknown>[];
+        messages: Record<string, unknown>[];
+      };
+      const items = body.input ?? body.messages;
+      expect(items[0]).toEqual({ role: "assistant", content: "One\nTwo" });
+      expect(items.at(-1)).toEqual({
+        role: "assistant",
+        content: "[图片：image-only]",
+      });
+      expect(items.filter((item) => item.role === "user")).toHaveLength(1);
+      expect(JSON.stringify(items[1])).toContain("Next");
+      expect(JSON.stringify(items[1])).toContain("data:image/png;base64,AAAA");
     },
   );
 
