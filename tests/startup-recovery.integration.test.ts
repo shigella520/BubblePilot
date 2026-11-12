@@ -11,6 +11,7 @@ import {
   vi,
 } from "vitest";
 import { WorkflowStartupRecovery } from "../modules/workflow/startup-recovery.js";
+import { PostgresMemeRepository } from "../modules/memes/postgres-meme-repository.js";
 import { PostgresWorkflowRepository } from "../modules/workflow/postgres-workflow-repository.js";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -317,6 +318,31 @@ describe.runIf(!!url)(
       expect((await db.query("SELECT * FROM scheduled_tasks")).rows).toEqual(
         before,
       );
+    });
+    it("keeps deleted meme files until an interrupted unknown delivery is explicitly closed", async () => {
+      const id = await execution(),
+        sent = await delivery(id, "sending"),
+        asset = randomUUID();
+      await db.query(
+        "INSERT INTO meme_assets(id,name,mime_type,size,width,height,hash,storage_key,deleted_at) VALUES($1::uuid,'fictional','image/png',10,1,1,'fixture',$1::text,now()-interval '2 days')",
+        [asset],
+      );
+      await db.query(
+        "UPDATE outbound_deliveries SET kind='meme',meme_id=$2 WHERE id=$1",
+        [sent, asset],
+      );
+      await guard().start();
+      const memes = new PostgresMemeRepository(connection);
+      try {
+        expect(await memes.storageKeys()).toContain(asset);
+        await db.query(
+          "UPDATE outbound_deliveries SET closed_at=now() WHERE id=$1",
+          [sent],
+        );
+        expect(await memes.storageKeys()).not.toContain(asset);
+      } finally {
+        await memes.close();
+      }
     });
     it("holds ownership after scanning, rejects a competing runtime and detects a lost connection", async () => {
       const lost = vi.fn(),

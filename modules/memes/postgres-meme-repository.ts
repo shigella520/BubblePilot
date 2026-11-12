@@ -235,7 +235,7 @@ export class PostgresMemeRepository
   async storageKeys() {
     return (
       await this.pool.query<{ storage_key: string }>(
-        "SELECT storage_key FROM meme_assets a WHERE deleted_at IS NULL OR deleted_at>now()-interval '24 hours' OR EXISTS(SELECT 1 FROM outbound_deliveries d JOIN workflow_executions e ON e.id=d.execution_id WHERE e.status<>'closed' AND d.meme_id=a.id AND d.closed_at IS NULL AND d.status IN ('pending','sending','unknown','failed'))",
+        "SELECT storage_key FROM meme_assets a WHERE deleted_at IS NULL OR deleted_at>now()-interval '24 hours' OR EXISTS(SELECT 1 FROM outbound_deliveries d JOIN workflow_executions e ON e.id=d.execution_id WHERE (e.status<>'closed' OR (e.startup_closure IS NOT NULL AND d.status='unknown')) AND d.meme_id=a.id AND d.closed_at IS NULL AND d.status IN ('pending','sending','unknown','failed'))",
       )
     ).rows.map((row) => row.storage_key);
   }
