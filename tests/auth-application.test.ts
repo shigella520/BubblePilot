@@ -172,7 +172,7 @@ describe("Web admin authentication", () => {
       cookie: login.cookies.map((c) => `${c.name}=${c.value}`).join("; "),
       origin: "http://localhost",
     };
-    for (const method of ["GET", "PATCH"] as const)
+    for (const method of ["GET", "PATCH", "DELETE"] as const)
       expect(
         (
           await application.inject({

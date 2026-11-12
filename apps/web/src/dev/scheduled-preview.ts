@@ -121,7 +121,10 @@ window.fetch = (input, init) => {
     };
   } else if (url.pathname.startsWith("/api/v1/scheduled-tasks/")) {
     const task = tasks.find((t) => url.pathname.includes(t.id));
-    if (task && init?.method === "POST") {
+    if (task && init?.method === "DELETE") {
+      tasks.splice(tasks.indexOf(task), 1);
+      data = { id: task.id, deleted: true };
+    } else if (task && init?.method === "POST") {
       task.status = url.pathname.endsWith("/pause")
         ? "paused"
         : url.pathname.endsWith("/cancel")

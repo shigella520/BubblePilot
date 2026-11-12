@@ -25,6 +25,7 @@ done
 docker exec "$old_name" psql -v ON_ERROR_STOP=1 -U fixture -d fixture -c "INSERT INTO chats(id,provider,provider_chat_id,type,enabled) VALUES('00000000-0000-4000-8000-000000000099','bluebubbles','fictional-upgrade-chat','group',false)" >/dev/null
 # Fictional recurring definition and instance must survive with exact schedule/counts.
 docker exec -i "$old_name" psql -v ON_ERROR_STOP=1 -U fixture -d fixture >/dev/null <<'SQL'
+INSERT INTO scheduled_task_deletions(task_id,creation_key,version,reason) VALUES('00000000-0000-4000-8000-000000000095','fictional-deleted-task-create',3,'manual');
 INSERT INTO workflows(id,name,status) VALUES('00000000-0000-4000-8000-000000000098','fictional reminder workflow','draft');
 INSERT INTO scheduled_tasks(id,chat_id,workflow_id,creator_sender_id,scheduled_at,expires_at,timezone,creation_key,schedule,consumed_count)
 VALUES('00000000-0000-4000-8000-000000000097','00000000-0000-4000-8000-000000000099','00000000-0000-4000-8000-000000000098','fictional-member','2030-06-01T09:00:00Z','2030-06-01T09:30:00Z','UTC','fictional-recurring-restore','{"kind":"recurring","startsAt":"2030-06-01T09:00:00Z","rule":{"type":"daily","localTime":"09:00"},"end":{"kind":"count","count":12}}',2);
@@ -40,7 +41,8 @@ docker exec "$new_name" psql -v ON_ERROR_STOP=1 -U fixture -d fixture -c "CREATE
 docker exec -i "$new_name" psql -v ON_ERROR_STOP=1 -U fixture -d fixture >/dev/null <<'SQL'
 DO $$ BEGIN
  IF NOT EXISTS(SELECT 1 FROM scheduled_tasks t JOIN scheduled_task_occurrences o ON o.task_id=t.id WHERE t.creation_key='fictional-recurring-restore' AND t.schedule->>'kind'='recurring' AND t.consumed_count=2 AND o.occurrence_number=3 AND o.status='pending') THEN RAISE EXCEPTION 'recurring fixture missing after restore'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM scheduled_task_deletions WHERE creation_key='fictional-deleted-task-create' AND version=3) THEN RAISE EXCEPTION 'deleted task idempotency marker missing after restore'; END IF;
  IF EXISTS(SELECT 1 FROM scheduled_task_restore_guard) THEN RAISE EXCEPTION 'restore guard must not survive backup'; END IF;
 END $$;
 SQL
-printf '%s\n' 'PostgreSQL 16 Alpine dump restored on pgvector PostgreSQL 16; fixture, recurring definition/instance, restore guard and vector distance verified.'
+printf '%s\n' 'PostgreSQL 16 Alpine dump restored on pgvector PostgreSQL 16; fixture, recurring definition/instance, deleted-task tombstone, restore guard and vector distance verified.'

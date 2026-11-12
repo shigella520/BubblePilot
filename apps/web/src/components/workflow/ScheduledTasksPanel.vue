@@ -26,6 +26,7 @@ function taskOverview(content: string | null): string {
     (characters.length > 56 || opening.length < text.length ? "…" : "")
   );
 }
+const deleting = ref<Task | null>(null);
 const settingsDialog = ref(false);
 const settingsOriginal = ref<Settings | null>(null);
 function openSettings() {
@@ -332,6 +333,23 @@ async function cancel(task: Task) {
       : "操作成功。";
   });
 }
+async function removeTask() {
+  const task = deleting.value;
+  if (!task) return;
+  await action(async () => {
+    await apiRequest(`/api/v1/scheduled-tasks/${task.id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ expectedVersion: task.version }),
+    });
+    deleting.value = null;
+    if (detailTask.value?.id === task.id) {
+      detail.value = null;
+      detailTask.value = null;
+    }
+    notice.value = "任务已删除，工作流执行记录仍保留。";
+    offset.value = 0;
+  });
+}
 async function inspect(task: Task, page = 0) {
   detailOffset.value = page;
   await action(async () => {
@@ -388,7 +406,8 @@ onBeforeUnmount(() => generation++);
         <p class="eyebrow">SCHEDULED TASKS</p>
         <h2>定时任务</h2>
         <p>
-          按聊天和角色登记的单次与周期提醒。修改、暂停、跳过及取消需要敏感验证。
+          按聊天和角色登记的单次与周期提醒。修改、暂停、跳过、取消和删除需要敏感验证。已结束任务满
+          90 天自动清理。
         </p>
       </div>
       <button
@@ -507,6 +526,17 @@ onBeforeUnmount(() => generation++);
                   </button>
                 </template></template
               >
+              <button
+                v-if="['completed', 'cancelled'].includes(task.lifecycle ?? '')"
+                class="button danger-ghost"
+                :disabled="mutating || !session.sensitiveActive"
+                @click="
+                  error = '';
+                  deleting = task;
+                "
+              >
+                删除
+              </button>
             </td>
           </tr>
           <tr v-if="!items.length">
@@ -538,6 +568,32 @@ onBeforeUnmount(() => generation++);
         下一页
       </button>
     </footer>
+    <AdminFormDialog
+      v-if="deleting"
+      title="删除定时任务"
+      :busy="mutating"
+      @close="deleting = null"
+    >
+      <div class="task-dialog-content">
+        <p>
+          确认删除「{{ deleting.summary || taskOverview(deleting.content) }}」？
+        </p>
+        <p>
+          任务及其专属历史记录将被删除，无法在页面恢复。工作流执行审计仍保留，不会重新发送提醒。
+        </p>
+        <p v-if="deleting.status === 'delivery_unknown'">
+          此任务的发送结果未知，删除不代表确认未发送，也不会重试。
+        </p>
+        <p v-if="error" class="task-alert" role="alert">{{ error }}</p>
+        <button
+          class="button danger-ghost"
+          :disabled="mutating || !session.sensitiveActive"
+          @click="removeTask"
+        >
+          {{ mutating ? "删除中…" : "确认删除" }}
+        </button>
+      </div>
+    </AdminFormDialog>
     <AdminDetailDialog
       v-if="editing"
       title="修改定时任务"

@@ -414,6 +414,199 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       ),
     ).rejects.toThrow("TASK_CONTENT_CLEARED");
   });
+  it("deletes only finished tasks, rejects stale versions and retains a creation tombstone", async () => {
+    const s = await setup();
+    const c = await create(s);
+    await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
+      "TASK_DELETE_NOT_FINISHED",
+    );
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 1 },
+      true,
+    );
+    await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
+      "TASK_VERSION_CONFLICT",
+    );
+    expect(
+      await Promise.all([
+        s.tasks.remove(c.task.id, 2),
+        s.tasks.remove(c.task.id, 2),
+      ]),
+    ).toEqual([
+      { id: c.task.id, deleted: true },
+      { id: c.task.id, deleted: true },
+    ]);
+    expect(await s.tasks.remove(c.task.id, 2)).toEqual({
+      id: c.task.id,
+      deleted: true,
+    });
+    await expect(s.tasks.detail(c.task.id)).rejects.toThrow("TASK_NOT_FOUND");
+    expect(
+      (await s.tasks.list({ workflowId: s.version.workflowId })).items,
+    ).toEqual([]);
+    await expect(s.tasks.create(c.executionId, c.input, c.ctx)).rejects.toThrow(
+      "TASK_DELETED",
+    );
+    expect(
+      (
+        await pool.query(
+          "SELECT creation_key,reason FROM scheduled_task_deletions WHERE task_id=$1",
+          [c.task.id],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    for (const table of [
+      "scheduled_tasks",
+      "scheduled_task_occurrences",
+      "scheduled_task_runs",
+      "scheduled_task_events",
+      "scheduled_task_operations",
+    ]) {
+      const column = table === "scheduled_tasks" ? "id" : "task_id";
+      expect(
+        (
+          await pool.query(`SELECT 1 FROM ${table} WHERE ${column}=$1`, [
+            c.task.id,
+          ])
+        ).rowCount,
+      ).toBe(0);
+    }
+  });
+  it("keeps workflow and delivery evidence when deleting a sent reminder", async () => {
+    const s = await setup();
+    const c = await create(s);
+    vi.spyOn(AgentRunner.prototype, "run").mockImplementationOnce(async () => {
+      await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
+        "TASK_DELETE_NOT_FINISHED",
+      );
+      return success("虚构提醒");
+    });
+    await due(c.task.id);
+    await s.scheduler.tick();
+    const d = await s.tasks.detail(c.task.id);
+    const execution = d.runs[0]!.execution_id;
+    const deliveries = (
+      await pool.query(
+        "SELECT id,status FROM outbound_deliveries WHERE execution_id=$1",
+        [execution],
+      )
+    ).rows;
+    await s.tasks.remove(c.task.id, 1);
+    expect(
+      (
+        await pool.query(
+          "SELECT id,status FROM outbound_deliveries WHERE execution_id=$1",
+          [execution],
+        )
+      ).rows,
+    ).toEqual(deliveries);
+    const saved = (
+      await pool.query<{ status: string; content: string }>(
+        "SELECT status,trigger_event->'scheduled'->>'content' AS content FROM workflow_executions WHERE id=$1",
+        [execution],
+      )
+    ).rows[0];
+    expect(saved).toMatchObject({ content: "" });
+    expect(saved?.status).not.toBe("running");
+    expect(s.send).toHaveBeenCalledTimes(1);
+  });
+  it("automatically removes all old terminal items while paused, preserving recent, active and paused tasks", async () => {
+    const s = await setup();
+    const oldIds: string[] = [];
+    for (const status of [
+      "sent",
+      "cancelled",
+      "expired",
+      "failed",
+      "delivery_unknown",
+      "completed",
+    ]) {
+      const c = await create(s);
+      oldIds.push(c.task.id);
+      await pool.query(
+        "UPDATE scheduled_tasks SET lifecycle=$2,status=$3,finished_at=now()-interval '91 days' WHERE id=$1",
+        [c.task.id, status === "cancelled" ? "cancelled" : "completed", status],
+      );
+      await pool.query(
+        "UPDATE scheduled_task_occurrences SET status='sent',finished_at=now()-interval '91 days' WHERE task_id=$1",
+        [c.task.id],
+      );
+    }
+    const active = await create(s),
+      paused = await recurring(s, 4),
+      recent = await create(s);
+    await s.tasks.control(
+      { kind: "admin", id: "fixture" },
+      { id: paused.task.id, expectedVersion: 1 },
+      "pause",
+    );
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      { id: recent.task.id, expectedVersion: 1 },
+      true,
+    );
+    await pool.query(
+      "UPDATE scheduled_tasks SET finished_at=now()-interval '89 days',scheduled_at=now()-interval '100 days' WHERE id=$1",
+      [recent.task.id],
+    );
+    await pool.query(
+      "UPDATE scheduled_task_settings SET paused=true WHERE id=1",
+    );
+    try {
+      await s.scheduler.tick();
+      expect(
+        (
+          await pool.query(
+            "SELECT id FROM scheduled_tasks WHERE id=ANY($1::uuid[])",
+            [oldIds],
+          )
+        ).rowCount,
+      ).toBe(0);
+      expect(
+        (
+          await pool.query(
+            "SELECT id FROM scheduled_tasks WHERE id=ANY($1::uuid[])",
+            [[active.task.id, paused.task.id, recent.task.id]],
+          )
+        ).rowCount,
+      ).toBe(3);
+      expect(
+        (
+          await pool.query(
+            "SELECT 1 FROM audit_events WHERE action='scheduled-task.expire' AND target_id=ANY($1::text[])",
+            [oldIds],
+          )
+        ).rowCount,
+      ).toBe(6);
+      await Promise.all([s.tasks.purgeExpired(), s.tasks.purgeExpired()]);
+      expect(
+        (
+          await pool.query(
+            "SELECT 1 FROM scheduled_task_deletions WHERE task_id=ANY($1::uuid[])",
+            [oldIds],
+          )
+        ).rowCount,
+      ).toBe(6);
+    } finally {
+      await pool.query(
+        "UPDATE scheduled_task_settings SET paused=false WHERE id=1",
+      );
+    }
+  });
+  it("does not purge terminal definitions that still have an in-flight occurrence", async () => {
+    const s = await setup();
+    const c = await create(s);
+    await pool.query(
+      "UPDATE scheduled_tasks SET lifecycle='cancelled',status='cancelled',finished_at=now()-interval '91 days' WHERE id=$1",
+      [c.task.id],
+    );
+    await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
+      "TASK_DELETE_NOT_FINISHED",
+    );
+    await s.tasks.purgeExpired();
+    expect((await s.tasks.detail(c.task.id)).task.id).toBe(c.task.id);
+  });
   it("persists once, scopes tools, and rejects other members", async () => {
     const s = await setup();
     const c = await create(s);

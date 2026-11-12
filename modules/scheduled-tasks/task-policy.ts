@@ -150,6 +150,8 @@ export const taskToolInstruction =
 
 export function taskErrorMessage(code: string): string {
   const messages: Record<string, string> = {
+    TASK_DELETED: "任务已删除，不能重放创建请求。",
+    TASK_DELETE_NOT_FINISHED: "请先取消任务，并等待在途执行结束后再删除。",
     TASK_CONTENT_CLEARED: "任务正文已清理，不能再生成或修改概要。",
     TASK_VERSION_CONFLICT: "任务已发生变化，请刷新后重试。",
     TASK_TIME_OUT_OF_RANGE:

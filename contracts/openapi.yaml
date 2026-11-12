@@ -63,6 +63,25 @@ paths:
         "200": { description: Protected task detail. }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteScheduledTask
+      description: Sensitive unlock required. Deletes a finished task and its task-specific history, preserving workflow executions, delivery evidence and minimal creation-idempotency tombstone. Rejects active, paused or in-flight tasks. Same-version retry is idempotent.
+      security: [{ sessionAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        "200": { description: Task deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
     patch:
       operationId: updateScheduledTask
       description: Sensitive unlock required. Change content or complete schedule and timeZone. Legacy scheduledAt is only supported for once tasks and cannot coexist with schedule. Task kind is immutable. Execution-affecting edits are rejected after sending starts. Summary-only edits preserve execution and are allowed on retained finished tasks; expectedVersion still applies.

@@ -47,6 +47,7 @@ export interface TaskRow {
   version: number;
   created_at: Date;
   updated_at: Date;
+  finished_at: Date | null;
 }
 export interface TaskActor {
   kind: "member" | "admin";
@@ -361,11 +362,20 @@ export class TaskService {
       ).rows[0]!;
       const existing = (
         await db.query<TaskRow>(
-          "SELECT * FROM scheduled_tasks WHERE creation_key=$1",
+          "SELECT * FROM scheduled_tasks WHERE creation_key=$1 FOR UPDATE",
           [key],
         )
       ).rows[0];
       if (existing) return existing;
+      if (
+        (
+          await db.query(
+            "SELECT 1 FROM scheduled_task_deletions WHERE creation_key=$1",
+            [key],
+          )
+        ).rowCount
+      )
+        throw new TaskError("TASK_DELETED");
       const schedule: TaskSchedule = input.schedule ?? {
         kind: "once",
         scheduledAt: input.scheduledAt!,
@@ -767,6 +777,96 @@ export class TaskService {
         ],
       )
     ).rows[0]!;
+  }
+  /** Called only by the authenticated administrator API, never a model tool. */
+  async remove(id: string, expectedVersion: number) {
+    return this.transaction(async (db) => {
+      const task = (
+        await db.query<TaskRow>(
+          "SELECT * FROM scheduled_tasks WHERE id=$1 FOR UPDATE",
+          [id],
+        )
+      ).rows[0];
+      if (!task) {
+        const prior = (
+          await db.query<{ version: number }>(
+            "SELECT version FROM scheduled_task_deletions WHERE task_id=$1",
+            [id],
+          )
+        ).rows[0];
+        if (!prior) throw new TaskError("TASK_NOT_FOUND");
+        if (prior.version !== expectedVersion)
+          throw new TaskError("TASK_VERSION_CONFLICT");
+        return { id, deleted: true };
+      }
+      if (task.version !== expectedVersion)
+        throw new TaskError("TASK_VERSION_CONFLICT");
+      if (!(await this.canRemove(db, task)))
+        throw new TaskError("TASK_DELETE_NOT_FINISHED");
+      await this.deleteLocked(db, task, "manual");
+      return { id, deleted: true };
+    });
+  }
+  private async canRemove(db: PoolClient, task: TaskRow) {
+    if (
+      !["completed", "cancelled"].includes(task.lifecycle) ||
+      task.finished_at === null
+    )
+      return false;
+    return !(
+      await db.query(
+        `SELECT 1 FROM scheduled_task_runs r JOIN workflow_executions e ON e.id=r.execution_id WHERE r.task_id=$1 AND (r.outcome IS NULL OR e.status IN ('created','running','retrying'))
+       UNION ALL SELECT 1 FROM scheduled_task_occurrences WHERE task_id=$1 AND status IN ('pending','running') LIMIT 1`,
+        [task.id],
+      )
+    ).rowCount;
+  }
+  private async deleteLocked(
+    db: PoolClient,
+    task: TaskRow,
+    reason: "manual" | "retention",
+  ) {
+    await db.query(
+      "INSERT INTO scheduled_task_deletions(task_id,creation_key,version,reason) SELECT id,creation_key,version,$2 FROM scheduled_tasks WHERE id=$1",
+      [task.id, reason],
+    );
+    // Keep execution identities and delivery evidence, remove the task payload copy.
+    await db.query(
+      `UPDATE workflow_executions e SET trigger_event=jsonb_set(jsonb_set(e.trigger_event,'{scheduled,content}','""'::jsonb),'{scheduled,requestSnapshot}','""'::jsonb) FROM scheduled_task_runs r WHERE r.task_id=$1 AND r.execution_id=e.id AND e.trigger_event->>'schemaVersion' IN ('scheduled-task-v1','scheduled-task-v2')`,
+      [task.id],
+    );
+    await db.query("DELETE FROM scheduled_task_operations WHERE task_id=$1", [
+      task.id,
+    ]);
+    await db.query("DELETE FROM scheduled_task_events WHERE task_id=$1", [
+      task.id,
+    ]);
+    await db.query("DELETE FROM scheduled_task_runs WHERE task_id=$1", [
+      task.id,
+    ]);
+    await db.query("DELETE FROM scheduled_task_occurrences WHERE task_id=$1", [
+      task.id,
+    ]);
+    await db.query("DELETE FROM scheduled_tasks WHERE id=$1", [task.id]);
+    if (reason === "retention")
+      await db.query(
+        `INSERT INTO audit_events(id,actor_type,action,target_type,target_id,outcome,correlation_id,metadata) VALUES($1,'system','scheduled-task.expire','scheduled-task',$2,'succeeded',$1,'{"retentionDays":90}'::jsonb)`,
+        [randomUUID(), task.id],
+      );
+  }
+  async purgeExpired(): Promise<number> {
+    return this.transaction(async (db) => {
+      const tasks = (
+        await db.query<TaskRow>(
+          `SELECT t.* FROM scheduled_tasks t WHERE t.lifecycle IN ('completed','cancelled') AND t.finished_at < now()-interval '90 days'
+         AND NOT EXISTS(SELECT 1 FROM scheduled_task_runs r JOIN workflow_executions e ON e.id=r.execution_id WHERE r.task_id=t.id AND (r.outcome IS NULL OR e.status IN ('created','running','retrying')))
+         AND NOT EXISTS(SELECT 1 FROM scheduled_task_occurrences o WHERE o.task_id=t.id AND o.status IN ('pending','running'))
+         ORDER BY t.finished_at,t.id LIMIT 25 FOR UPDATE OF t SKIP LOCKED`,
+        )
+      ).rows;
+      for (const task of tasks) await this.deleteLocked(db, task, "retention");
+      return tasks.length;
+    });
   }
   async list(options: {
     workflowId?: string | undefined;

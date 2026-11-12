@@ -23,6 +23,7 @@ interface Run {
 export class TaskScheduler {
   private timer: ReturnType<typeof setInterval> | undefined;
   private running: Promise<void> | undefined;
+  private nextCleanupAt = 0;
   private readonly owner = randomUUID();
   constructor(
     readonly service: TaskService,
@@ -49,6 +50,15 @@ export class TaskScheduler {
     await this.running;
   }
   async tick() {
+    // Retention is independent of the reminder pause switch and bounded per batch.
+    if (Date.now() >= this.nextCleanupAt) {
+      this.nextCleanupAt = Date.now() + 60_000;
+      try {
+        await this.service.purgeExpired();
+      } catch {
+        this.reportError();
+      }
+    }
     if ((await this.service.settings()).paused) return;
     await this.reconcile();
     const tasks = (

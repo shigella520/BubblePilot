@@ -1081,6 +1081,20 @@ export function buildApplication(
       return { data: await taskService().detail(taskId, q.offset, q.limit) };
     },
   );
+  application.delete(
+    "/api/v1/scheduled-tasks/:taskId",
+    { preHandler: requireSensitive("scheduled-task.delete", "scheduled-task") },
+    async (request) => {
+      const { taskId } = z
+        .object({ taskId: z.string().uuid() })
+        .parse(request.params);
+      const { expectedVersion } = z
+        .object({ expectedVersion: z.number().int().positive() })
+        .strict()
+        .parse(request.body);
+      return { data: await taskService().remove(taskId, expectedVersion) };
+    },
+  );
   application.patch(
     "/api/v1/scheduled-tasks/:taskId",
     { preHandler: requireSensitive("scheduled-task.update", "scheduled-task") },
