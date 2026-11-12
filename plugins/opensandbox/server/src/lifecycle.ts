@@ -1,3 +1,10 @@
+import {
+  sandboxTimeoutDefaults,
+  sandboxCommandDefaults,
+  workspaceCheckTimeoutDefaultSeconds,
+  type CommandTimeouts,
+  type SandboxTimeouts,
+} from "./config.js";
 import { TransferFailure } from "./attachment-contract.js";
 import { workspaceUsageCommand } from "./attachment-helper.js";
 import type { TransferInput, TransferResult } from "./attachment-contract.js";
@@ -18,6 +25,9 @@ export class SandboxPool {
     readonly backend: Backend,
     readonly maximum: number,
     readonly ttlMs: number,
+    readonly timeouts: SandboxTimeouts = sandboxTimeoutDefaults,
+    readonly commandTimeouts: CommandTimeouts = sandboxCommandDefaults,
+    readonly workspaceCheckTimeoutSeconds = workspaceCheckTimeoutDefaultSeconds,
   ) {}
   newSession() {
     const session = new SandboxSession(this);
@@ -72,6 +82,9 @@ export class SandboxSession {
   private expandedBytes = 0;
   private expandedFiles = 0;
   private importLimits?: TransferInput["limits"];
+  get importTimeoutMs() {
+    return this.pool.timeouts.importSeconds * 1000;
+  }
   importStatus(id: string, input?: TransferInput) {
     this.check();
     const existing = this.imported.get(id);
@@ -111,7 +124,7 @@ export class SandboxSession {
     const combined = AbortSignal.any([
       signal,
       this.abort.signal,
-      AbortSignal.timeout(45000),
+      AbortSignal.timeout(this.importTimeoutMs),
     ]);
     const cancel = () => this.invalidate();
     combined.addEventListener("abort", cancel, { once: true });
@@ -177,7 +190,7 @@ export class SandboxSession {
     const combined = AbortSignal.any([
       signal,
       this.abort.signal,
-      AbortSignal.timeout(40000),
+      AbortSignal.timeout(this.pool.timeouts.createSeconds * 1000),
     ]);
     const cancel = () => this.invalidate();
     combined.addEventListener("abort", cancel, { once: true });
@@ -215,15 +228,15 @@ export class SandboxSession {
     signal.throwIfAborted();
     if (!this.handle) throw new ToolError("prepare_sandbox_required");
     this.busy = true;
-    const combined = AbortSignal.any([
-      signal,
-      this.abort.signal,
-      AbortSignal.timeout(seconds * 1000),
-    ]);
+    const timeout = AbortSignal.timeout(seconds * 1000);
+    const combined = AbortSignal.any([signal, this.abort.signal, timeout]);
     const cancel = () => this.invalidate();
     combined.addEventListener("abort", cancel, { once: true });
     try {
-      const result = await this.handle.run(command, combined, seconds);
+      const result = await abortable(
+        this.handle.run(command, combined, seconds),
+        combined,
+      );
       combined.throwIfAborted();
       if (result.truncated || result.status === "result_unknown")
         this.invalidate();
@@ -231,7 +244,11 @@ export class SandboxSession {
     } catch {
       this.invalidate();
       throw new ToolError(
-        "command_result_unknown_session_invalidated_do_not_replay",
+        signal.aborted
+          ? "command_cancelled_session_invalidated_do_not_replay"
+          : timeout.aborted
+            ? "command_timeout_session_invalidated_do_not_replay"
+            : "command_result_unknown_session_invalidated_do_not_replay",
       );
     } finally {
       combined.removeEventListener("abort", cancel);
@@ -241,11 +258,19 @@ export class SandboxSession {
   async checkSpace() {
     if (!this.importLimits || !this.handle || this.ended) return;
     try {
-      const result = await this.handle.run(
-        workspaceUsageCommand,
-        AbortSignal.any([this.abort.signal, AbortSignal.timeout(2000)]),
-        2,
+      const signal = AbortSignal.any([
+        this.abort.signal,
+        AbortSignal.timeout(this.pool.workspaceCheckTimeoutSeconds * 1000),
+      ]);
+      const result = await abortable(
+        this.handle.run(
+          workspaceUsageCommand,
+          signal,
+          this.pool.workspaceCheckTimeoutSeconds,
+        ),
+        signal,
       );
+      signal.throwIfAborted();
       const kib = Number(result.stdout.trim());
       if (
         result.status !== "completed" ||
@@ -273,4 +298,27 @@ export class SandboxSession {
       return false;
     }
   }
+}
+
+// Some transports take time to unwind an aborted stream. Return the bounded
+// tool failure now; consume late settlement without ever delivering its result.
+function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new Error("operation_aborted"));
+    signal.addEventListener("abort", abort, { once: true });
+    operation.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error instanceof Error ? error : new Error("operation_failed"));
+      },
+    );
+    if (signal.aborted) {
+      signal.removeEventListener("abort", abort);
+      abort();
+    }
+  });
 }

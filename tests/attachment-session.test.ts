@@ -1,9 +1,13 @@
+import type { InitialAttachmentCatalogue } from "../modules/attachments/attachment-catalogue.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
-import { AttachmentSession } from "../modules/attachments/attachment-session.js";
+import {
+  type AttachmentRunInput,
+  AttachmentSession,
+} from "../modules/attachments/attachment-session.js";
 import { AttachmentStore } from "../modules/attachments/attachment-store.js";
 import { attachmentLimitsSchema } from "../modules/attachments/attachment-policy.js";
 import {
@@ -21,7 +25,7 @@ afterEach(async () => {
   for (const root of roots.splice(0))
     await rm(root, { recursive: true, force: true });
 });
-async function fixture() {
+async function fixture(snapshot = false) {
   const root = await mkdtemp(join(tmpdir(), "bp-attachment-unit-"));
   roots.push(root);
   const storage = new AttachmentStore(root);
@@ -33,9 +37,10 @@ async function fixture() {
     sizeBytes: null,
   };
   let authorized = true;
+  let contentAvailable = true;
   const resolve = vi.fn(() =>
     Promise.resolve(
-      authorized
+      authorized && contentAvailable
         ? {
             messageId: "archive-message",
             providerMessageId: "current",
@@ -48,7 +53,12 @@ async function fixture() {
   const data = Buffer.from("地区,金额\n东,10\n");
   const download = vi.fn(() => Promise.resolve(new Response(data)));
   const transfer = vi.fn(
-    async (input: Record<string, unknown>, file: string) => {
+    async (
+      input: Record<string, unknown>,
+      file: string,
+      signal: AbortSignal,
+    ) => {
+      signal.throwIfAborted();
       expect(await readFile(file)).toEqual(data);
       expect(input.sha256).toBe(
         createHash("sha256").update(data).digest("hex"),
@@ -71,7 +81,7 @@ async function fixture() {
   const plugins = {
     attachmentChannel: () => channel,
   } as unknown as PluginSession;
-  const input = {
+  const input: AttachmentRunInput = {
     config: {
       enabled: true,
       pluginId: channel.metadata.pluginId,
@@ -88,7 +98,10 @@ async function fixture() {
   const session = new AttachmentSession(
     input,
     plugins,
-    { resolve },
+    {
+      resolve,
+      ...(snapshot ? { authorized: () => Promise.resolve(authorized) } : {}),
+    },
     { download },
     storage,
   );
@@ -125,6 +138,9 @@ async function fixture() {
     revoke: () => {
       authorized = false;
     },
+    removeContent: () => {
+      contentAvailable = false;
+    },
     ref: session.currentCatalogue().entries[0]!.attachment_ref!,
   };
 }
@@ -153,6 +169,75 @@ it("imports only issued references, reuses success and validates again after rev
   );
   expect(f.invalidate).toHaveBeenCalled();
   expect((await f.call({ attachment_ref: f.ref })).value.errorCode).toBe(
+    "ATTACHMENT_SESSION_INVALIDATED",
+  );
+});
+it("only grants staged references actually returned, without spending capacity on discarded operations", async () => {
+  const f = await fixture();
+  const message = {
+    id: "history",
+    providerMessageId: "past",
+    attachments: f.input.current.attachments,
+  };
+  for (let i = 0; i < 110; i++) {
+    const pending = f.session.stageCatalogue();
+    const listing = pending.catalogue({
+      ...message,
+      providerMessageId: `discarded-${i}`,
+    });
+    const denied = await f.call({
+      attachment_ref: listing.entries[0]!.attachment_ref,
+    });
+    expect(denied.value.errorCode).toBe("ATTACHMENT_REFERENCE_UNAVAILABLE");
+    expect(denied.value.guidance).toContain(
+      "No download or import was started",
+    );
+    pending.commit([]);
+  }
+  const pending = f.session.stageCatalogue();
+  const returned = pending.catalogue(message);
+  const dropped = pending.catalogue({
+    ...message,
+    providerMessageId: "cropped",
+  });
+  const ref = returned.entries[0]!.attachment_ref!;
+  expect(ref).toMatch(/^A/);
+  pending.commit([returned]);
+  expect(
+    (await f.call({ attachment_ref: dropped.entries[0]!.attachment_ref })).value
+      .errorCode,
+  ).toBe("ATTACHMENT_REFERENCE_UNAVAILABLE");
+  expect(f.download).not.toHaveBeenCalled();
+  expect((await f.call({ attachment_ref: ref })).value.status).toBe("imported");
+  expect(f.resolve).toHaveBeenLastCalledWith(f.input.scope, "past", 0, true);
+  expect(
+    f.session.stageCatalogue().catalogue(message).entries[0]!.attachment_ref,
+  ).toBe(ref);
+});
+it("cannot publish staged references after the run ends or partially commit conflicting catalogues", async () => {
+  const f = await fixture();
+  const message = {
+    id: "history",
+    providerMessageId: "past",
+    attachments: f.input.current.attachments,
+  };
+  const first = f.session.stageCatalogue(),
+    second = f.session.stageCatalogue();
+  const a = first.catalogue(message),
+    b = second.catalogue(message);
+  const extra = second.catalogue({ ...message, providerMessageId: "extra" });
+  first.commit([a]);
+  expect(() => second.commit([extra, b])).toThrow(
+    "ATTACHMENT_REFERENCE_UNAVAILABLE",
+  );
+  expect(
+    (await f.call({ attachment_ref: extra.entries[0]!.attachment_ref })).value
+      .errorCode,
+  ).toBe("ATTACHMENT_REFERENCE_UNAVAILABLE");
+  const late = f.session.stageCatalogue();
+  const listing = late.catalogue({ ...message, providerMessageId: "late" });
+  await f.session.close();
+  expect(() => late.commit([listing])).toThrow(
     "ATTACHMENT_SESSION_INVALIDATED",
   );
 });
@@ -242,4 +327,143 @@ it("enforces actual streaming bytes and releases temporary reservations on failu
     store.stage(new Response("1"), 5, abort.signal),
   ).rejects.toThrow();
   expect(await readdir(f.root)).toEqual([]);
+});
+
+it("extended import time cannot outlive the remaining Agent budget or caller cancellation", async () => {
+  for (const cancel of [false, true]) {
+    const f = await fixture();
+    f.input.config.limits.timeoutSeconds = 150;
+    const controller = new AbortController();
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    f.transfer.mockImplementationOnce(async (input, _file, signal) => {
+      entered();
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      // A transport may return a result after cancellation; it must not be committed.
+      return {
+        status: "imported",
+        sandbox_path: "/workspace/late.csv",
+        size: 1,
+        sha256: input.sha256,
+      };
+    });
+    const pending = f.tool.execute(JSON.stringify({ attachment_ref: f.ref }), {
+      signal: controller.signal,
+      deadline: Date.now() + 1000,
+      maxOutputCharacters: 64000,
+    });
+    await ready;
+    if (cancel) controller.abort();
+    const output = (await pending) as MultimodalToolResult;
+    expect(JSON.parse(output.text)).toMatchObject({
+      status: "unavailable",
+      errorCode: cancel
+        ? "ATTACHMENT_CANCELLED"
+        : "ATTACHMENT_TIMEOUT_OR_CANCELLED",
+    });
+    expect(f.invalidate).toHaveBeenCalledOnce();
+    expect(await readdir(f.root)).toEqual([]);
+    await f.session.close();
+  }
+});
+
+it("keeps read bytes when the archive changes before transfer, but still revokes permissions", async () => {
+  const f = await fixture(true);
+  f.download.mockImplementationOnce(() => {
+    f.removeContent();
+    return Promise.resolve(new Response(Buffer.from("地区,金额\n东,10\n")));
+  });
+  expect((await f.call({ attachment_ref: f.ref })).value.status).toBe(
+    "imported",
+  );
+  await expect(f.session.validate()).resolves.toBeUndefined();
+  expect((await f.call({ attachment_ref: f.ref })).value.reused).toBe(true);
+  expect(f.invalidate).not.toHaveBeenCalled();
+  f.revoke();
+  await expect(f.session.validate()).rejects.toThrow(
+    "ATTACHMENT_PERMISSION_REVOKED",
+  );
+  expect(f.invalidate).toHaveBeenCalled();
+});
+it("metadata is not a file snapshot; missing fresh content does not cancel the session", async () => {
+  const f = await fixture(true);
+  f.removeContent();
+  expect((await f.call({ attachment_ref: f.ref })).value.errorCode).toBe(
+    "ATTACHMENT_REFERENCE_UNAVAILABLE",
+  );
+  expect(f.download).not.toHaveBeenCalled();
+  expect(f.invalidate).not.toHaveBeenCalled();
+});
+
+it("publishes only committed initial history refs and reuses them in subsequent searches", async () => {
+  const f = await fixture(true);
+  f.input.history = [
+    {
+      ...f.input.current,
+      providerMessageId: "earlier",
+      sentAt: "2026-01-01T00:00:00Z",
+    },
+  ];
+  const prepared = await f.session.initialCatalogue(20000);
+  const c = JSON.parse(
+    prepared.text.slice(prepared.text.indexOf("{")),
+  ) as InitialAttachmentCatalogue;
+  const ref = c.history[0]!.entries[0]!.attachment_ref!;
+  expect((await f.call({ attachment_ref: ref })).value.errorCode).toBe(
+    "ATTACHMENT_REFERENCE_UNAVAILABLE",
+  );
+  prepared.commit();
+  expect(
+    f.session.catalogue({ id: "archive", ...f.input.history[0]! }).entries[0]
+      ?.attachment_ref,
+  ).toBe(ref);
+  expect(f.download).not.toHaveBeenCalled();
+  f.revoke();
+  expect((await f.call({ attachment_ref: ref })).value.errorCode).toBe(
+    "ATTACHMENT_PERMISSION_REVOKED",
+  );
+  expect(f.download).not.toHaveBeenCalled();
+});
+it("does not grant initial history references without authorization or for omitted entries", async () => {
+  const f = await fixture();
+  f.input.history = [{ ...f.input.current, providerMessageId: "older" }];
+  const denied = await f.session.initialCatalogue(20000);
+  const c = JSON.parse(
+    denied.text.slice(denied.text.indexOf("{")),
+  ) as InitialAttachmentCatalogue;
+  expect(c.history[0]!.entries[0]!.attachment_ref).toBeUndefined();
+  expect(c.history[0]!.importUnavailableReason).toBe("history-not-authorized");
+  const g = await fixture(true);
+  g.input.history = [
+    {
+      ...g.input.current,
+      providerMessageId: "older",
+      attachments: Array.from({ length: 20 }, () => ({
+        ...g.input.current.attachments[0]!,
+        fileName: "长".repeat(500) + ".pdf",
+      })),
+    },
+  ];
+  const limited = await g.session.initialCatalogue(1700);
+  const lc = JSON.parse(
+    limited.text.slice(limited.text.indexOf("{")),
+  ) as InitialAttachmentCatalogue;
+  limited.commit();
+  expect(lc.history[0]!.entries).toHaveLength(0);
+  const later = g.session.catalogue(
+    {
+      id: "new",
+      providerMessageId: "later",
+      attachments: Array(100).fill(g.input.current.attachments[0]),
+    },
+    0,
+    undefined,
+    true,
+  );
+  expect(later.entries.filter((e) => e.attachment_ref)).toHaveLength(99);
 });

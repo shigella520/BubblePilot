@@ -66,6 +66,41 @@ describe.runIf(!!url)("raw context PostgreSQL windows", () => {
         }),
     };
   }
+  it("keeps withdrawal placeholders and edit metadata but never admin text or expired content", async () => {
+    const f = await fixture(4);
+    await db.query(
+      "UPDATE messages SET body=NULL,revision_state='retracted',retracted_body='仅管理员可见的虚构原文' WHERE provider_message_id=$1",
+      [`${f.chatGuid}-1`],
+    );
+    await db.query(
+      "UPDATE messages SET body='最新虚构正文',edited_at='2026-08-10T00:01:00Z' WHERE provider_message_id=$1",
+      [`${f.chatGuid}-2`],
+    );
+    await db.query(
+      "UPDATE messages SET body=NULL,revision_state='retracted',content_redacted_at=now() WHERE provider_message_id=$1",
+      [`${f.chatGuid}-3`],
+    );
+    const result = await f.load(4, await f.snapshot(4));
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages[0]).toMatchObject({
+      body: "",
+      revisionState: "retracted",
+    });
+    expect(result.messages[1]).toMatchObject({
+      body: "最新虚构正文",
+      editedAt: "2026-08-10T00:01:00.000Z",
+    });
+    expect(JSON.stringify(result)).not.toContain("仅管理员可见");
+    const legacy = await archive.loadRecentMessages(f.chatGuid, {
+      limit: 10,
+      maxCharacters: 6000,
+      includeFromMe: true,
+      beforeProviderMessageId: `${f.chatGuid}-4`,
+    });
+    expect(legacy).toHaveLength(2);
+    expect(legacy[0]?.revisionState).toBe("retracted");
+    expect(JSON.stringify(legacy)).not.toContain("仅管理员可见");
+  });
   it("keeps prefixes until threshold, survives restart and isolates later triggers", async () => {
     const f = await fixture(12);
     const a = await f.snapshot(4),

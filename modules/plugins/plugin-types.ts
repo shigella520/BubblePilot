@@ -64,9 +64,13 @@ export const connectionSchema = z
       .regex(/^[A-Za-z][A-Za-z0-9-]*$/)
       .default("X-Api-Key"),
     secret: z.string().max(8192).optional(),
+    callTimeoutSeconds: z.number().int().min(5).max(180).optional(),
   })
   .strict();
 export type Connection = z.infer<typeof connectionSchema>;
+export function connectionCallTimeoutMs(connection?: Connection) {
+  return (connection?.callTimeoutSeconds ?? 45) * 1000;
+}
 export interface PluginConfiguration {
   connections: Record<string, Connection>;
   tools: ApprovedTool[];

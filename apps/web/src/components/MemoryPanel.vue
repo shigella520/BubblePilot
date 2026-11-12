@@ -124,7 +124,7 @@ function jobsPath() {
     props.mode === "chat"
       ? `/api/v1/chats/${chatId.value}/memory/jobs`
       : "/api/v1/memory/jobs";
-  const params = new URLSearchParams({ limit: "25" });
+  const params = new URLSearchParams({ limit: "10" });
   const cursor = jobCursors.value[jobPage.value - 1];
   if (cursor) params.set("cursor", cursor);
   return `${base}?${params}`;

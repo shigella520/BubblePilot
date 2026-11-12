@@ -34,7 +34,7 @@ const scope: MemoryScope = {
 };
 try {
   await pool.query(
-    "CREATE TEMP TABLE messages(id uuid,chat_id uuid,message_index bigint,sent_at timestamptz,sender_id text,body text,content_redacted_at timestamptz,is_from_me boolean,attachments jsonb,link_previews jsonb)",
+    "CREATE TEMP TABLE messages(id uuid,chat_id uuid,message_index bigint,sent_at timestamptz,sender_id text,body text,content_redacted_at timestamptz,is_from_me boolean,attachments jsonb,link_previews jsonb,bot_attribution_issue text,provider_message_id text,revision_state text default 'active')",
   );
   await pool.query(
     "CREATE TEMP TABLE message_image_summaries(id uuid,message_id uuid,status text,summary text)",
@@ -50,11 +50,11 @@ try {
   for (const size of [10000, 100000]) {
     await pool.query("TRUNCATE messages");
     await pool.query(
-      "INSERT INTO messages SELECT md5(n::text)::uuid,$1,n,'2026-01-01'::timestamptz+n*interval '1 minute','fictional-'||(n%10),'fictional backup '||(n%5),NULL,FALSE,'[]','[]' FROM generate_series(1,$2) n",
+      "INSERT INTO messages SELECT md5(n::text)::uuid,$1,n,'2026-01-01'::timestamptz+n*interval '1 minute','fictional-'||(n%10),'fictional backup '||(n%5),NULL,FALSE,'[]','[]',NULL,n::text FROM generate_series(1,$2) n",
       [chatId, size],
     );
     await pool.query("ANALYZE messages");
-    const operations = {
+    const operations: Record<string, () => Promise<unknown>> = {
       latest: () =>
         repo.query(
           scope,
@@ -70,6 +70,33 @@ try {
           }),
           "Asia/Shanghai",
         ),
+      ...Object.fromEntries(
+        (
+          [
+            ["hourly", "hour", undefined],
+            ["daily", "day", undefined],
+            ["monthly", "month", undefined],
+            ["members", "sender", undefined],
+            ["clockHours", "hourOfDay", undefined],
+            ["heatmap", "weekday", "hourOfDay"],
+            ["dailyMembers", "day", "sender"],
+          ] as const
+        ).map(([name, groupBy, breakdownBy]) => [
+          name,
+          () =>
+            repo.aggregate(
+              scope,
+              chatCountQuerySchema.parse({
+                groupBy,
+                breakdownBy,
+                from: "2026-01-01T00:00:00Z",
+                to: "2026-03-31T23:59:59Z",
+                limit: 100,
+              }),
+              "Asia/Shanghai",
+            ),
+        ]),
+      ),
       dailyExtrema: () =>
         repo.aggregate(
           scope,
@@ -102,11 +129,18 @@ try {
     "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT id FROM messages WHERE chat_id=$1 AND sender_id=$2 AND content_redacted_at IS NULL AND message_index<100001 ORDER BY sent_at DESC,message_index DESC LIMIT 20",
     [chatId, "fictional-1"],
   );
+  // Representative aggregate plan; the production statement also fills buckets,
+  // computes totals, orders and pages. Timings above use that complete statement.
+  const aggregatePlan = await pool.query(
+    "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT date_trunc('day',sent_at AT TIME ZONE 'Asia/Shanghai'),sender_id,count(*) FROM messages WHERE chat_id=$1 AND content_redacted_at IS NULL AND message_index<100001 AND sent_at>='2026-01-01T00:00:00Z' AND sent_at<='2026-03-31T23:59:59Z' GROUP BY 1,2",
+    [chatId],
+  );
   process.stdout.write(
     JSON.stringify(
       {
         report,
         latestPlan: plan.rows,
+        representativeAggregatePlan: aggregatePlan.rows,
         limitation:
           "Warm local PostgreSQL synthetic TEMP archive; no model, network, ingestion or NAS load.",
       },

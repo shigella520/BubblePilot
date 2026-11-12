@@ -6,6 +6,21 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /api/v1/messages/{messageId}:
+    parameters:
+      - in: path
+        name: messageId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getArchivedMessage
+      description: Requires sensitive unlock and an enabled chat. Returns current archived message with revisionState, editedAt and optional replyTo. Quote previews are bounded to earlier messages in the same authorized chat; withdrawn content is never included in quote previews. Sensitive admin responses may include retractedBody containing the locally retained pre-withdrawal text; null when unavailable or expired.
+      security: [{ sessionAuth: [] }]
+      responses:
+        "200": { description: Current message and revision metadata }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/v1/plugins/attachment-targets:
     get:
       operationId: listAttachmentSandboxTargets
@@ -22,7 +37,7 @@ paths:
   /api/v1/scheduled-tasks:
     get:
       operationId: listScheduledTasks
-      description: List reminders scoped by optional workflowId, chatId and status; offset and limit (1-50). Returns items and hasMore. Member tools additionally enforce creator ownership.
+      description: List reminders scoped by optional workflowId, chatId, lifecycle and status; offset and limit (1-50). Returns items and hasMore. Each item includes creatorSenderId and nullable creatorRealName resolved from the current member mapping in the task chat; ownership is unchanged. Member tools additionally enforce creator ownership.
       security: [{ sessionAuth: [] }]
       responses:
         "200":
@@ -42,15 +57,15 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: getScheduledTask
-      description: Sensitive unlock required. Returns task, protected request snapshot, changes and execution references.
+      description: Sensitive unlock required. task.creator_real_name is nullable and resolved from the current member mapping in the task chat; creator_sender_id remains the owner. Returns task, summary, protected request snapshot, latest 100 changes, paginated occurrences and execution references. offset defaults to 0; limit defaults to 20, maximum 50; hasMore indicates further occurrence history.
       security: [{ sessionAuth: [] }]
       responses:
         "200": { description: Protected task detail. }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
-    patch:
-      operationId: updateScheduledTask
-      description: Sensitive unlock required. Change content or absolute scheduledAt and timeZone. Sending already started cannot be edited.
+    delete:
+      operationId: deleteScheduledTask
+      description: Sensitive unlock required. Deletes a finished task and its task-specific history, preserving workflow executions, delivery evidence and minimal creation-idempotency tombstone. Rejects active, paused or in-flight tasks. Same-version retry is idempotent.
       security: [{ sessionAuth: [] }]
       requestBody:
         required: true
@@ -62,7 +77,34 @@ paths:
               required: [expectedVersion]
               properties:
                 expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        "200": { description: Task deleted. }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateScheduledTask
+      description: Sensitive unlock required. Change content or complete schedule and timeZone. Legacy scheduledAt is only supported for once tasks and cannot coexist with schedule. Task kind is immutable. Execution-affecting edits are rejected after sending starts. Summary-only edits preserve execution and are allowed on retained finished tasks; expectedVersion still applies.
+      security: [{ sessionAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                summary:
+                  {
+                    type: string,
+                    minLength: 1,
+                    maxLength: 40,
+                    description: Single-line display title. Omit to preserve the existing summary.,
+                  }
                 content: { type: string, minLength: 1, maxLength: 2000 }
+                schedule: { $ref: "#/components/schemas/TaskSchedule" }
                 scheduledAt: { type: string, format: date-time }
                 timeZone:
                   {
@@ -76,7 +118,7 @@ paths:
   /api/v1/scheduled-tasks/{taskId}/cancel:
     post:
       operationId: cancelScheduledTask
-      description: Sensitive unlock required. Cancellation after send fence is rejected; no promise to retract an issued gateway request.
+      description: Sensitive unlock required. For recurring tasks cancels future occurrences, returning sendingAlreadyStarted when the current send is irreversible. Once tasks reject cancellation after the send fence. No promise to retract an issued gateway request.
       security: [{ sessionAuth: [] }]
       parameters:
         - in: path
@@ -97,6 +139,109 @@ paths:
         "200": { description: Cancelled task. }
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /api/v1/scheduled-tasks/preview:
+    post:
+      operationId: previewScheduledTask
+      description: Read-only authenticated calendar preview. Returns scheduleSummary, timeZone and up to three upcoming UTC instants; no task or model call is created.
+      security: [{ sessionAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schedule, timeZone]
+              properties:
+                schedule: { $ref: "#/components/schemas/TaskSchedule" }
+                timeZone: { type: string }
+                consumedCount: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200": { description: Normalized recurrence preview. }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/v1/scheduled-tasks/{taskId}/pause:
+    post:
+      operationId: pauseScheduledTask
+      description: Sensitive unlock required. Operates on a recurring task with expectedVersion concurrency control; never retracts an issued send. Skip consumes exactly one plan occurrence and rejects a sending occurrence.
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          {
+            description: Updated task with sendingAlreadyStarted boundary flag.,
+          }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v1/scheduled-tasks/{taskId}/resume:
+    post:
+      operationId: resumeScheduledTask
+      description: Sensitive unlock required. Operates on a recurring task with expectedVersion concurrency control; never retracts an issued send. Skip consumes exactly one plan occurrence and rejects a sending occurrence.
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          {
+            description: Updated task with sendingAlreadyStarted boundary flag.,
+          }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v1/scheduled-tasks/{taskId}/skip-next:
+    post:
+      operationId: skipNextScheduledTask
+      description: Sensitive unlock required. Operates on a recurring task with expectedVersion concurrency control; never retracts an issued send. Skip consumes exactly one plan occurrence and rejects a sending occurrence.
+      security: [{ sessionAuth: [] }]
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedVersion]
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          {
+            description: Updated task with sendingAlreadyStarted boundary flag.,
+          }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /api/v1/settings/scheduled-tasks:
     get:
       operationId: getScheduledTaskSettings
@@ -107,7 +252,7 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
     put:
       operationId: updateScheduledTaskSettings
-      description: Sensitive unlock required. New catchup window affects new or rescheduled tasks only. Zero permits only the scheduled minute.
+      description: Sensitive unlock required. New catchup window affects new, rescheduled and subsequent recurring occurrences. Resume skips the paused interval. Zero permits only the scheduled minute.
       security: [{ sessionAuth: [] }]
       requestBody:
         required: true
@@ -3499,6 +3644,140 @@ components:
         type: integer
         minimum: 1
   schemas:
+    TaskSchedule:
+      anyOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              const: once
+            scheduledAt:
+              type: string
+              format: date-time
+              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+          required:
+            - kind
+            - scheduledAt
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              const: recurring
+            startsAt:
+              type: string
+              format: date-time
+              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+            rule:
+              anyOf:
+                - type: object
+                  properties:
+                    type:
+                      type: string
+                      const: daily
+                    localTime:
+                      type: string
+                      pattern: ^([01]\d|2[0-3]):[0-5]\d$
+                  required:
+                    - type
+                    - localTime
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    type:
+                      type: string
+                      const: weekly
+                    weekdays:
+                      minItems: 1
+                      maxItems: 7
+                      type: array
+                      items:
+                        type: integer
+                        minimum: 1
+                        maximum: 7
+                    localTime:
+                      type: string
+                      pattern: ^([01]\d|2[0-3]):[0-5]\d$
+                  required:
+                    - type
+                    - weekdays
+                    - localTime
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    type:
+                      type: string
+                      const: monthly
+                    dayOfMonth:
+                      anyOf:
+                        - type: integer
+                          minimum: 1
+                          maximum: 31
+                        - type: string
+                          const: last
+                    localTime:
+                      type: string
+                      pattern: ^([01]\d|2[0-3]):[0-5]\d$
+                  required:
+                    - type
+                    - dayOfMonth
+                    - localTime
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    type:
+                      type: string
+                      const: interval
+                    everyMinutes:
+                      type: integer
+                      minimum: 60
+                      maximum: 525600
+                  required:
+                    - type
+                    - everyMinutes
+                  additionalProperties: false
+            end:
+              anyOf:
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: never
+                  required:
+                    - kind
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: until
+                    until:
+                      type: string
+                      format: date-time
+                      pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                  required:
+                    - kind
+                    - until
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: count
+                    count:
+                      type: integer
+                      minimum: 1
+                      maximum: 10000
+                  required:
+                    - kind
+                    - count
+                  additionalProperties: false
+          required:
+            - kind
+            - startsAt
+            - rule
+            - end
+          additionalProperties: false
     MemeCollection:
       type: object
       required:

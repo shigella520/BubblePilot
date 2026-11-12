@@ -6,10 +6,10 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Images to publish (app / app-adapter preserve the existing sandbox runtime)
+        description: Images to publish (app / adapter / app-adapter preserve the existing sandbox runtime)
         type: choice
         default: all
-        options: [all, app, app-adapter]
+        options: [all, app, adapter, app-adapter]
 
 env:
   REGISTRY: ghcr.io
@@ -109,7 +109,7 @@ jobs:
   docker:
     strategy:
       matrix:
-        include: ${{ fromJSON(inputs.scope == 'app' && '[{"image":"bubblepilot","dockerfile":"Dockerfile"}]' || inputs.scope == 'app-adapter' && '[{"image":"bubblepilot","dockerfile":"Dockerfile"},{"image":"bubblepilot-opensandbox-mcp","dockerfile":"plugins/opensandbox/server/Dockerfile"}]' || '[{"image":"bubblepilot","dockerfile":"Dockerfile"},{"image":"bubblepilot-sandbox-python","dockerfile":"plugins/opensandbox/runtime/Dockerfile"},{"image":"bubblepilot-opensandbox-mcp","dockerfile":"plugins/opensandbox/server/Dockerfile"}]') }}
+        include: ${{ fromJSON(inputs.scope == 'adapter' && '[{"image":"bubblepilot-opensandbox-mcp","dockerfile":"plugins/opensandbox/server/Dockerfile"}]' || inputs.scope == 'app' && '[{"image":"bubblepilot","dockerfile":"Dockerfile"}]' || inputs.scope == 'app-adapter' && '[{"image":"bubblepilot","dockerfile":"Dockerfile"},{"image":"bubblepilot-opensandbox-mcp","dockerfile":"plugins/opensandbox/server/Dockerfile"}]' || '[{"image":"bubblepilot","dockerfile":"Dockerfile"},{"image":"bubblepilot-sandbox-python","dockerfile":"plugins/opensandbox/runtime/Dockerfile"},{"image":"bubblepilot-opensandbox-mcp","dockerfile":"plugins/opensandbox/server/Dockerfile"}]') }}
     runs-on: ubuntu-latest
     needs: [verify, sandbox-runtime]
     if: ${{ always() && needs.verify.result == 'success' && ((inputs.scope != 'all' && needs.sandbox-runtime.result == 'skipped') || needs.sandbox-runtime.result == 'success') }}

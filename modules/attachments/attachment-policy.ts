@@ -4,7 +4,7 @@ export const attachmentLimitsSchema = z
     fileMiB: z.number().int().min(1).max(20).default(10),
     files: z.number().int().min(1).max(5).default(3),
     totalMiB: z.number().int().min(1).max(50).default(20),
-    timeoutSeconds: z.number().int().min(5).max(45).default(30),
+    timeoutSeconds: z.number().int().min(5).max(180).default(30),
     expandedMiB: z.number().int().min(1).max(100).default(50),
     expandedFiles: z.number().int().min(1).max(500).default(200),
   })
@@ -34,6 +34,7 @@ export interface AttachmentListing {
   entries: Array<{
     index: number;
     fileName: string | null;
+    fileNameTruncated?: boolean;
     mimeType: string | null;
     sizeBytes: number | null;
     availability: "not-verified";

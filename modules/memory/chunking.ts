@@ -1,7 +1,14 @@
+import type {
+  ReplyPreview,
+  RevisionState,
+} from "../archive/message-revision.js";
 import type { MessageAttachment } from "../ingestion/message-envelope.js";
 import { authorLabel, type MessageAuthor } from "../identity/bot-identity.js";
 import { createHash } from "node:crypto";
 export interface MemoryMessage {
+  replyTo?: ReplyPreview;
+  revisionState?: RevisionState;
+  editedAt?: string | null;
   providerMessageId?: string;
   attachments?: readonly MessageAttachment[];
   id: string;

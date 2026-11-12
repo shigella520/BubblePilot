@@ -15,6 +15,7 @@
     "skipLibCheck": true
   },
   "include": [
+    "../../modules/scheduled-tasks/task-schedule.ts",
     "../../modules/attachments/attachment-policy.ts",
     "../../modules/workflow/action-blocks.ts",
     "../../modules/ai/execution-policy.ts",

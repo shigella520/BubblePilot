@@ -172,7 +172,7 @@ describe("Web admin authentication", () => {
       cookie: login.cookies.map((c) => `${c.name}=${c.value}`).join("; "),
       origin: "http://localhost",
     };
-    for (const method of ["GET", "PATCH"] as const)
+    for (const method of ["GET", "PATCH", "DELETE"] as const)
       expect(
         (
           await application.inject({
@@ -195,6 +195,47 @@ describe("Web admin authentication", () => {
         })
       ).statusCode,
     ).toBe(403);
+    for (const operation of ["pause", "resume", "skip-next"]) {
+      expect(
+        (
+          await application.inject({
+            method: "POST",
+            url: `/api/v1/scheduled-tasks/00000000-0000-4000-8000-000000000001/${operation}`,
+            headers,
+            payload: { expectedVersion: 1 },
+          })
+        ).statusCode,
+      ).toBe(403);
+    }
+    const previewBody = {
+      timeZone: "UTC",
+      consumedCount: 1,
+      schedule: {
+        kind: "recurring",
+        startsAt: new Date(Date.now() + 3600000).toISOString(),
+        rule: { type: "interval", everyMinutes: 60 },
+        end: { kind: "count", count: 2 },
+      },
+    };
+    expect(
+      (
+        await application.inject({
+          method: "POST",
+          url: "/api/v1/scheduled-tasks/preview",
+          payload: previewBody,
+        })
+      ).statusCode,
+    ).toBe(401);
+    const preview = await application.inject({
+      method: "POST",
+      url: "/api/v1/scheduled-tasks/preview",
+      headers,
+      payload: previewBody,
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(
+      preview.json<{ data: { upcoming: string[] } }>().data.upcoming,
+    ).toHaveLength(1);
     expect(
       (
         await application.inject({

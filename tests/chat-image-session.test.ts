@@ -71,6 +71,7 @@ function fixture(overrides: Partial<ImageInputRuntimeSettings> = {}) {
   const resolved = { ...settings, ...overrides };
   const repository = new InMemoryAiRepository();
   const sources = new ChatImageSourceRepository({} as Pool);
+  const authorized = vi.spyOn(sources, "authorized").mockResolvedValue(true);
   const resolve = vi.spyOn(sources, "resolve").mockResolvedValue({
     messageId: "11111111-1111-4111-8111-111111111111",
     providerMessageId: envelope.message.providerMessageId,
@@ -127,6 +128,7 @@ function fixture(overrides: Partial<ImageInputRuntimeSettings> = {}) {
   return {
     session,
     repository,
+    authorized,
     resolve,
     fetcher,
     loader,
@@ -172,6 +174,7 @@ describe("runtime chat image access", () => {
       ),
     ).toBeNull();
     f.resolve.mockResolvedValue(null);
+    f.authorized.mockResolvedValue(false);
     expect(await session.validate()).toBe(false);
     expect(
       await f.loader.preview(record.diagnostics!, record.sourceHash),
@@ -205,6 +208,25 @@ describe("runtime chat image access", () => {
     expect(
       new URL(f.fetcher.mock.calls[0]![0] as URL).searchParams.get("original"),
     ).toBe("false");
+  });
+  it("keeps completely read images after archive revisions, but still enforces authorization", async () => {
+    const f = fixture();
+    f.fetcher.mockImplementationOnce(() => {
+      // Revision arrives during an authorized download.
+      f.resolve.mockResolvedValue(null);
+      return Promise.resolve(new Response(png));
+    });
+    const result = await f.invoke(JSON.stringify({ image_ref: f.ref }));
+    expect(parseResult(result.text).status).toBe("loaded");
+    result.commit!();
+    expect(await f.session.validate()).toBe(true);
+    const reused = await f.invoke(JSON.stringify({ image_ref: f.ref }));
+    expect(parseResult(reused.text).status).toBe("already-loaded");
+    expect(f.fetcher).toHaveBeenCalledTimes(1);
+    f.authorized.mockResolvedValue(false);
+    expect(await f.session.validate()).toBe(false);
+    const revoked = await f.invoke(JSON.stringify({ image_ref: f.ref }));
+    expect(parseResult(revoked.text).status).toBe("unavailable");
   });
   it("rejects guessed, cross-run and malformed refs without gateway calls", async () => {
     const f = fixture();
@@ -263,6 +285,7 @@ describe("runtime chat image access", () => {
         attachmentIndex: 0,
       })
       .mockResolvedValueOnce(null);
+    f.authorized.mockResolvedValueOnce(false);
     const output = await f.invoke(JSON.stringify({ image_ref: f.ref }));
     expect(parseResult(output.text).reason).toBe("source-unavailable");
     expect(output.commit).toBeUndefined();

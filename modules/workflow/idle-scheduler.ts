@@ -1,3 +1,5 @@
+import { parseWorkflowDefinition } from "./workflow-definition.js";
+import { parseTriggerConditions } from "./trigger-matcher.js";
 import { DEFAULT_CONTEXT_SETTINGS } from "./context-settings-types.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
@@ -33,6 +35,7 @@ interface Candidate {
   trigger: TriggerBinding;
   config: IdleTriggerConfig;
   due: Date;
+  event?: ChatIdleEvent;
 }
 export class IdleScheduler {
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -218,18 +221,6 @@ export class IdleScheduler {
     return results;
   }
   async tick(): Promise<void> {
-    await this.pool
-      .query(`UPDATE workflow_executions e SET status='skipped',completed_at=now(),error_code='idle-stale-attempt',error_summary='空闲任务已失效'
-      FROM idle_attempts a JOIN idle_chat_activity activity ON activity.chat_id=a.chat_id
-      JOIN chats c ON c.id=a.chat_id JOIN bot_triggers t ON t.id=a.trigger_id
-      JOIN workflow_versions v ON v.id=a.workflow_version_id JOIN workflows w ON w.id=v.workflow_id
-      WHERE a.execution_id=e.id AND e.status IN ('created','running','retrying')
-      AND (a.generation<>activity.generation OR NOT c.enabled OR c.deleted_at IS NOT NULL
-        OR NOT t.enabled OR t.deleted_at IS NOT NULL OR w.status<>'active' OR w.deleted_at IS NOT NULL
-        OR t.workflow_version_id<>a.workflow_version_id
-        OR date_trunc('milliseconds',GREATEST(t.updated_at,w.updated_at))<>a.trigger_updated_at
-        OR NOT EXISTS(SELECT 1 FROM messages m WHERE m.chat_id=c.id AND m.message_index=(e.trigger_event->'idle'->>'lastMessageIndex')::bigint AND m.content_redacted_at IS NULL))
-      AND NOT EXISTS(SELECT 1 FROM outbound_deliveries d WHERE d.execution_id=e.id)`);
     await this.reconcile();
     const triggers = await this.repository.listActiveTriggerBindings();
     const activities = await this.activities();
@@ -268,7 +259,12 @@ export class IdleScheduler {
         a.due.getTime() - b.due.getTime() ||
         a.trigger.id.localeCompare(b.trigger.id),
     );
+    // Accepted runs retain their original event and configuration, including
+    // after a restart. New activity/configuration only affects future attempts.
     const selected = new Map<string, Candidate>();
+    for (const candidate of await this.pendingCandidates())
+      if (!selected.has(candidate.activity.chat_id))
+        selected.set(candidate.activity.chat_id, candidate);
     for (const candidate of candidates)
       if (!selected.has(candidate.activity.chat_id))
         selected.set(candidate.activity.chat_id, candidate);
@@ -281,6 +277,61 @@ export class IdleScheduler {
         for (const result of results)
           if (result.status === "rejected") this.reportError();
       });
+  }
+  private async pendingCandidates(): Promise<Candidate[]> {
+    const pending = await this.pool.query<{
+      execution_id: string;
+      trigger_updated_at: Date;
+      conditions: unknown;
+      definition: unknown;
+      include_from_me: boolean;
+    }>(`SELECT a.execution_id,a.trigger_updated_at,t.conditions,t.include_from_me,v.definition
+      FROM idle_attempts a JOIN workflow_executions e ON e.id=a.execution_id
+      JOIN bot_triggers t ON t.id=a.trigger_id
+      JOIN workflow_versions v ON v.id=a.workflow_version_id
+      WHERE a.state IN ('accepted','reserved') AND e.status IN ('created','running','retrying')
+      ORDER BY a.created_at,a.id`);
+    const candidates: Candidate[] = [];
+    for (const row of pending.rows) {
+      const execution = await this.repository.getExecution(row.execution_id);
+      const event = execution?.triggerEvent;
+      if (!execution || event?.schemaVersion !== "chat-idle-v1") continue;
+      const trigger: TriggerBinding = {
+        id: execution.triggerId,
+        name: execution.triggerName,
+        workflowId: execution.workflowId,
+        workflowVersionId: execution.workflowVersionId,
+        workflowVersion: execution.workflowVersion,
+        definition: parseWorkflowDefinition(row.definition),
+        conditions: parseTriggerConditions(row.conditions),
+        includeFromMe: row.include_from_me,
+        enabled: true,
+        createdAt: execution.createdAt,
+        updatedAt: row.trigger_updated_at.toISOString(),
+      };
+      const config = this.config(trigger);
+      if (!config) continue;
+      candidates.push({
+        trigger,
+        config,
+        event,
+        due: new Date(event.idle.triggeredAt),
+        activity: {
+          chat_id: event.idle.chatId,
+          provider_chat_id: event.chat.providerChatId,
+          type: event.chat.type,
+          display_name: event.chat.displayName,
+          generation: event.idle.activityGeneration,
+          consumed_generation: event.idle.activityGeneration,
+          last_activity_at: new Date(event.idle.lastActivityAt),
+          last_human_at: null,
+          last_activity_source: "unknown",
+          next_message_index: event.idle.upperMessageIndex,
+          last_message_index: event.idle.lastMessageIndex,
+        },
+      });
+    }
+    return candidates;
   }
   private async dispatch(candidate: Candidate): Promise<void> {
     const db = await this.pool.connect();
@@ -296,7 +347,7 @@ export class IdleScheduler {
         ).rows[0]?.locked ?? false;
       if (!locked) return;
       const { activity, trigger, config } = candidate;
-      const event: ChatIdleEvent = {
+      const event: ChatIdleEvent = candidate.event ?? {
         schemaVersion: "chat-idle-v1",
         eventId: `idle:${activity.chat_id}:${activity.generation}`,
         correlationId: randomUUID(),
@@ -324,22 +375,6 @@ export class IdleScheduler {
         accept: async () => {
           await db.query("BEGIN");
           try {
-            const current = (
-              await db.query<Activity>(
-                "SELECT * FROM idle_chat_activity WHERE chat_id=$1 FOR UPDATE",
-                [activity.chat_id],
-              )
-            ).rows[0];
-            if (
-              !current ||
-              current.last_activity_source !== "human" ||
-              current.generation !== activity.generation ||
-              current.last_activity_at.getTime() !==
-                activity.last_activity_at.getTime()
-            ) {
-              await db.query("ROLLBACK");
-              return null;
-            }
             const existing = (
               await db.query<{
                 execution_id: string | null;
@@ -401,6 +436,14 @@ export class IdleScheduler {
                 );
                 return null;
               }
+              // Preserve reservations for accepted rows from earlier releases.
+              await db.query(
+                "UPDATE idle_attempts SET state='reserved',workflow_day=COALESCE(workflow_day,$2),updated_at=now() WHERE execution_id=$1 AND state='accepted'",
+                [
+                  existing.execution_id,
+                  idleDay(new Date(event.idle.triggeredAt), config.timeZone),
+                ],
+              );
               await db.query(
                 "UPDATE node_executions SET status='failed',completed_at=now(),error_code='IDLE_EXECUTION_INTERRUPTED',error_summary='进程中断后恢复' WHERE execution_id=$1 AND status='running'",
                 [existing.execution_id],
@@ -412,6 +455,65 @@ export class IdleScheduler {
                 ["created", "running", "retrying"].includes(execution.status)
                 ? execution
                 : null;
+            }
+            const current = (
+              await db.query<Activity>(
+                "SELECT * FROM idle_chat_activity WHERE chat_id=$1 FOR UPDATE",
+                [activity.chat_id],
+              )
+            ).rows[0];
+            if (
+              !current ||
+              current.last_activity_source !== "human" ||
+              current.generation !== activity.generation ||
+              current.last_message_index !== activity.last_message_index ||
+              current.last_activity_at.getTime() !==
+                activity.last_activity_at.getTime()
+            ) {
+              await db.query("ROLLBACK");
+              return null;
+            }
+            const authorized = await db.query(
+              `SELECT 1 FROM bot_triggers t JOIN workflow_versions v ON v.id=t.workflow_version_id JOIN workflows w ON w.id=v.workflow_id
+              JOIN chats c ON c.id=$2
+              WHERE t.id=$1 AND t.enabled AND t.deleted_at IS NULL
+              AND w.status='active' AND w.deleted_at IS NULL
+              AND c.enabled AND c.deleted_at IS NULL
+              AND t.workflow_version_id=$3
+              AND date_trunc('milliseconds',GREATEST(t.updated_at,w.updated_at))=$4
+              AND EXISTS(SELECT 1 FROM messages m WHERE m.chat_id=c.id AND m.message_index=$5 AND m.content_redacted_at IS NULL)`,
+              [
+                trigger.id,
+                activity.chat_id,
+                trigger.workflowVersionId,
+                trigger.updatedAt,
+                activity.last_message_index,
+              ],
+            );
+            const now = this.now();
+            const due = idleDueAt(current.last_activity_at, config, now);
+            if (
+              !authorized.rowCount ||
+              !config.chatIds.includes(activity.provider_chat_id) ||
+              !current.last_human_at ||
+              current.last_human_at <= new Date(trigger.updatedAt) ||
+              !due ||
+              due > now ||
+              isQuiet(now, config)
+            ) {
+              await db.query("ROLLBACK");
+              return null;
+            }
+            const workflowDay = idleDay(now, config.timeZone);
+            const counts = await db.query<{ count: string }>(
+              `SELECT count(*)::text AS count FROM idle_attempts a JOIN workflow_versions v ON v.id=a.workflow_version_id
+              WHERE a.chat_id=$1 AND v.workflow_id=$2 AND a.workflow_day=$3
+              AND a.state IN ('reserved','confirmed','unknown')`,
+              [activity.chat_id, trigger.workflowId, workflowDay],
+            );
+            if (Number(counts.rows[0]!.count) >= config.dailyLimit) {
+              await db.query("ROLLBACK");
+              return null;
             }
             if (
               BigInt(current.consumed_generation) >= BigInt(current.generation)
@@ -465,8 +567,8 @@ export class IdleScheduler {
               ],
             );
             await db.query(
-              `INSERT INTO idle_attempts(id,chat_id,generation,trigger_id,workflow_version_id,execution_id,trigger_updated_at,state)
-              VALUES($1,$2,$3,$4,$5,$6,$7,'accepted')`,
+              `INSERT INTO idle_attempts(id,chat_id,generation,trigger_id,workflow_version_id,execution_id,trigger_updated_at,state,workflow_day)
+              VALUES($1,$2,$3,$4,$5,$6,$7,'reserved',$8)`,
               [
                 randomUUID(),
                 activity.chat_id,
@@ -475,6 +577,7 @@ export class IdleScheduler {
                 trigger.workflowVersionId,
                 id,
                 trigger.updatedAt,
+                workflowDay,
               ],
             );
             await db.query(
@@ -488,7 +591,7 @@ export class IdleScheduler {
             throw error;
           }
         },
-        guard: (id, sending) => this.guardExecution(id, sending),
+        guard: (id) => this.guardExecution(id),
       });
       await this.reconcile(activity.chat_id);
     } finally {
@@ -499,162 +602,23 @@ export class IdleScheduler {
       db.release();
     }
   }
-  async guardExecution(
-    executionId: string,
-    sending = true,
-  ): Promise<string | null> {
+  async guardExecution(executionId: string): Promise<string | null> {
+    // Only execution lifecycle remains a send fence. Idle eligibility and quota
+    // were checked/reserved atomically at acceptance, not again per message part.
     const execution = await this.repository.getExecution(executionId);
     if (!execution) return "idle-execution-unavailable";
-    if (
-      !execution.triggerEvent ||
-      execution.triggerEvent.schemaVersion !== "chat-idle-v1"
-    )
-      return null;
+    if (execution.triggerEvent?.schemaVersion !== "chat-idle-v1") return null;
     if (
       ["skipped", "failed", "dead-lettered", "closed"].includes(
         execution.status,
       )
     )
       return "idle-execution-ended";
-    const event = execution.triggerEvent;
-    const attempt = (
-      await this.pool.query<{ trigger_updated_at: Date }>(
-        "SELECT trigger_updated_at FROM idle_attempts WHERE execution_id=$1",
-        [executionId],
-      )
-    ).rows[0];
-    const trigger = (await this.repository.listActiveTriggerBindings()).find(
-      (t) => t.id === execution.triggerId,
+    const attempt = await this.pool.query(
+      "SELECT 1 FROM idle_attempts WHERE execution_id=$1 AND state IN ('accepted','reserved','confirmed','unknown')",
+      [executionId],
     );
-    if (
-      !trigger ||
-      !attempt ||
-      trigger.workflowVersionId !== event.idle.workflowVersionId ||
-      new Date(trigger.updatedAt).getTime() !==
-        attempt.trigger_updated_at.getTime()
-    )
-      return "idle-configuration-changed";
-    const config = this.config(trigger);
-    if (!config || !config.chatIds.includes(event.chat.providerChatId))
-      return "idle-configuration-changed";
-    const activity: Activity = {
-      chat_id: event.idle.chatId,
-      provider_chat_id: event.chat.providerChatId,
-      type: event.chat.type,
-      display_name: event.chat.displayName,
-      generation: event.idle.activityGeneration,
-      consumed_generation: event.idle.activityGeneration,
-      last_activity_at: new Date(event.idle.lastActivityAt),
-      last_human_at: null,
-      last_activity_source: "unknown",
-      next_message_index: event.idle.upperMessageIndex,
-      last_message_index: event.idle.lastMessageIndex,
-    };
-    return this.guard(
-      executionId,
-      { activity, trigger, config, due: new Date(event.idle.triggeredAt) },
-      sending,
-    );
-  }
-  private async guard(
-    executionId: string,
-    candidate: Candidate,
-    sending: boolean,
-  ): Promise<string | null> {
-    const { activity, trigger, config } = candidate;
-    const textConfirmed = !!(
-      await this.pool.query(
-        "SELECT 1 FROM outbound_deliveries WHERE execution_id=$1 AND kind='text' AND status='confirmed'",
-        [executionId],
-      )
-    ).rowCount;
-    if (!sending && textConfirmed) return null;
-    const live = (await this.repository.listActiveTriggerBindings()).find(
-      (t) => t.id === trigger.id,
-    );
-    if (
-      !live ||
-      live.workflowVersionId !== trigger.workflowVersionId ||
-      live.updatedAt !== trigger.updatedAt ||
-      !this.config(live)?.chatIds.includes(activity.provider_chat_id)
-    )
-      return "idle-configuration-changed";
-    const now = this.now();
-    if (isQuiet(now, config)) return "idle-quiet-hours";
-    const current = (await this.activities()).find(
-      (a) => a.chat_id === activity.chat_id,
-    );
-    if (!current) return "idle-chat-unavailable";
-    if (!textConfirmed && current.last_activity_source !== "human")
-      return "idle-last-message-not-human";
-    if (
-      current.generation !== activity.generation ||
-      current.last_message_index !== activity.last_message_index ||
-      (!textConfirmed &&
-        current.last_activity_at.getTime() !==
-          activity.last_activity_at.getTime())
-    )
-      return "idle-new-activity";
-    const due = idleDueAt(current.last_activity_at, config, now);
-    if (!textConfirmed && (!due || due > now)) return "idle-not-due";
-    const db = await this.pool.connect();
-    try {
-      await db.query("BEGIN");
-      // Serialize quota reservation with activity changes and other workflows.
-      await db.query(
-        "SELECT 1 FROM idle_chat_activity WHERE chat_id=$1 FOR UPDATE",
-        [activity.chat_id],
-      );
-      const row = (
-        await db.query<{
-          generation: string;
-          last_activity_source: string;
-          last_activity_at: Date;
-          last_message_index: string;
-        }>(
-          "SELECT generation,last_activity_source,last_activity_at,last_message_index FROM idle_chat_activity WHERE chat_id=$1",
-          [activity.chat_id],
-        )
-      ).rows[0];
-      if (
-        !row ||
-        (!textConfirmed && row.last_activity_source !== "human") ||
-        row.generation !== activity.generation ||
-        row.last_message_index !== activity.last_message_index ||
-        (!textConfirmed &&
-          row.last_activity_at.getTime() !==
-            activity.last_activity_at.getTime())
-      ) {
-        await db.query("ROLLBACK");
-        return "idle-new-activity";
-      }
-      const workflowDay = idleDay(now, config.timeZone);
-      const counts = (
-        await db.query<{ workflow_count: string }>(
-          `SELECT count(*)::text AS workflow_count FROM idle_attempts
-         WHERE chat_id=$1 AND workflow_day=$2
-         AND workflow_version_id IN (SELECT id FROM workflow_versions WHERE workflow_id=$3)
-         AND state IN ('reserved','confirmed','unknown') AND execution_id<>$4`,
-          [activity.chat_id, workflowDay, trigger.workflowId, executionId],
-        )
-      ).rows[0]!;
-      if (Number(counts.workflow_count) >= config.dailyLimit) {
-        await db.query("ROLLBACK");
-        return "idle-daily-limit";
-      }
-      if (sending)
-        await db.query(
-          "UPDATE idle_attempts SET state='reserved',workflow_day=$2,updated_at=now() WHERE execution_id=$1 AND state IN ('accepted','reserved')",
-          [executionId, workflowDay],
-        );
-      await db.query("COMMIT");
-      return null;
-    } catch (error) {
-      await db.query("ROLLBACK");
-      throw error;
-    } finally {
-      db.release();
-    }
+    return attempt.rowCount ? null : "idle-execution-unavailable";
   }
   private async reconcile(chatId: string | null = null): Promise<void> {
     await this.pool.query(

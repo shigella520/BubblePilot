@@ -1,4 +1,9 @@
 import {
+  messageRevisionNotice,
+  visibleRevisionText,
+} from "../archive/message-revision.js";
+import { countPageCharacters } from "./chat-count-buckets.js";
+import {
   attachmentPageSize,
   type AttachmentListing,
 } from "../attachments/attachment-policy.js";
@@ -18,6 +23,7 @@ import {
   ChatQueryError,
   type ChatArchiveQuery,
   type ChatPosition,
+  type CountPosition,
   type MessagePosition,
 } from "./chat-query-types.js";
 import {
@@ -60,7 +66,7 @@ export const memoryTools: readonly AiToolDefinition[] = [
       name: "count_chat_messages",
       schema: chatCountQuerySchema,
       description:
-        "Count matching archived messages exactly in SQL, overall or grouped by local day or sender. Keywords count messages, not occurrences. Day grouping requires from/to spanning at most 366 local dates. Empty days have zero. Counts are exact for each returned group; follow nextCursor for remaining groups. Counts have no message citation.",
+        "Count archived MESSAGES exactly in SQL without reading their bodies. Withdrawn message placeholders still count as sends; keyword and attachment filters use only current retained content. Prefer this tool for totals, trends, rankings and activity heatmaps; never fetch message bodies merely to count. groupBy: none, hour (dated timeline with offsets), day, week (Monday start), month, sender, hourOfDay (merge local clock hours across dates), weekday (ISO 1-7). Time dimensions require from/to, at most 366 local dates. Optional breakdownBy: sender with any time dimension, or hourOfDay with weekday. orderBy=countDesc ranks groups, ties use stable keys. Attachment filters count each matching MESSAGE once, not files; filename and type must match the SAME file. authorKind=participant is an archive identity, not verified humanity; unknown includes unidentified senders and unknown-self. Time groups have zero counts for empty readable archive; sender combinations are sparse. totalCount covers ALL matches, not only this page or top N; countsExact applies to returned counts. Follow nextCursor with unchanged filters/grouping/order for more groups, but every page has its own queriedAt snapshot and may change after archive edits. Partial buckets are not full periods; weekday/hourOfDay counts are sums, not daily averages. Results have no message citations. If unavailable or budget exhausted, explain limits; do not fall back to bulk transcript retrieval.",
     },
     {
       name: "get_chat_message_extrema",
@@ -324,6 +330,10 @@ export class MemorySession {
     offset: number,
     query?: ChatMessageQuery,
   ) => AttachmentListing;
+  stageAttachmentCatalogue?: () => {
+    catalogue: NonNullable<MemorySession["attachmentCatalogue"]>;
+    commit: (listings: readonly AttachmentListing[]) => void;
+  };
   private withAttachments(
     item: Evidence,
     messages: MemoryMessage[],
@@ -403,6 +413,8 @@ export class MemorySession {
           return (
             other?.id === m.id &&
             other.hash === m.hash &&
+            other.revisionState === m.revisionState &&
+            other.editedAt === m.editedAt &&
             other.text === m.text &&
             (other.excerptStart ?? 0) === (m.excerptStart ?? 0) &&
             (other.excerptEnd ??
@@ -428,7 +440,7 @@ export class MemorySession {
       text: messages
         .map(
           (m) =>
-            `${m.sentAt} sender_id=${m.senderId} author=${m.author ? authorLabel(m.author) : "unknown"}\n${m.text}`,
+            `${m.sentAt} sender_id=${m.senderId} author=${m.author ? authorLabel(m.author) : "unknown"}\n${[messageRevisionNotice(m), visibleRevisionText(m, m.text)].filter(Boolean).join("\n")}${m.replyTo ? `\nreply_to=${JSON.stringify(m.replyTo)}` : ""}${m.revisionState && m.revisionState !== "active" ? `\nmessage_state=${m.revisionState}` : ""}`,
         )
         .join("\n"),
       ...(this.imagesEnabled
@@ -590,6 +602,7 @@ export class MemorySession {
     const positions: ChatPosition[] = [];
     let queriedAt: string, databaseHasMore: boolean;
     let scalar: Record<string, unknown> = {};
+    const members = new Map<string, unknown>();
     if ("order" in query) {
       const page = await this.service.repository.archiveQueries.query(
         this.scope,
@@ -622,12 +635,15 @@ export class MemorySession {
         this.scope,
         query,
         timeZone,
-        previous?.position as string | undefined,
+        previous?.position as string | CountPosition | undefined,
         this.operationContext,
       );
       this.checkActive();
       queriedAt = page.queriedAt;
       databaseHasMore = page.rows.length > limit;
+      if (!("pick" in query)) {
+        scalar = { totalCount: page.totalCount, totalGroups: page.totalGroups };
+      }
       for (const row of page.rows.slice(0, limit)) {
         const identity =
           query.groupBy === "day"
@@ -652,18 +668,27 @@ export class MemorySession {
                   }
                 : null,
           });
-        } else items.push({ ...identity, count: row.count });
-        positions.push(row.key);
+        } else {
+          items.push({ ...(row.dimensions ?? identity), count: row.count });
+          if (row.memberKey) members.set(row.memberKey, row.author);
+        }
+        positions.push(row.position ?? row.key);
       }
       if (query.groupBy === "none" && !("pick" in query))
-        scalar = { count: items[0]?.count ?? 0 };
+        scalar = { ...scalar, count: items[0]?.count ?? 0 };
     }
     const field = "order" in query ? "evidence" : "groups";
     const token = randomUUID();
     const originalLength = items.length;
+    const isCount = !("order" in query) && !("pick" in query);
+    const available = this.operationContext?.maxOutputCharacters ?? Infinity;
+    const maximum = isCount
+      ? Math.min(countPageCharacters, available)
+      : available;
+    let budgetTruncated = false;
     while (true) {
-      const truncated = items.length < originalLength;
-      const hasMore = databaseHasMore || truncated;
+      const truncated = budgetTruncated;
+      const hasMore = databaseHasMore || items.length < originalLength;
       const result = {
         status:
           "count" in scalar ||
@@ -683,6 +708,22 @@ export class MemorySession {
           ? { order: query.order, sort: "sent_at,message_index" }
           : {
               groupBy: query.groupBy,
+              ...(!("pick" in query)
+                ? {
+                    orderBy: query.orderBy ?? "group",
+                    breakdownBy: query.breakdownBy,
+                    returnedGroupCount: items.length,
+                    ...(query.breakdownBy === "sender"
+                      ? {
+                          members: Object.fromEntries(
+                            [...members].filter(([key]) =>
+                              items.some((item) => item.senderKey === key),
+                            ),
+                          ),
+                        }
+                      : {}),
+                  }
+                : {}),
               ...("pick" in query
                 ? { pick: query.pick }
                 : { countsExact: true }),
@@ -696,10 +737,7 @@ export class MemorySession {
         ...(truncated ? { reason: "tool-output" } : {}),
       };
       const content = JSON.stringify(result);
-      if (
-        content.length <=
-        (this.operationContext?.maxOutputCharacters ?? Infinity)
-      ) {
+      if (content.length <= maximum) {
         const position = positions[items.length - 1];
         if (hasMore && position !== undefined)
           this.cursors.set(token, { fingerprint, position });
@@ -711,6 +749,7 @@ export class MemorySession {
           reason: "tool-output",
           truncated: true,
         });
+      if (!isCount || available < countPageCharacters) budgetTruncated = true;
       items.pop();
     }
   }
@@ -825,6 +864,8 @@ export class MemorySession {
     }
     // Each operation owns a staging map. Timed-out work cannot modify the live session.
     const staged = new MemorySession(this.service, this.scope, this.id);
+    const attachments = this.stageAttachmentCatalogue?.();
+    if (attachments) staged.attachmentCatalogue = attachments.catalogue;
     staged.imagesEnabled = this.imagesEnabled;
     staged.evidence = new Map(this.evidence);
     staged.cursors = new Map(this.cursors);
@@ -848,8 +889,8 @@ export class MemorySession {
           truncated: true,
         });
       const payload = JSON.parse(content) as {
-        evidence?: { ref: string }[];
-        groups?: { message?: { ref: string } | null }[];
+        evidence?: Pick<Evidence, "ref" | "attachments">[];
+        groups?: { message?: Pick<Evidence, "ref" | "attachments"> | null }[];
         status: string;
         retrievalMode?: string;
       };
@@ -907,6 +948,7 @@ export class MemorySession {
         staged.checkActive();
         await client.query("COMMIT");
         staged.checkActive();
+        attachments?.commit(refs.flatMap((item) => item.attachments ?? []));
         for (const entry of accepted) this.evidence.set(entry.item.ref, entry);
         this.cursors = staged.cursors;
       } catch (error) {
@@ -942,7 +984,9 @@ export class MemorySession {
             m.index,
           )
         )[0];
-        if (current?.hash !== m.hash) return false;
+        // Already returned evidence is a run snapshot. Revision is not revocation;
+        // deletion/retention and chat authorization still invalidate access.
+        if (!current) return false;
       }
     return true;
   }

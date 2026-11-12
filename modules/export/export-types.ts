@@ -1,3 +1,7 @@
+import type {
+  ReplyPreview,
+  RevisionState,
+} from "../archive/message-revision.js";
 import { z } from "zod";
 
 export const dataExportScopeSchema = z
@@ -71,6 +75,9 @@ export interface DataExportJob {
 }
 
 export interface DataExportMessage {
+  revisionState?: RevisionState;
+  editedAt?: string | null;
+  replyTo?: ReplyPreview;
   id: string;
   providerMessageId: string;
   chatId: string;

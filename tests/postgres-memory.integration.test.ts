@@ -1,3 +1,11 @@
+import { AgentBudget } from "../modules/ai/agent-budget.js";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AttachmentSession } from "../modules/attachments/attachment-session.js";
+import { ChatImageSourceRepository } from "../modules/ai/chat-image-source.js";
+import { AgentToolRegistry } from "../modules/ai/agent-tool-registry.js";
+import type { AttachmentListing } from "../modules/attachments/attachment-policy.js";
 import { AttachmentService } from "../modules/attachments/attachment-service.js";
 import { AttachmentStore } from "../modules/attachments/attachment-store.js";
 import { attachmentLimitsSchema } from "../modules/attachments/attachment-policy.js";
@@ -10,7 +18,15 @@ import {
   chatExtremaQuerySchema,
 } from "../modules/memory/chat-query-types.js";
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  it,
+  expect,
+  vi,
+} from "vitest";
 import { MemoryRepository } from "../modules/memory/memory-repository.js";
 import { MemoryService } from "../modules/memory/memory-service.js";
 import { defaultMemoryConfig } from "../modules/memory/memory-types.js";
@@ -68,6 +84,153 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     );
     return id;
   }
+
+  function observeAttachmentStage(
+    session: Awaited<ReturnType<typeof service.session>>,
+  ) {
+    const catalogue = vi.fn((m: { id: string }): AttachmentListing => ({
+      messageId: m.id,
+      entries: [
+        {
+          index: 0,
+          fileName: "fictional.csv",
+          mimeType: "text/csv",
+          sizeBytes: 4,
+          availability: "not-verified",
+          attachment_ref: `A${m.id}`,
+        },
+      ],
+      total: 1,
+      omitted: 0,
+      nextOffset: null,
+    }));
+    const commit = vi.fn();
+    session.stageAttachmentCatalogue = () => ({ catalogue, commit });
+    return { catalogue, commit };
+  }
+
+  it.each(["query_chat_messages", "search_chat_history"])(
+    "imports an earlier XLSX after %s and excerpt expansion, with a separate attachment-free trigger",
+    async (toolName) => {
+      const id = await chat();
+      const source = await message(id, "虚构销售附件");
+      const current = await message(id, "请汇总之前的销售表格");
+      const data = await readFile(
+        new URL("./fixtures/fictional-sales.xlsx", import.meta.url),
+      );
+      const attachment = {
+        providerAttachmentId: "fictional-xlsx",
+        fileName: "fictional-sales.xlsx",
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        sizeBytes: data.length,
+      };
+      await repo.pool.query("UPDATE messages SET attachments=$2 WHERE id=$1", [
+        source,
+        JSON.stringify([attachment]),
+      ]);
+      const root = await mkdtemp(join(tmpdir(), "bp-history-xlsx-"));
+      const storage = new AttachmentStore(root);
+      await storage.init();
+      const transfer = vi.fn(
+        async (input: Record<string, unknown>, file: string) => {
+          expect(await readFile(file)).toEqual(data);
+          return {
+            status: "imported",
+            sandbox_path: "/workspace/attachments/fixture/fictional-sales.xlsx",
+            size: data.length,
+            sha256: input.sha256,
+          };
+        },
+      );
+      const download = vi.fn(() => Promise.resolve(new Response(data)));
+      const channel = {
+        metadata: { pluginId: randomUUID(), server: "sandbox" },
+        check: async () => {},
+        invalidate: async () => {},
+        transfer,
+      };
+      const attachments = new AttachmentSession(
+        {
+          config: {
+            enabled: true,
+            pluginId: channel.metadata.pluginId,
+            server: "sandbox",
+            limits: attachmentLimitsSchema.parse({}),
+          },
+          scope: {
+            provider: "bluebubbles",
+            providerChatId: id,
+            triggerMessageId: current,
+          },
+          current: { providerMessageId: current, attachments: [] },
+        },
+        { attachmentChannel: () => channel } as unknown as PluginSession,
+        new ChatImageSourceRepository(repo.pool),
+        { download },
+        storage,
+      );
+      try {
+        const boundary = await repo.pool.query<{ message_index: string }>(
+          "SELECT message_index FROM messages WHERE id=$1",
+          [current],
+        );
+        const scope = (await repo.scope(
+          id,
+          Number(boundary.rows[0]!.message_index),
+          null,
+        ))!;
+        const memory = await service.session(scope);
+        memory.stageAttachmentCatalogue = () => attachments.stageCatalogue();
+        expect(attachments.currentCatalogue().entries).toEqual([]);
+        const result = JSON.parse(
+          await memory.execute(
+            toolName,
+            JSON.stringify(
+              toolName === "search_chat_history"
+                ? { query: "虚构销售附件" }
+                : { hasAttachments: true, attachmentType: ".xlsx" },
+            ),
+          ),
+        ) as {
+          evidence: Array<{ ref: string; attachments: AttachmentListing[] }>;
+        };
+        const found = result.evidence.find((e) =>
+          e.attachments.some((a) => a.messageId === source),
+        )!;
+        expect(found).toBeDefined();
+        const ref = found.attachments[0]!.entries[0]!.attachment_ref;
+        expect(ref).toMatch(/^A[0-9a-f-]{36}$/);
+        const excerpt = JSON.parse(
+          await memory.execute(
+            "read_chat_excerpt",
+            JSON.stringify({ ref: found.ref, before: 0, after: 0 }),
+          ),
+        ) as { evidence: Array<{ attachments: AttachmentListing[] }> };
+        expect(
+          excerpt.evidence[0]!.attachments[0]!.entries[0]!.attachment_ref,
+        ).toBe(ref);
+        const registry = new AgentToolRegistry();
+        attachments.register(registry);
+        const output = await registry
+          .get("import_chat_attachment")!
+          .execute(JSON.stringify({ attachment_ref: ref }), {
+            signal: AbortSignal.timeout(5000),
+            deadline: Date.now() + 5000,
+            maxOutputCharacters: 64000,
+          });
+        expect(typeof output === "string" ? output : output.text).toContain(
+          '"status":"imported"',
+        );
+        expect(download).toHaveBeenCalledTimes(1);
+        expect(transfer).toHaveBeenCalledTimes(1);
+        expect(await readdir(root)).toEqual([]);
+      } finally {
+        await attachments.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("filters attachments on the same item, respects archive boundaries and continues bounded catalogues", async () => {
     const id = await chat();
@@ -454,6 +617,313 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     );
     expect(last.rows[0]?.message?.message.id).toBe(b);
   });
+  const statisticsChats: string[] = [];
+  afterEach(async () => {
+    if (statisticsChats.length)
+      await repo.pool.query(
+        "DELETE FROM memory_jobs WHERE chat_id=ANY($1::uuid[])",
+        [statisticsChats.splice(0)],
+      );
+  });
+  async function statisticsFixture(
+    size: number,
+    longBody = false,
+    uniqueSenders = false,
+  ) {
+    const id = await chat();
+    statisticsChats.push(id);
+    const seed = await message(
+      id,
+      longBody ? "fictional " + "x".repeat(5000) : "fictional statistic",
+    );
+    await repo.pool.query(
+      "UPDATE messages SET sent_at='2026-11-07T00:00:00+08:00',sender_id='member-0' WHERE id=$1",
+      [seed],
+    );
+    // Batch fixture writes so trigger work never needs a relaxed SQL timeout.
+    for (let offset = 1; offset < size; offset += 1000) {
+      await repo.pool.query(
+        `INSERT INTO messages(id,provider,provider_message_id,chat_id,sender_id,sent_at,body,content_type,is_from_me,content_hash,source_event_id)
+        SELECT gen_random_uuid(),'bluebubbles',gen_random_uuid()::text,chat_id,'member-'||(CASE WHEN $3::boolean THEN n ELSE n%5 END),'2026-11-07T00:00:00+08:00'::timestamptz+n*interval '1 minute',body,'text',false,'fixture',source_event_id
+        FROM messages CROSS JOIN generate_series($2::int,$4::int) n WHERE id=$1`,
+        [seed, offset, uniqueSenders, Math.min(offset + 999, size - 1)],
+      );
+    }
+    const scope = {
+      ...(await repo.scope(id, Number.MAX_SAFE_INTEGER, null))!,
+      timeZone: "Asia/Shanghai",
+    };
+    const session = await service.session(scope);
+    const call = async (input: unknown, maximum = 64000) => {
+      const raw = await session.execute(
+        "count_chat_messages",
+        JSON.stringify(input),
+        {
+          signal: new AbortController().signal,
+          deadline: Date.now() + 10000,
+          maxOutputCharacters: maximum,
+        },
+      );
+      return {
+        raw,
+        data: JSON.parse(raw) as {
+          count?: number;
+          totalCount: number;
+          totalGroups: number;
+          returnedGroupCount: number;
+          groups: Array<{ count: number; hour: string; senderKey: string }>;
+          members: Record<string, unknown>;
+          hasMore: boolean;
+          truncated: boolean;
+          nextCursor: string | null;
+          reason?: string;
+        },
+      };
+    };
+    return { id, seed, scope, session, call };
+  }
+  const statisticsRange = {
+    from: "2026-11-07T00:00:00+08:00",
+    to: "2026-11-07T23:59:59.999999+08:00",
+  };
+  it("counts 285 long messages hourly in one small body-free response", async () => {
+    const f = await statisticsFixture(285, true);
+    const { raw, data } = await f.call({
+      ...statisticsRange,
+      groupBy: "hour",
+      limit: 24,
+    });
+    expect(data).toMatchObject({
+      totalCount: 285,
+      totalGroups: 24,
+      returnedGroupCount: 24,
+      hasMore: false,
+      complete: true,
+      truncated: false,
+      countsExact: true,
+    });
+    expect(data.groups.map((g: { count: number }) => g.count)).toEqual([
+      60,
+      60,
+      60,
+      60,
+      45,
+      ...Array.from({ length: 19 }, () => 0),
+    ]);
+    expect(raw.length).toBeLessThanOrEqual(12000);
+    expect(raw).not.toMatch(/fictional|xxxxx|body|messageId/);
+    expect(f.session.references()).toEqual([]);
+    for (const groupBy of ["day", "week", "month", "hourOfDay", "weekday"]) {
+      const { data: r } = await f.call({ ...statisticsRange, groupBy });
+      expect(r.totalCount).toBe(285);
+      expect(
+        r.groups.reduce((n: number, g: { count: number }) => n + g.count, 0),
+      ).toBe(285);
+    }
+  });
+  it("pages dense heatmaps and sparse member rankings with stable ties", async () => {
+    const f = await statisticsFixture(285);
+    const args = {
+      ...statisticsRange,
+      groupBy: "weekday",
+      breakdownBy: "hourOfDay",
+      limit: 100,
+    };
+    const a = (await f.call(args)).data;
+    const b = (await f.call({ ...args, cursor: a.nextCursor })).data;
+    expect(a.totalGroups).toBe(168);
+    expect([...a.groups, ...b.groups]).toHaveLength(168);
+    expect(
+      [...a.groups, ...b.groups].reduce(
+        (n: number, g: { count: number }) => n + g.count,
+        0,
+      ),
+    ).toBe(285);
+    expect(b.hasMore).toBe(false);
+    const ranking = {
+      ...statisticsRange,
+      groupBy: "hour",
+      breakdownBy: "sender",
+      orderBy: "countDesc",
+      limit: 3,
+    };
+    const groups: { hour: string; senderKey: string; count: number }[] = [];
+    let cursor: string | undefined;
+    do {
+      const r = (await f.call({ ...ranking, ...(cursor ? { cursor } : {}) }))
+        .data;
+      expect(r.totalCount).toBe(285);
+      expect(r.totalGroups).toBe(25);
+      expect(Object.keys(r.members).length).toBeLessThanOrEqual(
+        r.groups.length,
+      );
+      groups.push(...r.groups);
+      cursor = r.nextCursor ?? undefined;
+    } while (cursor);
+    expect(new Set(groups.map((g) => g.hour + g.senderKey)).size).toBe(25);
+    expect(groups.reduce((n, g) => n + g.count, 0)).toBe(285);
+    expect(groups.map((g) => g.count)).toEqual(
+      [...groups.map((g) => g.count)].sort((x, y) => y - x),
+    );
+    const first = (await f.call(ranking)).data;
+    expect(
+      (await f.call({ ...ranking, orderBy: "group", cursor: first.nextCursor }))
+        .data.reason,
+    ).toBe("invalid-cursor");
+    for (const groupBy of ["day", "week", "month", "hourOfDay", "weekday"]) {
+      const r = (
+        await f.call({
+          ...statisticsRange,
+          groupBy,
+          breakdownBy: "sender",
+          limit: 100,
+        })
+      ).data;
+      expect(
+        r.groups.reduce((n: number, g: { count: number }) => n + g.count, 0),
+      ).toBe(285);
+    }
+  });
+  it("counts attachment matches once, respects identities, redaction and runtime boundary", async () => {
+    const f = await statisticsFixture(4);
+    const attachments = [
+      { fileName: "report.pdf", mimeType: "application/pdf" },
+      { fileName: "second.pdf", mimeType: "application/pdf" },
+      { fileName: "other.csv", mimeType: "text/csv" },
+    ];
+    await repo.pool.query(
+      "UPDATE messages SET attachments=$2::jsonb WHERE id=$1",
+      [f.seed, JSON.stringify(attachments)],
+    );
+    expect(
+      (await f.call({ hasAttachments: true, attachmentType: ".pdf" })).data
+        .count,
+    ).toBe(1);
+    expect(
+      (
+        await f.call({
+          attachmentName: "REPORT",
+          attachmentType: "application/pdf",
+        })
+      ).data.count,
+    ).toBe(1);
+    expect(
+      (await f.call({ attachmentName: "report", attachmentType: ".csv" })).data
+        .count,
+    ).toBe(0);
+    expect((await f.call({ hasAttachments: false })).data.count).toBe(3);
+    await repo.pool.query("UPDATE messages SET sender_id=NULL WHERE id=$1", [
+      f.seed,
+    ]);
+    expect((await f.call({ authorKind: "unknown" })).data.count).toBe(1);
+    expect((await f.call({ authorKind: "participant" })).data.count).toBe(3);
+    expect((await f.call({ authorKind: "bot" })).data.count).toBe(0);
+    await repo.pool.query(
+      "UPDATE messages SET is_from_me=true,sender_id='self' WHERE id=$1",
+      [f.seed],
+    );
+    expect((await f.call({ authorKind: "unknown" })).data.count).toBe(1);
+    await repo.pool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
+      [f.seed],
+    );
+    expect((await f.call({})).data.count).toBe(3);
+    const hidden = await message(f.id, "future-message");
+    const index = await repo.pool.query<{ message_index: string }>(
+      "SELECT message_index FROM messages WHERE id=$1",
+      [hidden],
+    );
+    const boundary = await repo.archiveQueries.aggregate(
+      { ...f.scope, upperIndex: Number(index.rows[0]!.message_index) },
+      chatCountQuerySchema.parse({}),
+      "UTC",
+    );
+    expect(boundary.totalCount).toBe(3);
+    await repo.authorize(f.id, false, 1);
+    expect((await f.call({})).data).toMatchObject({
+      status: "unavailable",
+      reason: "source-unavailable",
+    });
+  });
+  it("soft-pages large statistics without exhausting global budget and rejects excessive groups", async () => {
+    const f = await statisticsFixture(120);
+    await repo.pool.query(
+      "UPDATE messages SET sender_id=repeat('s',200)||id::text WHERE chat_id=$1",
+      [f.id],
+    );
+    const args = {
+      ...statisticsRange,
+      groupBy: "day",
+      breakdownBy: "sender",
+      limit: 100,
+    };
+    const first = await f.call(args);
+    expect(first.raw.length).toBeLessThanOrEqual(12000);
+    expect(first.data).toMatchObject({
+      hasMore: true,
+      truncated: false,
+      totalCount: 120,
+      totalGroups: 120,
+    });
+    expect(first.data.groups.length).toBeLessThan(100);
+    const budget = new AgentBudget({
+      source: "defaults",
+      version: 0,
+      updatedAt: null,
+      maxToolCalls: 10,
+      maxToolOutputCharacters: 64000,
+      maxToolDurationMs: 90000,
+    });
+    budget.append(first.raw);
+    expect(budget.exhausted).toBe(false);
+
+    const found = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const r = (await f.call({ ...args, ...(cursor ? { cursor } : {}) })).data;
+      expect(r.truncated).toBe(false);
+      for (const g of r.groups) {
+        expect(found.has(g.senderKey)).toBe(false);
+        found.add(g.senderKey);
+      }
+      cursor = r.nextCursor ?? undefined;
+    } while (cursor);
+    expect(found.size).toBe(120);
+    expect((await f.call(args, 100)).data).toMatchObject({
+      status: "unavailable",
+      reason: "tool-output",
+    });
+    const many = await statisticsFixture(10001, false, true);
+    expect((await many.call({ groupBy: "sender" })).data).toMatchObject({
+      status: "unavailable",
+      reason: "group-limit",
+    });
+  }, 20000);
+  it("counts repeated DST hours separately and merges their clock-hour groups", async () => {
+    const f = await statisticsFixture(2);
+    await repo.pool.query(
+      "UPDATE messages SET sent_at=CASE WHEN id=$2 THEN '2026-11-01T05:30:00Z'::timestamptz ELSE '2026-11-01T06:30:00Z'::timestamptz END WHERE chat_id=$1",
+      [f.id, f.seed],
+    );
+    const filter = {
+      from: "2026-11-01T00:00:00-04:00",
+      to: "2026-11-01T23:59:59.999999-05:00",
+    };
+    const result = await repo.archiveQueries.aggregate(
+      f.scope,
+      chatCountQuerySchema.parse({ ...filter, groupBy: "hour" }),
+      "America/New_York",
+    );
+    expect(result.rows).toHaveLength(25);
+    expect(result.rows.slice(1, 3).map((r) => r.count)).toEqual([1, 1]);
+    const clock = await repo.archiveQueries.aggregate(
+      f.scope,
+      chatCountQuerySchema.parse({ ...filter, groupBy: "hourOfDay" }),
+      "America/New_York",
+    );
+    expect(clock.rows[1]?.count).toBe(2);
+  });
+
   it("binds session cursors, fits actual returned pages and expands extrema sources offline", async () => {
     const id = await chat();
     for (let i = 0; i < 4; i++)
@@ -752,6 +1222,21 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     const id = await chat();
     await message(id, "虚构取消中的来源");
     const session = await service.session((await repo.scope(id, 999, null))!);
+    await repo.pool.query(
+      "UPDATE messages SET attachments=$2 WHERE chat_id=$1",
+      [
+        id,
+        JSON.stringify([
+          {
+            providerAttachmentId: "fictional",
+            fileName: "fictional.csv",
+            mimeType: "text/csv",
+            sizeBytes: 4,
+          },
+        ]),
+      ],
+    );
+    const stage = observeAttachmentStage(session);
     const controller = new AbortController();
     await repo.pool.query(
       "CREATE OR REPLACE FUNCTION agent_fixture_delay_source() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(1); RETURN NEW; END $$",
@@ -780,6 +1265,8 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       controller.abort();
       await assertion;
       expect(waiting).toBe(true);
+      expect(stage.catalogue).toHaveBeenCalled();
+      expect(stage.commit).not.toHaveBeenCalled();
       expect(session.references()).toEqual([]);
       expect(
         (
@@ -804,6 +1291,21 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     await message(id, "虚构大消息".repeat(3000));
     await message(id, "虚构小消息");
     const session = await service.session((await repo.scope(id, 999, null))!);
+    await repo.pool.query(
+      "UPDATE messages SET attachments=$2 WHERE chat_id=$1",
+      [
+        id,
+        JSON.stringify([
+          {
+            providerAttachmentId: "fictional",
+            fileName: "fictional.csv",
+            mimeType: "text/csv",
+            sizeBytes: 4,
+          },
+        ]),
+      ],
+    );
+    const stage = observeAttachmentStage(session);
     const context = {
       signal: new AbortController().signal,
       deadline: Date.now() + 5000,
@@ -818,6 +1320,10 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       evidence: [{ ref: "M1" }],
     });
     expect(result.evidence).toHaveLength(1);
+    expect(stage.catalogue.mock.calls.length).toBeGreaterThan(1);
+    expect(stage.commit).toHaveBeenCalledWith(
+      (result.evidence[0] as { attachments: AttachmentListing[] }).attachments,
+    );
     expect(session.references()).toEqual(["M1"]);
     expect(
       (
@@ -833,6 +1339,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
         maxOutputCharacters: 1,
       }),
     ) as unknown;
+    expect(stage.commit).toHaveBeenLastCalledWith([]);
     expect(tiny).toMatchObject({
       status: "unavailable",
       reason: "tool-output",
@@ -887,6 +1394,55 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
         ) as { status: string }
       ).status,
     ).toBe("unavailable");
+  });
+  it("history tools report edited and withdrawn states without admin-only retained text", async () => {
+    const id = await chat();
+    const source = await message(id, "虚构早期正文");
+    const scope = (await repo.scope(id, 999, null))!;
+    const session = await service.session(scope);
+    await repo.pool.query(
+      "UPDATE messages SET edited_at='2026-08-10T00:01:00Z',body='虚构最新正文' WHERE id=$1",
+      [source],
+    );
+    const edited = await session.execute("query_chat_messages", "{}");
+    expect(edited).toContain("该消息已编辑");
+    expect(edited).toContain("虚构最新正文");
+    expect(edited).not.toContain("虚构早期正文");
+    await repo.pool.query(
+      "UPDATE messages SET body=NULL,revision_state='retracted',retracted_body='仅供管理员查看的虚构正文' WHERE id=$1",
+      [source],
+    );
+    const withdrawn = await session.execute("query_chat_messages", "{}");
+    expect(withdrawn).toContain("该消息已撤回；原文不提供");
+    expect(withdrawn).not.toContain("仅供管理员");
+    expect(withdrawn).not.toContain("虚构最新正文");
+    await repo.pool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
+      [source],
+    );
+    const fresh = await service.session((await repo.scope(id, 999, null))!);
+    const expired = await fresh.execute("query_chat_messages", "{}");
+    expect(expired).not.toContain("该消息已撤回");
+  });
+  it("keeps already-read evidence across revisions while invalidating shared indexes", async () => {
+    const id = await chat();
+    const source = await message(id, "虚构备份计划原文");
+    await drain();
+    const scope = (await repo.scope(id, 999, null))!;
+    const session = await service.session(scope);
+    const read = await session.search({ query: "备份" });
+    expect(read.evidence.length).toBeGreaterThan(0);
+    await repo.pool.query(
+      "UPDATE messages SET body=NULL,attachments='[]',revision_state='retracted',revision_number=revision_number+1 WHERE id=$1",
+      [source],
+    );
+    expect(await session.validate()).toBe(true);
+    expect(read.evidence.some((e) => e.text.includes("虚构备份计划原文"))).toBe(
+      true,
+    );
+    expect(await repo.candidates(scope, { query: "备份" }, [1, 0])).toEqual([]);
+    await repo.pool.query("UPDATE chats SET enabled=false WHERE id=$1", [id]);
+    expect(await session.validate()).toBe(false);
   });
   it("invalidates text, vectors visibility and cached evidence on redaction", async () => {
     const id = await chat();

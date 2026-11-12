@@ -24,6 +24,9 @@ it("pins image and ownership, omits CPU/mounts and verifies deletion instead of 
       SANDBOX_IMAGE: `python:3.12-slim@sha256:${"a".repeat(64)}`,
       ADAPTER_INSTANCE_ID: "fixture",
       OPENSANDBOX_URL: "http://sandbox.example.test",
+      SANDBOX_CREATE_TIMEOUT_SECONDS: "120",
+      ATTACHMENT_IMPORT_TIMEOUT_SECONDS: "150",
+      SANDBOX_COMMAND_MAX_TIMEOUT_SECONDS: "180",
       MCP_TOKEN_FILE: "/fake/token",
       OPENSANDBOX_API_KEY_FILE: "/fake/key",
     });
@@ -34,11 +37,13 @@ it("pins image and ownership, omits CPU/mounts and verifies deletion instead of 
     expect(options).toMatchObject({
       image: config.SANDBOX_IMAGE,
       timeoutSeconds: 600,
+      readyTimeoutSeconds: 120,
       metadata: {
         "bubblepilot.adapter": "fixture",
         "bubblepilot.session": "run-one",
       },
     });
+    expect(options.connectionConfig?.requestTimeoutSeconds).toBe(180);
     expect(options).not.toHaveProperty("volumes");
     expect(await backend.owned()).toEqual(["own"]);
     expect(await backend.remove("own")).toBe(false);
@@ -56,4 +61,61 @@ it("rejects unsafe concurrency and mutable sandbox image tags", () => {
   expect(
     configSchema.safeParse({ SANDBOX_IMAGE: "python:latest" }).success,
   ).toBe(false);
+});
+
+it("defaults and bounds administrator-owned timeout configuration", () => {
+  for (const [key, defaultValue] of [
+    ["SANDBOX_CREATE_TIMEOUT_SECONDS", 40],
+    ["ATTACHMENT_IMPORT_TIMEOUT_SECONDS", 45],
+  ] as const) {
+    const schema = configSchema.shape[key];
+    expect(schema.parse(undefined)).toBe(defaultValue);
+    expect(schema.parse("180")).toBe(180);
+    for (const value of ["4", "181", "5.5", "invalid", ""])
+      expect(schema.safeParse(value).success).toBe(false);
+  }
+});
+
+it("bounds command defaults and rejects a default above the configured maximum", () => {
+  const base = {
+    SANDBOX_IMAGE: `python:3.12-slim@sha256:${"a".repeat(64)}`,
+    ADAPTER_INSTANCE_ID: "fixture",
+    OPENSANDBOX_URL: "http://sandbox.example.test",
+    MCP_TOKEN_FILE: "/fake/token",
+    OPENSANDBOX_API_KEY_FILE: "/fake/key",
+  };
+  expect(configSchema.parse(base)).toMatchObject({
+    SANDBOX_COMMAND_TIMEOUT_SECONDS: 60,
+    SANDBOX_COMMAND_MAX_TIMEOUT_SECONDS: 120,
+  });
+  expect(
+    configSchema.safeParse({ ...base, SANDBOX_COMMAND_TIMEOUT_SECONDS: 121 })
+      .success,
+  ).toBe(false);
+  expect(
+    configSchema.parse({
+      ...base,
+      SANDBOX_COMMAND_TIMEOUT_SECONDS: "30",
+      SANDBOX_COMMAND_MAX_TIMEOUT_SECONDS: "90",
+    }),
+  ).toMatchObject({
+    SANDBOX_COMMAND_TIMEOUT_SECONDS: 30,
+    SANDBOX_COMMAND_MAX_TIMEOUT_SECONDS: 90,
+  });
+  for (const key of [
+    "SANDBOX_COMMAND_TIMEOUT_SECONDS",
+    "SANDBOX_COMMAND_MAX_TIMEOUT_SECONDS",
+  ])
+    for (const value of [0, 181, 1.5, "invalid", ""])
+      expect(configSchema.safeParse({ ...base, [key]: value }).success).toBe(
+        false,
+      );
+});
+
+it("bounds the workspace scan deadline without changing disk limits", () => {
+  const schema = configSchema.shape.SANDBOX_WORKSPACE_CHECK_TIMEOUT_SECONDS;
+  expect(schema.parse(undefined)).toBe(10);
+  expect(schema.parse("30")).toBe(30);
+  for (const value of ["0", "31", "1.5", "invalid"])
+    expect(schema.safeParse(value).success).toBe(false);
 });

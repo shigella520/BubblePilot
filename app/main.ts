@@ -1,3 +1,6 @@
+import { MessageRevisionService } from "../modules/archive/message-revision-service.js";
+import { ManagedMessageDetailClient } from "../modules/integrations/bluebubbles/message-detail.js";
+import { createPostgresPool } from "../modules/shared/postgres-pool.js";
 import { AttachmentService } from "../modules/attachments/attachment-service.js";
 import { AttachmentStore } from "../modules/attachments/attachment-store.js";
 import { TaskService } from "../modules/scheduled-tasks/task-service.js";
@@ -329,12 +332,13 @@ const taskScheduler = new TaskScheduler(tasks, workflowEngine, () =>
     "Task scheduling failed",
   ),
 );
-memeDelivery.setIdleSendGuard(async (id) =>
-  (await workflowRepository.getExecution(id))?.triggerEvent?.schemaVersion ===
-  "scheduled-task-v1"
+memeDelivery.setIdleSendGuard(async (id) => {
+  const event = (await workflowRepository.getExecution(id))?.triggerEvent;
+  return event?.schemaVersion === "scheduled-task-v1" ||
+    event?.schemaVersion === "scheduled-task-v2"
     ? "scheduled-manual-redelivery-not-supported"
-    : idleScheduler.guardExecution(id),
-);
+    : idleScheduler.guardExecution(id);
+});
 const application = buildApplication(config, repository, {
   networkSettings,
   auth: authService,
@@ -367,7 +371,14 @@ const application = buildApplication(config, repository, {
     repository: dataExportRepository,
     service: new DataExportService(dataExportRepository),
   },
-  blueBubbles: { settings: blueBubblesSettings, linkPreviewEnricher },
+  blueBubbles: {
+    settings: blueBubblesSettings,
+    linkPreviewEnricher,
+    revisions: new MessageRevisionService(
+      createPostgresPool(config.databaseUrl, 2, config.databaseQueryTimeoutMs),
+      new ManagedMessageDetailClient(blueBubblesSettings),
+    ),
+  },
   ...(messageRetention === undefined ? {} : { messageRetention }),
   imageSummary: {
     scheduler: imageSummaryWorker,

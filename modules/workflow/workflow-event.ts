@@ -19,13 +19,15 @@ export interface ChatIdleEvent {
   };
 }
 export interface ScheduledTaskEvent {
-  schemaVersion: "scheduled-task-v1";
+  schemaVersion: "scheduled-task-v1" | "scheduled-task-v2";
   eventId: string;
   correlationId: string;
   provider: "bluebubbles";
   chat: MessageEnvelope["chat"];
   message: null;
   scheduled: {
+    occurrenceId?: string;
+    occurrenceNumber?: string;
     taskId: string;
     taskVersion: number;
     chatId: string;

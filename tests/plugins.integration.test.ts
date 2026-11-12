@@ -91,6 +91,26 @@ describe.runIf(url)("plugin lifecycle and isolated runtime", () => {
     );
     await service.mutate(pluginId, p.version, { enabled: true });
   });
+  it("saves and reloads per-service timeouts without changing tool approval", async () => {
+    const p = await service.get(pluginId);
+    const connections = {
+      test: { ...p.config.connections.test!, callTimeoutSeconds: 150 },
+    };
+    await service.configure(
+      pluginId,
+      p.version,
+      connections,
+      p.config.tools.map((t) => `${t.server}/${t.definition.name}#${t.hash}`),
+      [],
+      [],
+    );
+    const saved = await service.get(pluginId);
+    expect(saved.config.connections.test!.callTimeoutSeconds).toBe(150);
+    expect(saved.config.tools).toEqual(p.config.tools);
+    await expect(
+      service.configure(pluginId, p.version, connections, [], [], []),
+    ).rejects.toMatchObject({ code: "PLUGIN_CONFLICT" });
+  });
   it("persists runtime catalogue limits and rejects stale settings writes", async () => {
     const initial = await service.runtimeSettings();
     expect(initial.catalogueCharacters).toBe(64000);

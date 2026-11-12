@@ -27,9 +27,13 @@ export class AttachmentTransfers {
     const signal = AbortSignal.any([
       abort.signal,
       this.session.abort.signal,
-      AbortSignal.timeout(45000),
+      AbortSignal.timeout(this.session.importTimeoutMs),
     ]);
-    const abortBody = () => req.destroy();
+    const abortBody = () => {
+      // Destroy an incomplete incoming body to unblock reads, but preserve the
+      // connection for the explicit failure response once the body is received.
+      if (!req.complete) req.destroy();
+    };
     signal.addEventListener("abort", abortBody, { once: true });
     try {
       for (const [key, ticket] of this.tickets)
@@ -55,8 +59,14 @@ export class AttachmentTransfers {
         if (this.tickets.size >= 4)
           throw new ToolError("transfer_capacity_busy");
         const token = randomBytes(32).toString("hex");
-        this.tickets.set(token, { input, expires: Date.now() + 45000 });
-        send(200, { token, expiresInSeconds: 45 });
+        this.tickets.set(token, {
+          input,
+          expires: Date.now() + this.session.importTimeoutMs,
+        });
+        send(200, {
+          token,
+          expiresInSeconds: this.session.importTimeoutMs / 1000,
+        });
         return;
       }
       const token = req.headers["x-bp-transfer-token"];

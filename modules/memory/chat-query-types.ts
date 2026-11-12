@@ -49,19 +49,26 @@ export interface ChatFilters {
   dailyTime?: { from: string; to: string } | undefined;
   keywords?: string[] | undefined;
   keywordMode?: "all" | "any" | undefined;
+  hasAttachments?: boolean | undefined;
+  attachmentName?: string | undefined;
+  attachmentType?: string | undefined;
+  authorKind?: "participant" | "bot" | "unknown" | undefined;
 }
 const cursor = z.string().uuid().optional();
+const attachmentFields = {
+  hasAttachments: z.boolean().optional(),
+  attachmentName: z.string().trim().min(1).max(200).optional(),
+  attachmentType: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^(?:[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+|\.[a-z0-9]{1,16})$/u)
+    .optional(),
+};
 export const chatMessageQuerySchema = z
   .object({
     ...fields,
-    hasAttachments: z.boolean().optional(),
-    attachmentName: z.string().trim().min(1).max(200).optional(),
-    attachmentType: z
-      .string()
-      .trim()
-      .toLowerCase()
-      .regex(/^(?:[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+|\.[a-z0-9]{1,16})$/u)
-      .optional(),
+    ...attachmentFields,
     attachmentOffset: z.number().int().min(0).max(10000).optional(),
     order: z.enum(["asc", "desc"]).default("desc"),
     limit: z.number().int().min(1).max(50).default(20),
@@ -89,9 +96,38 @@ function validGrouping(
   );
 }
 export const chatCountQuerySchema = z
-  .object(groupFields)
+  .object({
+    ...groupFields,
+    ...attachmentFields,
+    groupBy: z
+      .enum([
+        "none",
+        "hour",
+        "day",
+        "week",
+        "month",
+        "sender",
+        "hourOfDay",
+        "weekday",
+      ])
+      .default("none"),
+    breakdownBy: z.enum(["sender", "hourOfDay"]).optional(),
+    orderBy: z.enum(["group", "countDesc"]).optional(),
+    authorKind: z.enum(["participant", "bot", "unknown"]).optional(),
+  })
   .strict()
-  .refine(validGrouping);
+  .refine(validGrouping)
+  .refine(
+    (v) =>
+      v.hasAttachments !== false || (!v.attachmentName && !v.attachmentType),
+  )
+  .refine((v) => ["none", "sender"].includes(v.groupBy) || !!(v.from && v.to))
+  .refine(
+    (v) =>
+      !v.breakdownBy ||
+      (!["none", "sender"].includes(v.groupBy) &&
+        (v.breakdownBy === "sender" || v.groupBy === "weekday")),
+  );
 export const chatExtremaQuerySchema = z
   .object({ ...groupFields, pick: z.enum(["first", "last"]) })
   .strict()
@@ -105,7 +141,11 @@ export interface MessagePosition {
   sentAt: string;
   index: string;
 }
-export type ChatPosition = MessagePosition | string;
+export interface CountPosition {
+  key: string;
+  count: number;
+}
+export type ChatPosition = MessagePosition | CountPosition | string;
 export function chatTimeZone(value: string | undefined): string {
   const zone = value ?? "UTC";
   try {
@@ -127,7 +167,7 @@ export function localDate(timestamp: string, timeZone: string): string {
     .join("-");
 }
 export function dayBounds(
-  query: ChatCountQuery,
+  query: ChatFilters,
   timeZone: string,
 ): [string, string] {
   if (!query.from || !query.to) throw new ChatQueryError("day-range-required");
@@ -159,12 +199,14 @@ export function appliedFilters(query: ChatArchiveQuery): ChatFilters {
     dailyTime,
     keywords,
     keywordMode,
-    ...("order" in query
+    authorKind: "authorKind" in query ? query.authorKind : undefined,
+    ...(!("pick" in query)
       ? {
           hasAttachments: query.hasAttachments,
           attachmentName: query.attachmentName,
           attachmentType: query.attachmentType,
-          attachmentOffset: query.attachmentOffset,
+          attachmentOffset:
+            "order" in query ? query.attachmentOffset : undefined,
         }
       : {}),
   };

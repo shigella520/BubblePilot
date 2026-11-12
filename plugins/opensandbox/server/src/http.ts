@@ -1,3 +1,5 @@
+import type { CommandTimeouts } from "./config.js";
+import type { ServerResponse } from "node:http";
 import { AttachmentTransfers } from "./attachment-http.js";
 import { attachmentProtocol } from "./attachment-contract.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -34,7 +36,11 @@ function reply(data: Record<string, unknown>, isError = false) {
     content: [{ type: "text" as const, text: JSON.stringify(data) }],
   };
 }
-function register(server: McpServer, session: SandboxSession) {
+function register(
+  server: McpServer,
+  session: SandboxSession,
+  commands: CommandTimeouts,
+) {
   const safe = async (action: () => Promise<Record<string, unknown>>) => {
     try {
       const value = await action();
@@ -75,7 +81,12 @@ function register(server: McpServer, session: SandboxSession) {
         "Run a foreground shell command inside this run's sandbox. No host mounts. Nonzero exit is failure. Unknown/cancelled results must not be replayed. Output cap 1 MiB; redirect large output into /workspace files and read portions.",
       inputSchema: {
         command: z.string().min(1).max(32768),
-        timeout_seconds: z.number().int().min(1).max(30).default(20),
+        timeout_seconds: z
+          .number()
+          .int()
+          .min(1)
+          .max(commands.maxSeconds)
+          .default(commands.defaultSeconds),
       },
       annotations: {
         readOnlyHint: false,
@@ -176,6 +187,7 @@ export function createMcpHttp(
       transport: StreamableHTTPServerTransport;
       sandbox: SandboxSession;
       attachments: AttachmentTransfers;
+      responses: Set<ServerResponse>;
     }
   >();
   const expected = createHash("sha256").update(`Bearer ${token}`).digest();
@@ -249,7 +261,8 @@ export function createMcpHttp(
           },
         );
         const attachments = new AttachmentTransfers(sandbox);
-        register(server, sandbox);
+        register(server, sandbox, pool.commandTimeouts);
+        const responses = new Set<ServerResponse>();
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: randomUUID,
           onsessioninitialized: (sessionId) => {
@@ -258,15 +271,28 @@ export function createMcpHttp(
               transport,
               sandbox,
               attachments,
+              responses,
             });
           },
         });
         await server.connect(transport as Transport);
-        pair = { server, transport, sandbox, attachments };
+        pair = { server, transport, sandbox, attachments, responses };
       }
       if (req.method === "DELETE") {
         pair.sandbox.invalidate();
         if (typeof id === "string") sessions.delete(id);
+      }
+      if (req.method === "POST") {
+        // handleRequest can return before an async tools/call sends its response.
+        // Invalidate sandbox access immediately, but do not close its MCP stream
+        // until the accepted response has finished (or the client disconnects).
+        const responses = pair.responses;
+        responses.add(res);
+        const finished = () => {
+          responses.delete(res);
+        };
+        res.once("finish", finished);
+        res.once("close", finished);
       }
       await pair.transport.handleRequest(req, res, parsed);
       if (req.method === "DELETE")
@@ -276,14 +302,18 @@ export function createMcpHttp(
       res.end();
     });
   });
-  http.requestTimeout = 45000;
+  // Node also limits receiving the request body. A cold start can pause upload
+  // consumption, so this outer guard must cover the configured import window.
+  http.requestTimeout = Math.max(45000, pool.timeouts.importSeconds * 1000);
   http.headersTimeout = 10000;
   const timer = setInterval(() => {
     for (const [id, pair] of sessions)
       if (pair.sandbox.ended || Date.now() >= pair.sandbox.expiresAt) {
         pair.sandbox.invalidate();
-        sessions.delete(id);
-        void pair.server.close().catch(() => undefined);
+        if (pair.responses.size === 0) {
+          sessions.delete(id);
+          void pair.server.close().catch(() => undefined);
+        }
       }
     void pool.sweep().catch(() => undefined);
   }, 1000);

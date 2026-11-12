@@ -237,6 +237,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       maxOutputCharacters: 10000,
     };
     const input = {
+      summary: "抢火车票提醒",
       content: "提醒抢火车票",
       scheduledAt: new Date(Date.now() + 3600000).toISOString(),
       timeZone: "UTC",
@@ -250,12 +251,414 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       [id],
     );
   }
+  it("resolves creator real names within each chat using the current mapping without changing ownership", async () => {
+    const first = await setup();
+    const second = await setup();
+    const a = await create(first);
+    const b = await create(second);
+    expect(a.task.creator_sender_id).toBe(b.task.creator_sender_id);
+    const readName = async (service: TaskService, task: typeof a.task) => {
+      const list = await service.list({ workflowId: task.workflow_id });
+      expect(list.items).toHaveLength(1);
+      const item = list.items[0]!;
+      const detail = await service.detail(task.id);
+      expect(item.creatorSenderId).toBe(task.creator_sender_id);
+      expect(detail.task.creator_sender_id).toBe(task.creator_sender_id);
+      expect(detail.task.version).toBe(task.version);
+      expect(item.creatorRealName).toBe(detail.task.creator_real_name);
+      return item.creatorRealName;
+    };
+    expect(await readName(first.tasks, a.task)).toBeNull();
+    for (const [task, name] of [
+      [a.task, "林书宁"],
+      [b.task, "周知远"],
+    ] as const) {
+      await pool.query(
+        "INSERT INTO chat_participant_identities(id,chat_id,sender_id,real_name,nickname) VALUES($1,$2,$3,$4,'虚构昵称')",
+        [randomUUID(), task.chat_id, task.creator_sender_id, name],
+      );
+    }
+    expect(await readName(first.tasks, a.task)).toBe("林书宁");
+    expect(await readName(second.tasks, b.task)).toBe("周知远");
+    await pool.query(
+      "UPDATE chat_participant_identities SET real_name='林知夏' WHERE chat_id=$1 AND sender_id=$2",
+      [a.task.chat_id, a.task.creator_sender_id],
+    );
+    expect(await readName(first.tasks, a.task)).toBe("林知夏");
+    await pool.query(
+      "UPDATE chat_participant_identities SET real_name=NULL WHERE chat_id=$1 AND sender_id=$2",
+      [a.task.chat_id, a.task.creator_sender_id],
+    );
+    // A nickname alone must not be reported as the member's real name.
+    expect(await readName(first.tasks, a.task)).toBeNull();
+    await pool.query(
+      "DELETE FROM chat_participant_identities WHERE chat_id=$1",
+      [b.task.chat_id],
+    );
+    expect(await readName(second.tasks, b.task)).toBeNull();
+  });
+  it("fills legacy summaries through the member tool, keeps occurrences and rejects stale or foreign edits", async () => {
+    const s = await setup();
+    const c = await create(s);
+    await pool.query("UPDATE scheduled_tasks SET summary=NULL WHERE id=$1", [
+      c.task.id,
+    ]);
+    const before = await s.tasks.detail(c.task.id);
+    const tool = (await s.tasks.tools(c.executionId)).find(
+      (t) => t.definition.name === "update_scheduled_task",
+    )!;
+    const args = JSON.stringify({
+      id: c.task.id,
+      expectedVersion: 1,
+      summary: "火车票预订提醒",
+    });
+    const context = { ...c.ctx, toolCallId: "summary-call" };
+    const raw = await tool.execute(args, context);
+    if (typeof raw !== "string")
+      throw new Error("Expected textual tool result");
+    const result: unknown = JSON.parse(raw);
+    expect(result).toMatchObject({
+      status: "ok",
+      task: { summary: "火车票预订提醒", version: 2 },
+    });
+    expect(await tool.execute(args, context)).toBe(raw);
+    const after = await s.tasks.detail(c.task.id);
+    expect(after.occurrences).toEqual(before.occurrences);
+    expect(after.task).toMatchObject({
+      content: c.input.content,
+      scheduled_at: before.task.scheduled_at,
+      execution_version: 1,
+      version: 2,
+    });
+    expect(
+      after.events.filter((e) => e.event_type === "summary-updated"),
+    ).toHaveLength(1);
+    await expect(
+      s.tasks.change(
+        { kind: "admin", id: "fixture" },
+        { id: c.task.id, expectedVersion: 1, summary: "过期修改" },
+        false,
+      ),
+    ).rejects.toThrow("TASK_VERSION_CONFLICT");
+    await expect(
+      s.tasks.change(
+        {
+          kind: "member",
+          id: "other",
+          chatId: c.task.chat_id,
+          workflowId: c.task.workflow_id,
+        },
+        { id: c.task.id, expectedVersion: 2, summary: "越权修改" },
+        false,
+      ),
+    ).rejects.toThrow("TASK_NOT_FOUND");
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      {
+        id: c.task.id,
+        expectedVersion: 2,
+        summary: "新概要",
+        content: "新的完整提醒",
+      },
+      false,
+    );
+    const changed = await s.tasks.detail(c.task.id);
+    expect(changed.task).toMatchObject({
+      version: 3,
+      execution_version: 2,
+      summary: "新概要",
+      content: "新的完整提醒",
+    });
+    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(
+      success("虚构提醒"),
+    );
+    await due(c.task.id);
+    await s.scheduler.tick();
+    expect(s.send).toHaveBeenCalledTimes(1);
+  });
+  it.each([false, true])(
+    "does not interrupt an accepted or sending reminder when only its summary changes (recurring=%s)",
+    async (repeats) => {
+      const s = await setup();
+      const c = repeats ? await recurring(s, 4) : await create(s);
+      vi.spyOn(AgentRunner.prototype, "run").mockImplementationOnce(
+        async () => {
+          const before = await s.tasks.detail(c.task.id);
+          await s.tasks.change(
+            { kind: "admin", id: "fixture" },
+            { id: c.task.id, expectedVersion: 1, summary: "生成中补充概要" },
+            false,
+          );
+          const after = await s.tasks.detail(c.task.id);
+          expect(after.runs).toEqual(before.runs);
+          expect(after.occurrences).toEqual(before.occurrences);
+          expect(after.task).toMatchObject({
+            status: "running",
+            version: 2,
+            execution_version: 1,
+          });
+          return success("虚构提醒");
+        },
+      );
+      s.send.mockImplementationOnce(async () => {
+        await s.tasks.change(
+          { kind: "admin", id: "fixture" },
+          { id: c.task.id, expectedVersion: 2, summary: "发送中补充概要" },
+          false,
+        );
+        return {
+          status: "confirmed",
+          providerMessageId: "fixture-summary-send",
+        };
+      });
+      if (repeats) await recurringDue(c.task.id);
+      else await due(c.task.id);
+      await s.scheduler.tick();
+      await s.scheduler.tick();
+      expect(s.send).toHaveBeenCalledTimes(1);
+      const d = await s.tasks.detail(c.task.id);
+      expect(d.task).toMatchObject({
+        version: 3,
+        execution_version: 1,
+        summary: "发送中补充概要",
+      });
+      expect(d.runs[0]?.outcome).toBe("sent");
+    },
+  );
+  it("allows summary-only edits of retained finished tasks but clears summaries with their content", async () => {
+    const s = await setup();
+    const c = await create(s);
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 1 },
+      true,
+    );
+    const updated = await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 2, summary: "已取消的虚构提醒" },
+      false,
+    );
+    expect(updated).toMatchObject({
+      lifecycle: "cancelled",
+      execution_version: 2,
+      version: 3,
+    });
+    await pool.query(
+      "UPDATE scheduled_tasks SET finished_at=now()-interval '91 days' WHERE id=$1",
+      [c.task.id],
+    );
+    await s.scheduler.reconcile();
+    expect((await s.tasks.detail(c.task.id)).task).toMatchObject({
+      summary: null,
+      content: null,
+    });
+    await expect(
+      s.tasks.change(
+        { kind: "admin", id: "fixture" },
+        { id: c.task.id, expectedVersion: 3, summary: "不可复原" },
+        false,
+      ),
+    ).rejects.toThrow("TASK_CONTENT_CLEARED");
+  });
+  it("deletes only finished tasks, rejects stale versions and retains a creation tombstone", async () => {
+    const s = await setup();
+    const c = await create(s);
+    await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
+      "TASK_DELETE_NOT_FINISHED",
+    );
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 1 },
+      true,
+    );
+    await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
+      "TASK_VERSION_CONFLICT",
+    );
+    expect(
+      await Promise.all([
+        s.tasks.remove(c.task.id, 2),
+        s.tasks.remove(c.task.id, 2),
+      ]),
+    ).toEqual([
+      { id: c.task.id, deleted: true },
+      { id: c.task.id, deleted: true },
+    ]);
+    expect(await s.tasks.remove(c.task.id, 2)).toEqual({
+      id: c.task.id,
+      deleted: true,
+    });
+    await expect(s.tasks.detail(c.task.id)).rejects.toThrow("TASK_NOT_FOUND");
+    expect(
+      (await s.tasks.list({ workflowId: s.version.workflowId })).items,
+    ).toEqual([]);
+    await expect(s.tasks.create(c.executionId, c.input, c.ctx)).rejects.toThrow(
+      "TASK_DELETED",
+    );
+    expect(
+      (
+        await pool.query(
+          "SELECT creation_key,reason FROM scheduled_task_deletions WHERE task_id=$1",
+          [c.task.id],
+        )
+      ).rows,
+    ).toHaveLength(1);
+    for (const table of [
+      "scheduled_tasks",
+      "scheduled_task_occurrences",
+      "scheduled_task_runs",
+      "scheduled_task_events",
+      "scheduled_task_operations",
+    ]) {
+      const column = table === "scheduled_tasks" ? "id" : "task_id";
+      expect(
+        (
+          await pool.query(`SELECT 1 FROM ${table} WHERE ${column}=$1`, [
+            c.task.id,
+          ])
+        ).rowCount,
+      ).toBe(0);
+    }
+  });
+  it("keeps workflow and delivery evidence when deleting a sent reminder", async () => {
+    const s = await setup();
+    const c = await create(s);
+    vi.spyOn(AgentRunner.prototype, "run").mockImplementationOnce(async () => {
+      await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
+        "TASK_DELETE_NOT_FINISHED",
+      );
+      return success("虚构提醒");
+    });
+    await due(c.task.id);
+    await s.scheduler.tick();
+    const d = await s.tasks.detail(c.task.id);
+    const execution = d.runs[0]!.execution_id;
+    const deliveries = (
+      await pool.query(
+        "SELECT id,status FROM outbound_deliveries WHERE execution_id=$1",
+        [execution],
+      )
+    ).rows;
+    await s.tasks.remove(c.task.id, 1);
+    expect(
+      (
+        await pool.query(
+          "SELECT id,status FROM outbound_deliveries WHERE execution_id=$1",
+          [execution],
+        )
+      ).rows,
+    ).toEqual(deliveries);
+    const saved = (
+      await pool.query<{ status: string; content: string }>(
+        "SELECT status,trigger_event->'scheduled'->>'content' AS content FROM workflow_executions WHERE id=$1",
+        [execution],
+      )
+    ).rows[0];
+    expect(saved).toMatchObject({ content: "" });
+    expect(saved?.status).not.toBe("running");
+    expect(s.send).toHaveBeenCalledTimes(1);
+  });
+  it("automatically removes all old terminal items while paused, preserving recent, active and paused tasks", async () => {
+    const s = await setup();
+    const oldIds: string[] = [];
+    for (const status of [
+      "sent",
+      "cancelled",
+      "expired",
+      "failed",
+      "delivery_unknown",
+      "completed",
+    ]) {
+      const c = await create(s);
+      oldIds.push(c.task.id);
+      await pool.query(
+        "UPDATE scheduled_tasks SET lifecycle=$2,status=$3,finished_at=now()-interval '91 days' WHERE id=$1",
+        [c.task.id, status === "cancelled" ? "cancelled" : "completed", status],
+      );
+      await pool.query(
+        "UPDATE scheduled_task_occurrences SET status='sent',finished_at=now()-interval '91 days' WHERE task_id=$1",
+        [c.task.id],
+      );
+    }
+    const active = await create(s),
+      paused = await recurring(s, 4),
+      recent = await create(s);
+    await s.tasks.control(
+      { kind: "admin", id: "fixture" },
+      { id: paused.task.id, expectedVersion: 1 },
+      "pause",
+    );
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      { id: recent.task.id, expectedVersion: 1 },
+      true,
+    );
+    await pool.query(
+      "UPDATE scheduled_tasks SET finished_at=now()-interval '89 days',scheduled_at=now()-interval '100 days' WHERE id=$1",
+      [recent.task.id],
+    );
+    await pool.query(
+      "UPDATE scheduled_task_settings SET paused=true WHERE id=1",
+    );
+    try {
+      await s.scheduler.tick();
+      expect(
+        (
+          await pool.query(
+            "SELECT id FROM scheduled_tasks WHERE id=ANY($1::uuid[])",
+            [oldIds],
+          )
+        ).rowCount,
+      ).toBe(0);
+      expect(
+        (
+          await pool.query(
+            "SELECT id FROM scheduled_tasks WHERE id=ANY($1::uuid[])",
+            [[active.task.id, paused.task.id, recent.task.id]],
+          )
+        ).rowCount,
+      ).toBe(3);
+      expect(
+        (
+          await pool.query(
+            "SELECT 1 FROM audit_events WHERE action='scheduled-task.expire' AND target_id=ANY($1::text[])",
+            [oldIds],
+          )
+        ).rowCount,
+      ).toBe(6);
+      await Promise.all([s.tasks.purgeExpired(), s.tasks.purgeExpired()]);
+      expect(
+        (
+          await pool.query(
+            "SELECT 1 FROM scheduled_task_deletions WHERE task_id=ANY($1::uuid[])",
+            [oldIds],
+          )
+        ).rowCount,
+      ).toBe(6);
+    } finally {
+      await pool.query(
+        "UPDATE scheduled_task_settings SET paused=false WHERE id=1",
+      );
+    }
+  });
+  it("does not purge terminal definitions that still have an in-flight occurrence", async () => {
+    const s = await setup();
+    const c = await create(s);
+    await pool.query(
+      "UPDATE scheduled_tasks SET lifecycle='cancelled',status='cancelled',finished_at=now()-interval '91 days' WHERE id=$1",
+      [c.task.id],
+    );
+    await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
+      "TASK_DELETE_NOT_FINISHED",
+    );
+    await s.tasks.purgeExpired();
+    expect((await s.tasks.detail(c.task.id)).task.id).toBe(c.task.id);
+  });
   it("persists once, scopes tools, and rejects other members", async () => {
     const s = await setup();
     const c = await create(s);
     const again = await s.tasks.create(c.executionId, c.input, c.ctx);
     expect(again.id).toBe(c.task.id);
-    expect(await s.tasks.tools(c.executionId)).toHaveLength(4);
+    expect(await s.tasks.tools(c.executionId)).toHaveLength(7);
     await expect(
       s.tasks.change(
         {
@@ -480,33 +883,41 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       "UPDATE scheduled_task_settings SET paused=false WHERE id=1",
     );
   });
-  it("recovers the same logical execution after an interrupted claim", async () => {
-    const s = await setup();
-    const c = await create(s);
-    await due(c.task.id);
-    const claim = vi
-      .spyOn(s.engine, "handleBackground")
-      .mockImplementationOnce(async (input) => {
-        await input.accept();
-        throw new Error("fixture crash");
-      });
-    await expect(s.scheduler.tick()).rejects.toThrow();
-    claim.mockRestore();
-    const before = (await s.tasks.detail(c.task.id)).runs[0]!;
-    await pool.query(
-      "UPDATE scheduled_task_runs SET lease_expires_at=now()-interval '1 second' WHERE task_id=$1",
-      [c.task.id],
-    );
-    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(
-      success("恢复后的提醒"),
-    );
-    await new TaskScheduler(s.tasks, s.engine).tick();
-    const after = (await s.tasks.detail(c.task.id)).runs;
-    expect(after).toHaveLength(1);
-    expect(after[0]?.execution_id).toBe(before.execution_id);
-    expect(after[0]?.lease_generation).toBe(2);
-    expect(s.send).toHaveBeenCalledTimes(1);
-  });
+  it.each(["scheduled-task-v1", "scheduled-task-v2"])(
+    "recovers the same %s execution after an interrupted claim",
+    async (schemaVersion) => {
+      const s = await setup();
+      const c = await create(s);
+      await due(c.task.id);
+      const claim = vi
+        .spyOn(s.engine, "handleBackground")
+        .mockImplementationOnce(async (input) => {
+          await input.accept();
+          throw new Error("fixture crash");
+        });
+      await expect(s.scheduler.tick()).rejects.toThrow();
+      claim.mockRestore();
+      const before = (await s.tasks.detail(c.task.id)).runs[0]!;
+      if (schemaVersion === "scheduled-task-v1")
+        await pool.query(
+          `UPDATE workflow_executions SET trigger_event=jsonb_set(trigger_event #- '{scheduled,occurrenceId}' #- '{scheduled,occurrenceNumber}','{schemaVersion}','"scheduled-task-v1"'::jsonb) WHERE id=$1`,
+          [before.execution_id],
+        );
+      await pool.query(
+        "UPDATE scheduled_task_runs SET lease_expires_at=now()-interval '1 second' WHERE task_id=$1",
+        [c.task.id],
+      );
+      vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(
+        success("恢复后的提醒"),
+      );
+      await new TaskScheduler(s.tasks, s.engine).tick();
+      const after = (await s.tasks.detail(c.task.id)).runs;
+      expect(after).toHaveLength(1);
+      expect(after[0]?.execution_id).toBe(before.execution_id);
+      expect(after[0]?.lease_generation).toBe(2);
+      expect(s.send).toHaveBeenCalledTimes(1);
+    },
+  );
   it("registers tools in the real agent loop even without web search or plugins", async () => {
     const s = await setup();
     const c = await create(s);
@@ -542,7 +953,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
     });
     expect(result.status).toBe("succeeded");
     expect(execute).toHaveBeenCalledTimes(2);
-    expect(execute.mock.calls[0]![0].tools).toHaveLength(4);
+    expect(execute.mock.calls[0]![0].tools).toHaveLength(7);
     const second = execute.mock.calls[1]![0].messages;
     expect(
       second.some(
@@ -552,5 +963,366 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
           m.content.includes(c.task.id),
       ),
     ).toBe(true);
+  });
+  async function recurring(s: Awaited<ReturnType<typeof setup>>, count = 3) {
+    const seed = await create(s);
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      { id: seed.task.id, expectedVersion: 1 },
+      true,
+    );
+    const task = await s.tasks.create(
+      seed.executionId,
+      {
+        summary: "虚构周期提醒",
+        content: "虚构周期提醒",
+        timeZone: "UTC",
+        schedule: {
+          kind: "recurring",
+          startsAt: new Date(Date.now() + 3600000).toISOString(),
+          rule: { type: "interval", everyMinutes: 60 },
+          end: { kind: "count", count },
+        },
+      },
+      { ...seed.ctx, toolCallId: "recurring-create" },
+    );
+    return { ...seed, task };
+  }
+  async function recurringDue(id: string, minutes = 1) {
+    await pool.query(
+      `UPDATE scheduled_tasks SET scheduled_at=now()-($2*interval '1 minute'),expires_at=now()-($2*interval '1 minute')+interval '30 minutes',schedule=jsonb_set(schedule,'{startsAt}',to_jsonb(to_char((now()-($2*interval '1 minute')) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))) WHERE id=$1`,
+      [id, minutes],
+    );
+  }
+  it("reuses one recurring definition, gives each slot its own execution, and completes at count", async () => {
+    const s = await setup();
+    const c = await recurring(s, 2);
+    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(
+      success("周期提醒"),
+    );
+    await recurringDue(c.task.id);
+    await Promise.all([
+      s.scheduler.tick(),
+      new TaskScheduler(s.tasks, s.engine).tick(),
+    ]);
+    let detail = await s.tasks.detail(c.task.id);
+    expect(s.send).toHaveBeenCalledTimes(1);
+    expect(detail.task).toMatchObject({
+      lifecycle: "active",
+      status: "pending",
+      consumed_count: 1,
+      version: 1,
+    });
+    const original = (await repository.getExecution(
+      String(detail.runs[0]!.execution_id),
+    ))!;
+    expect(original.triggerEvent?.schemaVersion).toBe("scheduled-task-v2");
+    await recurringDue(c.task.id);
+    await s.scheduler.tick();
+    await s.scheduler.tick();
+    detail = await s.tasks.detail(c.task.id);
+    expect(detail.task).toMatchObject({
+      lifecycle: "completed",
+      consumed_count: 2,
+    });
+    expect(s.send).toHaveBeenCalledTimes(2);
+    expect(detail.runs).toHaveLength(2);
+    expect(new Set(detail.runs.map((r) => r.execution_id)).size).toBe(2);
+  });
+  it("does not terminate recurrence on unknown delivery or replay the same slot", async () => {
+    const s = await setup({
+      status: "unknown",
+      code: "FICTIONAL_TIMEOUT",
+      summary: "fixture",
+    });
+    const c = await recurring(s, 2);
+    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(success("提醒"));
+    await recurringDue(c.task.id);
+    await s.scheduler.tick();
+    await s.scheduler.tick();
+    const d = await s.tasks.detail(c.task.id);
+    expect(d.task.lifecycle).toBe("active");
+    expect(d.occurrences[0]?.status).toBe("delivery_unknown");
+    expect(s.send).toHaveBeenCalledTimes(1);
+  });
+  it("compresses missed slots and catches up only the most recent eligible occurrence", async () => {
+    const s = await setup();
+    const c = await recurring(s, 10);
+    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(success("补发"));
+    await recurringDue(c.task.id, 181);
+    await s.scheduler.tick();
+    const d = await s.tasks.detail(c.task.id);
+    expect(s.send).toHaveBeenCalledTimes(1);
+    expect(d.task.consumed_count).toBe(4);
+    expect(d.events.some((e) => e.event_type === "missed-occurrences")).toBe(
+      true,
+    );
+    expect(d.runs).toHaveLength(1);
+  });
+  it("keeps quota and count while paused; resumes to a future time without catchup", async () => {
+    const s = await setup();
+    const c = await recurring(s, 3);
+    await recurringDue(c.task.id, 181);
+    const paused = await s.tasks.control(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 1 },
+      "pause",
+    );
+    await s.scheduler.tick();
+    expect(s.send).not.toHaveBeenCalled();
+    expect(paused.consumed_count).toBe(0);
+    const resumed = await s.tasks.control(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 2 },
+      "resume",
+    );
+    expect(resumed.scheduled_at.getTime()).toBeGreaterThan(Date.now());
+    expect(resumed.consumed_count).toBe(0);
+    expect(resumed.lifecycle).toBe("active");
+  });
+  it("skips exactly one occurrence despite duplicate tools and conflicts on stale versions", async () => {
+    const s = await setup();
+    const c = await recurring(s, 3);
+    const actor = {
+      kind: "member" as const,
+      id: c.task.creator_sender_id,
+      executionId: c.executionId,
+      chatId: c.task.chat_id,
+      workflowId: c.task.workflow_id,
+    };
+    const args = { id: c.task.id, expectedVersion: 1 };
+    const ctx = { ...c.ctx, toolCallId: "skip-once" };
+    const first = await s.tasks.control(actor, args, "skip", ctx);
+    const again = await s.tasks.control(actor, args, "skip", ctx);
+    expect(again.version).toBe(first.version);
+    expect(again.consumed_count).toBe(1);
+    expect(
+      (await s.tasks.detail(c.task.id)).occurrences.filter(
+        (o) => o.status === "skipped",
+      ),
+    ).toHaveLength(1);
+    await expect(
+      s.tasks.control(actor, args, "skip", {
+        ...ctx,
+        toolCallId: "different-call",
+      }),
+    ).rejects.toThrow("TASK_VERSION_CONFLICT");
+  });
+  it("does not consume when the queue rejects admission", async () => {
+    const s = await setup();
+    const c = await recurring(s, 3);
+    await recurringDue(c.task.id);
+    vi.spyOn(s.engine, "handleBackground").mockResolvedValue(undefined);
+    await s.scheduler.tick();
+    const d = await s.tasks.detail(c.task.id);
+    expect(d.task.consumed_count).toBe(0);
+    expect(d.runs).toHaveLength(0);
+    expect(d.task.lifecycle).toBe("active");
+  });
+  it("pausing during generation suppresses the old result and keeps the recurring rule", async () => {
+    const s = await setup();
+    const c = await recurring(s, 3);
+    vi.spyOn(AgentRunner.prototype, "run").mockImplementation(async () => {
+      await s.tasks.control(
+        { kind: "admin", id: "fixture" },
+        { id: c.task.id, expectedVersion: 1 },
+        "pause",
+      );
+      return success("迟到结果");
+    });
+    await recurringDue(c.task.id);
+    await s.scheduler.tick();
+    expect(s.send).not.toHaveBeenCalled();
+    expect((await s.tasks.detail(c.task.id)).task.lifecycle).toBe("paused");
+  });
+  it("cancels future recurrence after the send fence without rewriting the submitted outcome", async () => {
+    const s = await setup();
+    const c = await recurring(s, 3);
+    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(success("提醒"));
+    s.send.mockImplementation(async () => {
+      const t = await s.tasks.change(
+        { kind: "admin", id: "fixture" },
+        { id: c.task.id, expectedVersion: 1 },
+        true,
+      );
+      expect(t.sendingAlreadyStarted).toBe(true);
+      return { status: "confirmed", providerMessageId: "fictional-send" };
+    });
+    await recurringDue(c.task.id);
+    await s.scheduler.tick();
+    await s.scheduler.tick();
+    const d = await s.tasks.detail(c.task.id);
+    expect(d.task.lifecycle).toBe("cancelled");
+    expect(d.occurrences[0]?.status).toBe("sent");
+    expect(s.send).toHaveBeenCalledTimes(1);
+  });
+  it.each([false, true])(
+    "preserves count when editing recurring rules (paused=%s)",
+    async (paused) => {
+      const s = await setup();
+      const c = await recurring(s, 3);
+      await s.tasks.control(
+        { kind: "admin", id: "fixture" },
+        { id: c.task.id, expectedVersion: 1 },
+        "skip",
+      );
+      await expect(
+        s.tasks.change(
+          { kind: "admin", id: "fixture" },
+          {
+            id: c.task.id,
+            expectedVersion: 2,
+            scheduledAt: new Date(Date.now() + 3600000).toISOString(),
+          },
+          false,
+        ),
+      ).rejects.toThrow("TASK_LEGACY_UPDATE_UNSUPPORTED");
+      if (paused)
+        await s.tasks.control(
+          { kind: "admin", id: "fixture" },
+          { id: c.task.id, expectedVersion: 2 },
+          "pause",
+        );
+      const updated = await s.tasks.change(
+        { kind: "admin", id: "fixture" },
+        {
+          id: c.task.id,
+          expectedVersion: paused ? 3 : 2,
+          schedule: {
+            kind: "recurring",
+            startsAt: new Date(Date.now() + 3600000).toISOString(),
+            rule: { type: "daily", localTime: "09:00" },
+            end: { kind: "count", count: 1 },
+          },
+        },
+        false,
+      );
+      expect(updated.lifecycle).toBe("completed");
+      expect(updated.consumed_count).toBe(1);
+    },
+  );
+  it("global pause and resume skip the paused interval without consuming it", async () => {
+    const s = await setup();
+    const c = await recurring(s, 3);
+    await recurringDue(c.task.id, 181);
+    const settings = await s.tasks.settings();
+    try {
+      await s.tasks.configure({
+        paused: true,
+        pendingLimit: 1000,
+        catchupMinutes: 30,
+        expectedVersion: settings.version,
+      });
+      await s.scheduler.tick();
+      expect(s.send).not.toHaveBeenCalled();
+      await s.tasks.configure({
+        paused: false,
+        pendingLimit: 1000,
+        catchupMinutes: 30,
+        expectedVersion: settings.version + 1,
+      });
+      await s.scheduler.tick();
+      const d = await s.tasks.detail(c.task.id);
+      expect(d.task.consumed_count).toBe(0);
+      expect(d.task.scheduled_at.getTime()).toBeGreaterThan(Date.now());
+      expect(s.send).not.toHaveBeenCalled();
+    } finally {
+      await pool.query(
+        "UPDATE scheduled_task_settings SET paused=false WHERE id=1",
+      );
+    }
+  });
+  it("does not restart old slots when pausing and resuming an already submitted send", async () => {
+    const s = await setup();
+    const c = await recurring(s, 4);
+    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(success("提醒"));
+    s.send.mockImplementation(async () => {
+      await s.tasks.control(
+        { kind: "admin", id: "fixture" },
+        { id: c.task.id, expectedVersion: 1 },
+        "pause",
+      );
+      await s.tasks.control(
+        { kind: "admin", id: "fixture" },
+        { id: c.task.id, expectedVersion: 2 },
+        "resume",
+      );
+      return { status: "confirmed", providerMessageId: "fictional-send" };
+    });
+    await recurringDue(c.task.id);
+    await s.scheduler.tick();
+    await s.scheduler.tick();
+    const d = await s.tasks.detail(c.task.id);
+    expect(d.task).toMatchObject({
+      lifecycle: "active",
+      status: "pending",
+      consumed_count: 1,
+    });
+    expect(d.task.scheduled_at.getTime()).toBeGreaterThan(Date.now());
+    expect(d.occurrences[0]?.status).toBe("sent");
+    expect(s.send).toHaveBeenCalledTimes(1);
+  });
+  it("prunes old occurrence content even while the recurring definition remains active", async () => {
+    const s = await setup();
+    const c = await recurring(s, 4);
+    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(success("提醒"));
+    await recurringDue(c.task.id);
+    await s.scheduler.tick();
+    await pool.query(
+      "UPDATE scheduled_task_occurrences SET finished_at=now()-interval '91 days' WHERE task_id=$1 AND status='sent'",
+      [c.task.id],
+    );
+    await pool.query(
+      "UPDATE scheduled_task_runs SET finished_at=now()-interval '91 days' WHERE task_id=$1",
+      [c.task.id],
+    );
+    await s.scheduler.reconcile();
+    const d = await s.tasks.detail(c.task.id);
+    expect(d.task.content).toBe("虚构周期提醒");
+    expect(d.runs[0]?.task_snapshot).toBeNull();
+    expect(d.occurrences[0]?.snapshot).toBeNull();
+  });
+  it("allows content edits while paused after the old scheduled time", async () => {
+    const s = await setup();
+    const c = await recurring(s, 3);
+    await recurringDue(c.task.id, 181);
+    await s.tasks.control(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 1 },
+      "pause",
+    );
+    const updated = await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 2, content: "新的虚构提醒内容" },
+      false,
+    );
+    expect(updated).toMatchObject({
+      lifecycle: "paused",
+      consumed_count: 0,
+      content: "新的虚构提醒内容",
+    });
+  });
+  it("closes an interrupted unsent execution when paused rather than leaving it running forever", async () => {
+    const s = await setup();
+    const c = await recurring(s, 3);
+    await recurringDue(c.task.id);
+    const claim = vi
+      .spyOn(s.engine, "handleBackground")
+      .mockImplementationOnce(async (input) => {
+        await input.accept();
+        throw new Error("fixture crash");
+      });
+    await expect(s.scheduler.tick()).rejects.toThrow();
+    claim.mockRestore();
+    const before = (await s.tasks.detail(c.task.id)).runs[0]!;
+    await s.tasks.control(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 1 },
+      "pause",
+    );
+    expect(
+      (await repository.getExecution(String(before.execution_id)))?.status,
+    ).toBe("skipped");
+    expect(s.send).not.toHaveBeenCalled();
   });
 });

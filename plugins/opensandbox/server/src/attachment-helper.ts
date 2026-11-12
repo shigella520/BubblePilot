@@ -118,7 +118,7 @@ class Server(HTTPServer):
  def server_bind(self):
   TCPServer.server_bind(self)
   self.server_name='sandbox'; self.server_port=self.server_address[1]
-server=Server(('0.0.0.0',p['port']),Handler); server.timeout=40
+server=Server(('0.0.0.0',p['port']),Handler); server.timeout=p.get('acceptTimeoutSeconds',40)
 print('ATTACHMENT_READY',flush=True)
 try: server.handle_request()
 finally:

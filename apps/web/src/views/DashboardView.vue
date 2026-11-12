@@ -38,6 +38,7 @@ interface InboundEvent {
   eventType: string;
   ingestionStatus: "accepted" | "ignored" | "completed" | "failed";
   automationOutcome: AutomationOutcome;
+  archiveUpdate?: { status: string; reason: string | null; attempts: number };
   receivedAt: string;
 }
 const inboundEvents = ref<InboundEvent[]>([]);
@@ -213,7 +214,14 @@ onMounted(load);
                   >{{ outcomeLabels[event.automationOutcome] }}</span
                 >
               </td>
-              <td>{{ event.ingestionStatus }}</td>
+              <td>
+                {{ event.ingestionStatus
+                }}<small v-if="event.archiveUpdate" class="muted"
+                  ><br />归档修订：{{ event.archiveUpdate.status }}<br />{{
+                    event.archiveUpdate.reason
+                  }}</small
+                >
+              </td>
               <td>{{ event.eventType }}</td>
               <td>{{ new Date(event.receivedAt).toLocaleString() }}</td>
               <td class="mono decision-identifiers">

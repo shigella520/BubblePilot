@@ -1,3 +1,8 @@
+import {
+  attachmentEntry,
+  initialAttachmentCatalogue,
+  type AttachmentContextMessage,
+} from "./attachment-catalogue.js";
 import { ApplicationError } from "../../app/errors.js";
 import type { AiToolDefinition } from "../ai/ai-types.js";
 import { randomUUID } from "node:crypto";
@@ -45,10 +50,8 @@ type Candidate = {
 export interface AttachmentRunInput {
   config: AttachmentHandling;
   scope: ChatImageScope;
-  current: {
-    providerMessageId: string;
-    attachments: readonly MessageAttachment[];
-  };
+  current: AttachmentContextMessage;
+  history?: readonly AttachmentContextMessage[];
 }
 export class AttachmentSession {
   private candidates = new Map<string, Candidate>();
@@ -62,7 +65,8 @@ export class AttachmentSession {
   constructor(
     readonly input: AttachmentRunInput,
     plugins: PluginSession,
-    private readonly sources: Pick<ChatImageSourceRepository, "resolve">,
+    private readonly sources: Pick<ChatImageSourceRepository, "resolve"> &
+      Partial<Pick<ChatImageSourceRepository, "authorized">>,
     private readonly downloader: Pick<
       BlueBubblesAttachmentDownloader,
       "download"
@@ -78,6 +82,66 @@ export class AttachmentSession {
     query?: ChatMessageQuery,
     current = false,
   ): AttachmentListing {
+    return this.buildCatalogue(
+      message,
+      offset,
+      query,
+      current,
+      this.candidates,
+      this.keys,
+    );
+  }
+  // A history operation may time out or discard evidence to fit its output budget.
+  // Keep its proposed references private until the returned listings are committed.
+  stageCatalogue() {
+    const candidates = new Map(this.candidates);
+    const keys = new Map(this.keys);
+    let committed = false;
+    return {
+      catalogue: (
+        message: Pick<
+          MemoryMessage,
+          "id" | "providerMessageId" | "attachments"
+        >,
+        offset = 0,
+        query?: ChatMessageQuery,
+        current = false,
+      ) =>
+        this.buildCatalogue(message, offset, query, current, candidates, keys),
+      commit: (listings: readonly AttachmentListing[]) => {
+        if (this.ended || committed)
+          throw new AttachmentError("ATTACHMENT_SESSION_INVALIDATED");
+        const nextCandidates = new Map(this.candidates);
+        const nextKeys = new Map(this.keys);
+        for (const listing of listings)
+          for (const entry of listing.entries) {
+            const ref = entry.attachment_ref;
+            if (!ref) continue;
+            const candidate = candidates.get(ref);
+            if (!candidate)
+              throw new AttachmentError("ATTACHMENT_REFERENCE_UNAVAILABLE");
+            const key = `${candidate.providerMessageId}:${candidate.index}`;
+            if (nextKeys.has(key) && nextKeys.get(key) !== ref)
+              throw new AttachmentError("ATTACHMENT_REFERENCE_UNAVAILABLE");
+            nextCandidates.set(ref, candidate);
+            nextKeys.set(key, ref);
+          }
+        if (nextCandidates.size > attachmentReferenceLimit)
+          throw new AttachmentError("ATTACHMENT_REFERENCE_UNAVAILABLE");
+        this.candidates = nextCandidates;
+        this.keys = nextKeys;
+        committed = true;
+      },
+    };
+  }
+  private buildCatalogue(
+    message: Pick<MemoryMessage, "id" | "providerMessageId" | "attachments">,
+    offset: number,
+    query: ChatMessageQuery | undefined,
+    current: boolean,
+    candidates: Map<string, Candidate>,
+    keys: Map<string, string>,
+  ): AttachmentListing {
     const attachments = message.attachments ?? [];
     const limit = current ? attachmentReferenceLimit : attachmentPageSize;
     const entries = attachments
@@ -85,15 +149,15 @@ export class AttachmentSession {
       .map((a, index) => {
         const actualIndex = offset + index;
         const key = `${message.providerMessageId}:${actualIndex}`;
-        let ref = this.keys.get(key);
+        let ref = keys.get(key);
         if (
           !ref &&
           message.providerMessageId &&
-          this.candidates.size < attachmentReferenceLimit
+          candidates.size < attachmentReferenceLimit
         ) {
           ref = `A${randomUUID()}`;
-          this.keys.set(key, ref);
-          this.candidates.set(ref, {
+          keys.set(key, ref);
+          candidates.set(ref, {
             providerMessageId: message.providerMessageId,
             index: actualIndex,
             attachment: structuredClone(a),
@@ -102,14 +166,7 @@ export class AttachmentSession {
         }
         const type = query?.attachmentType;
         return {
-          index: actualIndex,
-          fileName: a.fileName?.slice(0, 512) ?? null,
-          ...(a.fileName && a.fileName.length > 512
-            ? { fileNameTruncated: true }
-            : {}),
-          mimeType: a.mimeType,
-          sizeBytes: a.sizeBytes,
-          availability: "not-verified" as const,
+          ...attachmentEntry(a, actualIndex),
           ...(ref ? { attachment_ref: ref } : {}),
           ...(query
             ? {
@@ -139,6 +196,40 @@ export class AttachmentSession {
         : {}),
     };
   }
+  async initialCatalogue(maxBytes: number) {
+    const stage = this.stageCatalogue();
+    const prepared = await initialAttachmentCatalogue(
+      { current: this.input.current, history: this.input.history ?? [] },
+      maxBytes,
+      async (message, current) => {
+        // Historical references require explicit archive authorization. No permissive
+        // fallback when a repository does not implement the authorization contract.
+        if (
+          !current &&
+          (!this.sources.authorized ||
+            !(await this.sources.authorized(
+              this.input.scope,
+              message.providerMessageId,
+              true,
+            )))
+        )
+          return null;
+        return stage.catalogue(
+          {
+            id: current ? "current-message" : message.providerMessageId,
+            ...message,
+          },
+          0,
+          undefined,
+          current,
+        );
+      },
+    );
+    return {
+      text: prepared.text,
+      commit: () => stage.commit(prepared.listings),
+    };
+  }
   currentCatalogue() {
     return this.catalogue(
       { id: "current-message", ...this.input.current },
@@ -147,10 +238,23 @@ export class AttachmentSession {
       true,
     );
   }
-  private async check(candidate?: Candidate) {
+  private async check(candidate?: Candidate, snapshot = false) {
     if (this.ended) throw new AttachmentError("ATTACHMENT_SESSION_INVALIDATED");
     await this.channel.check();
     if (candidate) {
+      if (this.sources.authorized) {
+        if (
+          !(await this.sources.authorized(
+            this.input.scope,
+            candidate.providerMessageId,
+            candidate.historical,
+          ))
+        ) {
+          await this.close();
+          throw new AttachmentError("ATTACHMENT_PERMISSION_REVOKED");
+        }
+        if (snapshot) return null;
+      }
       const source = await this.sources.resolve(
         this.input.scope,
         candidate.providerMessageId,
@@ -163,8 +267,14 @@ export class AttachmentSession {
           ["providerAttachmentId", "fileName", "mimeType", "sizeBytes"] as const
         ).some((key) => source.attachment[key] !== candidate.attachment[key])
       ) {
-        await this.close();
-        throw new AttachmentError("ATTACHMENT_PERMISSION_REVOKED");
+        // Source revision is not permission revocation. Previously read files
+        // continue to use their task snapshot; fresh reads report unavailable.
+        if (!this.sources.authorized) await this.close();
+        throw new AttachmentError(
+          this.sources.authorized
+            ? "ATTACHMENT_REFERENCE_UNAVAILABLE"
+            : "ATTACHMENT_PERMISSION_REVOKED",
+        );
       }
       return source;
     }
@@ -172,7 +282,7 @@ export class AttachmentSession {
   }
   async validate() {
     for (const ref of this.imported.keys())
-      await this.check(this.candidates.get(ref));
+      await this.check(this.candidates.get(ref), true);
   }
   register(registry: AgentToolRegistry) {
     registry.register({
@@ -228,7 +338,9 @@ export class AttachmentSession {
               errorCode: code,
               retryable: false,
               guidance:
-                "Do not claim the file was read. Explain the limitation; do not replay unknown imports or commands.",
+                code === "ATTACHMENT_REFERENCE_UNAVAILABLE"
+                  ? "No download or import was started. Query the attachment again with query_chat_messages or read_chat_excerpt and use the exact attachment_ref returned in THIS run. Context display IDs, message IDs and references from earlier runs are not import references. If no valid reference is returned, explain the limitation; do not guess a reference or assume the user must resend the file."
+                  : "Do not claim the file was read. Explain the limitation; do not replay unknown imports or commands.",
             }),
             diagnostics: {
               ...this.channel.metadata,
@@ -265,9 +377,12 @@ export class AttachmentSession {
     let stage: Awaited<ReturnType<AttachmentStore["stage"]>> | undefined;
     try {
       signal.throwIfAborted();
-      const source = await this.check(candidate);
       const previous = this.imported.get(ref);
-      if (previous) return { ...previous, reused: true };
+      if (previous) {
+        await this.check(candidate, true);
+        return { ...previous, reused: true };
+      }
+      const source = await this.check(candidate);
       if (this.imported.size >= limits.files)
         throw new AttachmentError("ATTACHMENT_COUNT_LIMIT");
       const maximum = Math.min(
@@ -290,7 +405,7 @@ export class AttachmentSession {
       const validationStarted = Date.now();
       await validateAttachmentFile(stage.file, extension, signal);
       const validationMs = Date.now() - validationStarted;
-      await this.check(candidate);
+      await this.check(candidate, true);
       signal.throwIfAborted();
       const transferStarted = Date.now();
       const result = await this.channel.transfer(
@@ -309,7 +424,7 @@ export class AttachmentSession {
         stage.file,
         signal,
       );
-      await this.check(candidate);
+      await this.check(candidate, true);
       signal.throwIfAborted();
       if (Date.now() >= ctx.deadline)
         throw new AttachmentError("ATTACHMENT_TIMEOUT");

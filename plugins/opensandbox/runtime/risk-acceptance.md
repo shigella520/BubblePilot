@@ -55,3 +55,15 @@ Debian trixie 当日仍无 zlib 修复包；采用上游正式版 1.4，与 SQLi
 依据：[Debian APT 公告](https://lists.debian.org/debian-security-announce/2026/msg00526.html)、[Debian zlib tracker](https://security-tracker.debian.org/tracker/CVE-2026-76844)、[zlib 1.4 正式发布](https://github.com/madler/zlib/releases/tag/v1.4)、[上游修复](https://github.com/madler/zlib/commit/df84af25dc1942490e1d1c899a07619152a46148)。Tracker 明确 CVE-2026-76844 与 CVE-2026-85091 使用同一修复。
 
 自编译库的安全证据包含来源、哈希、实际加载版本与功能回归，不以扫描器不再列出 Debian 包作为唯一依据。仅同步 Dockerfile 源哈希，不新增风险例外或延长有效期。此次修复随代码合并；已部署的 NAS 运行镜像不会随合并自动更新，后续需单独发布运行镜像并切换 digest。
+
+## 2026-11-12 Kerberos 修复
+
+PR #58 的完整 CI 扫描发现 14 个新的 HIGH CVE、56 条包记录，来自 `iproute2 → libtirpc3t64 → libgssapi-krb5-2` 引入的四个 Kerberos 库。Debian trixie 的 1.21.3-5+deb13u1 当日尚无对应修复包；不扩大原风险例外，不因未启动 KDC 服务而忽略库漏洞。
+
+采用 [MIT 官方 1.22.3](https://web.mit.edu/kerberos/krb5-1.22/)（2026-11-09 发布），其修复说明覆盖 CVE-2026-107364、CVE-2026-112315—112323、CVE-2026-118380、CVE-2026-119079、CVE-2026-71199、CVE-2026-71200。源码从 [MIT 分发站](https://kerberos.org/dist/index.html)获取；发行签名验证通过，签名指纹 `C4493CB739F4A89F9852CBC20CBA08575F8372DF` 与官方分发页一致。固定源码 SHA-256：`fe90af8441ad9fa9b064b8e53077cefb782a96f8a68276b031dc54af1789ff0b`。
+
+独立构建阶段制作 `bubblepilot-krb5` Debian 包，替换 `libgssapi-krb5-2`、`libkrb5-3`、`libk5crypto3`、`libkrb5support0`，通过版本化 Provides 维持 libtirpc 和 iproute2 的依赖；最终镜像仅包含这四个运行库，不新增 Kerberos 服务、命令或编译器。沿用现有 libcom-err2、OpenSSL 和 keyutils 依赖；构建运行上游 ASN.1 与密码算法测试。
+
+验收要求包括：旧包不残留、动态加载库版本为 1.22.3、Kerberos context 与 GSS 机制初始化、普通权限下 ip/ss 只读诊断，以及既有 512 MiB 冒烟和完整漏洞扫描。自编译包不完全属于 Debian 公告映射，不能只凭扫描项消失宣称修复；签名来源、真实库替换与功能验证共同作为证据。仅更新 Dockerfile 源哈希，风险例外条目和有效期不变。
+
+本次为合并前源码修复，不发布镜像或修改 NAS；现有 NAS 运行镜像需后续单独授权构建发布、扫描并切换 digest 才能获得修复。

@@ -43,6 +43,7 @@ interface Chat {
   updatedAt: string;
 }
 
+const session = useSessionStore();
 const memoryChat = ref<Chat | null>(null);
 const memoryTrigger = ref<HTMLElement | null>(null);
 function openChatMemory(chat: Chat, event: MouseEvent) {
@@ -100,7 +101,71 @@ async function rebuildChat(chat: Chat, target: "memory") {
   }
 }
 
+const quotedMessage = ref<MessageResult | null>(null);
+const quoteOpen = ref(false);
+const quoteBusy = ref(false);
+const quoteError = ref("");
+let quoteRequest = 0;
+function closeQuote() {
+  quoteRequest++;
+  quoteOpen.value = false;
+  quotedMessage.value = null;
+  quoteBusy.value = false;
+  quoteError.value = "";
+}
+async function openQuote(id: string) {
+  const request = ++quoteRequest;
+  quoteOpen.value = true;
+  quoteBusy.value = true;
+  quotedMessage.value = null;
+  quoteError.value = "";
+  try {
+    const result = await apiRequest<MessageResult>(
+      `/api/v1/messages/${encodeURIComponent(id)}`,
+    );
+    if (request === quoteRequest && session.sensitiveActive)
+      quotedMessage.value = result;
+  } catch (e) {
+    if (request === quoteRequest) quoteError.value = errorMessage(e);
+  } finally {
+    if (request === quoteRequest) quoteBusy.value = false;
+  }
+}
+function revisionLabel(value?: string) {
+  return value === "retracted"
+    ? "消息已撤回"
+    : value === "partial"
+      ? "部分内容已撤回，未确认的部分暂不展示"
+      : value === "unresolved"
+        ? "内容状态待确认"
+        : "";
+}
+function quoteLabel(value: string) {
+  return value === "retracted"
+    ? "引用消息已撤回"
+    : value === "unresolved"
+      ? "引用目标部分待确认"
+      : "引用消息不可用";
+}
+watch(
+  () => session.sensitiveActive,
+  (active) => {
+    if (!active) closeQuote();
+  },
+);
+onBeforeUnmount(closeQuote);
+
 interface MessageResult {
+  retractedBody?: string | null;
+  revisionState?: "active" | "retracted" | "partial" | "unresolved";
+  editedAt?: string | null;
+  replyTo?: {
+    status: string;
+    archive_id?: string;
+    sender_id?: string;
+    text_preview?: string;
+    truncated?: boolean;
+  };
   id: string;
   chatId: string;
   providerChatId: string;
@@ -242,7 +307,6 @@ interface DataExportJob {
   createdAt: string;
 }
 
-const session = useSessionStore();
 const busy = ref(false);
 const message = ref("");
 const messageIsError = ref(false);
@@ -1136,13 +1200,15 @@ onBeforeUnmount(() =>
             ><span>结束时间</span
             ><input v-model="form.sentTo" type="datetime-local"
           /></label>
-          <button
-            class="button primary"
-            type="submit"
-            :disabled="busy || !session.sensitiveActive"
-          >
-            <Search :size="17" />搜索
-          </button>
+          <div class="filter-actions">
+            <button
+              class="button primary"
+              type="submit"
+              :disabled="busy || !session.sensitiveActive"
+            >
+              <Search :size="17" />搜索
+            </button>
+          </div>
         </form>
         <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
           <Search :size="24" />
@@ -1155,7 +1221,66 @@ onBeforeUnmount(() =>
               <strong>{{ item.chatDisplayName || item.providerChatId }}</strong
               ><span>{{ new Date(item.sentAt).toLocaleString() }}</span>
             </header>
+            <p
+              v-if="item.editedAt && item.revisionState === 'active'"
+              class="muted"
+            >
+              已编辑 · {{ new Date(item.editedAt).toLocaleString() }}
+            </p>
+            <blockquote
+              v-if="item.replyTo && !item.contentRedactedAt"
+              class="message-quote"
+            >
+              <template v-if="item.replyTo.status === 'available'">
+                <strong>{{ item.replyTo.sender_id || "原消息" }}</strong>
+                <p>
+                  {{ item.replyTo.text_preview || "非文本消息"
+                  }}{{ item.replyTo.truncated ? "…" : "" }}
+                </p>
+                <button
+                  v-if="item.replyTo.archive_id"
+                  class="button secondary"
+                  type="button"
+                  @click="openQuote(item.replyTo.archive_id)"
+                >
+                  查看原消息
+                </button>
+              </template>
+              <span v-else>{{ quoteLabel(item.replyTo.status) }}</span>
+            </blockquote>
             <p v-if="item.contentRedactedAt">【内容已按保留策略清理】</p>
+            <div
+              v-else-if="revisionLabel(item.revisionState)"
+              class="message-revision-body"
+            >
+              <span class="message-revision-badge">{{
+                revisionLabel(item.revisionState)
+              }}</span>
+              <template v-if="item.retractedBody != null">
+                <p class="muted">撤回前留存正文 · 仅管理页可见</p>
+                <template v-if="isLongMessage(item.retractedBody)">
+                  <p class="message-body-collapsed">
+                    {{ messagePreview(item.retractedBody) }}
+                  </p>
+                  <details class="message-body-details">
+                    <summary>
+                      展开留存正文（{{ item.retractedBody.length }} 字符）
+                    </summary>
+                    <p>{{ item.retractedBody }}</p>
+                  </details>
+                </template>
+                <p v-else>{{ item.retractedBody || "【空正文】" }}</p>
+              </template>
+              <p
+                v-else-if="
+                  item.revisionState === 'retracted' ||
+                  item.revisionState === 'partial'
+                "
+                class="muted"
+              >
+                原文未保留
+              </p>
+            </div>
             <template v-else-if="item.body && isLongMessage(item.body)">
               <p class="message-body-collapsed">
                 {{ messagePreview(item.body) }}
@@ -1304,20 +1429,22 @@ onBeforeUnmount(() =>
               /><span>执行摘要</span></label
             >
           </fieldset>
-          <button
-            class="button secondary"
-            type="submit"
-            :disabled="
-              exportPreviewBusy ||
-              !exportForm.chatId ||
-              (!exportForm.includeMessages && !exportForm.includeExecutions)
-            "
-            :aria-busy="exportPreviewBusy"
-          >
-            <FileJson2 :size="17" />{{
-              exportPreviewBusy ? "冻结中…" : "预览导出范围"
-            }}
-          </button>
+          <div class="filter-actions">
+            <button
+              class="button secondary"
+              type="submit"
+              :disabled="
+                exportPreviewBusy ||
+                !exportForm.chatId ||
+                (!exportForm.includeMessages && !exportForm.includeExecutions)
+              "
+              :aria-busy="exportPreviewBusy"
+            >
+              <FileJson2 :size="17" />{{
+                exportPreviewBusy ? "冻结中…" : "预览导出范围"
+              }}
+            </button>
+          </div>
         </form>
         <article v-if="exportPreview" class="export-preview">
           <header>
@@ -1474,6 +1601,41 @@ onBeforeUnmount(() =>
       </section>
     </div>
   </main>
+  <AdminDetailDialog v-if="quoteOpen" title="引用消息详情" @close="closeQuote">
+    <p v-if="quoteBusy">正在读取…</p>
+    <p v-else-if="quoteError" role="alert">{{ quoteError }}</p>
+    <template v-else-if="quotedMessage">
+      <p class="muted">
+        {{ quotedMessage.senderId || "未知发送者" }} ·
+        {{ new Date(quotedMessage.sentAt).toLocaleString() }}
+      </p>
+      <p v-if="quotedMessage.contentRedactedAt">内容已按保留策略清理</p>
+      <div
+        v-else-if="revisionLabel(quotedMessage.revisionState)"
+        class="message-revision-body"
+      >
+        <span class="message-revision-badge">{{
+          revisionLabel(quotedMessage.revisionState)
+        }}</span>
+        <template v-if="quotedMessage.retractedBody != null">
+          <p class="muted">撤回前留存正文 · 仅管理页可见</p>
+          <p>{{ quotedMessage.retractedBody || "【空正文】" }}</p>
+        </template>
+        <p
+          v-else-if="
+            quotedMessage.revisionState === 'retracted' ||
+            quotedMessage.revisionState === 'partial'
+          "
+          class="muted"
+        >
+          原文未保留
+        </p>
+      </div>
+      <p v-else style="white-space: pre-wrap; overflow-wrap: anywhere">
+        {{ quotedMessage.body || "非文本消息" }}
+      </p>
+    </template>
+  </AdminDetailDialog>
   <Teleport to="body">
     <div
       v-if="mediaMessage"
@@ -1637,3 +1799,40 @@ onBeforeUnmount(() =>
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+.message-quote,
+.message-revision-body {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border-left: 3px solid;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.message-quote {
+  border-left-color: #95a7bd;
+  background: #f1f4f8;
+}
+.message-revision-body {
+  border-left-color: #d6cbb8;
+  background: #f7f3ec;
+}
+.message-quote p {
+  white-space: pre-wrap;
+  margin: 6px 0;
+}
+.message-revision-body p {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.message-revision-badge {
+  display: inline-flex;
+  padding: 3px 9px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--color-text-muted, #776d60);
+  font-size: 12px;
+  line-height: 1.5;
+}
+</style>

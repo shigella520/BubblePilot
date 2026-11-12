@@ -13,17 +13,34 @@
     "metadata"
   ],
   "properties": {
-    "schemaVersion": { "const": "3" },
-    "eventId": { "type": "string", "minLength": 1 },
-    "correlationId": { "type": "string", "format": "uuid" },
-    "provider": { "const": "bluebubbles" },
+    "schemaVersion": {
+      "const": "3"
+    },
+    "eventId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "provider": {
+      "const": "bluebubbles"
+    },
     "chat": {
       "type": "object",
       "required": ["providerChatId", "type", "displayName"],
       "properties": {
-        "providerChatId": { "type": "string", "minLength": 1 },
-        "type": { "enum": ["direct", "group", "unknown"] },
-        "displayName": { "type": ["string", "null"] }
+        "providerChatId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": ["direct", "group", "unknown"]
+        },
+        "displayName": {
+          "type": ["string", "null"]
+        }
       },
       "additionalProperties": false
     },
@@ -41,12 +58,26 @@
         "contentHash"
       ],
       "properties": {
-        "providerMessageId": { "type": "string", "minLength": 1 },
-        "senderId": { "type": ["string", "null"] },
-        "sentAt": { "type": "string", "format": "date-time" },
-        "text": { "type": ["string", "null"] },
-        "contentType": { "enum": ["text", "attachment", "mixed", "unknown"] },
-        "isFromMe": { "type": "boolean" },
+        "providerMessageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "senderId": {
+          "type": ["string", "null"]
+        },
+        "sentAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "text": {
+          "type": ["string", "null"]
+        },
+        "contentType": {
+          "enum": ["text", "attachment", "mixed", "unknown"]
+        },
+        "isFromMe": {
+          "type": "boolean"
+        },
         "attachments": {
           "type": "array",
           "items": {
@@ -58,10 +89,20 @@
               "sizeBytes"
             ],
             "properties": {
-              "providerAttachmentId": { "type": "string", "minLength": 1 },
-              "mimeType": { "type": ["string", "null"] },
-              "fileName": { "type": ["string", "null"] },
-              "sizeBytes": { "type": ["integer", "null"], "minimum": 0 }
+              "providerAttachmentId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mimeType": {
+                "type": ["string", "null"]
+              },
+              "fileName": {
+                "type": ["string", "null"]
+              },
+              "sizeBytes": {
+                "type": ["integer", "null"],
+                "minimum": 0
+              }
             },
             "additionalProperties": false
           }
@@ -80,7 +121,9 @@
                 "redacted"
               ]
             },
-            "errorCode": { "type": ["string", "null"] },
+            "errorCode": {
+              "type": ["string", "null"]
+            },
             "items": {
               "type": "array",
               "maxItems": 4,
@@ -99,7 +142,9 @@
                   "iconAvailable"
                 ],
                 "properties": {
-                  "source": { "enum": ["bluebubbles", "open-graph"] },
+                  "source": {
+                    "enum": ["bluebubbles", "open-graph"]
+                  },
                   "url": {
                     "type": "string",
                     "format": "uri",
@@ -110,10 +155,21 @@
                     "format": "uri",
                     "maxLength": 2048
                   },
-                  "title": { "type": ["string", "null"], "maxLength": 500 },
-                  "summary": { "type": ["string", "null"], "maxLength": 2000 },
-                  "siteName": { "type": ["string", "null"], "maxLength": 200 },
-                  "imageAvailable": { "type": "boolean" },
+                  "title": {
+                    "type": ["string", "null"],
+                    "maxLength": 500
+                  },
+                  "summary": {
+                    "type": ["string", "null"],
+                    "maxLength": 2000
+                  },
+                  "siteName": {
+                    "type": ["string", "null"],
+                    "maxLength": 200
+                  },
+                  "imageAvailable": {
+                    "type": "boolean"
+                  },
                   "imageUrl": {
                     "type": ["string", "null"],
                     "format": "uri",
@@ -122,7 +178,9 @@
                   "imageSource": {
                     "enum": ["bluebubbles", "open-graph", null]
                   },
-                  "iconAvailable": { "type": "boolean" }
+                  "iconAvailable": {
+                    "type": "boolean"
+                  }
                 },
                 "additionalProperties": false
               }
@@ -130,7 +188,61 @@
           },
           "additionalProperties": false
         },
-        "contentHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+        "contentHash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "replyReference": {
+          "type": "object",
+          "required": ["targetGuid", "part"],
+          "properties": {
+            "targetGuid": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "part": {
+              "type": ["string", "null"],
+              "maxLength": 256
+            }
+          },
+          "additionalProperties": false
+        },
+        "replyTo": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": {
+              "enum": ["available", "retracted", "unavailable", "unresolved"]
+            },
+            "message_id": {
+              "type": "string"
+            },
+            "archive_id": {
+              "type": "string"
+            },
+            "message_index": {
+              "type": "number"
+            },
+            "sender_id": {
+              "type": "string"
+            },
+            "part_id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "object"
+            },
+            "text_preview": {
+              "type": "string",
+              "maxLength": 400
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },
@@ -138,10 +250,19 @@
       "type": "object",
       "required": ["isReplay", "payloadHash", "eventType", "adapterVersion"],
       "properties": {
-        "isReplay": { "type": "boolean" },
-        "payloadHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
-        "eventType": { "type": "string" },
-        "adapterVersion": { "type": "string" }
+        "isReplay": {
+          "type": "boolean"
+        },
+        "payloadHash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "eventType": {
+          "type": "string"
+        },
+        "adapterVersion": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     }

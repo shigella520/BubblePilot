@@ -81,7 +81,7 @@ a {
   top: 12px;
   z-index: 30;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 18px;
   margin-bottom: 24px;
@@ -150,6 +150,10 @@ a {
   background-clip: text;
 }
 .primary-nav {
+  min-width: 0;
+  max-width: 100%;
+  justify-self: center;
+  overflow-x: auto;
   display: flex;
   gap: 4px;
   padding: 4px;
@@ -157,6 +161,7 @@ a {
   background: rgba(245, 244, 240, 0.8);
 }
 .primary-nav a {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -251,7 +256,9 @@ a {
   text-transform: uppercase;
 }
 .admin-workspace {
+  min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
 .split-admin-page {
@@ -344,9 +351,13 @@ a {
 }
 .panel-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
+}
+.panel-head > * {
+  min-width: 0;
 }
 .panel-head h1,
 .panel-head h2 {
@@ -661,6 +672,7 @@ a {
 }
 .table-shell {
   width: 100%;
+  min-width: 0;
   margin-top: 20px;
   overflow-x: auto;
   border: 1px solid var(--bubblepilot-line);
@@ -1475,6 +1487,7 @@ td .keyline {
 }
 .field-grid,
 .filter-grid {
+  min-width: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 13px;
@@ -1482,6 +1495,21 @@ td .keyline {
 .filter-grid {
   align-items: end;
   margin-top: 20px;
+}
+.filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 9px;
+  grid-column: 1 / -1;
+}
+.form-actions .button,
+.filter-actions .button {
+  max-width: 100%;
+  white-space: normal;
+}
+.button svg {
+  flex-shrink: 0;
 }
 .two-column-forms {
   display: grid;
@@ -1516,6 +1544,7 @@ select,
 textarea {
   width: 100%;
   min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--bubblepilot-line);
   border-radius: 13px;
   outline: none;
@@ -1529,6 +1558,22 @@ input,
 select {
   min-height: 43px;
   padding: 0 13px;
+}
+/* Keep native date pickers within their grid cell, including iOS Safari. */
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"] {
+  display: block;
+  height: 44px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+input::-webkit-date-and-time-value {
+  text-align: left;
+}
+input::-webkit-datetime-edit {
+  min-width: 0;
+  padding: 0;
 }
 input[type="checkbox"] {
   width: 18px;
@@ -1567,6 +1612,7 @@ textarea:focus {
   min-height: 39px;
 }
 .checkbox-field input {
+  flex-shrink: 0;
   width: 17px;
   height: 17px;
   min-height: 17px;
@@ -1608,6 +1654,7 @@ textarea:focus {
 }
 .form-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 9px;
 }
@@ -1615,6 +1662,7 @@ textarea:focus {
   justify-self: start;
 }
 fieldset {
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 8px 18px;
@@ -2715,7 +2763,7 @@ legend {
 
 .workflow-import-bindings {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: 0 1rem;
 }
 
@@ -3118,13 +3166,16 @@ legend {
 }
 @media (max-width: 1180px) {
   .topbar {
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
   .connection-pill {
     display: none;
   }
   .primary-nav {
-    justify-self: center;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    justify-self: stretch;
   }
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3146,7 +3197,7 @@ legend {
 }
 @media (max-width: 860px) {
   .app-shell {
-    padding: 13px 13px 88px;
+    padding: 13px 13px calc(96px + env(safe-area-inset-bottom, 0px));
   }
   .topbar {
     top: 7px;
@@ -3158,26 +3209,30 @@ legend {
     position: fixed;
     z-index: 45;
     right: 12px;
-    bottom: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     left: 12px;
-    justify-content: space-around;
+    justify-self: stretch;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
     padding: 7px;
     border: 1px solid rgba(255, 255, 255, 0.85);
     box-shadow: 0 18px 44px rgba(16, 19, 23, 0.18);
     backdrop-filter: blur(24px);
   }
   .primary-nav a {
-    flex: 1;
+    flex: 1 0 60px;
+    min-height: 48px;
     flex-direction: column;
     gap: 2px;
-    padding: 7px 3px;
-    font-size: 9px;
+    padding: 7px 4px;
+    font-size: 11px;
   }
   .topbar-meta {
     gap: 5px;
   }
   .split-admin-page {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .execution-detail-backdrop {
     padding: 12px;
@@ -3237,6 +3292,20 @@ legend {
   }
   .inline-create-form {
     grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 680px) {
+  .field-grid,
+  .filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  .filter-actions .button {
+    width: 100%;
   }
 }
 @media (max-width: 560px) {
