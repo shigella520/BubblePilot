@@ -1411,8 +1411,8 @@ onUnmounted(() => {
 </template>
 <style scoped>
 .meme-filters > input {
-  flex: 1;
-  min-width: 180px;
+  flex: 1 1 180px;
+  min-width: 0;
   width: auto;
 }
 .meme-filters > select {
@@ -1436,7 +1436,7 @@ onUnmounted(() => {
 }
 .meme-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
   gap: 16px;
 }
 .meme-card {
@@ -2020,7 +2020,7 @@ onUnmounted(() => {
     gap: 6px;
   }
   .meme-grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr));
   }
 }
 </style>

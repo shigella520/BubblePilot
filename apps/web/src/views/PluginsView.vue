@@ -667,6 +667,7 @@ async function remove() {
 .plugin-heading,
 .plugin-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -686,7 +687,7 @@ async function remove() {
 }
 .plugin-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
   gap: 16px;
 }
 .plugin-card,

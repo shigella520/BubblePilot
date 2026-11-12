@@ -1200,13 +1200,15 @@ onBeforeUnmount(() =>
             ><span>结束时间</span
             ><input v-model="form.sentTo" type="datetime-local"
           /></label>
-          <button
-            class="button primary"
-            type="submit"
-            :disabled="busy || !session.sensitiveActive"
-          >
-            <Search :size="17" />搜索
-          </button>
+          <div class="filter-actions">
+            <button
+              class="button primary"
+              type="submit"
+              :disabled="busy || !session.sensitiveActive"
+            >
+              <Search :size="17" />搜索
+            </button>
+          </div>
         </form>
         <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
           <Search :size="24" />
@@ -1427,20 +1429,22 @@ onBeforeUnmount(() =>
               /><span>执行摘要</span></label
             >
           </fieldset>
-          <button
-            class="button secondary"
-            type="submit"
-            :disabled="
-              exportPreviewBusy ||
-              !exportForm.chatId ||
-              (!exportForm.includeMessages && !exportForm.includeExecutions)
-            "
-            :aria-busy="exportPreviewBusy"
-          >
-            <FileJson2 :size="17" />{{
-              exportPreviewBusy ? "冻结中…" : "预览导出范围"
-            }}
-          </button>
+          <div class="filter-actions">
+            <button
+              class="button secondary"
+              type="submit"
+              :disabled="
+                exportPreviewBusy ||
+                !exportForm.chatId ||
+                (!exportForm.includeMessages && !exportForm.includeExecutions)
+              "
+              :aria-busy="exportPreviewBusy"
+            >
+              <FileJson2 :size="17" />{{
+                exportPreviewBusy ? "冻结中…" : "预览导出范围"
+              }}
+            </button>
+          </div>
         </form>
         <article v-if="exportPreview" class="export-preview">
           <header>

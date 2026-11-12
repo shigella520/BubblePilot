@@ -1,7 +1,8 @@
 // Development-only: actual view, fictional data, no external API requests.
-import { createApp } from "vue";
+import { createApp, h } from "vue";
 import { createPinia } from "pinia";
 import { createRouter, createMemoryHistory } from "vue-router";
+import AppHeader from "../components/AppHeader.vue";
 import MessagesView from "../views/MessagesView.vue";
 import { useSessionStore } from "../stores/session";
 import "../styles/tokens.css";
@@ -97,9 +98,15 @@ window.fetch = (input) => {
 const pinia = createPinia();
 const router = createRouter({
   history: createMemoryHistory(),
-  routes: [{ path: "/", component: MessagesView }],
+  routes: [{ path: "/:pathMatch(.*)*", component: MessagesView }],
 });
-await router.push("/");
+await router.push("/messages");
 await router.isReady();
-createApp(MessagesView).use(pinia).use(router).mount("#app");
+createApp({
+  render: () =>
+    h("div", { class: "app-shell" }, [h(AppHeader), h(MessagesView)]),
+})
+  .use(pinia)
+  .use(router)
+  .mount("#app");
 await useSessionStore(pinia).restore();

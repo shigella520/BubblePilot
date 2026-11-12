@@ -9,7 +9,7 @@ import {
   Settings,
   ShieldCheck,
 } from "@lucide/vue";
-import { ref, watch } from "vue";
+import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import { errorMessage } from "../services/api";
@@ -21,6 +21,29 @@ import SensitiveUnlock from "./SensitiveUnlock.vue";
 
 const session = useSessionStore();
 const router = useRouter();
+const navigation = ref<HTMLElement | null>(null);
+// Scroll only the navigation strip; changing routes must not move page content.
+function revealCurrentNavigation() {
+  const nav = navigation.value;
+  const active = nav?.querySelector<HTMLElement>(".router-link-exact-active");
+  if (!nav || !active || nav.scrollWidth <= nav.clientWidth) return;
+  const container = nav.getBoundingClientRect();
+  const item = active.getBoundingClientRect();
+  if (item.left < container.left + 8)
+    nav.scrollLeft += item.left - container.left - 8;
+  else if (item.right > container.right - 8)
+    nav.scrollLeft += item.right - container.right + 8;
+}
+watch(() => router.currentRoute.value.path, revealCurrentNavigation, {
+  flush: "post",
+});
+let navigationObserver: ResizeObserver | undefined;
+onMounted(() => {
+  revealCurrentNavigation();
+  navigationObserver = new ResizeObserver(revealCurrentNavigation);
+  if (navigation.value) navigationObserver.observe(navigation.value);
+});
+onBeforeUnmount(() => navigationObserver?.disconnect());
 const unlockOpen = ref(false);
 const unlockTrigger = ref<HTMLElement | null>(null);
 watch(
@@ -53,7 +76,7 @@ async function logout() {
       <img class="brand-icon" src="/bubblepilot-icon.png" alt="" />
       <span class="brand-text">BubblePilot</span>
     </RouterLink>
-    <nav class="primary-nav" aria-label="主导航">
+    <nav ref="navigation" class="primary-nav" aria-label="主导航">
       <RouterLink to="/"><LayoutDashboard :size="16" />概览</RouterLink>
       <RouterLink to="/messages"><MessagesSquare :size="16" />消息</RouterLink>
       <RouterLink to="/automation"><Boxes :size="16" />自动化</RouterLink>

@@ -74,7 +74,7 @@ async function verify() {
 
 <style scoped>
 .sensitive-unlock {
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
 }
 .sensitive-unlock input,
 .sensitive-unlock .button,

@@ -482,61 +482,67 @@ onBeforeUnmount(() => generation++);
             </td>
             <td>{{ labels[task.status] ?? task.status }}</td>
             <td>
-              <button
-                class="button secondary"
-                :disabled="mutating || !session.sensitiveActive"
-                @click="inspect(task)"
-              >
-                详情</button
-              ><template
-                v-if="['pending', 'running', 'paused'].includes(task.status)"
-                ><button
+              <div class="task-row-actions">
+                <button
                   class="button secondary"
                   :disabled="mutating || !session.sensitiveActive"
-                  @click="edit(task)"
+                  @click="inspect(task)"
                 >
-                  修改</button
-                ><button
-                  class="button secondary"
+                  详情</button
+                ><template
+                  v-if="['pending', 'running', 'paused'].includes(task.status)"
+                  ><button
+                    class="button secondary"
+                    :disabled="mutating || !session.sensitiveActive"
+                    @click="edit(task)"
+                  >
+                    修改</button
+                  ><button
+                    class="button secondary"
+                    :disabled="mutating || !session.sensitiveActive"
+                    @click="cancel(task)"
+                  >
+                    取消整个任务
+                  </button>
+                  <template v-if="task.schedule?.kind === 'recurring'">
+                    <button
+                      class="button secondary"
+                      :disabled="mutating || !session.sensitiveActive"
+                      @click="
+                        control(
+                          task,
+                          task.lifecycle === 'paused' ? 'resume' : 'pause',
+                        )
+                      "
+                    >
+                      {{
+                        task.lifecycle === "paused" ? "恢复周期" : "暂停周期"
+                      }}
+                    </button>
+                    <button
+                      v-if="task.lifecycle === 'active'"
+                      class="button secondary"
+                      :disabled="mutating || !session.sensitiveActive"
+                      @click="control(task, 'skip-next')"
+                    >
+                      跳过下一次
+                    </button>
+                  </template></template
+                >
+                <button
+                  v-if="
+                    ['completed', 'cancelled'].includes(task.lifecycle ?? '')
+                  "
+                  class="button danger-ghost"
                   :disabled="mutating || !session.sensitiveActive"
-                  @click="cancel(task)"
+                  @click="
+                    error = '';
+                    deleting = task;
+                  "
                 >
-                  取消整个任务
+                  删除
                 </button>
-                <template v-if="task.schedule?.kind === 'recurring'">
-                  <button
-                    class="button secondary"
-                    :disabled="mutating || !session.sensitiveActive"
-                    @click="
-                      control(
-                        task,
-                        task.lifecycle === 'paused' ? 'resume' : 'pause',
-                      )
-                    "
-                  >
-                    {{ task.lifecycle === "paused" ? "恢复周期" : "暂停周期" }}
-                  </button>
-                  <button
-                    v-if="task.lifecycle === 'active'"
-                    class="button secondary"
-                    :disabled="mutating || !session.sensitiveActive"
-                    @click="control(task, 'skip-next')"
-                  >
-                    跳过下一次
-                  </button>
-                </template></template
-              >
-              <button
-                v-if="['completed', 'cancelled'].includes(task.lifecycle ?? '')"
-                class="button danger-ghost"
-                :disabled="mutating || !session.sensitiveActive"
-                @click="
-                  error = '';
-                  deleting = task;
-                "
-              >
-                删除
-              </button>
+              </div>
             </td>
           </tr>
           <tr v-if="!items.length">
@@ -922,7 +928,9 @@ onBeforeUnmount(() => generation++);
 </template>
 <style scoped>
 .scheduled-tasks {
+  min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
 }
 .scheduled-tasks header,
@@ -946,9 +954,12 @@ footer {
   display: grid;
   gap: 8px;
 }
+.task-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+}
 .task-filters label {
-  flex: 1;
-  min-width: 180px;
+  min-width: 0;
 }
 .table-scroll {
   overflow: auto;
@@ -977,8 +988,12 @@ td:first-child {
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
-td button {
-  margin: 3px;
+.task-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 230px;
 }
 footer {
   justify-content: flex-end;
@@ -1124,7 +1139,7 @@ textarea {
 }
 .task-facts {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
   border-top: 1px solid var(--bubblepilot-line);
   padding-top: 18px;
@@ -1291,7 +1306,7 @@ textarea {
   }
   .task-dialog-actions > div {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .task-field-hint {
     flex-wrap: wrap;
