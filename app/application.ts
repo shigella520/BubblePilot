@@ -4274,6 +4274,7 @@ export function buildApplication(
   );
 
   application.addHook("onClose", async () => {
+    await options.workflow?.engine.close?.();
     await options.blueBubbles?.revisions?.stop();
     await options.memory?.stop();
     await options.imageSummary?.worker.stop();

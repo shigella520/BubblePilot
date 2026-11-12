@@ -1,12 +1,16 @@
 export type WorkflowCapacityErrorCode =
-  "WORKFLOW_QUEUE_FULL" | "WORKFLOW_QUEUE_WAIT_TIMEOUT";
+  | "WORKFLOW_QUEUE_FULL"
+  | "WORKFLOW_QUEUE_WAIT_TIMEOUT"
+  | "WORKFLOW_SHUTTING_DOWN";
 
 export class WorkflowCapacityError extends Error {
   constructor(readonly code: WorkflowCapacityErrorCode) {
     super(
       code === "WORKFLOW_QUEUE_FULL"
         ? "The workflow execution queue is full."
-        : "The workflow execution waited too long for capacity.",
+        : code === "WORKFLOW_SHUTTING_DOWN"
+          ? "The workflow runtime is shutting down."
+          : "The workflow execution waited too long for capacity.",
     );
     this.name = "WorkflowCapacityError";
   }
@@ -28,6 +32,8 @@ interface WaitingTask {
 
 export class BoundedExecutionGate {
   private active = 0;
+  private closing = false;
+  private readonly closedWaiters: Array<() => void> = [];
   private readonly activeKeys = new Set<string>();
   private readonly waiting: WaitingTask[] = [];
 
@@ -42,6 +48,10 @@ export class BoundedExecutionGate {
   }
 
   run<T>(task: () => Promise<T>, key: string | null = null): Promise<T> {
+    if (this.closing)
+      return Promise.reject(
+        new WorkflowCapacityError("WORKFLOW_SHUTTING_DOWN"),
+      );
     if (this.canStart(key)) {
       return this.start(task, key);
     }
@@ -74,6 +84,16 @@ export class BoundedExecutionGate {
     });
   }
 
+  async close(): Promise<void> {
+    this.closing = true;
+    for (const waiting of this.waiting.splice(0)) {
+      if (waiting.timer !== null) clearTimeout(waiting.timer);
+      waiting.reject(new WorkflowCapacityError("WORKFLOW_SHUTTING_DOWN"));
+    }
+    if (this.active)
+      await new Promise<void>((resolve) => this.closedWaiters.push(resolve));
+  }
+
   status(): WorkflowGateStatus {
     return {
       active: this.active,
@@ -101,7 +121,9 @@ export class BoundedExecutionGate {
     } finally {
       this.active -= 1;
       if (key !== null) this.activeKeys.delete(key);
-      this.drain();
+      if (!this.closing) this.drain();
+      if (!this.active)
+        for (const resolve of this.closedWaiters.splice(0)) resolve();
     }
   }
 

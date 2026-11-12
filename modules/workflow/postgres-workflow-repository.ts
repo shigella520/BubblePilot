@@ -97,6 +97,7 @@ interface ExecutionRow {
   workflow_version: number;
   retry_of_execution_id: string | null;
   recovery_attempt: number;
+  startup_closure: WorkflowExecutionRecord["startupClosure"];
   correlation_id: string;
   status: WorkflowExecutionRecord["status"];
   current_node_id: string | null;
@@ -192,7 +193,7 @@ const triggerSelect = `SELECT
   t.created_at, t.updated_at, t.deleted_at`;
 
 const executionSelect = `SELECT
-  e.id, e.trigger_event, e.bot_identity, e.provider, e.external_event_id,
+  e.id, e.trigger_event, e.bot_identity, e.startup_closure, e.provider, e.external_event_id,
   source_message.provider_message_id AS source_provider_message_id,
   source_chat.provider_chat_id, source_chat.display_name AS chat_display_name,
   e.trigger_id,
@@ -272,6 +273,7 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
       : Number(row.cached_prompt_tokens ?? 0);
   return {
     triggerEvent: row.trigger_event,
+    startupClosure: row.startup_closure ?? null,
     id: row.id,
     provider: row.provider,
     externalEventId: row.external_event_id,
@@ -1035,13 +1037,14 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     executionId: string,
     nodeId: string,
   ): Promise<void> {
-    await this.pool.query(
+    const updated = await this.pool.query(
       `UPDATE workflow_executions
        SET status = 'running', current_node_id = $2,
            started_at = COALESCE(started_at, NOW()), next_retry_at = NULL
-       WHERE id = $1`,
+       WHERE id = $1 AND startup_closure IS NULL`,
       [executionId, nodeId],
     );
+    if (!updated.rowCount) throw new Error("WORKFLOW_EXECUTION_CLOSED");
   }
 
   async recordContextSnapshot(
@@ -1066,7 +1069,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       `UPDATE workflow_executions
        SET status = 'retrying', current_node_id = $2, next_retry_at = $3,
            error_code = $4
-       WHERE id = $1`,
+       WHERE id = $1 AND startup_closure IS NULL`,
       [executionId, nodeId, nextRetryAt.toISOString(), errorCode],
     );
   }
@@ -1097,7 +1100,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       `UPDATE workflow_executions
        SET status = $2, current_node_id = NULL, completed_at = NOW(),
            next_retry_at = NULL, error_code = $3, error_summary = $4
-       WHERE id = $1`,
+       WHERE id = $1 AND startup_closure IS NULL`,
       [executionId, status, error?.code ?? null, error?.summary ?? null],
     );
   }
@@ -1109,11 +1112,11 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     inputSummary: Readonly<Record<string, unknown>>;
   }): Promise<string> {
     const id = randomUUID();
-    await this.pool.query(
+    const inserted = await this.pool.query(
       `INSERT INTO node_executions (
          id, execution_id, node_id, node_type, node_version, attempt, status,
          input_summary
-       ) VALUES ($1, $2, $3, $4, $5, $6, 'running', $7::jsonb)`,
+       ) SELECT $1, $2, $3, $4, $5, $6, 'running', $7::jsonb FROM workflow_executions WHERE id=$2 AND startup_closure IS NULL`,
       [
         id,
         input.executionId,
@@ -1124,6 +1127,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         JSON.stringify(input.inputSummary),
       ],
     );
+    if (!inserted.rowCount) throw new Error("WORKFLOW_EXECUTION_CLOSED");
     return id;
   }
 
@@ -1138,7 +1142,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
        SET status = $2, output_summary = $3::jsonb, error_code = $4,
            error_summary = $5, retryable = $6, completed_at = NOW(),
            duration_ms = GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::integer)
-       WHERE id = $1`,
+       WHERE id = $1 AND status='running'`,
       [
         input.nodeExecutionId,
         input.status,
@@ -1165,7 +1169,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
          id, execution_id, node_id, idempotency_key, provider,
          provider_chat_id, reply_to_provider_message_id, body_hash,
          provider_temp_guid, status
-       ) VALUES ($1, $2, $3, $4, 'bluebubbles', $5, $6, $7, $8, 'pending')
+       ) SELECT $1, $2, $3, $4, 'bluebubbles', $5, $6, $7, $8, 'pending' FROM workflow_executions WHERE id=$2 AND startup_closure IS NULL
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING id`,
       [
@@ -1196,14 +1200,16 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   }
 
   async markDeliverySending(deliveryId: string): Promise<void> {
-    await this.pool.query(
+    const updated = await this.pool.query(
       `UPDATE outbound_deliveries
        SET status = 'sending', attempt_count = attempt_count + 1,
            error_code = NULL, error_summary = NULL, retryable = NULL,
            updated_at = NOW()
-       WHERE id = $1 AND status IN ('pending', 'failed')`,
+       WHERE id = $1 AND status IN ('pending', 'failed') AND closed_at IS NULL
+         AND EXISTS(SELECT 1 FROM workflow_executions e WHERE e.id=outbound_deliveries.execution_id AND e.startup_closure IS NULL)`,
       [deliveryId],
     );
+    if (!updated.rowCount) throw new Error("OUTBOUND_DELIVERY_NOT_SENDABLE");
   }
 
   async confirmDelivery(
@@ -1248,7 +1254,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
            $2::timestamptz IS NULL
            OR (e.created_at, e.id) < ($2::timestamptz, $3::uuid)
          )
-         AND ($5::text IS NULL OR (e.status <> 'closed' AND EXISTS (
+         AND ($5::text IS NULL OR ((e.status <> 'closed' OR e.startup_closure IS NOT NULL) AND EXISTS (
            SELECT 1 FROM outbound_deliveries d
            WHERE d.execution_id = e.id AND d.status = 'unknown' AND d.closed_at IS NULL AND d.kind = 'text'
          )))
@@ -1356,7 +1362,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       this.pool.query<{ sending: string; unknown: string }>(
         `SELECT
            COUNT(*) FILTER (WHERE d.status = 'sending') AS sending,
-           COUNT(*) FILTER (WHERE d.status = 'unknown' AND d.closed_at IS NULL AND d.kind = 'text' AND e.status IS DISTINCT FROM 'closed') AS unknown
+           COUNT(*) FILTER (WHERE d.status = 'unknown' AND d.closed_at IS NULL AND d.kind = 'text' AND (e.status IS DISTINCT FROM 'closed' OR e.startup_closure IS NOT NULL)) AS unknown
          FROM outbound_deliveries d
          LEFT JOIN workflow_executions e ON e.id = d.execution_id`,
       ),

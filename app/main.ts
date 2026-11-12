@@ -1,3 +1,4 @@
+import { WorkflowStartupRecovery } from "../modules/workflow/startup-recovery.js";
 import { MessageRevisionService } from "../modules/archive/message-revision-service.js";
 import { ManagedMessageDetailClient } from "../modules/integrations/bluebubbles/message-detail.js";
 import { createPostgresPool } from "../modules/shared/postgres-pool.js";
@@ -65,6 +66,17 @@ import { PostgresContextSettingsRepository } from "../modules/workflow/postgres-
 import { ContextSettingsService } from "../modules/workflow/context-settings-service.js";
 
 const config = loadConfig();
+// Acquire before constructing services, running startup collectors, or accepting work.
+const startupRecovery = new WorkflowStartupRecovery(
+  config.databaseUrl,
+  config.databaseQueryTimeoutMs,
+  () => {
+    // Fail-stop: do not allow requests or late tool results after losing runtime ownership.
+    console.error("WORKFLOW_RUNTIME_LOCK_LOST");
+    process.exit(1);
+  },
+);
+const startupReport = await startupRecovery.start();
 const botIdentity = new BotIdentityService(
   config.databaseUrl,
   config.databaseQueryTimeoutMs,
@@ -393,6 +405,7 @@ const shutdown = async (signal: string) => {
   await taskScheduler.close();
   await idleScheduler.close();
   await application.close();
+  await startupRecovery.close();
   process.exitCode = 0;
 };
 
@@ -400,6 +413,10 @@ process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 try {
+  application.log.info(
+    { startupRecovery: startupReport },
+    "Workflow startup recovery completed",
+  );
   botIdentity.start();
   await application.listen({ host: config.host, port: config.port });
   idleScheduler.start();
@@ -407,5 +424,6 @@ try {
 } catch (error) {
   application.log.fatal({ err: error }, "BubblePilot failed to start");
   await application.close();
+  await startupRecovery.close();
   process.exitCode = 1;
 }
