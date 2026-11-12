@@ -1,3 +1,4 @@
+import { normalizeWebSearchPolicy } from "../modules/ai/web-search-policy.js";
 import type { MessageRevisionService } from "../modules/archive/message-revision-service.js";
 import {
   schedulePreview,
@@ -3438,20 +3439,17 @@ export function buildApplication(
               );
           }
         }
-        const routePolicies = new Map<
-          string,
-          "disabled" | "auto" | "required"
-        >();
+        const routePolicies = new Map<string, "disabled" | "auto">();
         for (const node of candidate?.definition.nodes ?? []) {
           const routeId =
             node.type === "ai-chat" ? node.config.providerRouteId : undefined;
           if (routeId === undefined) continue;
           const policy =
             node.type === "ai-chat"
-              ? (node.config.webSearch ?? "disabled")
+              ? normalizeWebSearchPolicy(node.config.webSearch)
               : "disabled";
           const current = routePolicies.get(routeId);
-          const rank = { disabled: 0, auto: 1, required: 2 };
+          const rank = { disabled: 0, auto: 1 };
           if (current === undefined || rank[policy] > rank[current]) {
             routePolicies.set(routeId, policy);
           }

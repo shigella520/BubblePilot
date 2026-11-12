@@ -1,3 +1,4 @@
+import { normalizeWebSearchPolicy } from "../ai/web-search-policy.js";
 import {
   AI_CHAT_INPUT_HARD_PAYLOAD_BYTES,
   aiChatInputPayloadBytes,
@@ -1337,7 +1338,11 @@ class AiChatNodeHandler extends BaseNodeHandler {
           : {}),
         ...(node.config.webSearch === undefined
           ? {}
-          : { webSearch: scheduled ? "disabled" : node.config.webSearch }),
+          : {
+              webSearch: scheduled
+                ? "disabled"
+                : normalizeWebSearchPolicy(node.config.webSearch),
+            }),
         webSearchSources: node.config.webSearchSources,
         protectedPrompt: systemPrompt.length === 0 ? null : systemPrompt,
         promptTraceKey: sha256(

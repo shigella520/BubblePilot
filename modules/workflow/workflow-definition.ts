@@ -144,7 +144,7 @@ const aiChatNodeSchema = z.object({
       allowMemes: z.boolean().optional(),
       attachmentHandling: attachmentHandlingSchema.optional(),
       pluginIds: z.array(z.string().uuid()).max(10).optional(),
-      webSearch: z.enum(["disabled", "auto", "required"]).optional(),
+      webSearch: z.enum(["disabled", "auto", "required"]).optional(), // required is a legacy alias of auto; see normalizeWebSearchPolicy.
       webSearchSources: z.enum(["full", "compact", "hidden"]).default("full"),
       outputFormat: z.enum(["text", "json"]).default("text"),
       outputVariable: variableNameSchema.default("aiReply"),

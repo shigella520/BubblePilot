@@ -920,9 +920,7 @@ export class OpenAiCompatibleClient implements AiClient {
       }
       if (request.webSearch !== undefined && request.webSearch !== "disabled") {
         payload.tools = [{ type: "web_search" }];
-        if (request.webSearch === "required") {
-          payload.tool_choice = "required";
-        }
+        payload.tool_choice = "auto";
       } else if (tools !== undefined) {
         payload.tools = tools.map((tool) => ({
           type: "function",

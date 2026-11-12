@@ -563,7 +563,7 @@ async function providerAction(
             | "functionCalling"
             | "hostedWebSearch"
             | "imageInput";
-          status: "verified" | "failed";
+          status: "verified" | "failed" | "unknown";
           attempts: number;
           durationMs: number;
           errorCode: string | null;
@@ -579,7 +579,7 @@ async function providerAction(
           }（${result.durationMs} ms）。`;
       feedbackIsError =
         !result.success ||
-        result.checks.some((check) => check.status === "failed");
+        result.checks.some((check) => check.status !== "verified");
       const imageMismatch = result.checks.find(
         (check) =>
           check.name === "imageInput" &&
@@ -922,10 +922,10 @@ onMounted(async () => {
               ><span>搜索失败处理</span
               ><select v-model="searchSettingsForm.failurePolicy">
                 <option value="mode-default">
-                  自动模式降级，必须模式失败（推荐）
+                  默认：搜索失败后继续回答（推荐）
                 </option>
-                <option value="continue">全部降级继续回答</option>
-                <option value="fail">全部让 AI 节点失败</option>
+                <option value="continue">搜索失败后继续回答</option>
+                <option value="fail">首次搜索失败时终止 AI 节点</option>
               </select></label
             >
           </div>

@@ -75,6 +75,9 @@ function checkMessage(check: AiProviderTestCheck): string {
   if (check.status === "verified") {
     return `${labels[check.name]} verified`;
   }
+  if (check.status === "unknown") {
+    return "Function Calling 尚未验证：本次未观察到工具调用，请重试测试";
+  }
   const diagnostics = [
     check.errorCode,
     check.httpStatus === null ? null : `HTTP ${check.httpStatus}`,
@@ -100,10 +103,33 @@ export const capabilityProbeTool: AiToolDefinition = {
   description: "A harmless tool used only to verify function calling.",
   parameters: {
     type: "object",
-    properties: {},
+    properties: {
+      acknowledgement: { type: "string", enum: ["bubblepilot-probe"] },
+    },
+    required: ["acknowledgement"],
     additionalProperties: false,
   },
 };
+
+function functionProbeVerified(result: AiCallResult): boolean {
+  if (result.status !== "succeeded" || result.toolCalls?.length !== 1)
+    return false;
+  const call = result.toolCalls[0]!;
+  if (!call.id.trim() || call.name !== "capability_probe") return false;
+  try {
+    const args: unknown = JSON.parse(call.arguments);
+    return (
+      args !== null &&
+      typeof args === "object" &&
+      !Array.isArray(args) &&
+      Object.keys(args).length === 1 &&
+      "acknowledgement" in args &&
+      args.acknowledgement === "bubblepilot-probe"
+    );
+  } catch {
+    return false;
+  }
+}
 
 async function probeWithRetry(
   client: AiClient,
@@ -260,33 +286,37 @@ export class AiManagementService {
         messages: [
           {
             role: "user",
-            content: "Call the capability_probe tool exactly once.",
+            content:
+              'This is a harmless function-calling capability test. Use the native structured tool-call channel to call capability_probe exactly once with {"acknowledgement":"bubblepilot-probe"}. Do not answer in prose or print JSON as text. No external action is performed.',
           },
         ],
-        maxOutputTokens: 128,
+        maxOutputTokens: 1024,
         temperature: 0,
         tools: [capabilityProbeTool],
-        toolChoice: "required",
+        toolChoice: "auto",
       });
       totalDurationMs += functionProbe.durationMs;
-      functionCalling =
+      const verified = functionProbeVerified(functionProbe);
+      const notObserved =
         functionProbe.status === "succeeded" &&
-        (functionProbe.toolCalls?.some(
-          (call) => call.name === "capability_probe",
-        ) ??
-          false)
-          ? "verified"
+        !functionProbe.toolCalls?.length;
+      functionCalling = verified
+        ? "verified"
+        : notObserved
+          ? "unknown"
           : "failed";
-      checks.push(
-        probeCheck(
-          "functionCalling",
-          functionProbe,
-          1,
-          functionProbe.durationMs,
-          functionCalling === "verified",
-          "AI_FUNCTION_PROBE_MISMATCH",
-        ),
+      const check = probeCheck(
+        "functionCalling",
+        functionProbe,
+        1,
+        functionProbe.durationMs,
+        verified,
+        notObserved
+          ? "AI_FUNCTION_PROBE_NOT_OBSERVED"
+          : "AI_FUNCTION_PROBE_MISMATCH",
       );
+      check.status = functionCalling;
+      checks.push(check);
     }
     if (
       result.status === "succeeded" &&
@@ -302,7 +332,7 @@ export class AiManagementService {
         ],
         maxOutputTokens: 128,
         temperature: 0,
-        webSearch: "required",
+        webSearch: "auto",
       });
       totalDurationMs += searchProbe.durationMs;
       hostedWebSearch =
@@ -469,9 +499,7 @@ export class AiManagementService {
         provider.capabilityProbe?.functionCalling === "verified";
       return hosted || local;
     });
-    return webSearch === "required"
-      ? searchable.length === available.length && available.length > 0
-      : searchable.length > 0;
+    return searchable.length > 0;
   }
 
   async createRoute(

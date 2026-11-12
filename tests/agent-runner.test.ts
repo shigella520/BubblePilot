@@ -301,7 +301,7 @@ describe("AgentRunner", () => {
     expect(client.requests[1]?.toolChoice).toBe("auto");
   });
 
-  it("executes a required local search and continues the same provider", async () => {
+  it("executes a legacy required local search with auto tool choice and continues the same provider", async () => {
     const { repository, client, routing, search, request } = await setup();
     const result = await new AgentRunner(routing, search, repository).run({
       ...request,
@@ -312,7 +312,7 @@ describe("AgentRunner", () => {
       text: "Answer with source",
     });
     expect(client.requests).toHaveLength(2);
-    expect(client.requests[0]).toMatchObject({ toolChoice: "required" });
+    expect(client.requests[0]).toMatchObject({ toolChoice: "auto" });
     expect(
       client.requests[1]?.messages.some((item) => item.role === "tool"),
     ).toBe(true);
@@ -335,32 +335,35 @@ describe("AgentRunner", () => {
     ]);
   });
 
-  it("allows auto mode to answer without searching", async () => {
-    const { repository, search, request } = await setup();
-    const directClient: AiClient = {
-      call: () =>
-        Promise.resolve({
-          status: "succeeded",
-          text: "Timeless answer",
-          durationMs: 2,
-        }),
-    };
-    const runner = new AgentRunner(
-      new AiRoutingService(
-        repository,
-        directClient,
-        new EnvironmentSecretResolver({ FICTIONAL_KEY: "fictional-secret" }),
-        true,
-      ),
-      search,
-    );
-    await expect(
-      runner.run({ ...request, webSearch: "auto" }),
-    ).resolves.toMatchObject({
-      status: "succeeded",
-      text: "Timeless answer",
-    });
-  });
+  it.each(["auto", "required"] as const)(
+    "allows %s mode to answer without searching",
+    async (policy) => {
+      const { repository, search, request } = await setup();
+      const directClient: AiClient = {
+        call: () =>
+          Promise.resolve({
+            status: "succeeded",
+            text: "Timeless answer",
+            durationMs: 2,
+          }),
+      };
+      const runner = new AgentRunner(
+        new AiRoutingService(
+          repository,
+          directClient,
+          new EnvironmentSecretResolver({ FICTIONAL_KEY: "fictional-secret" }),
+          true,
+        ),
+        search,
+      );
+      await expect(
+        runner.run({ ...request, webSearch: policy }),
+      ).resolves.toMatchObject({
+        status: "succeeded",
+        text: "Timeless answer",
+      });
+    },
+  );
 
   it("lets auto mode choose to answer after local search retries fail", async () => {
     const { repository, client, routing, request } = await setup(
@@ -512,7 +515,7 @@ describe("AgentRunner", () => {
     expect(client.requests).toHaveLength(2);
   });
 
-  it("does not count an empty search as satisfying required mode", async () => {
+  it("allows legacy required mode to answer after an empty search", async () => {
     const { repository, client, routing, request } = await setup();
     const search: WebSearchTool = {
       isReady: () => Promise.resolve(true),
@@ -532,8 +535,7 @@ describe("AgentRunner", () => {
     await expect(
       new AgentRunner(routing, search, repository).run(request),
     ).resolves.toMatchObject({
-      status: "failed",
-      code: "AI_WEB_SEARCH_REQUIRED_NO_RESULTS",
+      status: "succeeded",
     });
     expect(repository.toolExecutions).toMatchObject([
       {
@@ -870,7 +872,16 @@ describe("AgentRunner", () => {
     };
 
     await expect(
-      new AgentRunner(routing, search, repository).run(request),
+      new AgentRunner(routing, search, repository, {
+        resolve: () =>
+          Promise.resolve({
+            maxAttempts: 2,
+            attemptTimeoutMs: 8000,
+            retryDelayMs: 300,
+            maxResults: 5,
+            failurePolicy: "fail",
+          }),
+      }).run(request),
     ).resolves.toMatchObject({
       status: "failed",
       code: "AI_WEB_SEARCH_ENGINES_UNAVAILABLE",
@@ -989,7 +1000,7 @@ describe("AgentRunner", () => {
     expect(result.status).toBe("succeeded");
     expect(open).not.toHaveBeenCalled();
   });
-  it("does not count historical retrieval as a required web search", async () => {
+  it("allows history-only answers when legacy web search is enabled", async () => {
     const { repository, client, routing, search, request } = await setup();
     const memory = {
       repository: { scopeForEvent: vi.fn().mockResolvedValue({}) },
@@ -1031,8 +1042,8 @@ describe("AgentRunner", () => {
       memoryEvent: { provider: "bluebubbles", messageId: "fixture" },
     });
     expect(result).toMatchObject({
-      status: "failed",
-      code: "AI_WEB_SEARCH_REQUIRED_NOT_USED",
+      status: "succeeded",
+      text: "Answer",
     });
   });
   it("bounds invalid historical citation correction to one request", async () => {

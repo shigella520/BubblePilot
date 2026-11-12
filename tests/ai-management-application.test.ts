@@ -68,7 +68,11 @@ class SuccessfulAiClient implements AiClient {
         status: "succeeded",
         text: "",
         toolCalls: [
-          { id: "fictional-call", name: "capability_probe", arguments: "{}" },
+          {
+            id: "fictional-call",
+            name: "capability_probe",
+            arguments: '{"acknowledgement":"bubblepilot-probe"}',
+          },
         ],
         durationMs: 7,
       });
@@ -402,8 +406,8 @@ describe("AI management API", () => {
       },
     });
     expect(client.requests).toHaveLength(4);
-    expect(client.requests[1]).toMatchObject({ toolChoice: "required" });
-    expect(client.requests[2]).toMatchObject({ webSearch: "required" });
+    expect(client.requests[1]).toMatchObject({ toolChoice: "auto" });
+    expect(client.requests[2]).toMatchObject({ webSearch: "auto" });
     const imageContent = client.requests[3]?.messages[0]?.content;
     expect(Array.isArray(imageContent)).toBe(true);
     const imagePart =

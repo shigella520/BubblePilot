@@ -1,3 +1,4 @@
+import { normalizeWebSearchPolicy } from "./web-search-policy.js";
 import {
   initialAttachmentCatalogue,
   attachmentCatalogueGuidance,
@@ -43,7 +44,6 @@ import type {
   AiRouteResult,
   AiToolCall,
   AiToolDefinition,
-  WebSearchFailurePolicy,
   WebSearchSourceDisplay,
 } from "./ai-types.js";
 import {
@@ -118,16 +118,6 @@ function toolFailureOutput(code: string, hasEarlierEvidence: boolean): string {
       ? "This refinement search failed after its internal retries. If tools remain available, decide whether another query would help; otherwise answer from earlier evidence and disclose remaining uncertainty."
       : "Web search failed after its internal retries. Do not claim that current information was verified. If tools remain available, you may retry or revise the query within the shared budget. If you answer without a successful check, use only stable knowledge or supplied context and disclose that live information could not be checked.",
   });
-}
-
-function continuesAfterSearchFailure(
-  policy: "auto" | "required",
-  failurePolicy: WebSearchFailurePolicy,
-): boolean {
-  return (
-    failurePolicy === "continue" ||
-    (failurePolicy === "mode-default" && policy === "auto")
-  );
 }
 
 function sourceDisplayInstruction(
@@ -262,7 +252,7 @@ export class AgentRunner {
     plugins?: PluginSession,
     attachments?: AttachmentSession,
   ): Promise<AiRouteResult> {
-    const policy = request.webSearch ?? "disabled";
+    const policy = normalizeWebSearchPolicy(request.webSearch);
     const sourceDisplay = request.webSearchSources ?? "full";
     const scope =
       request.memoryEvent && request.executionId && this.memory
@@ -437,10 +427,7 @@ export class AgentRunner {
       });
     }
     const failurePolicy = settings?.failurePolicy ?? "mode-default";
-    const continueOnSearchFailure = continuesAfterSearchFailure(
-      policy === "disabled" ? "auto" : policy,
-      failurePolicy,
-    );
+    const continueOnSearchFailure = failurePolicy !== "fail";
     if (
       (policy !== "disabled" && this.searchTool === undefined) ||
       budget.snapshot.settings.maxToolCalls < 1
@@ -508,7 +495,6 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
     let citationCorrection = false;
     const maxTurns = budget.snapshot.settings.maxToolCalls + 2;
     let searched = false;
-    let searchAttempted = false;
     let preferredProviderId: string | undefined;
     let totalAttempts = 0;
     let finalAnswerOnly = false;
@@ -547,10 +533,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         ],
         agentTurn: turn,
         tools: registry.definitions(),
-        toolChoice:
-          !mustFinalize && policy === "required" && !searched
-            ? "required"
-            : "auto",
+        toolChoice: "auto",
         ...(preferredProviderId === undefined ? {} : { preferredProviderId }),
       };
       if (memory && !(await memory.validate())) {
@@ -578,23 +561,6 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         };
       preferredProviderId = result.providerId;
       if (result.toolCalls.length === 0) {
-        if (
-          policy === "required" &&
-          !searched &&
-          !(continueOnSearchFailure && searchAttempted)
-        ) {
-          return {
-            status: "failed",
-            code: searchAttempted
-              ? "AI_WEB_SEARCH_REQUIRED_NO_RESULTS"
-              : "AI_WEB_SEARCH_REQUIRED_NOT_USED",
-            summary: searchAttempted
-              ? "The required web search completed without usable results."
-              : "The model did not use the required web search tool.",
-            retryable: false,
-            attemptCount: totalAttempts,
-          };
-        }
         let answer = result.text;
         if (memory) {
           const rendered = memory.render(answer, request.outputFormat);
@@ -747,7 +713,6 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                 }
                 return output;
               }
-              searchAttempted = true;
               const searchResult =
                 cache.get(queryHash) ??
                 (JSON.parse(
@@ -951,21 +916,6 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         });
       if (images) budget.snapshot.images = images.snapshot();
       if (budget.exhausted) finalAnswerOnly = true;
-    }
-
-    if (
-      policy === "required" &&
-      searchAttempted &&
-      !searched &&
-      !continueOnSearchFailure
-    ) {
-      return {
-        status: "failed",
-        code: "AI_WEB_SEARCH_REQUIRED_NO_RESULTS",
-        summary: "The required web search completed without usable results.",
-        retryable: false,
-        attemptCount: totalAttempts,
-      };
     }
 
     return {

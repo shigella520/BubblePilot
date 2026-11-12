@@ -371,9 +371,8 @@ describe("AgentRunner shared quota integration", () => {
     const required = runner.run({ ...request, webSearch: "required" });
     await vi.advanceTimersByTimeAsync(5000);
     expect(await required).toMatchObject({
-      status: "failed",
-      code: "AI_AGENT_TOOL_TIMEOUT",
-      agentBudget: { outcome: "failed" },
+      status: "succeeded",
+      agentBudget: { outcome: "budget-completed" },
     });
   });
   it("stops at the round limit when the provider ignores finalization", async () => {

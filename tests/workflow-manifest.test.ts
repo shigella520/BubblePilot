@@ -93,30 +93,37 @@ describe("workflow manifest", () => {
     expect(checkedIn).toEqual(generated);
   });
 
-  it("exports a portable manifest without instance identifiers and imports it losslessly", () => {
-    const manifest = exportWorkflowManifest({
-      definition,
-      mode: "portable",
-      catalog,
-    });
-    const serialized = JSON.stringify(manifest);
-    expect(serialized).not.toContain(routeId);
-    expect(serialized).not.toContain(chatId);
-    expect(
-      manifest.bindings.aiRoutes["ai-route-1"]?.requiredCapabilities,
-    ).toEqual(["text", "function-calling"]);
+  it.each(["auto", "required"] as const)(
+    "round-trips %s search manifests without losing capability requirements",
+    (webSearch) => {
+      const original = structuredClone(definition);
+      const ai = original.nodes.find((node) => node.type === "ai-chat")!;
+      if (ai.type !== "ai-chat") throw new Error("fixture");
+      ai.config.webSearch = webSearch;
+      const manifest = exportWorkflowManifest({
+        definition: original,
+        mode: "portable",
+        catalog,
+      });
+      const serialized = JSON.stringify(manifest);
+      expect(serialized).not.toContain(routeId);
+      expect(serialized).not.toContain(chatId);
+      expect(
+        manifest.bindings.aiRoutes["ai-route-1"]?.requiredCapabilities,
+      ).toEqual(["text", "function-calling"]);
 
-    const imported = importWorkflowManifest({ manifest, catalog });
-    expect(imported.issues).toEqual([]);
-    expect(imported.definition).toEqual({
-      ...definition,
-      nodes: definition.nodes.map((node) =>
-        node.type === "message-trigger" || node.type === "ai-chat"
-          ? { ...node, config: { ...node.config } }
-          : node,
-      ),
-    });
-  });
+      const imported = importWorkflowManifest({ manifest, catalog });
+      expect(imported.issues).toEqual([]);
+      expect(imported.definition).toEqual({
+        ...original,
+        nodes: original.nodes.map((node) =>
+          node.type === "message-trigger" || node.type === "ai-chat"
+            ? { ...node, config: { ...node.config } }
+            : node,
+        ),
+      });
+    },
+  );
 
   it("preserves node attachment settings on save but removes transfer authority on import", () => {
     const original = structuredClone(definition);

@@ -1178,28 +1178,34 @@ describe("OpenAiCompatibleClient", () => {
     });
   });
 
-  it("adds the hosted web search tool to Responses requests", async () => {
-    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ output_text: "Fresh answer" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    const client = new OpenAiCompatibleClient(
-      new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
-      fetchImplementation,
-    );
-    await expect(
-      client.call(
-        { ...provider, apiKind: "responses" },
-        { ...request, webSearch: "auto" },
-      ),
-    ).resolves.toMatchObject({ status: "succeeded", text: "Fresh answer" });
-    const body = fetchImplementation.mock.calls[0]?.[1]?.body;
-    expect(JSON.parse(typeof body === "string" ? body : "null")).toMatchObject({
-      tools: [{ type: "web_search" }],
-    });
-  });
+  it.each(["auto", "required"] as const)(
+    "uses auto hosted search for %s Responses requests",
+    async (policy) => {
+      const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify({ output_text: "Fresh answer" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "server-secret" }),
+        fetchImplementation,
+      );
+      await expect(
+        client.call(
+          { ...provider, apiKind: "responses" },
+          { ...request, webSearch: policy },
+        ),
+      ).resolves.toMatchObject({ status: "succeeded", text: "Fresh answer" });
+      const body = fetchImplementation.mock.calls[0]?.[1]?.body;
+      expect(
+        JSON.parse(typeof body === "string" ? body : "null"),
+      ).toMatchObject({
+        tools: [{ type: "web_search" }],
+        tool_choice: "auto",
+      });
+    },
+  );
 
   it("serializes and parses Chat Completions function calls", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(

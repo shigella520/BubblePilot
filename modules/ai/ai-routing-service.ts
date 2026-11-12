@@ -1,3 +1,4 @@
+import { normalizeWebSearchPolicy } from "./web-search-policy.js";
 import { randomUUID } from "node:crypto";
 
 import { sha256 } from "../../app/canonical-json.js";
@@ -190,6 +191,12 @@ export class AiRoutingService {
     );
   }
   async execute(request: AiRouteRequest): Promise<AiRouteResult> {
+    request = {
+      ...request,
+      ...(request.webSearch === undefined
+        ? {}
+        : { webSearch: normalizeWebSearchPolicy(request.webSearch) }),
+    };
     const withImages = requestHasImages(request);
     const result = await this.executeOnce(
       request,
