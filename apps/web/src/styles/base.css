@@ -1503,6 +1503,16 @@ td .keyline {
   gap: 9px;
   grid-column: 1 / -1;
 }
+/* Keep search beside the final field; the shared grid stacks it on mobile. */
+.message-search-form > .filter-actions {
+  grid-column: auto;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+}
+.message-search-form > .filter-actions .button {
+  min-height: 44px;
+}
 .form-actions .button,
 .filter-actions .button {
   max-width: 100%;

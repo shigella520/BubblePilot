@@ -350,7 +350,7 @@ const chatPager = useCursorPager<Chat>((cursor) => {
   return apiPageRequest<Chat[]>(`/api/v1/chat-monitoring?${query}`);
 });
 const messagePager = useCursorPager<MessageResult>((cursor) => {
-  const query = new URLSearchParams({ limit: "50" });
+  const query = new URLSearchParams({ limit: "10" });
   if (appliedSearch.chatId) query.set("chatId", appliedSearch.chatId);
   if (appliedSearch.q) query.set("q", appliedSearch.q);
   if (appliedSearch.senderId) query.set("senderId", appliedSearch.senderId);
@@ -1162,7 +1162,7 @@ onBeforeUnmount(() =>
           </div>
           <span class="state-badge">仅已监听范围</span>
         </div>
-        <form class="filter-grid" @submit.prevent="search">
+        <form class="filter-grid message-search-form" @submit.prevent="search">
           <label
             ><span>聊天</span
             ><select v-model="form.chatId">
