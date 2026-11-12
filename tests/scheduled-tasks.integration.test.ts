@@ -593,7 +593,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       true,
     );
     await pool.query(
-      "UPDATE scheduled_tasks SET finished_at=now()-interval '89 days',scheduled_at=now()-interval '100 days' WHERE id=$1",
+      "UPDATE scheduled_tasks SET finished_at=now()-interval '29 days',scheduled_at=now()-interval '100 days' WHERE id=$1",
       [recent.task.id],
     );
     await pool.query(
@@ -637,6 +637,93 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
     } finally {
       await pool.query(
         "UPDATE scheduled_task_settings SET paused=false WHERE id=1",
+      );
+    }
+  });
+  it("persists retention with version checks, protects recent tasks and audits the applied cutoff", async () => {
+    const s = await setup();
+    const original = await s.tasks.settings();
+    expect(original.retention_days).toBe(30);
+    const ended = await create(s),
+      recent = await create(s),
+      active = await create(s);
+    for (const [task, age] of [
+      [ended.task, 31],
+      [recent.task, 29],
+    ] as const) {
+      await s.tasks.change(
+        { kind: "admin", id: "fixture" },
+        { id: task.id, expectedVersion: 1 },
+        true,
+      );
+      await pool.query(
+        "UPDATE scheduled_tasks SET finished_at=now()-($2::int * interval '1 day') WHERE id=$1",
+        [task.id, age],
+      );
+    }
+    try {
+      const settings = {
+        paused: true,
+        pendingLimit: 1000,
+        catchupMinutes: 30,
+        expectedVersion: original.version,
+        retentionDays: 180,
+      };
+      await s.tasks.configure(settings);
+      expect((await s.tasks.settings()).retention_days).toBe(180);
+      await expect(
+        s.tasks.configure({ ...settings, retentionDays: 30 }),
+      ).rejects.toThrow("TASK_VERSION_CONFLICT");
+      for (const retentionDays of [6, 181]) {
+        await expect(
+          s.tasks.configure({ ...settings, retentionDays }),
+        ).rejects.toThrow();
+        await expect(
+          pool.query(
+            "UPDATE scheduled_task_settings SET retention_days=$1 WHERE id=1",
+            [retentionDays],
+          ),
+        ).rejects.toThrow();
+      }
+      await s.tasks.purgeExpired();
+      expect((await s.tasks.detail(ended.task.id)).task.content).not.toBeNull();
+      // Older clients omit the new field, preserving a previously configured value.
+      await s.tasks.configure({
+        paused: true,
+        pendingLimit: 999,
+        catchupMinutes: 10,
+        expectedVersion: original.version + 1,
+      });
+      expect((await s.tasks.settings()).retention_days).toBe(180);
+      await s.tasks.configure({
+        ...settings,
+        expectedVersion: original.version + 2,
+        retentionDays: 30,
+      });
+      await Promise.all([s.tasks.purgeExpired(), s.tasks.purgeExpired()]);
+      await expect(s.tasks.detail(ended.task.id)).rejects.toThrow(
+        "TASK_NOT_FOUND",
+      );
+      expect(
+        (await s.tasks.detail(recent.task.id)).task.content,
+      ).not.toBeNull();
+      expect((await s.tasks.detail(active.task.id)).task.lifecycle).toBe(
+        "active",
+      );
+      const audit = await pool.query<{ metadata: { retentionDays: number } }>(
+        "SELECT metadata FROM audit_events WHERE action='scheduled-task.expire' AND target_id=$1",
+        [ended.task.id],
+      );
+      expect(audit.rows).toEqual([{ metadata: { retentionDays: 30 } }]);
+    } finally {
+      await pool.query(
+        "UPDATE scheduled_task_settings SET retention_days=$1,paused=$2,pending_limit=$3,catchup_minutes=$4 WHERE id=1",
+        [
+          original.retention_days,
+          original.paused,
+          original.pending_limit,
+          original.catchup_minutes,
+        ],
       );
     }
   });
@@ -1276,7 +1363,23 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       "UPDATE scheduled_task_runs SET finished_at=now()-interval '91 days' WHERE task_id=$1",
       [c.task.id],
     );
-    await s.scheduler.reconcile();
+    try {
+      await pool.query(
+        "UPDATE scheduled_task_settings SET retention_days=180 WHERE id=1",
+      );
+      await s.scheduler.reconcile();
+      const retained = await s.tasks.detail(c.task.id);
+      expect(retained.runs[0]?.task_snapshot).not.toBeNull();
+      expect(retained.occurrences[0]?.snapshot).not.toBeNull();
+      await pool.query(
+        "UPDATE scheduled_task_settings SET retention_days=30 WHERE id=1",
+      );
+      await s.scheduler.reconcile();
+    } finally {
+      await pool.query(
+        "UPDATE scheduled_task_settings SET retention_days=30 WHERE id=1",
+      );
+    }
     const d = await s.tasks.detail(c.task.id);
     expect(d.task.content).toBe("虚构周期提醒");
     expect(d.runs[0]?.task_snapshot).toBeNull();

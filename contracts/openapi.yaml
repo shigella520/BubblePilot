@@ -248,11 +248,16 @@ paths:
       security: [{ sessionAuth: [] }]
       responses:
         "200":
-          { description: paused, pending_limit, catchup_minutes and version. }
+          {
+            description: paused,
+            pending_limit,
+            catchup_minutes,
+            retention_days (default 30) and version.,
+          }
         "401": { $ref: "#/components/responses/Error" }
     put:
       operationId: updateScheduledTaskSettings
-      description: Sensitive unlock required. New catchup window affects new, rescheduled and subsequent recurring occurrences. Resume skips the paused interval. Zero permits only the scheduled minute.
+      description: Sensitive unlock required. New catchup window affects new, rescheduled and subsequent recurring occurrences. Resume skips the paused interval. Zero permits only the scheduled minute. Optional retentionDays controls terminal task and historical payload retention on subsequent cleanup checks; omission preserves the saved value. Reducing it may irreversibly remove old data.
       security: [{ sessionAuth: [] }]
       requestBody:
         required: true
@@ -266,6 +271,7 @@ paths:
                 paused: { type: boolean }
                 pendingLimit: { type: integer, minimum: 1, maximum: 10000 }
                 catchupMinutes: { type: integer, minimum: 0, maximum: 1440 }
+                retentionDays: { type: integer, minimum: 7, maximum: 180 }
                 expectedVersion: { type: integer, minimum: 1 }
       responses:
         "200": { description: Updated settings. }

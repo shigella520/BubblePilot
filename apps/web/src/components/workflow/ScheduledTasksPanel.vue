@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import ToggleSwitch from "../ToggleSwitch.vue";
 import TaskScheduleEditor from "./TaskScheduleEditor.vue";
 import type { TaskSchedule } from "../../../../../modules/scheduled-tasks/task-schedule";
 import AdminFormDialog from "../AdminFormDialog.vue";
@@ -28,16 +27,6 @@ function taskOverview(content: string | null): string {
   );
 }
 const deleting = ref<Task | null>(null);
-const settingsDialog = ref(false);
-const settingsOriginal = ref<Settings | null>(null);
-function openSettings() {
-  settingsOriginal.value = settings.value ? { ...settings.value } : null;
-  settingsDialog.value = true;
-}
-function closeSettings() {
-  if (settingsOriginal.value) settings.value = { ...settingsOriginal.value };
-  settingsDialog.value = false;
-}
 interface Task {
   id: string;
   summary?: string | null;
@@ -94,12 +83,6 @@ interface TaskDetail {
     reason_code: string | null;
   }>;
 }
-interface Settings {
-  paused: boolean;
-  pending_limit: number;
-  catchup_minutes: number;
-  version: number;
-}
 const items = ref<Task[]>([]),
   workflows = ref<Array<{ id: string; name: string }>>([]),
   chats = ref<Array<{ id: string; displayName: string | null }>>([]);
@@ -115,8 +98,7 @@ const workflowId = ref(""),
   detailTask = ref<Task | null>(null),
   editing = ref<Task | null>(null),
   content = ref(""),
-  summary = ref(""),
-  settings = ref<Settings | null>(null);
+  summary = ref("");
 const session = useSessionStore();
 watch(
   () => session.sensitiveActive,
@@ -365,23 +347,6 @@ async function inspect(task: Task, page = 0) {
     }
   });
 }
-async function saveSettings() {
-  if (!settings.value) return;
-  await action(async () => {
-    const s = settings.value!;
-    settings.value = await apiRequest("/api/v1/settings/scheduled-tasks", {
-      method: "PUT",
-      body: JSON.stringify({
-        paused: s.paused,
-        pendingLimit: s.pending_limit,
-        catchupMinutes: s.catchup_minutes,
-        expectedVersion: s.version,
-      }),
-    });
-    settingsOriginal.value = settings.value ? { ...settings.value } : null;
-    settingsDialog.value = false;
-  });
-}
 watch([workflowId, chatId, status], () => {
   offset.value = 0;
   void load();
@@ -393,11 +358,9 @@ onMounted(async () => {
     apiAllPages<{ id: string; displayName: string | null }>(
       "/api/v1/chats?limit=100",
     ),
-    apiRequest<Settings>("/api/v1/settings/scheduled-tasks"),
   ]);
   if (result[0].status === "fulfilled") workflows.value = result[0].value;
   if (result[1].status === "fulfilled") chats.value = result[1].value;
-  if (result[2].status === "fulfilled") settings.value = result[2].value;
 });
 onBeforeUnmount(() => generation++);
 </script>
@@ -409,8 +372,7 @@ onBeforeUnmount(() => generation++);
         <p class="eyebrow">SCHEDULED TASKS</p>
         <h2>定时任务</h2>
         <p>
-          按聊天和角色登记的单次与周期提醒。修改、暂停、跳过、取消和删除需要敏感验证。已结束任务满
-          90 天自动清理。
+          按聊天和角色登记的单次与周期提醒。修改、暂停、跳过、取消和删除需要敏感验证。已结束任务按系统设置中的保留天数自动清理。
         </p>
       </div>
       <button
@@ -894,66 +856,6 @@ onBeforeUnmount(() => generation++);
         </div>
       </div>
     </AdminDetailDialog>
-    <button
-      v-if="settings"
-      class="button secondary"
-      type="button"
-      @click="openSettings"
-    >
-      调度与容量设置
-    </button>
-    <AdminFormDialog
-      v-if="settings && settingsDialog"
-      title="调度与容量设置"
-      :busy="mutating"
-      :saved-version="settings.version"
-      :draft="settings"
-      @close="closeSettings"
-    >
-      <p v-if="error" role="alert">{{ error }}</p>
-      <form class="task-editor" @submit.prevent="saveSettings">
-        <div class="task-setting-toggle">
-          <div>
-            <strong>暂停调度</strong>
-            <p class="task-help">
-              {{
-                settings.paused
-                  ? "保存后暂停受理新的到期任务。"
-                  : "保存后正常受理到期任务。"
-              }}
-            </p>
-          </div>
-          <ToggleSwitch
-            v-model="settings.paused"
-            label="暂停调度"
-            :disabled="mutating || !session.sensitiveActive"
-          />
-        </div>
-        <label
-          >实例待执行总数<input
-            v-model.number="settings.pending_limit"
-            type="number"
-            min="1"
-            max="10000" /></label
-        ><label
-          >补发窗口（分钟）<input
-            v-model.number="settings.catchup_minutes"
-            type="number"
-            min="0"
-            max="1440"
-        /></label>
-        <p>
-          修改补发窗口影响新建、改期及后续周期实例。0
-          表示只允许当前分钟内发送。恢复数据库后需先核对历史发送，再解除暂停。
-        </p>
-        <button
-          class="button primary"
-          :disabled="mutating || !session.sensitiveActive"
-        >
-          保存设置
-        </button>
-      </form>
-    </AdminFormDialog>
   </section>
 </template>
 <style scoped>
@@ -1047,19 +949,7 @@ td:first-child {
 footer {
   justify-content: flex-end;
 }
-.task-setting-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 44px;
-}
-.task-setting-toggle strong {
-  font-weight: 500;
-}
-.task-setting-toggle .task-help {
-  margin-top: 6px;
-}
+
 .task-editor {
   display: grid;
   gap: 12px;

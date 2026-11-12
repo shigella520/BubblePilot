@@ -5,6 +5,16 @@ import {
   type TaskSchedule,
 } from "./task-schedule.js";
 
+export const taskSettingsSchema = z
+  .object({
+    paused: z.boolean(),
+    pendingLimit: z.number().int().min(1).max(10000),
+    catchupMinutes: z.number().int().min(0).max(1440),
+    retentionDays: z.number().int().min(7).max(180).optional(),
+    expectedVersion: z.number().int().positive(),
+  })
+  .strict();
+
 export const timeZoneSchema = z
   .string()
   .max(100)
