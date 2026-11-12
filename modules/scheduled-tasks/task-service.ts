@@ -8,6 +8,7 @@ import type {
   TriggerBinding,
 } from "../workflow/workflow-repository.js";
 import {
+  taskSettingsSchema,
   cancelTaskSchema,
   createTaskSchema,
   listTasksSchema,
@@ -145,16 +146,13 @@ export class TaskService {
         paused: boolean;
         pending_limit: number;
         catchup_minutes: number;
+        retention_days: number;
         version: number;
       }>("SELECT * FROM scheduled_task_settings WHERE id=1")
     ).rows[0]!;
   }
-  async configure(input: {
-    paused: boolean;
-    pendingLimit: number;
-    catchupMinutes: number;
-    expectedVersion: number;
-  }) {
+  async configure(value: z.input<typeof taskSettingsSchema>) {
+    const input = taskSettingsSchema.parse(value);
     return this.transaction(async (db) => {
       const old = (
         await db.query<{ paused: boolean; version: number }>(
@@ -170,8 +168,13 @@ export class TaskService {
         );
       return (
         await db.query<Record<string, unknown>>(
-          `UPDATE scheduled_task_settings SET paused=$1,pending_limit=$2,catchup_minutes=$3,paused_at=CASE WHEN $1 THEN COALESCE(paused_at,now()) ELSE NULL END,version=version+1,updated_at=now() WHERE id=1 RETURNING *`,
-          [input.paused, input.pendingLimit, input.catchupMinutes],
+          `UPDATE scheduled_task_settings SET paused=$1,pending_limit=$2,catchup_minutes=$3,retention_days=COALESCE($4::int,retention_days),paused_at=CASE WHEN $1 THEN COALESCE(paused_at,now()) ELSE NULL END,version=version+1,updated_at=now() WHERE id=1 RETURNING *`,
+          [
+            input.paused,
+            input.pendingLimit,
+            input.catchupMinutes,
+            input.retentionDays ?? null,
+          ],
         )
       ).rows[0];
     });
@@ -825,6 +828,7 @@ export class TaskService {
     db: PoolClient,
     task: TaskRow,
     reason: "manual" | "retention",
+    retentionDays?: number,
   ) {
     await db.query(
       "INSERT INTO scheduled_task_deletions(task_id,creation_key,version,reason) SELECT id,creation_key,version,$2 FROM scheduled_tasks WHERE id=$1",
@@ -850,21 +854,28 @@ export class TaskService {
     await db.query("DELETE FROM scheduled_tasks WHERE id=$1", [task.id]);
     if (reason === "retention")
       await db.query(
-        `INSERT INTO audit_events(id,actor_type,action,target_type,target_id,outcome,correlation_id,metadata) VALUES($1,'system','scheduled-task.expire','scheduled-task',$2,'succeeded',$1,'{"retentionDays":90}'::jsonb)`,
-        [randomUUID(), task.id],
+        `INSERT INTO audit_events(id,actor_type,action,target_type,target_id,outcome,correlation_id,metadata) VALUES($1,'system','scheduled-task.expire','scheduled-task',$2,'succeeded',$1,$3::jsonb)`,
+        [randomUUID(), task.id, JSON.stringify({ retentionDays })],
       );
   }
   async purgeExpired(): Promise<number> {
     return this.transaction(async (db) => {
+      const settings = (
+        await db.query<{ retention_days: number }>(
+          "SELECT retention_days FROM scheduled_task_settings WHERE id=1 FOR SHARE",
+        )
+      ).rows[0]!;
       const tasks = (
         await db.query<TaskRow>(
-          `SELECT t.* FROM scheduled_tasks t WHERE t.lifecycle IN ('completed','cancelled') AND t.finished_at < now()-interval '90 days'
+          `SELECT t.* FROM scheduled_tasks t WHERE t.lifecycle IN ('completed','cancelled') AND t.finished_at < now()-($1::int * interval '1 day')
          AND NOT EXISTS(SELECT 1 FROM scheduled_task_runs r JOIN workflow_executions e ON e.id=r.execution_id WHERE r.task_id=t.id AND (r.outcome IS NULL OR e.status IN ('created','running','retrying')))
          AND NOT EXISTS(SELECT 1 FROM scheduled_task_occurrences o WHERE o.task_id=t.id AND o.status IN ('pending','running'))
          ORDER BY t.finished_at,t.id LIMIT 25 FOR UPDATE OF t SKIP LOCKED`,
+          [settings.retention_days],
         )
       ).rows;
-      for (const task of tasks) await this.deleteLocked(db, task, "retention");
+      for (const task of tasks)
+        await this.deleteLocked(db, task, "retention", settings.retention_days);
       return tasks.length;
     });
   }

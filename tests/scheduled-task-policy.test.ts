@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  taskSettingsSchema,
   validateTaskTime,
   scheduledTriggerSchema,
 } from "../modules/scheduled-tasks/task-policy.js";
@@ -12,6 +13,24 @@ import {
 } from "../modules/scheduled-tasks/task-policy.js";
 import { z } from "zod";
 describe("scheduled reminder policy", () => {
+  it("validates retention settings without resetting omitted legacy values", () => {
+    const base = {
+      paused: false,
+      pendingLimit: 1000,
+      catchupMinutes: 30,
+      expectedVersion: 1,
+    };
+    expect(taskSettingsSchema.parse(base)).not.toHaveProperty("retentionDays");
+    for (const days of [7, 30, 180])
+      expect(
+        taskSettingsSchema.parse({ ...base, retentionDays: days })
+          .retentionDays,
+      ).toBe(days);
+    for (const days of [0, -1, 6, 7.5, 181, "30", null])
+      expect(
+        taskSettingsSchema.safeParse({ ...base, retentionDays: days }).success,
+      ).toBe(false);
+  });
   const now = new Date("2030-01-01T00:00:00Z");
   it("validates absolute time, timezone, and horizon", () => {
     expect(

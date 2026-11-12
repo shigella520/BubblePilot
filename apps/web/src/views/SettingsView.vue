@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import ScheduledTaskSettingsPanel from "../components/ScheduledTaskSettingsPanel.vue";
 import PluginSettingsPanel from "../components/PluginSettingsPanel.vue";
 import NetworkSettingsPanel from "../components/NetworkSettingsPanel.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import {
+  CalendarClock,
   Cable,
   CheckCircle2,
   RefreshCw,
@@ -149,6 +151,11 @@ onMounted(load);
           { id: 'bluebubbles', label: 'BlueBubbles', icon: Cable },
           { id: 'network', label: '外部网络', icon: ShieldCheck },
           { id: 'plugin-budget', label: '插件工具预算', icon: Settings2 },
+          {
+            id: 'scheduled-task-settings',
+            label: '定时任务',
+            icon: CalendarClock,
+          },
         ]"
       />
       <div class="sidebar-note">
@@ -316,6 +323,7 @@ onMounted(load);
       </section>
       <NetworkSettingsPanel />
       <PluginSettingsPanel />
+      <ScheduledTaskSettingsPanel />
     </div>
   </main>
 </template>

@@ -15,7 +15,7 @@ const chat = {
   type: "group",
   enabled: true,
   memoryAuthorized: true,
-  messageCount: 4,
+  messageCount: 23,
   version: 1,
   updatedAt: new Date().toISOString(),
 };
@@ -57,6 +57,11 @@ const messages = [
     revisionState: "partial",
     replyTo: { status: "retracted" },
   },
+  ...Array.from({ length: 18 }, (_, index) => ({
+    id: `fictional-page-${index + 1}`,
+    body: `虚构分页消息 ${index + 1}：本周阅读计划与活动安排。`,
+    revisionState: "active",
+  })),
 ].map((m) => ({
   ...chat,
   chatId: chat.id,
@@ -73,10 +78,12 @@ const messages = [
   ...m,
 }));
 window.fetch = (input) => {
-  const path = new URL(
+  const url = new URL(
     input instanceof Request ? input.url : input.toString(),
     location.origin,
-  ).pathname;
+  );
+  const path = url.pathname;
+  let nextCursor: string | null = null;
   let data: unknown = [];
   if (path === "/api/v1/auth/session")
     data = {
@@ -86,11 +93,20 @@ window.fetch = (input) => {
   else if (["/api/v1/chats", "/api/v1/chat-monitoring"].includes(path))
     data = [chat];
   else if (path === "/api/v1/bot-attributions") data = { chats: [], jobs: [] };
-  else if (path === "/api/v1/messages/search") data = messages;
-  else if (path.startsWith("/api/v1/messages/"))
+  else if (path === "/api/v1/messages/search") {
+    const query = url.searchParams.get("q") ?? "";
+    const matching = messages.filter((message) =>
+      (message.body ?? "").includes(query),
+    );
+    const offset = Number(url.searchParams.get("cursor") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 10);
+    data = matching.slice(offset, offset + limit);
+    nextCursor =
+      offset + limit < matching.length ? String(offset + limit) : null;
+  } else if (path.startsWith("/api/v1/messages/"))
     data = messages.find((m) => m.id === path.split("/").at(-1));
   return Promise.resolve(
-    new Response(JSON.stringify({ data, page: { nextCursor: null } }), {
+    new Response(JSON.stringify({ data, page: { nextCursor } }), {
       headers: { "content-type": "application/json" },
     }),
   );

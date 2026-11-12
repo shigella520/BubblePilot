@@ -707,8 +707,10 @@ export class TaskScheduler {
     });
   }
   async reconcile() {
+    const { retention_days: retentionDays } = await this.service.settings();
     await this.service.pool.query(
-      "UPDATE scheduled_task_occurrences SET snapshot=NULL WHERE finished_at<now()-interval '90 days' AND snapshot IS NOT NULL",
+      "UPDATE scheduled_task_occurrences SET snapshot=NULL WHERE finished_at<now()-($1::int * interval '1 day') AND snapshot IS NOT NULL",
+      [retentionDays],
     );
     await this.service.pool.query(
       "DELETE FROM scheduled_task_operations WHERE created_at<now()-interval '90 days'",
@@ -759,16 +761,20 @@ export class TaskScheduler {
         );
       });
     await this.service.pool.query(
-      `UPDATE workflow_executions e SET trigger_event=jsonb_set(jsonb_set(e.trigger_event,'{scheduled,content}','""'::jsonb),'{scheduled,requestSnapshot}','""'::jsonb) FROM scheduled_task_runs r JOIN scheduled_tasks t ON t.id=r.task_id WHERE r.execution_id=e.id AND r.finished_at<now()-interval '90 days' AND e.trigger_event->>'schemaVersion' IN ('scheduled-task-v1','scheduled-task-v2') AND (e.trigger_event->'scheduled'->>'content'<>'' OR e.trigger_event->'scheduled'->>'requestSnapshot'<>'')`,
+      `UPDATE workflow_executions e SET trigger_event=jsonb_set(jsonb_set(e.trigger_event,'{scheduled,content}','""'::jsonb),'{scheduled,requestSnapshot}','""'::jsonb) FROM scheduled_task_runs r JOIN scheduled_tasks t ON t.id=r.task_id WHERE r.execution_id=e.id AND r.finished_at<now()-($1::int * interval '1 day') AND e.trigger_event->>'schemaVersion' IN ('scheduled-task-v1','scheduled-task-v2') AND (e.trigger_event->'scheduled'->>'content'<>'' OR e.trigger_event->'scheduled'->>'requestSnapshot'<>'')`,
+      [retentionDays],
     );
     await this.service.pool.query(
-      `UPDATE scheduled_tasks SET request_snapshot=NULL,content=NULL,summary=NULL WHERE finished_at<now()-interval '90 days' AND (request_snapshot IS NOT NULL OR content IS NOT NULL OR summary IS NOT NULL)`,
+      `UPDATE scheduled_tasks SET request_snapshot=NULL,content=NULL,summary=NULL WHERE finished_at<now()-($1::int * interval '1 day') AND (request_snapshot IS NOT NULL OR content IS NOT NULL OR summary IS NOT NULL)`,
+      [retentionDays],
     );
     await this.service.pool.query(
-      `UPDATE scheduled_task_events SET change_data=NULL WHERE change_data IS NOT NULL AND created_at<now()-interval '90 days'`,
+      `UPDATE scheduled_task_events SET change_data=NULL WHERE change_data IS NOT NULL AND created_at<now()-($1::int * interval '1 day')`,
+      [retentionDays],
     );
     await this.service.pool.query(
-      `UPDATE scheduled_task_runs SET task_snapshot=NULL WHERE task_snapshot IS NOT NULL AND finished_at<now()-interval '90 days'`,
+      `UPDATE scheduled_task_runs SET task_snapshot=NULL WHERE task_snapshot IS NOT NULL AND finished_at<now()-($1::int * interval '1 day')`,
+      [retentionDays],
     );
   }
 }

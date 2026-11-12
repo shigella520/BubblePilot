@@ -7,6 +7,7 @@ import type { WorkflowExecutionRecord } from "../modules/workflow/workflow-repos
 import type { TaskService } from "../modules/scheduled-tasks/task-service.js";
 import type { TaskScheduler } from "../modules/scheduled-tasks/task-scheduler.js";
 import {
+  taskSettingsSchema,
   TaskError,
   taskErrorMessage,
   taskStatusSchema,
@@ -1204,15 +1205,7 @@ export function buildApplication(
     "/api/v1/settings/scheduled-tasks",
     { preHandler: requireSensitive("scheduled-task.settings", "settings") },
     async (request) => {
-      const input = z
-        .object({
-          paused: z.boolean(),
-          pendingLimit: z.number().int().min(1).max(10000),
-          catchupMinutes: z.number().int().min(0).max(1440),
-          expectedVersion: z.number().int().positive(),
-        })
-        .strict()
-        .parse(request.body);
+      const input = taskSettingsSchema.parse(request.body);
       return { data: await taskService().configure(input) };
     },
   );

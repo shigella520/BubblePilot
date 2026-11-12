@@ -1,4 +1,5 @@
 // Development-only fictional data. No request is forwarded to a real service.
+import SettingsView from "../views/SettingsView.vue";
 import { createApp, h } from "vue";
 import {
   schedulePreview,
@@ -60,6 +61,7 @@ const schedulerSettings = {
   paused: false,
   pending_limit: 1000,
   catchup_minutes: 30,
+  retention_days: 30,
   version: 1,
 };
 window.fetch = (input, init) => {
@@ -78,6 +80,33 @@ window.fetch = (input, init) => {
       expiresAt: new Date(Date.now() + 3600000).toISOString(),
       sensitiveUntil: new Date(Date.now() + 300000).toISOString(),
     };
+  else if (url.pathname === "/api/v1/integrations/bluebubbles")
+    data = {
+      serverUrl: "https://gateway.example.test",
+      accessTokenConfigured: true,
+      webhookSecretConfigured: true,
+      sendMethod: "private-api",
+      requestTimeoutMs: 30000,
+      linkPreviewEnabled: true,
+      openGraphFallbackEnabled: true,
+      openGraphTimeoutMs: 5000,
+      source: "database",
+      version: 1,
+      updatedAt: null,
+    };
+  else if (url.pathname === "/api/v1/settings/network")
+    data = {
+      trustedFakeIpHosts: [],
+      version: 1,
+      updatedAt: new Date().toISOString(),
+    };
+  else if (url.pathname === "/api/v1/settings/plugins")
+    data = {
+      catalogueCharacters: 64000,
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      usage: { characters: 0, sharedCharacters: 0, toolCount: 0, plugins: [] },
+    };
   else if (url.pathname === "/api/v1/workflows")
     data = [
       { id: "role-lanbo", name: "兰博" },
@@ -93,10 +122,38 @@ window.fetch = (input, init) => {
     if (init?.method === "PUT") {
       const body = JSON.parse(
         typeof init.body === "string" ? init.body : "{}",
-      ) as { paused: boolean; pendingLimit: number; catchupMinutes: number };
+      ) as {
+        paused: boolean;
+        pendingLimit: number;
+        catchupMinutes: number;
+        retentionDays?: number;
+        expectedVersion: number;
+      };
+      const scenario = new URLSearchParams(location.search).get("scenario");
+      if (
+        body.expectedVersion !== schedulerSettings.version ||
+        scenario === "conflict" ||
+        scenario === "save-error"
+      )
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: {
+                code:
+                  scenario === "save-error"
+                    ? "REQUEST_FAILED"
+                    : "TASK_VERSION_CONFLICT",
+                message: "模拟保存失败，请刷新后重试。",
+              },
+            }),
+            { status: scenario === "save-error" ? 500 : 409 },
+          ),
+        );
       schedulerSettings.paused = body.paused;
       schedulerSettings.pending_limit = body.pendingLimit;
       schedulerSettings.catchup_minutes = body.catchupMinutes;
+      schedulerSettings.retention_days =
+        body.retentionDays ?? schedulerSettings.retention_days;
       schedulerSettings.version++;
     }
     data = { ...schedulerSettings };
@@ -221,22 +278,24 @@ const placeholder = (id: string, label: string) =>
   ]);
 const app = createApp({
   render: () =>
-    h(
-      "main",
-      { class: "page-container split-admin-page", style: "padding:24px" },
-      [
-        h("aside", { class: "admin-sidebar" }, [
-          h(SectionNavigation, { items: sections }),
-        ]),
-        h("div", { class: "admin-workspace" }, [
-          h("p", "定时任务 · 本地虚构数据预览，不会登记或发送真实提醒。"),
-          placeholder("idle-conversations", "空闲主动交流"),
-          h(ScheduledTasksPanel, { id: "scheduled-tasks" }),
-          placeholder("executions", "执行记录"),
-          placeholder("audit", "审计事件"),
-        ]),
-      ],
-    ),
+    router.currentRoute.value.path === "/settings"
+      ? h(SettingsView)
+      : h(
+          "main",
+          { class: "page-container split-admin-page", style: "padding:24px" },
+          [
+            h("aside", { class: "admin-sidebar" }, [
+              h(SectionNavigation, { items: sections }),
+            ]),
+            h("div", { class: "admin-workspace" }, [
+              h("p", "定时任务 · 本地虚构数据预览，不会登记或发送真实提醒。"),
+              placeholder("idle-conversations", "空闲主动交流"),
+              h(ScheduledTasksPanel, { id: "scheduled-tasks" }),
+              placeholder("executions", "执行记录"),
+              placeholder("audit", "审计事件"),
+            ]),
+          ],
+        ),
 });
 app.use(router);
 await router.isReady();
