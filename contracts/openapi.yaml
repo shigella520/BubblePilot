@@ -248,12 +248,7 @@ paths:
       security: [{ sessionAuth: [] }]
       responses:
         "200":
-          {
-            description: paused,
-            pending_limit,
-            catchup_minutes,
-            retention_days (default 30) and version.,
-          }
+          description: "paused, pending_limit, catchup_minutes, retention_days (default 30) and version."
         "401": { $ref: "#/components/responses/Error" }
     put:
       operationId: updateScheduledTaskSettings
