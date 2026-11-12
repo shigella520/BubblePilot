@@ -251,6 +251,52 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       [id],
     );
   }
+  it("resolves creator real names within each chat using the current mapping without changing ownership", async () => {
+    const first = await setup();
+    const second = await setup();
+    const a = await create(first);
+    const b = await create(second);
+    expect(a.task.creator_sender_id).toBe(b.task.creator_sender_id);
+    const readName = async (service: TaskService, task: typeof a.task) => {
+      const list = await service.list({ workflowId: task.workflow_id });
+      expect(list.items).toHaveLength(1);
+      const item = list.items[0]!;
+      const detail = await service.detail(task.id);
+      expect(item.creatorSenderId).toBe(task.creator_sender_id);
+      expect(detail.task.creator_sender_id).toBe(task.creator_sender_id);
+      expect(detail.task.version).toBe(task.version);
+      expect(item.creatorRealName).toBe(detail.task.creator_real_name);
+      return item.creatorRealName;
+    };
+    expect(await readName(first.tasks, a.task)).toBeNull();
+    for (const [task, name] of [
+      [a.task, "林书宁"],
+      [b.task, "周知远"],
+    ] as const) {
+      await pool.query(
+        "INSERT INTO chat_participant_identities(id,chat_id,sender_id,real_name,nickname) VALUES($1,$2,$3,$4,'虚构昵称')",
+        [randomUUID(), task.chat_id, task.creator_sender_id, name],
+      );
+    }
+    expect(await readName(first.tasks, a.task)).toBe("林书宁");
+    expect(await readName(second.tasks, b.task)).toBe("周知远");
+    await pool.query(
+      "UPDATE chat_participant_identities SET real_name='林知夏' WHERE chat_id=$1 AND sender_id=$2",
+      [a.task.chat_id, a.task.creator_sender_id],
+    );
+    expect(await readName(first.tasks, a.task)).toBe("林知夏");
+    await pool.query(
+      "UPDATE chat_participant_identities SET real_name=NULL WHERE chat_id=$1 AND sender_id=$2",
+      [a.task.chat_id, a.task.creator_sender_id],
+    );
+    // A nickname alone must not be reported as the member's real name.
+    expect(await readName(first.tasks, a.task)).toBeNull();
+    await pool.query(
+      "DELETE FROM chat_participant_identities WHERE chat_id=$1",
+      [b.task.chat_id],
+    );
+    expect(await readName(second.tasks, b.task)).toBeNull();
+  });
   it("fills legacy summaries through the member tool, keeps occurrences and rejects stale or foreign edits", async () => {
     const s = await setup();
     const c = await create(s);

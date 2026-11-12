@@ -37,7 +37,7 @@ paths:
   /api/v1/scheduled-tasks:
     get:
       operationId: listScheduledTasks
-      description: List reminders scoped by optional workflowId, chatId, lifecycle and status; offset and limit (1-50). Returns items and hasMore. Member tools additionally enforce creator ownership.
+      description: List reminders scoped by optional workflowId, chatId, lifecycle and status; offset and limit (1-50). Returns items and hasMore. Each item includes creatorSenderId and nullable creatorRealName resolved from the current member mapping in the task chat; ownership is unchanged. Member tools additionally enforce creator ownership.
       security: [{ sessionAuth: [] }]
       responses:
         "200":
@@ -57,7 +57,7 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: getScheduledTask
-      description: Sensitive unlock required. Returns task, summary, protected request snapshot, latest 100 changes, paginated occurrences and execution references. offset defaults to 0; limit defaults to 20, maximum 50; hasMore indicates further occurrence history.
+      description: Sensitive unlock required. task.creator_real_name is nullable and resolved from the current member mapping in the task chat; creator_sender_id remains the owner. Returns task, summary, protected request snapshot, latest 100 changes, paginated occurrences and execution references. offset defaults to 0; limit defaults to 20, maximum 50; hasMore indicates further occurrence history.
       security: [{ sessionAuth: [] }]
       responses:
         "200": { description: Protected task detail. }

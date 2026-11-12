@@ -44,7 +44,7 @@ pip-compile --generate-hashes --strip-extras --output-file=requirements.lock req
 系统包通过 Debian HTTPS 仓库在构建时安装，不承诺不同日期重建逐字节一致；实际部署固定最终镜像 digest。
 CI 独立构建、冒烟测试并用 Trivy 扫描系统/Python 漏洞，新增 HIGH/CRITICAL、可修复项和过期风险基线阻断。Dev 发布时对实际待推送运行镜像再次测试和扫描，不绕过失败或静默忽略漏洞。
 
-升级先准备并预拉取镜像、备份配置，等待任务结束，再将 `SANDBOX_IMAGE` 改为项目镜像 digest 并重建适配服务。
+通用准备与备份按[运维操作手册](../../../doc/运维操作手册.md)执行；本独立栈在任务结束后，将 `SANDBOX_IMAGE` 改为项目镜像 digest 并重建适配服务。
 旧 `python:3.12…@sha256:…` 仍有效，能力返回 unknown；保留原 digest 以便回退。不需要数据库迁移、新素材卷或跨轮状态备份。
 插件 0.2.0 的 Skill 需在管理页升级并审阅，不自动修改工作流。
 NAS CPU CFS/PIDs 能力不足仍需单独评估，本镜像不补齐宿主隔离。

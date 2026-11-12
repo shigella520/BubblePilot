@@ -879,9 +879,14 @@ export class TaskService {
   }) {
     const limit = options.limit ?? 20;
     const result = await this.pool.query<
-      TaskRow & { chat_name: string; workflow_name: string }
+      TaskRow & {
+        chat_name: string;
+        workflow_name: string;
+        creator_real_name: string | null;
+      }
     >(
-      `SELECT t.*,c.display_name AS chat_name,w.name AS workflow_name FROM scheduled_tasks t JOIN chats c ON c.id=t.chat_id JOIN workflows w ON w.id=t.workflow_id
+      `SELECT t.*,c.display_name AS chat_name,w.name AS workflow_name,i.real_name AS creator_real_name FROM scheduled_tasks t JOIN chats c ON c.id=t.chat_id JOIN workflows w ON w.id=t.workflow_id
+   LEFT JOIN chat_participant_identities i ON i.chat_id=t.chat_id AND i.sender_id=t.creator_sender_id
    WHERE ($1::uuid IS NULL OR t.workflow_id=$1) AND ($2::uuid IS NULL OR t.chat_id=$2) AND ($3::text IS NULL OR t.creator_sender_id=$3) AND ($4::text IS NULL OR t.status=$4) AND ($7::text IS NULL OR t.lifecycle=$7) ORDER BY t.scheduled_at DESC,t.id DESC LIMIT $5 OFFSET $6`,
       [
         options.workflowId ?? null,
@@ -901,14 +906,17 @@ export class TaskService {
         workflowId: t.workflow_id,
         workflowName: t.workflow_name,
         creatorSenderId: t.creator_sender_id,
+        creatorRealName: t.creator_real_name,
       })),
       hasMore: result.rows.length > limit,
     };
   }
   async detail(id: string, offset = 0, limit = 20) {
     const task = (
-      await this.pool.query<TaskRow>(
-        "SELECT * FROM scheduled_tasks WHERE id=$1",
+      await this.pool.query<TaskRow & { creator_real_name: string | null }>(
+        `SELECT t.*,i.real_name AS creator_real_name FROM scheduled_tasks t
+         LEFT JOIN chat_participant_identities i ON i.chat_id=t.chat_id AND i.sender_id=t.creator_sender_id
+         WHERE t.id=$1`,
         [id],
       )
     ).rows[0];

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ToggleSwitch from "../components/ToggleSwitch.vue";
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import {
   UploadCloud,
@@ -1166,17 +1167,11 @@ onUnmounted(() => {
                   }}
                 </p>
               </div>
-              <button
-                type="button"
-                class="meme-switch"
-                role="switch"
-                aria-label="允许 AI 使用"
-                :aria-checked="active"
+              <ToggleSwitch
+                v-model="active"
+                label="允许 AI 使用"
                 :disabled="busy"
-                @click="active = !active"
-              >
-                <span />
-              </button>
+              />
             </div>
           </aside>
           <div
@@ -1723,31 +1718,6 @@ onUnmounted(() => {
 }
 .meme-availability p {
   margin: 6px 0 0;
-}
-.meme-switch {
-  width: 38px;
-  height: 23px;
-  padding: 3px;
-  border: 0;
-  border-radius: 20px;
-  background: #cbd5e1;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-.meme-switch span {
-  display: block;
-  width: 17px;
-  height: 17px;
-  background: white;
-  border-radius: 50%;
-  box-shadow: 0 1px 3px #0002;
-  transition: transform 0.15s;
-}
-.meme-switch[aria-checked="true"] {
-  background: #2563eb;
-}
-.meme-switch[aria-checked="true"] span {
-  transform: translateX(15px);
 }
 .meme-summary-panel {
   margin-top: 22px;

@@ -415,7 +415,7 @@ const executionPager = useCursorPager<Execution>((cursor) => {
   return apiPageRequest<Execution[]>(`/api/v1/executions?${query}`);
 });
 const auditPager = useCursorPager<AuditEvent>((cursor) => {
-  const query = new URLSearchParams({ limit: "50" });
+  const query = new URLSearchParams({ limit: "10" });
   if (cursor !== null) query.set("cursor", cursor);
   return apiPageRequest<AuditEvent[]>(`/api/v1/audit-events?${query}`);
 });

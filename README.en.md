@@ -291,9 +291,9 @@ For a fixed reply, use `Message Trigger → Reply → End` and skip AI configura
 - Do not expose PostgreSQL or SearXNG, and do not log the webhook query string.
 - Store `.env`, backups, and `SETTINGS_ENCRYPTION_KEY` securely; never rotate the encryption key accidentally during an upgrade.
 - Review chat monitoring, message retention, and AI context limits.
-- Back up PostgreSQL and deploy an exact image version before upgrading.
+- Follow the [operations runbook](doc/运维操作手册.md) to verify backups and deploy an exact image version.
 
-See [Deployment and operations](doc/部署与运维.md) for backup, restore, upgrade, rollback, and troubleshooting commands.
+See the [operations runbook](doc/运维操作手册.md) for backup, upgrade, and recovery procedures, and [Deployment and operations](doc/部署与运维.md) for configuration, version-specific requirements, and troubleshooting.
 
 ## Documentation
 
@@ -301,7 +301,7 @@ See [Deployment and operations](doc/部署与运维.md) for backup, restore, upg
 | -------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | [Documentation center](doc/README.md)                    | Browse all documentation and its authoritative scope                                |
 | [Product and scope](doc/产品与范围.md)                   | Understand target users, delivered scope, acceptance criteria, and future direction |
-| [Deployment and operations](doc/部署与运维.md)           | First-time setup, production deployment, backup, upgrade, and troubleshooting       |
+| [Deployment and operations](doc/部署与运维.md)           | First-time setup, configuration, version migrations, and troubleshooting       |
 | [Technical design](doc/技术设计.md)                      | Understand architecture, data boundaries, security, and module responsibilities     |
 | [Events and workflow design](doc/事件与工作流设计.md)    | Understand triggers, nodes, AI routing, idempotency, and recovery semantics         |
 | [API and configuration contracts](doc/接口与配置契约.md) | Look up APIs, permissions, environment variables, and machine-readable contracts    |

@@ -45,6 +45,7 @@ const tasks = Array.from({ length: 5 }, (_, i) => ({
   workflowId: i % 2 ? "role-book" : "role-lanbo",
   workflowName: i % 2 ? "书友" : "兰博",
   creatorSenderId: "fictional-member",
+  creatorRealName: i === 2 ? null : i % 2 ? "林书宁" : "周知远",
 })).map((t) => ({
   ...t,
   scheduleSummary: scheduleSummary(t.schedule),
@@ -55,6 +56,12 @@ const tasks = Array.from({ length: 5 }, (_, i) => ({
     t.consumedCount,
   ),
 }));
+const schedulerSettings = {
+  paused: false,
+  pending_limit: 1000,
+  catchup_minutes: 30,
+  version: 1,
+};
 window.fetch = (input, init) => {
   const url = new URL(
     typeof input === "string"
@@ -82,14 +89,18 @@ window.fetch = (input, init) => {
       { id: "chat-book", displayName: "周末读书会" },
     ];
     page = { nextCursor: null };
-  } else if (url.pathname === "/api/v1/settings/scheduled-tasks")
-    data = {
-      paused: false,
-      pending_limit: 1000,
-      catchup_minutes: 30,
-      version: 1,
-    };
-  else if (url.pathname === "/api/v1/scheduled-tasks")
+  } else if (url.pathname === "/api/v1/settings/scheduled-tasks") {
+    if (init?.method === "PUT") {
+      const body = JSON.parse(
+        typeof init.body === "string" ? init.body : "{}",
+      ) as { paused: boolean; pendingLimit: number; catchupMinutes: number };
+      schedulerSettings.paused = body.paused;
+      schedulerSettings.pending_limit = body.pendingLimit;
+      schedulerSettings.catchup_minutes = body.catchupMinutes;
+      schedulerSettings.version++;
+    }
+    data = { ...schedulerSettings };
+  } else if (url.pathname === "/api/v1/scheduled-tasks")
     data = {
       items: tasks.filter(
         (t) =>
@@ -172,7 +183,8 @@ window.fetch = (input, init) => {
           status: task.status,
           scheduled_at: task.scheduledAt,
           timezone: task.timeZone,
-          creator_sender_id: "fictional-member",
+          creator_sender_id: task.creatorSenderId,
+          creator_real_name: task.creatorRealName,
         },
         events: [
           {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ToggleSwitch from "../ToggleSwitch.vue";
 import TaskScheduleEditor from "./TaskScheduleEditor.vue";
 import type { TaskSchedule } from "../../../../../modules/scheduled-tasks/task-schedule";
 import AdminFormDialog from "../AdminFormDialog.vue";
@@ -55,6 +56,7 @@ interface Task {
   chatId: string;
   workflowName: string;
   creatorSenderId: string;
+  creatorRealName?: string | null;
 }
 interface TaskDetail {
   summary?: Task;
@@ -75,6 +77,7 @@ interface TaskDetail {
     scheduled_at: string;
     timezone: string;
     creator_sender_id: string;
+    creator_real_name?: string | null;
   };
   events: Array<{
     id: string;
@@ -454,6 +457,7 @@ onBeforeUnmount(() => generation++);
           <tr>
             <th>任务概要</th>
             <th>工作流 / 聊天</th>
+            <th>创建成员</th>
             <th>计划时间</th>
             <th>状态</th>
             <th>操作</th>
@@ -472,6 +476,12 @@ onBeforeUnmount(() => generation++);
             </td>
             <td>
               {{ task.workflowName }}<br />{{ task.chatName ?? task.chatId }}
+            </td>
+            <td class="task-creator">
+              <span>{{ task.creatorRealName || task.creatorSenderId }}</span>
+              <small v-if="task.creatorRealName">{{
+                task.creatorSenderId
+              }}</small>
             </td>
             <td>
               {{
@@ -546,7 +556,7 @@ onBeforeUnmount(() => generation++);
             </td>
           </tr>
           <tr v-if="!items.length">
-            <td colspan="5">
+            <td colspan="6">
               {{ busy ? "正在加载…" : "暂无符合条件的任务。" }}
             </td>
           </tr>
@@ -734,7 +744,12 @@ onBeforeUnmount(() => generation++);
             </div>
             <div>
               <span>创建成员</span
-              ><strong>{{ detail.task.creator_sender_id }}</strong>
+              ><strong>{{
+                detail.task.creator_real_name || detail.task.creator_sender_id
+              }}</strong>
+              <small v-if="detail.task.creator_real_name">{{
+                detail.task.creator_sender_id
+              }}</small>
             </div>
           </div>
         </section>
@@ -897,9 +912,24 @@ onBeforeUnmount(() => generation++);
     >
       <p v-if="error" role="alert">{{ error }}</p>
       <form class="task-editor" @submit.prevent="saveSettings">
+        <div class="task-setting-toggle">
+          <div>
+            <strong>暂停调度</strong>
+            <p class="task-help">
+              {{
+                settings.paused
+                  ? "保存后暂停受理新的到期任务。"
+                  : "保存后正常受理到期任务。"
+              }}
+            </p>
+          </div>
+          <ToggleSwitch
+            v-model="settings.paused"
+            label="暂停调度"
+            :disabled="mutating || !session.sensitiveActive"
+          />
+        </div>
         <label
-          ><input v-model="settings.paused" type="checkbox" />暂停调度</label
-        ><label
           >实例待执行总数<input
             v-model.number="settings.pending_limit"
             type="number"
@@ -968,6 +998,12 @@ table {
   width: 100%;
   border-collapse: collapse;
 }
+.scheduled-tasks > .table-scroll > table {
+  min-width: 1040px;
+}
+th {
+  white-space: nowrap;
+}
 th,
 td {
   text-align: left;
@@ -988,6 +1024,19 @@ td:first-child {
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
+.task-creator {
+  min-width: 120px;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+}
+.task-creator small {
+  display: block;
+  margin-top: 6px;
+  color: var(--bubblepilot-muted);
+}
+.task-facts small {
+  overflow-wrap: anywhere;
+}
 .task-row-actions {
   display: flex;
   flex-wrap: wrap;
@@ -997,6 +1046,19 @@ td:first-child {
 }
 footer {
   justify-content: flex-end;
+}
+.task-setting-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+}
+.task-setting-toggle strong {
+  font-weight: 500;
+}
+.task-setting-toggle .task-help {
+  margin-top: 6px;
 }
 .task-editor {
   display: grid;
