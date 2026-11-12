@@ -121,6 +121,7 @@ describe("recurring calendar", () => {
   });
   it("rejects contradictory legacy/new fields, short intervals and injected scopes", () => {
     const base = {
+      summary: "Fictional reminder",
       content: "fictional",
       timeZone: "UTC",
       schedule: schedule({ type: "interval", everyMinutes: 180 }),

@@ -237,6 +237,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       maxOutputCharacters: 10000,
     };
     const input = {
+      summary: "抢火车票提醒",
       content: "提醒抢火车票",
       scheduledAt: new Date(Date.now() + 3600000).toISOString(),
       timeZone: "UTC",
@@ -250,6 +251,169 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       [id],
     );
   }
+  it("fills legacy summaries through the member tool, keeps occurrences and rejects stale or foreign edits", async () => {
+    const s = await setup();
+    const c = await create(s);
+    await pool.query("UPDATE scheduled_tasks SET summary=NULL WHERE id=$1", [
+      c.task.id,
+    ]);
+    const before = await s.tasks.detail(c.task.id);
+    const tool = (await s.tasks.tools(c.executionId)).find(
+      (t) => t.definition.name === "update_scheduled_task",
+    )!;
+    const args = JSON.stringify({
+      id: c.task.id,
+      expectedVersion: 1,
+      summary: "火车票预订提醒",
+    });
+    const context = { ...c.ctx, toolCallId: "summary-call" };
+    const raw = await tool.execute(args, context);
+    if (typeof raw !== "string")
+      throw new Error("Expected textual tool result");
+    const result: unknown = JSON.parse(raw);
+    expect(result).toMatchObject({
+      status: "ok",
+      task: { summary: "火车票预订提醒", version: 2 },
+    });
+    expect(await tool.execute(args, context)).toBe(raw);
+    const after = await s.tasks.detail(c.task.id);
+    expect(after.occurrences).toEqual(before.occurrences);
+    expect(after.task).toMatchObject({
+      content: c.input.content,
+      scheduled_at: before.task.scheduled_at,
+      execution_version: 1,
+      version: 2,
+    });
+    expect(
+      after.events.filter((e) => e.event_type === "summary-updated"),
+    ).toHaveLength(1);
+    await expect(
+      s.tasks.change(
+        { kind: "admin", id: "fixture" },
+        { id: c.task.id, expectedVersion: 1, summary: "过期修改" },
+        false,
+      ),
+    ).rejects.toThrow("TASK_VERSION_CONFLICT");
+    await expect(
+      s.tasks.change(
+        {
+          kind: "member",
+          id: "other",
+          chatId: c.task.chat_id,
+          workflowId: c.task.workflow_id,
+        },
+        { id: c.task.id, expectedVersion: 2, summary: "越权修改" },
+        false,
+      ),
+    ).rejects.toThrow("TASK_NOT_FOUND");
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      {
+        id: c.task.id,
+        expectedVersion: 2,
+        summary: "新概要",
+        content: "新的完整提醒",
+      },
+      false,
+    );
+    const changed = await s.tasks.detail(c.task.id);
+    expect(changed.task).toMatchObject({
+      version: 3,
+      execution_version: 2,
+      summary: "新概要",
+      content: "新的完整提醒",
+    });
+    vi.spyOn(AgentRunner.prototype, "run").mockResolvedValue(
+      success("虚构提醒"),
+    );
+    await due(c.task.id);
+    await s.scheduler.tick();
+    expect(s.send).toHaveBeenCalledTimes(1);
+  });
+  it.each([false, true])(
+    "does not interrupt an accepted or sending reminder when only its summary changes (recurring=%s)",
+    async (repeats) => {
+      const s = await setup();
+      const c = repeats ? await recurring(s, 4) : await create(s);
+      vi.spyOn(AgentRunner.prototype, "run").mockImplementationOnce(
+        async () => {
+          const before = await s.tasks.detail(c.task.id);
+          await s.tasks.change(
+            { kind: "admin", id: "fixture" },
+            { id: c.task.id, expectedVersion: 1, summary: "生成中补充概要" },
+            false,
+          );
+          const after = await s.tasks.detail(c.task.id);
+          expect(after.runs).toEqual(before.runs);
+          expect(after.occurrences).toEqual(before.occurrences);
+          expect(after.task).toMatchObject({
+            status: "running",
+            version: 2,
+            execution_version: 1,
+          });
+          return success("虚构提醒");
+        },
+      );
+      s.send.mockImplementationOnce(async () => {
+        await s.tasks.change(
+          { kind: "admin", id: "fixture" },
+          { id: c.task.id, expectedVersion: 2, summary: "发送中补充概要" },
+          false,
+        );
+        return {
+          status: "confirmed",
+          providerMessageId: "fixture-summary-send",
+        };
+      });
+      if (repeats) await recurringDue(c.task.id);
+      else await due(c.task.id);
+      await s.scheduler.tick();
+      await s.scheduler.tick();
+      expect(s.send).toHaveBeenCalledTimes(1);
+      const d = await s.tasks.detail(c.task.id);
+      expect(d.task).toMatchObject({
+        version: 3,
+        execution_version: 1,
+        summary: "发送中补充概要",
+      });
+      expect(d.runs[0]?.outcome).toBe("sent");
+    },
+  );
+  it("allows summary-only edits of retained finished tasks but clears summaries with their content", async () => {
+    const s = await setup();
+    const c = await create(s);
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 1 },
+      true,
+    );
+    const updated = await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      { id: c.task.id, expectedVersion: 2, summary: "已取消的虚构提醒" },
+      false,
+    );
+    expect(updated).toMatchObject({
+      lifecycle: "cancelled",
+      execution_version: 2,
+      version: 3,
+    });
+    await pool.query(
+      "UPDATE scheduled_tasks SET finished_at=now()-interval '91 days' WHERE id=$1",
+      [c.task.id],
+    );
+    await s.scheduler.reconcile();
+    expect((await s.tasks.detail(c.task.id)).task).toMatchObject({
+      summary: null,
+      content: null,
+    });
+    await expect(
+      s.tasks.change(
+        { kind: "admin", id: "fixture" },
+        { id: c.task.id, expectedVersion: 3, summary: "不可复原" },
+        false,
+      ),
+    ).rejects.toThrow("TASK_CONTENT_CLEARED");
+  });
   it("persists once, scopes tools, and rejects other members", async () => {
     const s = await setup();
     const c = await create(s);
@@ -571,6 +735,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
     const task = await s.tasks.create(
       seed.executionId,
       {
+        summary: "虚构周期提醒",
         content: "虚构周期提醒",
         timeZone: "UTC",
         schedule: {

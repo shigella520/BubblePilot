@@ -14,6 +14,18 @@ import {
 import { useSessionStore } from "../../stores/session";
 import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 import { apiRequest, apiAllPages, errorMessage } from "../../services/api";
+// A compact excerpt, not a generated title; the stored task remains unchanged.
+function taskOverview(content: string | null): string {
+  if (content === null) return "内容已清理";
+  const text = content.trim();
+  if (!text) return "暂无任务内容";
+  const opening = text.match(/^[^\n。！？]+[。！？]?/u)?.[0] ?? text;
+  const characters = Array.from(opening.replace(/\s+/gu, " ").trim());
+  return (
+    characters.slice(0, 56).join("") +
+    (characters.length > 56 || opening.length < text.length ? "…" : "")
+  );
+}
 const settingsDialog = ref(false);
 const settingsOriginal = ref<Settings | null>(null);
 function openSettings() {
@@ -26,6 +38,7 @@ function closeSettings() {
 }
 interface Task {
   id: string;
+  summary?: string | null;
   content: string | null;
   scheduledAt: string;
   timeZone: string;
@@ -54,6 +67,7 @@ interface TaskDetail {
     execution_id: string | null;
   }>;
   task: {
+    summary?: string | null;
     content: string | null;
     request_snapshot: string | null;
     status: string;
@@ -97,6 +111,7 @@ const workflowId = ref(""),
   detailTask = ref<Task | null>(null),
   editing = ref<Task | null>(null),
   content = ref(""),
+  summary = ref(""),
   settings = ref<Settings | null>(null);
 const session = useSessionStore();
 watch(
@@ -129,6 +144,7 @@ function eventLabel(type: string) {
     (
       {
         created: "创建",
+        "summary-updated": "更新概要",
         updated: "修改",
         update: "修改",
         cancel: "取消",
@@ -219,6 +235,7 @@ function edit(task: Task) {
   detail.value = null;
   editing.value = task;
   content.value = task.content ?? "";
+  summary.value = task.summary ?? "";
   draftSchedule.value = JSON.parse(
     JSON.stringify(
       task.schedule ?? { kind: "once", scheduledAt: task.scheduledAt },
@@ -259,12 +276,23 @@ async function save() {
       JSON.stringify(
         task.schedule ?? { kind: "once", scheduledAt: task.scheduledAt },
       ) || draftZone.value !== task.timeZone;
+  if (
+    !changed &&
+    content.value === task.content &&
+    (!summary.value.trim() || summary.value.trim() === task.summary)
+  ) {
+    editing.value = null;
+    return;
+  }
   await action(async () => {
     await apiRequest(`/api/v1/scheduled-tasks/${task.id}`, {
       method: "PATCH",
       body: JSON.stringify({
         expectedVersion: task.version,
-        content: content.value,
+        ...(content.value !== task.content ? { content: content.value } : {}),
+        ...(summary.value.trim() && summary.value.trim() !== task.summary
+          ? { summary: summary.value.trim() }
+          : {}),
         ...(changed
           ? { schedule: draftSchedule.value, timeZone: draftZone.value }
           : {}),
@@ -353,8 +381,8 @@ onMounted(async () => {
 onBeforeUnmount(() => generation++);
 </script>
 <template>
-  <p v-if="notice" role="status">{{ notice }}</p>
   <section class="admin-panel scheduled-tasks">
+    <p v-if="notice" role="status">{{ notice }}</p>
     <header class="scheduled-tasks-heading">
       <div>
         <p class="eyebrow">SCHEDULED TASKS</p>
@@ -405,7 +433,7 @@ onBeforeUnmount(() => generation++);
       <table>
         <thead>
           <tr>
-            <th>任务</th>
+            <th>任务概要</th>
             <th>工作流 / 聊天</th>
             <th>计划时间</th>
             <th>状态</th>
@@ -415,7 +443,9 @@ onBeforeUnmount(() => generation++);
         <tbody>
           <tr v-for="task in items" :key="task.id">
             <td>
-              {{ task.content ?? "内容已清理" }}
+              <p class="task-summary-excerpt">
+                {{ task.summary || taskOverview(task.content) }}
+              </p>
               <p class="task-help">{{ task.scheduleSummary ?? "单次提醒" }}</p>
               <small v-if="task.schedule?.kind === 'recurring'"
                 >已消耗 {{ task.consumedCount ?? 0 }} 次</small
@@ -528,6 +558,14 @@ onBeforeUnmount(() => generation++);
         <p v-if="error" class="task-alert" role="alert">{{ error }}</p>
         <section class="task-card">
           <label class="task-field"
+            >任务概要<input
+              v-model="summary"
+              maxlength="40"
+              :disabled="mutating"
+              :required="!!editing.summary"
+              placeholder="简短概括核心事项；旧任务未填写时展示正文预览"
+          /></label>
+          <label class="task-field"
             ><span class="task-field-title"
               ><MessageSquare :size="18" />提醒内容</span
             ><textarea
@@ -618,6 +656,9 @@ onBeforeUnmount(() => generation++);
         </div>
         <section class="task-card task-overview">
           <p class="task-section-label"><MessageSquare :size="17" />提醒内容</p>
+          <p v-if="detail.task.summary" class="task-summary-excerpt">
+            {{ detail.task.summary }}
+          </p>
           <p class="task-reminder">{{ detail.task.content ?? "内容已清理" }}</p>
           <div class="task-facts">
             <div>
@@ -870,6 +911,15 @@ td:first-child {
   min-width: 160px;
   max-width: 350px;
   overflow-wrap: anywhere;
+}
+.task-summary-excerpt {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 td button {
   margin: 3px;

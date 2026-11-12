@@ -65,7 +65,7 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
     patch:
       operationId: updateScheduledTask
-      description: Sensitive unlock required. Change content or complete schedule and timeZone. Legacy scheduledAt is only supported for once tasks and cannot coexist with schedule. Task kind is immutable. Sending already started cannot be edited.
+      description: Sensitive unlock required. Change content or complete schedule and timeZone. Legacy scheduledAt is only supported for once tasks and cannot coexist with schedule. Task kind is immutable. Execution-affecting edits are rejected after sending starts. Summary-only edits preserve execution and are allowed on retained finished tasks; expectedVersion still applies.
       security: [{ sessionAuth: [] }]
       requestBody:
         required: true
@@ -77,6 +77,13 @@ paths:
               required: [expectedVersion]
               properties:
                 expectedVersion: { type: integer, minimum: 1 }
+                summary:
+                  {
+                    type: string,
+                    minLength: 1,
+                    maxLength: 40,
+                    description: Single-line display title. Omit to preserve the existing summary.,
+                  }
                 content: { type: string, minLength: 1, maxLength: 2000 }
                 schedule: { $ref: "#/components/schemas/TaskSchedule" }
                 scheduledAt: { type: string, format: date-time }

@@ -281,7 +281,7 @@ export class TaskScheduler {
         occurrenceId: task.occurrenceId,
         occurrenceNumber: task.occurrenceNumber,
         taskId: task.id,
-        taskVersion: task.version,
+        taskVersion: task.execution_version,
         chatId: task.chat_id,
         content: task.content ?? "",
         requestSnapshot: task.request_snapshot ?? "",
@@ -344,7 +344,7 @@ export class TaskScheduler {
             ).rows[0];
             if (
               !current ||
-              current.version !== task.version ||
+              current.execution_version !== task.execution_version ||
               current.lifecycle !== "active" ||
               current.resume_after !== null ||
               !["pending", "running"].includes(current.status)
@@ -361,7 +361,7 @@ export class TaskScheduler {
             const instance = (
               await db.query<{ status: string }>(
                 "SELECT status FROM scheduled_task_occurrences WHERE id=$1 AND task_version=$2",
-                [task.occurrenceId, current.version],
+                [task.occurrenceId, current.execution_version],
               )
             ).rows[0];
             if (!instance || !["pending", "running"].includes(instance.status))
@@ -476,7 +476,7 @@ export class TaskScheduler {
               [
                 randomUUID(),
                 task.id,
-                task.version,
+                task.execution_version,
                 id,
                 binding.workflowVersionId,
                 JSON.stringify(event.scheduled),
@@ -531,7 +531,7 @@ export class TaskScheduler {
   async guard(executionId: string, generation: number): Promise<string | null> {
     const row = (
       await this.service.pool.query<TaskRow & { workflow_version_id: string }>(
-        `SELECT t.*,r.workflow_version_id FROM scheduled_task_runs r JOIN scheduled_tasks t ON t.id=r.task_id JOIN chats c ON c.id=t.chat_id JOIN workflow_executions e ON e.id=r.execution_id WHERE e.status IN ('created','running','retrying') AND r.execution_id=$1 AND r.lease_owner=$2 AND r.lease_generation=$3 AND r.lease_expires_at>now() AND r.outcome IS NULL AND t.version=r.task_version AND t.status='running' AND t.resume_after IS NULL AND t.expires_at>now() AND c.enabled AND c.deleted_at IS NULL AND NOT (SELECT paused FROM scheduled_task_settings WHERE id=1)`,
+        `SELECT t.*,r.workflow_version_id FROM scheduled_task_runs r JOIN scheduled_tasks t ON t.id=r.task_id JOIN chats c ON c.id=t.chat_id JOIN workflow_executions e ON e.id=r.execution_id WHERE e.status IN ('created','running','retrying') AND r.execution_id=$1 AND r.lease_owner=$2 AND r.lease_generation=$3 AND r.lease_expires_at>now() AND r.outcome IS NULL AND t.execution_version=r.task_version AND t.status='running' AND t.resume_after IS NULL AND t.expires_at>now() AND c.enabled AND c.deleted_at IS NULL AND NOT (SELECT paused FROM scheduled_task_settings WHERE id=1)`,
         [executionId, this.owner, generation],
       )
     ).rows[0];
@@ -576,7 +576,7 @@ export class TaskScheduler {
       if (!task || task.status !== "running") return "task-cancelled";
       const claimed = await db.query(
         `UPDATE scheduled_task_runs SET phase='sending' WHERE execution_id=$1 AND task_version=$2 AND lease_owner=$3 AND lease_generation=$4 AND lease_expires_at>now() AND outcome IS NULL AND EXISTS(SELECT 1 FROM scheduled_tasks t JOIN chats c ON c.id=t.chat_id JOIN workflows w ON w.id=t.workflow_id JOIN bot_triggers b ON b.workflow_version_id=w.published_version_id WHERE t.id=scheduled_task_runs.task_id AND t.resume_after IS NULL AND NOT (SELECT paused FROM scheduled_task_settings WHERE id=1) AND t.expires_at>now() AND c.enabled AND c.deleted_at IS NULL AND w.status='active' AND w.deleted_at IS NULL AND b.enabled AND b.deleted_at IS NULL AND b.workflow_version_id=scheduled_task_runs.workflow_version_id) RETURNING id`,
-        [executionId, task.version, this.owner, generation],
+        [executionId, task.execution_version, this.owner, generation],
       );
       if (!claimed.rowCount) return "task-no-longer-eligible";
       const delivery = await db.query(
@@ -752,7 +752,7 @@ export class TaskScheduler {
       `UPDATE workflow_executions e SET trigger_event=jsonb_set(jsonb_set(e.trigger_event,'{scheduled,content}','""'::jsonb),'{scheduled,requestSnapshot}','""'::jsonb) FROM scheduled_task_runs r JOIN scheduled_tasks t ON t.id=r.task_id WHERE r.execution_id=e.id AND r.finished_at<now()-interval '90 days' AND e.trigger_event->>'schemaVersion' IN ('scheduled-task-v1','scheduled-task-v2') AND (e.trigger_event->'scheduled'->>'content'<>'' OR e.trigger_event->'scheduled'->>'requestSnapshot'<>'')`,
     );
     await this.service.pool.query(
-      `UPDATE scheduled_tasks SET request_snapshot=NULL,content=NULL WHERE finished_at<now()-interval '90 days' AND (request_snapshot IS NOT NULL OR content IS NOT NULL)`,
+      `UPDATE scheduled_tasks SET request_snapshot=NULL,content=NULL,summary=NULL WHERE finished_at<now()-interval '90 days' AND (request_snapshot IS NOT NULL OR content IS NOT NULL OR summary IS NOT NULL)`,
     );
     await this.service.pool.query(
       `UPDATE scheduled_task_events SET change_data=NULL WHERE change_data IS NOT NULL AND created_at<now()-interval '90 days'`,

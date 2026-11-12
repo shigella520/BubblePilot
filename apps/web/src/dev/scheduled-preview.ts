@@ -5,6 +5,9 @@ import {
   scheduleSummary,
   type TaskSchedule,
 } from "../../../../modules/scheduled-tasks/task-schedule";
+import { createRouter, createWebHashHistory } from "vue-router";
+import { FileClock } from "@lucide/vue";
+import SectionNavigation from "../components/SectionNavigation.vue";
 import { createPinia } from "pinia";
 import { useSessionStore } from "../stores/session";
 import ScheduledTasksPanel from "../components/workflow/ScheduledTasksPanel.vue";
@@ -12,9 +15,10 @@ import "../styles/tokens.css";
 import "../styles/base.css";
 const tasks = Array.from({ length: 5 }, (_, i) => ({
   id: `00000000-0000-4000-8000-00000000000${i + 1}`,
+  summary: i === 0 ? "读书会场地预订" : null,
   content: [
-    "提醒我抢火车票",
-    "提醒检查读书会报名",
+    "提醒预订读书会场地。先整理参与人数和候选地点，再根据群内讨论汇总交通方式。\n这是虚构的长任务内容，用于检查列表是否简洁，详情是否完整保留后续说明。",
+    "提醒检查读书会报名并整理所有成员的到场时间和需要携带的书籍以及共享资料清单随后汇总尚未确认的事项并在活动开始前再次核对场地安排与座位数量",
     "提醒带雨伞",
     "提醒提交周末计划",
     "提醒喝水",
@@ -159,6 +163,7 @@ window.fetch = (input, init) => {
             : [],
         hasMore: false,
         task: {
+          summary: task.summary,
           content: task.content,
           request_snapshot: "兰博，明天早上五点提醒我抢火车票。",
           status: task.status,
@@ -184,13 +189,42 @@ window.fetch = (input, init) => {
     }),
   );
 };
+const sections = [
+  { id: "idle-conversations", label: "空闲主动交流", icon: FileClock },
+  { id: "scheduled-tasks", label: "定时任务", icon: FileClock },
+  { id: "executions", label: "执行记录", icon: FileClock },
+  { id: "audit", label: "审计事件", icon: FileClock },
+];
+const router = createRouter({
+  history: createWebHashHistory(),
+  routes: [{ path: "/:pathMatch(.*)*", component: { render: () => null } }],
+});
+const placeholder = (id: string, label: string) =>
+  h("section", { id, class: "admin-panel", style: "min-height:65vh" }, [
+    h("h2", label),
+    h("p", "虚构占位模块，用于验证导航顺序与跳转。"),
+  ]);
 const app = createApp({
   render: () =>
-    h("main", { style: "max-width:1440px;margin:auto;padding:24px" }, [
-      h("p", "定时任务 · 本地虚构数据预览，不会登记或发送真实提醒。"),
-      h(ScheduledTasksPanel),
-    ]),
+    h(
+      "main",
+      { class: "page-container split-admin-page", style: "padding:24px" },
+      [
+        h("aside", { class: "admin-sidebar" }, [
+          h(SectionNavigation, { items: sections }),
+        ]),
+        h("div", { class: "admin-workspace" }, [
+          h("p", "定时任务 · 本地虚构数据预览，不会登记或发送真实提醒。"),
+          placeholder("idle-conversations", "空闲主动交流"),
+          h(ScheduledTasksPanel, { id: "scheduled-tasks" }),
+          placeholder("executions", "执行记录"),
+          placeholder("audit", "审计事件"),
+        ]),
+      ],
+    ),
 });
+app.use(router);
+await router.isReady();
 const pinia = createPinia();
 app.use(pinia);
 await useSessionStore(pinia).restore();

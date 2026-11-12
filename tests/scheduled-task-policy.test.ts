@@ -40,6 +40,7 @@ describe("scheduled reminder policy", () => {
     ).toBe(false);
     expect(
       createTaskSchema.safeParse({
+        summary: "Task",
         content: "task",
         scheduledAt: "2030-01-02T05:00:00Z",
         timeZone: "UTC",
@@ -52,6 +53,28 @@ describe("scheduled reminder policy", () => {
         expectedVersion: 1,
       }).success,
     ).toBe(false);
+  });
+  it("requires a bounded single-line summary for creation and accepts summary-only updates", () => {
+    const input = {
+      content: "虚构任务正文",
+      timeZone: "UTC",
+      scheduledAt: "2030-01-02T05:00:00Z",
+    };
+    expect(createTaskSchema.safeParse(input).success).toBe(false);
+    for (const summary of ["", " ", "字".repeat(41), "第一行\n第二行"])
+      expect(createTaskSchema.safeParse({ ...input, summary }).success).toBe(
+        false,
+      );
+    expect(
+      createTaskSchema.parse({ ...input, summary: "  虚构提醒  " }).summary,
+    ).toBe("虚构提醒");
+    expect(
+      updateTaskSchema.safeParse({
+        id: "00000000-0000-4000-8000-000000000001",
+        expectedVersion: 1,
+        summary: "补充概要",
+      }).success,
+    ).toBe(true);
   });
   it("all tools support existing strict-schema adaptation", () => {
     for (const schema of [

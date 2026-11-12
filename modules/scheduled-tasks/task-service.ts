@@ -37,6 +37,8 @@ export interface TaskRow {
   source_message_id: string | null;
   source_execution_id: string | null;
   request_snapshot: string | null;
+  summary: string | null;
+  execution_version: number;
   content: string | null;
   scheduled_at: Date;
   timezone: string;
@@ -62,6 +64,7 @@ export function taskConfig(trigger: TriggerBinding) {
 export function publicTask(t: TaskRow) {
   return {
     id: t.id,
+    summary: t.summary ?? null,
     content: t.content,
     scheduledAt: t.scheduled_at.toISOString(),
     timeZone: t.timezone,
@@ -225,11 +228,11 @@ export class TaskService {
     };
     const descriptions = {
       create_scheduled_task:
-        "Create a one-time or recurring reminder only for the current user's explicit request. Confirm only after success. Use absolute datetime with offset and IANA timezone.",
+        "Create a one-time or recurring reminder only for the current user's explicit request. Confirm only after success. Provide summary (short title) and content (full instructions). Use absolute datetime with offset and IANA timezone.",
       list_scheduled_tasks:
         "List this member's reminder tasks in this chat and workflow before changing or cancelling them.",
       update_scheduled_task:
-        "Change a reminder owned by this member, using the ID and version returned by list.",
+        "Change a reminder owned by this member, using the ID and version returned by list. To fill a missing summary, send only id, expectedVersion and summary; this does not reschedule or interrupt execution.",
       pause_scheduled_task:
         "Pause this member's recurring reminder. Future occurrences stop until resumed.",
       resume_scheduled_task:
@@ -384,8 +387,8 @@ export class TaskService {
         throw new TaskError("TASK_OPERATION_TIMEOUT");
       const task = (
         await db.query<TaskRow>(
-          `INSERT INTO scheduled_tasks(id,chat_id,workflow_id,creator_sender_id,source_message_id,source_execution_id,request_snapshot,content,scheduled_at,timezone,expires_at,creation_key,schedule)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb) RETURNING *`,
+          `INSERT INTO scheduled_tasks(id,chat_id,workflow_id,creator_sender_id,source_message_id,source_execution_id,request_snapshot,content,scheduled_at,timezone,expires_at,creation_key,schedule,summary)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) RETURNING *`,
           [
             randomUUID(),
             scope.chat_id,
@@ -402,6 +405,7 @@ export class TaskService {
             ),
             key,
             JSON.stringify(schedule),
+            input.summary,
           ],
         )
       ).rows[0]!;
@@ -449,6 +453,7 @@ export class TaskService {
     input: {
       id: string;
       expectedVersion: number;
+      summary?: string | undefined;
       content?: string | undefined;
       scheduledAt?: string | undefined;
       timeZone?: string | undefined;
@@ -472,6 +477,7 @@ export class TaskService {
     input: {
       id: string;
       expectedVersion: number;
+      summary?: string | undefined;
       content?: string | undefined;
       scheduledAt?: string | undefined;
       timeZone?: string | undefined;
@@ -502,6 +508,44 @@ export class TaskService {
       }
       if (task.version !== input.expectedVersion)
         throw new TaskError("TASK_VERSION_CONFLICT");
+      const summaryOnly =
+        action === "update" &&
+        input.summary !== undefined &&
+        input.content === undefined &&
+        input.schedule === undefined &&
+        input.scheduledAt === undefined &&
+        input.timeZone === undefined;
+      if (summaryOnly) {
+        if (task.content === null) throw new TaskError("TASK_CONTENT_CLEARED");
+        this.checkContext(ctx);
+        const updated = (
+          await db.query<TaskRow>(
+            "UPDATE scheduled_tasks SET summary=$2,version=version+1,updated_at=now() WHERE id=$1 RETURNING *",
+            [task.id, input.summary],
+          )
+        ).rows[0]!;
+        await this.event(
+          db,
+          updated,
+          "summary-updated",
+          actor,
+          { fields: ["summary"] },
+          task.version,
+        );
+        if (
+          ctx &&
+          JSON.stringify(publicTask(updated)).length + 100 >
+            ctx.maxOutputCharacters
+        )
+          throw new TaskError("TASK_RESULT_BUDGET");
+        this.checkContext(ctx);
+        if (key)
+          await db.query(
+            "INSERT INTO scheduled_task_operations(operation_key,task_id,result) VALUES($1,$2,$3::jsonb)",
+            [key, task.id, JSON.stringify(updated)],
+          );
+        return updated;
+      }
       if (!["active", "paused"].includes(task.lifecycle))
         throw new TaskError("TASK_ALREADY_FINISHED");
       if (
@@ -633,7 +677,7 @@ export class TaskService {
       this.checkContext(ctx);
       const updated = (
         await db.query<TaskRow>(
-          `UPDATE scheduled_tasks SET content=$2,schedule=$3::jsonb,timezone=$4,scheduled_at=$5,expires_at=$6,lifecycle=$7,status=$8,version=version+1,finished_at=CASE WHEN $7 IN ('completed','cancelled') THEN now() ELSE NULL END,updated_at=now(),resume_after=$9 WHERE id=$1 RETURNING *`,
+          `UPDATE scheduled_tasks SET content=$2,schedule=$3::jsonb,timezone=$4,scheduled_at=$5,expires_at=$6,lifecycle=$7,status=$8,version=version+1,execution_version=execution_version+1,summary=$10,finished_at=CASE WHEN $7 IN ('completed','cancelled') THEN now() ELSE NULL END,updated_at=now(),resume_after=$9 WHERE id=$1 RETURNING *`,
           [
             task.id,
             input.content ?? task.content,
@@ -651,6 +695,7 @@ export class TaskService {
                 : "pending"
               : lifecycle,
             sending && action === "resume" ? settings.now : null,
+            input.summary ?? task.summary,
           ],
         )
       ).rows[0]!;
@@ -711,7 +756,7 @@ export class TaskService {
           randomUUID(),
           task.id,
           sequence,
-          task.version,
+          task.execution_version,
           task.scheduled_at,
           task.expires_at,
           JSON.stringify({

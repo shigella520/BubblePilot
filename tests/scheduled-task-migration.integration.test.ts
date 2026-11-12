@@ -128,6 +128,43 @@ describe.runIf(!!url)("recurring task migration", () => {
         consumed_count: 1,
         status: "sent",
       });
+      await db.query("UPDATE scheduled_tasks SET version=5 WHERE id=$1", [
+        tasks[0],
+      ]);
+      const occurrencesBefore = (
+        await db.query("SELECT * FROM scheduled_task_occurrences ORDER BY id")
+      ).rows;
+      const runsBefore = (
+        await db.query("SELECT * FROM scheduled_task_runs ORDER BY id")
+      ).rows;
+      await db.query(
+        await readFile(
+          new URL(
+            "../migrations/0067_scheduled_task_summary.sql",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      );
+      const migrated: unknown = (
+        await db.query(
+          "SELECT summary,version,execution_version,content FROM scheduled_tasks WHERE id=$1",
+          [tasks[0]],
+        )
+      ).rows[0];
+      expect(migrated).toEqual({
+        summary: null,
+        version: 5,
+        execution_version: 5,
+        content: "fixture reminder",
+      });
+      expect(
+        (await db.query("SELECT * FROM scheduled_task_occurrences ORDER BY id"))
+          .rows,
+      ).toEqual(occurrencesBefore);
+      expect(
+        (await db.query("SELECT * FROM scheduled_task_runs ORDER BY id")).rows,
+      ).toEqual(runsBefore);
     } finally {
       await db?.end();
       await admin.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
