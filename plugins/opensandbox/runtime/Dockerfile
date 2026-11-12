@@ -36,7 +36,7 @@ RUN mkdir /tmp/zlib && tar -xzf /tmp/zlib.tar.gz -C /tmp/zlib --strip-components
 
 # MIT 1.22.3 fixes the November 2026 Kerberos advisories; source signature verified.
 FROM sqlite-builder AS krb5-builder
-RUN apt-get install -y --no-install-recommends comerr-dev libssl-dev libkeyutils-dev bison
+RUN apt-get install -y --no-install-recommends comerr-dev libssl-dev libkeyutils-dev bison pkg-config
 ADD --checksum=sha256:fe90af8441ad9fa9b064b8e53077cefb782a96f8a68276b031dc54af1789ff0b https://kerberos.org/dist/krb5/1.22/krb5-1.22.3.tar.gz /tmp/krb5.tar.gz
 RUN mkdir /tmp/krb5 && tar -xzf /tmp/krb5.tar.gz -C /tmp/krb5 --strip-components=1 \
     && cd /tmp/krb5/src \
