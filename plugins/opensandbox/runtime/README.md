@@ -52,3 +52,5 @@ NAS CPU CFS/PIDs 能力不足仍需单独评估，本镜像不补齐宿主隔离
 当前候选的精简范围、扫描和验证结果见[精简复核](trim-review.md)。仍有基础系统 HIGH 风险，发布按已审核基础风险例外执行，见 [风险接受记录](risk-acceptance.md)。
 
 APT 在安装其他包前更新至 Debian 官方安全版本（至少3.0.4），升级阶段使用 HTTPS 并关闭下载重试。系统 zlib 使用固定来源哈希的官方1.4源码构建，替换旧库；Python和系统加载器版本、写失败恢复及压缩往返均纳入冒烟。安全来源与扫描限制见[修复记录](risk-acceptance.md#2026-11-05-apt-与-zlib-修复)。
+
+Kerberos 运行库使用签名已核验、SHA-256 固定的 MIT 1.22.3，替换 iproute2 间接依赖的旧库，保留 ip/ss；不启动 Kerberos 服务。构建运行上游 ASN.1／密码算法测试，冒烟核对实际动态库及只读网络诊断。详见[Kerberos 修复记录](risk-acceptance.md#2026-11-12-kerberos-修复)。

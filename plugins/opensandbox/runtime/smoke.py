@@ -37,6 +37,33 @@ assert sqlite3.sqlite_version == '3.54.1'
 assert subprocess.check_output(['sqlite3', ':memory:', 'select sqlite_version();'], text=True).strip() == sqlite3.sqlite_version
 assert not installed.intersection({'sqlite3', 'libsqlite3-0'})
 assert shutil.which('gcc') is None
+# Keep ip/ss while replacing their transitive Kerberos libraries, not metadata only.
+assert not installed.intersection({'libgssapi-krb5-2', 'libkrb5-3', 'libk5crypto3', 'libkrb5support0'})
+assert subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', 'bubblepilot-krb5'], text=True) == '1.22.3-1'
+for command in ['krb5kdc', 'kadmind', 'kadmin', 'kinit']:
+    assert shutil.which(command) is None, command
+krb5 = ctypes.CDLL('libkrb5.so.3')
+context = ctypes.c_void_p()
+krb5.krb5_init_context.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+krb5.krb5_init_context.restype = ctypes.c_int
+krb5.krb5_free_context.argtypes = [ctypes.c_void_p]
+krb5.krb5_free_context.restype = None
+assert krb5.krb5_init_context(ctypes.byref(context)) == 0
+krb5.krb5_free_context(context)
+gss = ctypes.CDLL('libgssapi_krb5.so.2')
+minor = ctypes.c_uint32()
+mechanisms = ctypes.c_void_p()
+gss.gss_indicate_mechs.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_void_p)]
+gss.gss_indicate_mechs.restype = ctypes.c_uint32
+gss.gss_release_oid_set.argtypes = gss.gss_indicate_mechs.argtypes
+gss.gss_release_oid_set.restype = ctypes.c_uint32
+assert gss.gss_indicate_mechs(ctypes.byref(minor), ctypes.byref(mechanisms)) == 0
+assert gss.gss_release_oid_set(ctypes.byref(minor), ctypes.byref(mechanisms)) == 0
+loaded_krb5 = {line.split()[-1] for line in Path('/proc/self/maps').read_text().splitlines() if '/libkrb5.so.' in line}
+assert loaded_krb5 and all(b'1.22.3' in Path(path).read_bytes() for path in loaded_krb5)
+# Execute read-only network diagnostics with the ordinary sandbox capabilities.
+subprocess.run(['ip', '-j', 'address', 'show'], check=True, stdout=subprocess.DEVNULL)
+subprocess.run(['ss', '-n', '-a'], check=True, stdout=subprocess.DEVNULL)
 # Verify the system loader and Python both use the repaired zlib, not an old copy.
 assert zlib.ZLIB_RUNTIME_VERSION == '1.4'
 assert 'zlib1g' not in installed and 'bubblepilot-zlib' in installed

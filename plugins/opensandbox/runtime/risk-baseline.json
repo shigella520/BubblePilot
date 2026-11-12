@@ -4,7 +4,7 @@
   "expiresAt": "2026-11-22T00:00:00Z",
   "scope": "Single-task NAS sandbox; user authorized reviewed base-risk release on 2026-10-23. See risk-acceptance.md.",
   "sourceHashes": {
-    "Dockerfile": "e03383f54dcb78ed8133352bb3ab51ed23775d484d75d6ec59ae861156d2b897",
+    "Dockerfile": "11168f817a0f50bcb046d7165518d4785a5ac607863233105e7cab30fa4d1c82",
     "requirements.lock": "fb098f44eed7ee5b4d5f4a3543f1b1ee44801c68ba38f3d33d797d57c7473fbe",
     "capabilities.json": "073985d99ffbb975106391fb5b485abddd55cfe12848c6010246c211705d1d19"
   },

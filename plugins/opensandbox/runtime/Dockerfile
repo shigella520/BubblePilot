@@ -34,6 +34,29 @@ RUN mkdir /tmp/zlib && tar -xzf /tmp/zlib.tar.gz -C /tmp/zlib --strip-components
        > /opt/zlib/DEBIAN/control \
     && dpkg-deb --build /opt/zlib /opt/bubblepilot-zlib.deb
 
+# MIT 1.22.3 fixes the November 2026 Kerberos advisories; source signature verified.
+FROM sqlite-builder AS krb5-builder
+RUN apt-get install -y --no-install-recommends comerr-dev libssl-dev libkeyutils-dev bison
+ADD --checksum=sha256:fe90af8441ad9fa9b064b8e53077cefb782a96f8a68276b031dc54af1789ff0b https://kerberos.org/dist/krb5/1.22/krb5-1.22.3.tar.gz /tmp/krb5.tar.gz
+RUN mkdir /tmp/krb5 && tar -xzf /tmp/krb5.tar.gz -C /tmp/krb5 --strip-components=1 \
+    && cd /tmp/krb5/src \
+    && ./configure --prefix=/usr --libdir=/usr/lib/$(gcc -dumpmachine) --sysconfdir=/etc --localstatedir=/var --with-system-et --disable-static --disable-rpath \
+    && make -j2 \
+    && make -C tests/asn.1 check && make -C lib/crypto/crypto_tests check \
+    && make DESTDIR=/opt/krb5-install install \
+    && mkdir -p /opt/krb5/DEBIAN /opt/krb5/usr/lib/$(gcc -dumpmachine) \
+    && for library in libgssapi_krb5 libkrb5 libk5crypto libkrb5support; do \
+       cp -a /opt/krb5-install/usr/lib/$(gcc -dumpmachine)/$library.so.* /opt/krb5/usr/lib/$(gcc -dumpmachine)/; done \
+    && printf '%s\n' 'Package: bubblepilot-krb5' 'Version: 1.22.3-1' \
+       "Architecture: $(dpkg --print-architecture)" 'Maintainer: BubblePilot' \
+       'Depends: libc6 (>= 2.38), libcom-err2, libkeyutils1, libssl3t64' \
+       'Provides: libgssapi-krb5-2 (= 1.22.3), libkrb5-3 (= 1.22.3), libk5crypto3 (= 1.22.3), libkrb5support0 (= 1.22.3)' \
+       'Conflicts: libgssapi-krb5-2, libkrb5-3, libk5crypto3, libkrb5support0' \
+       'Replaces: libgssapi-krb5-2, libkrb5-3, libk5crypto3, libkrb5support0' \
+       'Description: MIT Kerberos 1.22.3 runtime libraries for BubblePilot' \
+       > /opt/krb5/DEBIAN/control \
+    && dpkg-deb --build /opt/krb5 /opt/bubblepilot-krb5.deb
+
 FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
@@ -41,6 +64,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     XDG_CACHE_HOME=/tmp/cache PIP_CACHE_DIR=/tmp/pip-cache
 COPY --from=sqlite-builder /opt/bubblepilot-sqlite.deb /tmp/bubblepilot-sqlite.deb
 COPY --from=sqlite-builder /opt/bubblepilot-zlib.deb /tmp/bubblepilot-zlib.deb
+COPY --from=krb5-builder /opt/bubblepilot-krb5.deb /tmp/bubblepilot-krb5.deb
 # dpkg itself needs libz while replacing the distribution package.
 COPY --from=sqlite-builder /opt/zlib/usr/lib/ /tmp/zlib-bootstrap/
 RUN sed -i "s|http://deb.debian.org|https://deb.debian.org|g" /etc/apt/sources.list.d/debian.sources \
@@ -50,11 +74,11 @@ RUN sed -i "s|http://deb.debian.org|https://deb.debian.org|g" /etc/apt/sources.l
     && apt-get install -y --no-install-recommends \
     bash coreutils findutils grep sed ripgrep jq ca-certificates \
     iputils-ping iproute2 netcat-openbsd tar gzip zip unzip xz-utils file \
-    diffutils patch procps /tmp/bubblepilot-sqlite.deb /tmp/bubblepilot-zlib.deb \
+    diffutils patch procps /tmp/bubblepilot-sqlite.deb /tmp/bubblepilot-zlib.deb /tmp/bubblepilot-krb5.deb \
     && mkdir -p /opt/bubblepilot \
     && dpkg-query -W > /opt/bubblepilot/system-packages.tsv \
     && unset LD_LIBRARY_PATH \
-    && rm -rf /var/lib/apt/lists/* /tmp/bubblepilot-sqlite.deb /tmp/bubblepilot-zlib.deb /tmp/zlib-bootstrap
+    && rm -rf /var/lib/apt/lists/* /tmp/bubblepilot-sqlite.deb /tmp/bubblepilot-zlib.deb /tmp/bubblepilot-krb5.deb /tmp/zlib-bootstrap
 # The package replaces the old library while satisfying liblastlog2 dependencies.
 RUN ldconfig && python -c "import zlib; assert zlib.ZLIB_RUNTIME_VERSION == '1.4'" \
     && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' apt)" ge 3.0.4 \
