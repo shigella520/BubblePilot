@@ -134,6 +134,7 @@ export type AiSessionAffinity = "disabled" | "session-id-header";
 export type AiReasoningEffort =
   "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type AiCapabilityProbeState = "verified" | "failed" | "unknown";
+/** `required` is accepted only as a legacy alias of `auto`. */
 export type WebSearchPolicy = "disabled" | "auto" | "required";
 export type WebSearchSourceDisplay = "full" | "compact" | "hidden";
 export type WebSearchFailurePolicy = "mode-default" | "fail" | "continue";
@@ -252,7 +253,7 @@ export interface AiProviderTestResult {
 
 export interface AiProviderTestCheck {
   name: "connectivity" | "functionCalling" | "hostedWebSearch" | "imageInput";
-  status: "verified" | "failed";
+  status: "verified" | "failed" | "unknown";
   attempts: number;
   durationMs: number;
   errorCode: string | null;
@@ -661,6 +662,8 @@ export interface AiRouteRequest {
   };
   routeId: string;
   messages: readonly AiChatMessage[];
+  /** Internal insertion boundary for configuration catalogues; never sent to providers. */
+  configurationMessageCount?: number;
   maxOutputTokens: number;
   temperature: number | null;
   maxOutputCharacters: number;

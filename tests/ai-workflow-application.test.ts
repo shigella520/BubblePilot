@@ -489,7 +489,14 @@ describe("AI workflow", () => {
     const firstMessages = aiClient.requests[0]?.messages ?? [];
     expect(firstMessages[0]?.role).toBe("system");
     expect(firstMessages[0]?.content).toContain("BubblePilot 输入协议");
-    expect(firstMessages[0]?.content).toContain("<ai_system>");
+    expect(
+      firstMessages
+        .filter((m) => m.role === "system")
+        .map((m) =>
+          typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+        )
+        .join("\n"),
+    ).toContain("<ai_system>");
     expect(firstMessages[0]?.content).toContain("iMessage 纯文本");
     expect(firstMessages[0]?.content).toContain(
       "保留必要的原始符号、标签、缩进和换行",
@@ -513,8 +520,10 @@ describe("AI workflow", () => {
       "Older context outside the loaded window",
     );
     expect(
+      serializedFirstMessages.indexOf("<participant_identities>"),
+    ).toBeLessThan(
       serializedFirstMessages.indexOf("Earlier fictional context"),
-    ).toBeLessThan(serializedFirstMessages.indexOf("<participant_identities>"));
+    );
     expect(aiClient.requests[1]?.messages).toEqual([
       {
         role: "system",

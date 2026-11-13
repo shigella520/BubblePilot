@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { normalizeWebSearchPolicy } from "../../../../../modules/ai/web-search-policy";
 import { serializeTriggerConfig } from "../../utils/workflow-trigger-config";
 import { workflowDataEdges } from "../../utils/workflow-data-edges";
 import { isCanvasShortcut } from "../../utils/keyboard-scope";
@@ -530,6 +531,8 @@ function toDefinition() {
   );
   const runtimeNodes = nodes.value.map((node) => {
     const nodeConfig = configFor(node);
+    if (node.data.block.type === "ai-chat")
+      nodeConfig.webSearch = normalizeWebSearchPolicy(nodeConfig.webSearch);
     const common = {
       id: node.id,
       version: 1,

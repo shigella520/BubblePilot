@@ -129,6 +129,11 @@ interface Execution {
   retryOfExecutionId: string | null;
   recoveryAttempt: number;
   currentNodeId: string | null;
+  startupClosure?: {
+    reason: string;
+    closedAt: string;
+    previousStatus: string;
+  } | null;
   errorCode: string | null;
   nextRetryAt: string | null;
   createdAt: string;
@@ -1649,6 +1654,14 @@ function contextSnapshotValue(
               </span>
             </p>
           </section>
+          <section v-if="detail.startupClosure" class="context-snapshot-note">
+            <strong>启动时自动关闭</strong>
+            <p>{{ detail.startupClosure.reason }}</p>
+            <p>
+              原状态：{{ detail.startupClosure.previousStatus }} ·
+              {{ new Date(detail.startupClosure.closedAt).toLocaleString() }}
+            </p>
+          </section>
           <section
             v-if="detail.triggerEvent?.idle"
             class="context-snapshot-note"
@@ -2383,7 +2396,11 @@ function contextSnapshotValue(
                 "
                 class="keyline"
               >
-                执行已人工关闭；发送结果仍未知，不再自动重试，也不再计入待处理告警。
+                {{
+                  detail.startupClosure
+                    ? "执行因进程中断自动关闭；发送结果仍未知，保留待核实提示，不自动重发。"
+                    : "执行已人工关闭；发送结果仍未知，不再自动重试，也不再计入待处理告警。"
+                }}
               </p>
               <article
                 v-for="item in detail.deliveries.filter(

@@ -46,6 +46,7 @@ export interface MessageAutomation {
   closeExecution(executionId: string): Promise<ExecutionCloseResult>;
   closeRecoveryQueue(): Promise<{ closedCount: number }>;
   runtimeStatus(): WorkflowGateStatus;
+  close?(): Promise<void>;
 }
 
 function safeError(error: unknown): WorkflowExecutionError {
@@ -92,6 +93,10 @@ export class WorkflowEngine implements MessageAutomation {
       options.queueWaitMs ?? 30_000,
     );
     this.timeZone = options.timeZone ?? runtimeTimeZone();
+  }
+
+  close(): Promise<void> {
+    return this.gate.close();
   }
 
   async handleMessage(

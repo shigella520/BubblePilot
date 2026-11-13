@@ -322,12 +322,12 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         name: "webSearch",
         label: "联网搜索",
         type: "select",
-        description: "禁用、由模型自动判断，或要求必须搜索。",
         options: [
-          { value: "disabled", label: "禁用" },
-          { value: "auto", label: "自动判断" },
-          { value: "required", label: "必须搜索" },
+          { value: "disabled", label: "关闭" },
+          { value: "auto", label: "开启" },
         ],
+        description:
+          "允许模型按需联网搜索，不保证每次回答都搜索；不控制 MCP 等独立工具的联网。",
       },
       {
         name: "webSearchSources",

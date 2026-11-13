@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ToggleSwitch from "../ToggleSwitch.vue";
+import { normalizeWebSearchPolicy } from "../../../../../modules/ai/web-search-policy";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, vue/no-mutating-props */
 import AttachmentHandlingSettings from "./AttachmentHandlingSettings.vue";
 import ScheduledTriggerSettings from "./ScheduledTriggerSettings.vue";
@@ -370,8 +372,20 @@ function configVisible(item: any): boolean {
     >
       <label
         ><span>{{ item.label }}</span
-        ><ContextTemplateEditor
-          v-if="item.type === 'template'"
+        ><ToggleSwitch
+          v-if="
+            props.node.data.block.type === 'ai-chat' &&
+            item.name === 'webSearch'
+          "
+          :label="item.label"
+          :model-value="
+            normalizeWebSearchPolicy(props.config.webSearch) === 'auto'
+          "
+          @update:model-value="
+            props.config.webSearch = $event ? 'auto' : 'disabled'
+          " />
+        <ContextTemplateEditor
+          v-else-if="item.type === 'template'"
           :model-value="String(props.config[item.name] ?? '')"
           :references="templateReferences()"
           @update:model-value="

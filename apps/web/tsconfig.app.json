@@ -19,6 +19,7 @@
     "../../modules/attachments/attachment-policy.ts",
     "../../modules/workflow/action-blocks.ts",
     "../../modules/ai/execution-policy.ts",
+    "../../modules/ai/web-search-policy.ts",
     "../../modules/workflow/idle-policy.ts",
     "../../modules/workflow/idle-defaults.ts",
     "src/**/*.ts",

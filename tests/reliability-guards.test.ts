@@ -168,3 +168,34 @@ describe("reliability guards", () => {
     await expect(blockedA).resolves.toBe("blocked-a");
   });
 });
+
+describe("workflow shutdown", () => {
+  it("rejects queued and new work, drains active work before releasing runtime ownership", async () => {
+    const gate = new BoundedExecutionGate(1, 2, 1000);
+    let finish!: () => void;
+    const active = gate.run(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const task = vi.fn(() => Promise.resolve());
+    const queued = gate.run(task);
+    const rejected = expect(queued).rejects.toMatchObject({
+      code: "WORKFLOW_SHUTTING_DOWN",
+    });
+    const closed = vi.fn();
+    const closing = gate.close().then(closed);
+    await rejected;
+    await expect(gate.run(task)).rejects.toMatchObject({
+      code: "WORKFLOW_SHUTTING_DOWN",
+    });
+    expect(task).not.toHaveBeenCalled();
+    expect(closed).not.toHaveBeenCalled();
+    finish();
+    await active;
+    await closing;
+    expect(closed).toHaveBeenCalledOnce();
+    expect(gate.status()).toMatchObject({ active: 0, queued: 0 });
+  });
+});

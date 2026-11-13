@@ -61,7 +61,16 @@ export interface TriggerBinding extends TriggerRecord {
   definition: WorkflowDefinition;
 }
 
+export interface StartupExecutionClosure {
+  runId: string;
+  reasonCode: string;
+  reason: string;
+  previousStatus: string;
+  closedAt: string;
+}
+
 export interface WorkflowExecutionRecord {
+  startupClosure?: StartupExecutionClosure | null;
   triggerEvent?: BackgroundWorkflowEvent | null;
   botIdentity?: BotIdentity | null;
   id: string;
