@@ -97,6 +97,22 @@ const firstHistory = (request: AiChatRequest) =>
   request.messages.findIndex(
     (m) => typeof m.content === "string" && m.content.includes("<chat_history"),
   );
+// Model the documented gateway behavior using actual encoded payloads:
+// hoist every system/developer message, regardless of its original position.
+function gatewaySystem(payload: Record<string, unknown>): string {
+  const items = (payload.messages ?? payload.input) as Array<{
+    role?: string;
+    content: string | Array<{ text?: string }>;
+  }>;
+  return items
+    .filter((item) => item.role === "system" || item.role === "developer")
+    .map((item) =>
+      typeof item.content === "string"
+        ? item.content
+        : item.content.map((part) => part.text ?? "").join("\n"),
+    )
+    .join("\n\n");
+}
 function sharedPrefix(a: string, b: string): string {
   let i = 0;
   while (i < Math.min(a.length, b.length) && a[i] === b[i]) i++;
@@ -351,10 +367,15 @@ describe.each(["chat-completions", "responses"] as const)(
         const r = f.requests[i]!;
         expect(r.messages.slice(0, firstHistory(r))).toEqual(configPrefix);
         const text = messageText(r);
-        expect(text.indexOf("<execution_context>")).toBeGreaterThan(
+        expect(text.indexOf("<agent_budget_status>")).toBeGreaterThan(
           text.indexOf("Stable fictional history"),
         );
         expect(text).toContain(`2026-11-0${i + 1}T03:00:00.000Z`);
+        expect(r.messages.at(-1)!.role).toBe("user");
+        expect(gatewaySystem(f.payloads[i]!)).toBe(
+          gatewaySystem(f.payloads[0]!),
+        );
+        expect(gatewaySystem(f.payloads[i]!)).not.toContain("2026-11-0");
         expect(f.payloads[i]!.tools).toEqual(f.payloads[0]!.tools);
         expect(f.sessionIds[i]).toBe(f.sessionIds[0]);
         expect(JSON.stringify(f.payloads[i])).not.toContain(
@@ -485,7 +506,7 @@ describe.each(["chat-completions", "responses"] as const)(
       const end = first.messages.findIndex(
         (m) =>
           typeof m.content === "string" &&
-          m.content.startsWith("<execution_context>"),
+          m.content.startsWith("<current_message>"),
       );
       expect(end).toBeGreaterThan(0);
       expect(
@@ -553,7 +574,7 @@ describe.each(["chat-completions", "responses"] as const)(
               m.content.startsWith("<current_message>"),
           ),
         ).toBe(false);
-        expect(messageText(r)).not.toContain("当前服务端时间");
+        expect(messageText(r)).not.toContain('"currentTime"');
         expect(messageText(r)).toContain(
           mode === "idle" ? "虚构主动交流任务" : "虚构提醒任务",
         );
@@ -578,6 +599,27 @@ describe.each(["chat-completions", "responses"] as const)(
       );
       expect(second!.messages.at(-1)!.content).not.toEqual(
         first!.messages.at(-1)!.content,
+      );
+      const taskTimes: unknown[] = [];
+      for (const r of f.requests) {
+        expect(r.messages.at(-1)!.role).toBe("user");
+        const state = JSON.parse(
+          (r.messages.at(-1)!.content as string)
+            .replace("<agent_budget_status>", "")
+            .replace("</agent_budget_status>", ""),
+        ) as Record<string, unknown>;
+        expect(state.currentTime).toBeDefined();
+        taskTimes.push(state.currentTime);
+        expect(state).not.toHaveProperty("guidance");
+      }
+      expect(new Set(taskTimes).size).toBe(1);
+      expect(gatewaySystem(f.payloads[1]!)).toBe(gatewaySystem(f.payloads[0]!));
+      for (const payload of f.payloads) {
+        expect(payload).not.toHaveProperty("executionTime");
+      }
+      expect(gatewaySystem(f.payloads[0]!)).not.toContain('"modelRound":');
+      expect(gatewaySystem(f.payloads[0]!)).toContain(
+        "Only the application enforces quotas",
       );
       expect(
         second!.messages.filter(
