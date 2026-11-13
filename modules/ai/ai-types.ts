@@ -662,6 +662,8 @@ export interface AiRouteRequest {
   };
   routeId: string;
   messages: readonly AiChatMessage[];
+  /** Internal insertion boundary for configuration catalogues; never sent to providers. */
+  configurationMessageCount?: number;
   maxOutputTokens: number;
   temperature: number | null;
   maxOutputCharacters: number;

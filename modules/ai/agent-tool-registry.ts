@@ -1,3 +1,4 @@
+import { canonicalJson } from "../../app/canonical-json.js";
 import type { AiImageContentPart } from "./ai-types.js";
 import type { AgentToolContext } from "./agent-budget.js";
 import type { AiToolDefinition } from "./ai-types.js";
@@ -28,6 +29,13 @@ export class AgentToolRegistry {
     return this.tools.get(name);
   }
   definitions(): AiToolDefinition[] {
-    return [...this.tools.values()].map((t) => t.definition);
+    return [...this.tools.values()]
+      .map((t) => ({
+        ...t.definition,
+        parameters: JSON.parse(
+          canonicalJson(t.definition.parameters),
+        ) as AiToolDefinition["parameters"],
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 }

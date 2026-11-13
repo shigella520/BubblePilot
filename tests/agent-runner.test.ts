@@ -963,11 +963,11 @@ describe("AgentRunner", () => {
         text: "Earlier decision",
       });
       expect(client.requests[0]?.tools?.map((t) => t.name)).toEqual([
-        "query_chat_messages",
         "count_chat_messages",
         "get_chat_message_extrema",
-        "search_chat_history",
+        "query_chat_messages",
         "read_chat_excerpt",
+        "search_chat_history",
       ]);
       const policyText = JSON.stringify(client.requests[0]?.messages);
       expect(policyText).toContain("Preserve the configured persona");

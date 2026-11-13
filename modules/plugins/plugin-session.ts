@@ -48,17 +48,19 @@ export class PluginSession {
     }));
   }
   catalogue() {
-    return this.plugins.flatMap((p) =>
-      p.package.skills
-        .filter((s) => !p.config.disabledSkills.includes(s.id))
-        .map((s) => ({
-          id: `${p.id}:${s.id}`,
-          name: s.name,
-          description: s.description,
-          plugin: p.name,
-          version: p.package.version,
-        })),
-    );
+    return this.plugins
+      .flatMap((p) =>
+        p.package.skills
+          .filter((s) => !p.config.disabledSkills.includes(s.id))
+          .map((s) => ({
+            id: `${p.id}:${s.id}`,
+            name: s.name,
+            description: s.description,
+            plugin: p.name,
+            version: p.package.version,
+          })),
+      )
+      .sort((a, b) => a.id.localeCompare(b.id));
   }
   private async check(p: InstalledPlugin, skill?: string, tool?: ApprovedTool) {
     if (this.closed) pluginError("SESSION_INVALIDATED");
