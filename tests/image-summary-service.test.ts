@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { sha256 } from "../app/canonical-json.js";
 import type { AiRepository } from "../modules/ai/ai-repository.js";
-import type { AiRoutingService } from "../modules/ai/ai-routing-service.js";
+import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
+import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
+import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
+import type { AiApiKind } from "../modules/ai/ai-types.js";
 import {
   ImageSummaryService,
   ImageSummaryWorker,
@@ -21,6 +24,7 @@ import type { MessageEnvelope } from "../modules/ingestion/message-envelope.js";
 import { IngestionService } from "../modules/ingestion/ingestion-service.js";
 import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/webhook-adapter.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
+import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import {
   groupAttachmentWebhook,
   newMessageWebhook,
@@ -149,6 +153,194 @@ function imageRouteRepository(): Pick<
       }),
   };
 }
+
+async function imageAffinityFixture(
+  apiKind: AiApiKind,
+  options: {
+    fallback?: boolean;
+    affinity?: "session-id-header" | "disabled";
+    responseStatus: (url: string, attempt: number) => number;
+  },
+) {
+  const aiRepository = new InMemoryAiRepository();
+  const providers = [];
+  for (const name of options.fallback ? ["primary", "backup"] : ["primary"]) {
+    const result = await aiRepository.createProvider({
+      name,
+      apiKind,
+      baseUrl: `https://${name}.example.test/v1`,
+      model: "fictional-vision",
+      secretRef: "FICTIONAL_IMAGE_KEY",
+      parameters: {},
+      requestTimeoutMs: 5_000,
+      enabled: true,
+      capabilities: {
+        functionCalling: false,
+        hostedWebSearch: false,
+        imageInput: true,
+      },
+      sessionAffinity: options.affinity ?? "session-id-header",
+    });
+    if (result.status !== "ok") throw new Error("Provider fixture failed.");
+    providers.push(result.value);
+    await aiRepository.updateProviderCapabilityProbe(result.value.id, {
+      functionCalling: "unknown",
+      hostedWebSearch: "unknown",
+      imageInput: "verified",
+      checkedAt: new Date(0).toISOString(),
+    });
+  }
+  const route = await aiRepository.createRoute({
+    name: "Fictional image route",
+    providerIds: providers.map((provider) => provider.id),
+    fallbackEnabled: options.fallback ?? false,
+    retryPolicy: { maxRounds: 1, initialDelayMs: 0 },
+    degradePolicy: { failureThreshold: 10, cooldownMs: 60_000 },
+    enabled: true,
+  });
+  if (route.status !== "ok") throw new Error("Route fixture failed.");
+
+  const requests: Array<{
+    url: string;
+    headers: Headers;
+    body: Record<string, unknown>;
+  }> = [];
+  const secrets = new EnvironmentSecretResolver({
+    FICTIONAL_IMAGE_KEY: "fictional-secret",
+  });
+  const client = new OpenAiCompatibleClient(secrets, (url, init) => {
+    const urlText =
+      typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+    if (typeof init?.body !== "string") throw new Error("Expected JSON body.");
+    requests.push({
+      url: urlText,
+      headers: new Headers(init?.headers),
+      body: JSON.parse(init.body) as Record<string, unknown>,
+    });
+    const status = options.responseStatus(urlText, requests.length);
+    const body =
+      status === 200
+        ? apiKind === "responses"
+          ? { output_text: "一张虚构图片。" }
+          : {
+              choices: [
+                {
+                  message: { role: "assistant", content: "一张虚构图片。" },
+                  finish_reason: "stop",
+                },
+              ],
+            }
+        : { error: { message: "Fictional provider unavailable" } };
+    return Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  });
+  const routing = new AiRoutingService(aiRepository, client, secrets);
+  const service = new ImageSummaryService(
+    new MemorySummaryRepository(),
+    aiRepository,
+    routing,
+    {
+      loadForSummary: vi.fn().mockResolvedValue({
+        status: "succeeded",
+        contentHash: "sha256:fictional-image",
+        part: {
+          type: "image",
+          dataUrl: "data:image/png;base64,ZmFrZQ==",
+          detail: "high",
+          label: "待摘要的消息图片",
+        },
+      }),
+    } as unknown as NativeImageInputService,
+  );
+  return { service, providers, requests };
+}
+
+describe.each(["chat-completions", "responses"] as const)(
+  "image summary session affinity (%s)",
+  (apiKind) => {
+    it("keeps the same job stable across retries and isolates another job", async () => {
+      const { service, providers, requests } = await imageAffinityFixture(
+        apiKind,
+        { responseStatus: (_, attempt) => (attempt === 1 ? 503 : 200) },
+      );
+      const otherJob = {
+        ...imageJob,
+        id: "99999999-9999-4999-8999-999999999999",
+      };
+
+      await expect(service.process(imageJob, "worker-a")).resolves.toBe(false);
+      await expect(
+        service.process({ ...imageJob, attemptCount: 2 }, "worker-a"),
+      ).resolves.toBe(true);
+      await expect(service.process(otherJob, "worker-a")).resolves.toBe(true);
+
+      expect(requests).toHaveLength(3);
+      const ids = requests.map((request) =>
+        request.headers.get("x-session-id"),
+      );
+      const scope = sha256(["image-summary", imageJob.id].join("\u0000"));
+      expect(ids[0]).toBe(
+        `bp_${sha256(`${providers[0]!.id}\u0000${scope}`).slice("sha256:".length)}`,
+      );
+      expect(ids[1]).toBe(ids[0]);
+      expect(ids[2]).toMatch(/^bp_[a-f0-9]{64}$/u);
+      expect(ids[2]).not.toBe(ids[0]);
+      for (const [index, request] of requests.entries()) {
+        expect(JSON.stringify(request.body)).not.toContain(imageJob.id);
+        expect(JSON.stringify(request.body)).not.toContain(otherJob.id);
+        if (apiKind === "responses") {
+          expect(request.body.prompt_cache_key).toBe(ids[index]);
+        } else {
+          expect(request.body).not.toHaveProperty("prompt_cache_key");
+        }
+      }
+    });
+
+    it("uses a different session for each fallback provider", async () => {
+      const { service, providers, requests } = await imageAffinityFixture(
+        apiKind,
+        {
+          fallback: true,
+          responseStatus: (url) => (url.includes("primary.") ? 503 : 200),
+        },
+      );
+
+      await expect(service.process(imageJob, "worker-a")).resolves.toBe(true);
+
+      expect(requests).toHaveLength(2);
+      const scope = sha256(["image-summary", imageJob.id].join("\u0000"));
+      const ids = requests.map((request) =>
+        request.headers.get("x-session-id"),
+      );
+      for (const [index, request] of requests.entries()) {
+        expect(request.url).toContain(index === 0 ? "primary." : "backup.");
+        expect(ids[index]).toBe(
+          `bp_${sha256(`${providers[index]!.id}\u0000${scope}`).slice("sha256:".length)}`,
+        );
+        if (apiKind === "responses") {
+          expect(request.body.prompt_cache_key).toBe(ids[index]);
+        }
+      }
+      expect(ids[0]).not.toBe(ids[1]);
+    });
+
+    it("does not automatically send a session when affinity is disabled", async () => {
+      const { service, requests } = await imageAffinityFixture(apiKind, {
+        affinity: "disabled",
+        responseStatus: () => 200,
+      });
+
+      await expect(service.process(imageJob, "worker-a")).resolves.toBe(true);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.headers.get("x-session-id")).toBeNull();
+      expect(requests[0]!.body).not.toHaveProperty("prompt_cache_key");
+    });
+  },
+);
 
 describe("image summary background processing", () => {
   it("uses a verified image route without history, tools, search, or text fallback", async () => {

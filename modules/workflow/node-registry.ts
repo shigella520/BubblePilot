@@ -1233,6 +1233,17 @@ class AiChatNodeHandler extends BaseNodeHandler {
       );
     }
 
+    // Preserve the existing message key exactly. Both background triggers use
+    // one stable namespace, independent of task IDs, execution IDs and time.
+    const promptScopeKey = sha256(
+      [
+        context.envelope.provider,
+        context.envelope.chat.providerChatId,
+        context.workflowId,
+        node.id,
+        ...(context.envelope.message === null ? ["scheduled"] : []),
+      ].join("\u0000"),
+    );
     let result;
     try {
       result = await this.agent.run({
@@ -1307,22 +1318,8 @@ class AiChatNodeHandler extends BaseNodeHandler {
             }),
         webSearchSources: node.config.webSearchSources,
         protectedPrompt: systemPrompt.length === 0 ? null : systemPrompt,
-        promptTraceKey: sha256(
-          [
-            context.envelope.provider,
-            context.envelope.chat.providerChatId,
-            context.workflowId,
-            node.id,
-          ].join("\u0000"),
-        ),
-        sessionAffinityKey: sha256(
-          [
-            context.envelope.provider,
-            context.envelope.chat.providerChatId,
-            context.workflowId,
-            node.id,
-          ].join("\u0000"),
-        ),
+        promptTraceKey: promptScopeKey,
+        sessionAffinityKey: promptScopeKey,
       });
     } catch (error) {
       throw new WorkflowExecutionError(

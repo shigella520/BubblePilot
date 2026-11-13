@@ -3,6 +3,7 @@ import {
   generationLengthInstruction,
 } from "./execution-policy.js";
 import { randomUUID } from "node:crypto";
+import { sha256 } from "../../app/canonical-json.js";
 
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
 import type { LinkPreviewBundle } from "../ingestion/link-preview.js";
@@ -105,6 +106,9 @@ export class ImageSummaryService {
       purpose: "image-summary",
       backgroundOperationId: job.id,
       agentTurn: job.attemptCount,
+      // Each persisted image-summary job has its own affinity scope. Retries
+      // reuse it, while the routing layer still separates Provider IDs.
+      sessionAffinityKey: sha256(["image-summary", job.id].join("\u0000")),
       messages: [
         {
           role: "system",

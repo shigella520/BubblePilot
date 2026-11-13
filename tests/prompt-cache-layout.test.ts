@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentRunner } from "../modules/ai/agent-runner.js";
 import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
@@ -86,6 +86,54 @@ function context(turn = 0): NodeExecutionContext {
     contextSnapshot: null,
     botIdentity: { workflowId, nickname: "虚构助手", version: 1 },
   };
+}
+function backgroundContext(
+  mode: "idle" | "scheduled-v1" | "scheduled-v2",
+  turn: number,
+): NodeExecutionContext {
+  const ctx = context(turn);
+  const base = {
+    eventId: `fixture-${mode}-${turn}`,
+    correlationId: ctx.correlationId,
+    provider: "bluebubbles" as const,
+    chat: ctx.envelope.chat,
+    message: null,
+  };
+  ctx.envelope =
+    mode === "idle"
+      ? {
+          ...base,
+          schemaVersion: "chat-idle-v1",
+          idle: {
+            chatId: "fixture-chat",
+            activityGeneration: String(turn),
+            lastActivityAt: "2026-11-01T00:00:00Z",
+            lastMessageIndex: String(turn),
+            upperMessageIndex: String(turn + 1),
+            triggeredAt: "2026-11-01T01:00:00Z",
+            workflowVersionId: "fixture-version",
+            taskInstruction: "虚构主动交流任务",
+          },
+        }
+      : {
+          ...base,
+          schemaVersion:
+            mode === "scheduled-v1" ? "scheduled-task-v1" : "scheduled-task-v2",
+          scheduled: {
+            taskId: `fixture-task-${turn}`,
+            taskVersion: turn,
+            chatId: "fixture-chat",
+            content: "虚构提醒任务",
+            requestSnapshot: "虚构原始请求",
+            creatorSenderId: memberA.senderId,
+            scheduledAt: "2026-11-01T01:00:00Z",
+            triggeredAt: "2026-11-01T01:00:00Z",
+            timeZone: "Asia/Shanghai",
+            upperMessageIndex: String(turn + 1),
+            workflowVersionId: "fixture-version",
+          },
+        };
+  return ctx;
 }
 const messageText = (request: AiChatRequest) =>
   request.messages
@@ -321,6 +369,8 @@ async function setup(apiKind: AiApiKind, useTool = false, answer = "虚构回答
     onFailure: "done",
   };
   return {
+    repo,
+    providerId: provider.value.id,
     requests,
     payloads,
     sessionIds,
@@ -402,6 +452,122 @@ describe.each(["chat-completions", "responses"] as const)(
           }
         }
       }
+    });
+
+    it("separates message and scheduled sessions and compares each mode to its own prior request", async () => {
+      const f = await setup(
+        apiKind,
+        false,
+        '{"action":"send","text":"虚构主动交流"}',
+      );
+      const first = context(1);
+      const sequence = [
+        first,
+        backgroundContext("idle", 2),
+        context(3),
+        context(4),
+        context(5),
+        backgroundContext("scheduled-v2", 6),
+        context(7),
+        backgroundContext("scheduled-v1", 8),
+      ];
+      for (const ctx of sequence) await f.run(ctx);
+
+      const digest = (value: string) =>
+        `sha256:${createHash("sha256").update(value).digest("hex")}`;
+      const oldScope = digest(
+        [
+          first.envelope.provider,
+          first.envelope.chat.providerChatId,
+          first.workflowId,
+          f.node.id,
+        ].join("\u0000"),
+      );
+      const oldSession = `bp_${digest(`${f.providerId}\u0000${oldScope}`).slice("sha256:".length)}`;
+      expect(f.sessionIds[0]).toBe(oldSession);
+      const messageSession = f.sessionIds[0];
+      const backgroundSession = f.sessionIds[1];
+      const scheduledScope = digest(
+        [
+          first.envelope.provider,
+          first.envelope.chat.providerChatId,
+          first.workflowId,
+          f.node.id,
+          "scheduled",
+        ].join("\u0000"),
+      );
+      const scheduledSession = `bp_${digest(`${f.providerId}\u0000${scheduledScope}`).slice("sha256:".length)}`;
+      expect(backgroundSession).toBe(scheduledSession);
+      expect(backgroundSession).toMatch(/^bp_[a-f0-9]{64}$/u);
+      expect(backgroundSession).not.toBe(messageSession);
+      for (const i of [2, 3, 4, 6])
+        expect(f.sessionIds[i]).toBe(messageSession);
+      for (const i of [5, 7]) expect(f.sessionIds[i]).toBe(backgroundSession);
+      for (const [i, payload] of f.payloads.entries()) {
+        if (apiKind === "responses")
+          expect(payload.prompt_cache_key).toBe(f.sessionIds[i]);
+        else expect(payload).not.toHaveProperty("prompt_cache_key");
+      }
+
+      const traces = f.repo.attempts.map(
+        (attempt) => attempt.diagnostics?.requestTrace,
+      );
+      expect(traces).toHaveLength(sequence.length);
+      expect(traces[0]?.previousRequestHash).toBeNull();
+      expect(traces[1]?.previousRequestHash).toBeNull();
+      for (const [current, previous] of [
+        [2, 0],
+        [3, 2],
+        [4, 3],
+        [5, 1],
+        [6, 4],
+        [7, 5],
+      ]) {
+        expect(traces[current!]?.previousRequestHash).toBe(
+          traces[previous!]?.requestHash,
+        );
+        expect(traces[current!]?.cacheKeyMatchesPrevious).toBe(true);
+      }
+    });
+
+    it("keeps the existing chat, workflow, node and Provider isolation for scheduled sessions", async () => {
+      const f = await setup(apiKind, false, "虚构提醒");
+      const original = backgroundContext("scheduled-v2", 1);
+      await f.run(original);
+
+      const otherChat = backgroundContext("scheduled-v2", 2);
+      otherChat.envelope.chat.providerChatId = "fictional-other-chat";
+      await f.run(otherChat);
+
+      const otherWorkflow = backgroundContext("scheduled-v2", 3);
+      otherWorkflow.workflowId = "44444444-4444-4444-8444-444444444444";
+      await f.run(otherWorkflow);
+
+      f.node.id = "fictional-other-node";
+      await f.run(backgroundContext("scheduled-v2", 4));
+
+      const otherProvider = await setup(apiKind, false, "虚构提醒");
+      await otherProvider.run(backgroundContext("scheduled-v2", 5));
+      expect(new Set([...f.sessionIds, ...otherProvider.sessionIds]).size).toBe(
+        5,
+      );
+    });
+
+    it("does not send session identifiers when Provider affinity is disabled", async () => {
+      const f = await setup(
+        apiKind,
+        false,
+        '{"action":"send","text":"虚构主动交流"}',
+      );
+      f.repo.providers.get(f.providerId)!.sessionAffinity = "disabled";
+      await f.run(context());
+      await f.run(backgroundContext("idle", 1));
+      expect(f.sessionIds).toEqual([null, null]);
+      for (const payload of f.payloads)
+        expect(payload).not.toHaveProperty("prompt_cache_key");
+      expect(
+        f.repo.attempts[1]?.diagnostics?.requestTrace?.previousRequestHash,
+      ).toBeNull();
     });
 
     it("keeps dynamic system templates after history without changing their system role", async () => {
