@@ -12,6 +12,7 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -104,6 +105,7 @@ with sqlite3.connect(':memory:') as fts:
     assert [r[0] for r in fts.execute("SELECT rowid FROM docs WHERE docs MATCH 'prefix*' ORDER BY rowid")] == [-9223372036854775808, -1, 1]
 assert subprocess.check_output(['sqlite3', ':memory:', fts_sql], text=True).splitlines() == ['-9223372036854775808', '-1', '1']
 from bs4 import BeautifulSoup
+from importlib.metadata import version
 import httpx
 import numpy as np
 import pandas as pd
@@ -124,6 +126,14 @@ with tempfile.TemporaryDirectory(dir='/workspace') as folder:
     assert Image.open(root / 'image.png').size == (32, 24)
     assert yaml.safe_load('fictional: 42')['fictional'] == 42
     assert BeautifulSoup('<p>fictional cat</p>', 'html.parser').get_text() == 'fictional cat'
+    nested_html = BeautifulSoup('<section><div><div><p>fictional</p></div></div></section>', 'html.parser')
+    assert nested_html.select_one('section div div p').get_text() == 'fictional'
+    # CVE-2026-126190: an unmatched descendant selector on deeply nested input.
+    # Use a subprocess timeout so an accidental regression cannot stall CI.
+    assert version('soupsieve') == '4.0'
+    subprocess.run([sys.executable, '-c',
+        "from bs4 import BeautifulSoup; assert not BeautifulSoup('<div>' * 200, 'html.parser').select('section div div div')"],
+        check=True, timeout=15)
     writer = PdfWriter()
     page = writer.add_blank_page(width=200, height=200)
     font = DictionaryObject({NameObject('/Type'): NameObject('/Font'), NameObject('/Subtype'): NameObject('/Type1'), NameObject('/BaseFont'): NameObject('/Helvetica')})

@@ -3,6 +3,7 @@ import { InMemoryAuthRepository } from "./support/in-memory-auth-repository.js";
 import { describe, it, expect, vi } from "vitest";
 import { buildApplication } from "../app/application.js";
 import type { AppConfig } from "../app/config.js";
+import { hashPassword } from "../app/security.js";
 import type { BotIdentityService } from "../modules/identity/bot-identity-service.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
 const apiAccessToken = "fictional-api-access-token-32-chars-long";
@@ -39,6 +40,100 @@ const config: AppConfig = {
 };
 
 describe("Bot identity administrator API", () => {
+  it("requires sensitive authorization to rebuild an index and audits denial and success", async () => {
+    const loginPassword = "fictional-login-password";
+    const sensitivePassword = "fictional-sensitive-password";
+    const loginPasswordHash = await hashPassword(
+      loginPassword,
+      Buffer.from("login-test-salt-1"),
+    );
+    const sensitiveOperationPasswordHash = await hashPassword(
+      sensitivePassword,
+      Buffer.from("stepup-test-salt"),
+    );
+    const authRepository = new InMemoryAuthRepository();
+    const rebuild = vi.fn().mockResolvedValue({ memory: true });
+    const app = buildApplication(
+      { ...config, loginPasswordHash, sensitiveOperationPasswordHash },
+      new InMemoryArchiveRepository(),
+      {
+        botIdentity: {
+          rebuild,
+          close: () => Promise.resolve(),
+        } as unknown as BotIdentityService,
+        auth: new AuthService(authRepository, {
+          loginPasswordHash,
+          sensitiveOperationPasswordHash,
+          sessionTtlSeconds: 43200,
+          sensitiveOperationTtlSeconds: 300,
+        }),
+        logger: false,
+      },
+    );
+    try {
+      const url =
+        "/api/v1/chats/22222222-2222-4222-8222-222222222222/bot-identity/rebuild";
+      expect((await app.inject({ method: "POST", url })).statusCode).toBe(401);
+      const login = await app.inject({
+        method: "POST",
+        url: "/api/v1/auth/session",
+        payload: { password: loginPassword },
+      });
+      const headers = {
+        cookie: login.cookies.map((c) => `${c.name}=${c.value}`).join("; "),
+        origin: "http://localhost",
+      };
+      const denied = await app.inject({
+        method: "POST",
+        url,
+        headers,
+        payload: { target: "memory" },
+      });
+      expect(denied.statusCode).toBe(403);
+      expect(denied.json()).toMatchObject({
+        error: { code: "SENSITIVE_AUTH_REQUIRED" },
+      });
+      expect(rebuild).not.toHaveBeenCalled();
+      const verify = await app.inject({
+        method: "POST",
+        url: "/api/v1/auth/sensitive",
+        headers,
+        payload: { password: sensitivePassword },
+      });
+      expect(verify.statusCode).toBe(200);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url,
+            headers,
+            payload: { target: "memory" },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(rebuild).toHaveBeenCalledExactlyOnceWith(
+        "22222222-2222-4222-8222-222222222222",
+        "memory",
+      );
+      const grant = [...authRepository.grants.values()][0];
+      if (!grant) throw new Error("Sensitive grant fixture missing");
+      authRepository.grants.set(grant.sessionId, {
+        ...grant,
+        expiresAt: new Date(Date.now() - 1_000).toISOString(),
+      });
+      expect(
+        (await app.inject({ method: "POST", url, headers })).statusCode,
+      ).toBe(403);
+      expect(rebuild).toHaveBeenCalledTimes(1);
+      for (const outcome of ["denied", "succeeded"])
+        expect(authRepository.auditEvents).toContainEqual(
+          expect.objectContaining({ action: "bot-identity.rebuild", outcome }),
+        );
+    } finally {
+      await app.close();
+    }
+  });
+
   it("requires admin, validates input, and preserves exact workflow target", async () => {
     const view = vi.fn().mockResolvedValue({
       workflowId: "11111111-1111-4111-8111-111111111111",

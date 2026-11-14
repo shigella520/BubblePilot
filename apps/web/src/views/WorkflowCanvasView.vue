@@ -390,7 +390,7 @@ onMounted(load);
       <p>
         将向以下
         {{ idleConfirmation.chats.length }}
-        个聊天启用配置中的空闲交流或定时提醒，需要敏感解锁。定时提醒按用户指定时间发送，不受空闲免打扰限制。
+        个聊天启用配置中的空闲交流或定时提醒。定时提醒按用户指定时间发送，不受空闲免打扰限制。
       </p>
       <ul>
         <li v-for="chat in idleConfirmation.chats" :key="chat">{{ chat }}</li>

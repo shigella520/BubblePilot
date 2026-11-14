@@ -1664,9 +1664,16 @@ textarea:focus {
 }
 .form-actions {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 9px;
+}
+.form-actions > .panel-description {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
 }
 .inline-create-form > .button {
   justify-self: start;

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentRunner } from "../modules/ai/agent-runner.js";
 import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
@@ -87,6 +87,54 @@ function context(turn = 0): NodeExecutionContext {
     botIdentity: { workflowId, nickname: "虚构助手", version: 1 },
   };
 }
+function backgroundContext(
+  mode: "idle" | "scheduled-v1" | "scheduled-v2",
+  turn: number,
+): NodeExecutionContext {
+  const ctx = context(turn);
+  const base = {
+    eventId: `fixture-${mode}-${turn}`,
+    correlationId: ctx.correlationId,
+    provider: "bluebubbles" as const,
+    chat: ctx.envelope.chat,
+    message: null,
+  };
+  ctx.envelope =
+    mode === "idle"
+      ? {
+          ...base,
+          schemaVersion: "chat-idle-v1",
+          idle: {
+            chatId: "fixture-chat",
+            activityGeneration: String(turn),
+            lastActivityAt: "2026-11-01T00:00:00Z",
+            lastMessageIndex: String(turn),
+            upperMessageIndex: String(turn + 1),
+            triggeredAt: "2026-11-01T01:00:00Z",
+            workflowVersionId: "fixture-version",
+            taskInstruction: "虚构主动交流任务",
+          },
+        }
+      : {
+          ...base,
+          schemaVersion:
+            mode === "scheduled-v1" ? "scheduled-task-v1" : "scheduled-task-v2",
+          scheduled: {
+            taskId: `fixture-task-${turn}`,
+            taskVersion: turn,
+            chatId: "fixture-chat",
+            content: "虚构提醒任务",
+            requestSnapshot: "虚构原始请求",
+            creatorSenderId: memberA.senderId,
+            scheduledAt: "2026-11-01T01:00:00Z",
+            triggeredAt: "2026-11-01T01:00:00Z",
+            timeZone: "Asia/Shanghai",
+            upperMessageIndex: String(turn + 1),
+            workflowVersionId: "fixture-version",
+          },
+        };
+  return ctx;
+}
 const messageText = (request: AiChatRequest) =>
   request.messages
     .map((m) =>
@@ -97,6 +145,22 @@ const firstHistory = (request: AiChatRequest) =>
   request.messages.findIndex(
     (m) => typeof m.content === "string" && m.content.includes("<chat_history"),
   );
+// Model the documented gateway behavior using actual encoded payloads:
+// hoist every system/developer message, regardless of its original position.
+function gatewaySystem(payload: Record<string, unknown>): string {
+  const items = (payload.messages ?? payload.input) as Array<{
+    role?: string;
+    content: string | Array<{ text?: string }>;
+  }>;
+  return items
+    .filter((item) => item.role === "system" || item.role === "developer")
+    .map((item) =>
+      typeof item.content === "string"
+        ? item.content
+        : item.content.map((part) => part.text ?? "").join("\n"),
+    )
+    .join("\n\n");
+}
 function sharedPrefix(a: string, b: string): string {
   let i = 0;
   while (i < Math.min(a.length, b.length) && a[i] === b[i]) i++;
@@ -305,6 +369,8 @@ async function setup(apiKind: AiApiKind, useTool = false, answer = "虚构回答
     onFailure: "done",
   };
   return {
+    repo,
+    providerId: provider.value.id,
     requests,
     payloads,
     sessionIds,
@@ -351,10 +417,15 @@ describe.each(["chat-completions", "responses"] as const)(
         const r = f.requests[i]!;
         expect(r.messages.slice(0, firstHistory(r))).toEqual(configPrefix);
         const text = messageText(r);
-        expect(text.indexOf("<execution_context>")).toBeGreaterThan(
+        expect(text.indexOf("<agent_budget_status>")).toBeGreaterThan(
           text.indexOf("Stable fictional history"),
         );
         expect(text).toContain(`2026-11-0${i + 1}T03:00:00.000Z`);
+        expect(r.messages.at(-1)!.role).toBe("user");
+        expect(gatewaySystem(f.payloads[i]!)).toBe(
+          gatewaySystem(f.payloads[0]!),
+        );
+        expect(gatewaySystem(f.payloads[i]!)).not.toContain("2026-11-0");
         expect(f.payloads[i]!.tools).toEqual(f.payloads[0]!.tools);
         expect(f.sessionIds[i]).toBe(f.sessionIds[0]);
         expect(JSON.stringify(f.payloads[i])).not.toContain(
@@ -381,6 +452,122 @@ describe.each(["chat-completions", "responses"] as const)(
           }
         }
       }
+    });
+
+    it("separates message and scheduled sessions and compares each mode to its own prior request", async () => {
+      const f = await setup(
+        apiKind,
+        false,
+        '{"action":"send","text":"虚构主动交流"}',
+      );
+      const first = context(1);
+      const sequence = [
+        first,
+        backgroundContext("idle", 2),
+        context(3),
+        context(4),
+        context(5),
+        backgroundContext("scheduled-v2", 6),
+        context(7),
+        backgroundContext("scheduled-v1", 8),
+      ];
+      for (const ctx of sequence) await f.run(ctx);
+
+      const digest = (value: string) =>
+        `sha256:${createHash("sha256").update(value).digest("hex")}`;
+      const oldScope = digest(
+        [
+          first.envelope.provider,
+          first.envelope.chat.providerChatId,
+          first.workflowId,
+          f.node.id,
+        ].join("\u0000"),
+      );
+      const oldSession = `bp_${digest(`${f.providerId}\u0000${oldScope}`).slice("sha256:".length)}`;
+      expect(f.sessionIds[0]).toBe(oldSession);
+      const messageSession = f.sessionIds[0];
+      const backgroundSession = f.sessionIds[1];
+      const scheduledScope = digest(
+        [
+          first.envelope.provider,
+          first.envelope.chat.providerChatId,
+          first.workflowId,
+          f.node.id,
+          "scheduled",
+        ].join("\u0000"),
+      );
+      const scheduledSession = `bp_${digest(`${f.providerId}\u0000${scheduledScope}`).slice("sha256:".length)}`;
+      expect(backgroundSession).toBe(scheduledSession);
+      expect(backgroundSession).toMatch(/^bp_[a-f0-9]{64}$/u);
+      expect(backgroundSession).not.toBe(messageSession);
+      for (const i of [2, 3, 4, 6])
+        expect(f.sessionIds[i]).toBe(messageSession);
+      for (const i of [5, 7]) expect(f.sessionIds[i]).toBe(backgroundSession);
+      for (const [i, payload] of f.payloads.entries()) {
+        if (apiKind === "responses")
+          expect(payload.prompt_cache_key).toBe(f.sessionIds[i]);
+        else expect(payload).not.toHaveProperty("prompt_cache_key");
+      }
+
+      const traces = f.repo.attempts.map(
+        (attempt) => attempt.diagnostics?.requestTrace,
+      );
+      expect(traces).toHaveLength(sequence.length);
+      expect(traces[0]?.previousRequestHash).toBeNull();
+      expect(traces[1]?.previousRequestHash).toBeNull();
+      for (const [current, previous] of [
+        [2, 0],
+        [3, 2],
+        [4, 3],
+        [5, 1],
+        [6, 4],
+        [7, 5],
+      ]) {
+        expect(traces[current!]?.previousRequestHash).toBe(
+          traces[previous!]?.requestHash,
+        );
+        expect(traces[current!]?.cacheKeyMatchesPrevious).toBe(true);
+      }
+    });
+
+    it("keeps the existing chat, workflow, node and Provider isolation for scheduled sessions", async () => {
+      const f = await setup(apiKind, false, "虚构提醒");
+      const original = backgroundContext("scheduled-v2", 1);
+      await f.run(original);
+
+      const otherChat = backgroundContext("scheduled-v2", 2);
+      otherChat.envelope.chat.providerChatId = "fictional-other-chat";
+      await f.run(otherChat);
+
+      const otherWorkflow = backgroundContext("scheduled-v2", 3);
+      otherWorkflow.workflowId = "44444444-4444-4444-8444-444444444444";
+      await f.run(otherWorkflow);
+
+      f.node.id = "fictional-other-node";
+      await f.run(backgroundContext("scheduled-v2", 4));
+
+      const otherProvider = await setup(apiKind, false, "虚构提醒");
+      await otherProvider.run(backgroundContext("scheduled-v2", 5));
+      expect(new Set([...f.sessionIds, ...otherProvider.sessionIds]).size).toBe(
+        5,
+      );
+    });
+
+    it("does not send session identifiers when Provider affinity is disabled", async () => {
+      const f = await setup(
+        apiKind,
+        false,
+        '{"action":"send","text":"虚构主动交流"}',
+      );
+      f.repo.providers.get(f.providerId)!.sessionAffinity = "disabled";
+      await f.run(context());
+      await f.run(backgroundContext("idle", 1));
+      expect(f.sessionIds).toEqual([null, null]);
+      for (const payload of f.payloads)
+        expect(payload).not.toHaveProperty("prompt_cache_key");
+      expect(
+        f.repo.attempts[1]?.diagnostics?.requestTrace?.previousRequestHash,
+      ).toBeNull();
     });
 
     it("keeps dynamic system templates after history without changing their system role", async () => {
@@ -485,7 +672,7 @@ describe.each(["chat-completions", "responses"] as const)(
       const end = first.messages.findIndex(
         (m) =>
           typeof m.content === "string" &&
-          m.content.startsWith("<execution_context>"),
+          m.content.startsWith("<current_message>"),
       );
       expect(end).toBeGreaterThan(0);
       expect(
@@ -553,7 +740,7 @@ describe.each(["chat-completions", "responses"] as const)(
               m.content.startsWith("<current_message>"),
           ),
         ).toBe(false);
-        expect(messageText(r)).not.toContain("当前服务端时间");
+        expect(messageText(r)).not.toContain('"currentTime"');
         expect(messageText(r)).toContain(
           mode === "idle" ? "虚构主动交流任务" : "虚构提醒任务",
         );
@@ -578,6 +765,27 @@ describe.each(["chat-completions", "responses"] as const)(
       );
       expect(second!.messages.at(-1)!.content).not.toEqual(
         first!.messages.at(-1)!.content,
+      );
+      const taskTimes: unknown[] = [];
+      for (const r of f.requests) {
+        expect(r.messages.at(-1)!.role).toBe("user");
+        const state = JSON.parse(
+          (r.messages.at(-1)!.content as string)
+            .replace("<agent_budget_status>", "")
+            .replace("</agent_budget_status>", ""),
+        ) as Record<string, unknown>;
+        expect(state.currentTime).toBeDefined();
+        taskTimes.push(state.currentTime);
+        expect(state).not.toHaveProperty("guidance");
+      }
+      expect(new Set(taskTimes).size).toBe(1);
+      expect(gatewaySystem(f.payloads[1]!)).toBe(gatewaySystem(f.payloads[0]!));
+      for (const payload of f.payloads) {
+        expect(payload).not.toHaveProperty("executionTime");
+      }
+      expect(gatewaySystem(f.payloads[0]!)).not.toContain('"modelRound":');
+      expect(gatewaySystem(f.payloads[0]!)).toContain(
+        "Only the application enforces quotas",
       );
       expect(
         second!.messages.filter(

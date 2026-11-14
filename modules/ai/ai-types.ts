@@ -664,6 +664,8 @@ export interface AiRouteRequest {
   messages: readonly AiChatMessage[];
   /** Internal insertion boundary for configuration catalogues; never sent to providers. */
   configurationMessageCount?: number;
+  /** Task-start server time; emitted only in the trailing runtime data block. */
+  executionTime?: string;
   maxOutputTokens: number;
   temperature: number | null;
   maxOutputCharacters: number;

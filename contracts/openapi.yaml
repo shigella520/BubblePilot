@@ -1211,7 +1211,7 @@ paths:
   /api/v1/chats/{chatId}/bot-identity/rebuild:
     post:
       operationId: postapiv1chatschatIdbotidentityrebuild
-      description: 管理员手动启动身份兼容索引重建，沿用启用状态和聊天授权。仅接受 target=memory，省略时默认 memory。
+      description: 管理员敏感解锁后手动启动身份兼容索引重建并记录审计，沿用启用状态和聊天授权。仅接受 target=memory，省略时默认 memory。
       security:
         - sessionAuth: []
         - bearerAuth: []
@@ -1828,7 +1828,7 @@ paths:
   /api/v1/chats/{chatId}/participants:
     get:
       operationId: getChatParticipants
-      description: 返回该聊天历史中实际出现过的非本人 sender ID，以及按聊天隔离保存的本名和昵称映射。需要敏感操作授权。
+      description: 管理员登录后返回该聊天历史中实际出现过的非本人 sender ID，以及按聊天隔离保存的本名和昵称映射；记录审计，无需敏感解锁。
       security:
         - bearerAuth: []
         - sessionAuth: []
@@ -1842,13 +1842,13 @@ paths:
       responses:
         "200":
           description: 聊天成员发现结果和独立的映射版本。
-        "403":
+        "401":
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
     put:
       operationId: saveChatParticipantIdentities
-      description: 全量替换该聊天的成员映射；只能提交该聊天历史中已经出现过的 sender ID，空数组用于清除全部映射。请求正文不会写入审计 metadata。
+      description: 管理员登录后全量替换该聊天的成员映射，无需敏感解锁；只能提交该聊天历史中已经出现过的 sender ID，空数组用于清除全部映射。请求正文不会写入审计 metadata。
       security:
         - bearerAuth: []
         - sessionAuth: []
@@ -1895,6 +1895,8 @@ paths:
         "200":
           description: 成员映射已保存并返回新版本。
         "400":
+          $ref: "#/components/responses/Error"
+        "401":
           $ref: "#/components/responses/Error"
         "403":
           $ref: "#/components/responses/Error"
@@ -2428,6 +2430,7 @@ paths:
   /api/v1/workflows/{workflowId}/versions/{version}/publish:
     post:
       operationId: publishWorkflowVersion
+      description: 管理员登录即可发布，包括启用空闲交流或定时提醒的版本；需校验目标聊天与节点配置并记录审计。
       security:
         - bearerAuth: []
         - sessionAuth: []
@@ -2450,7 +2453,7 @@ paths:
   /api/v1/workflows/{workflowId}/versions/{version}/export:
     get:
       operationId: exportWorkflowManifest
-      description: 导出指定不可变版本；portable 默认移除实例 ID，instance-bound 需要二次验证。
+      description: 管理员登录即可导出指定不可变版本；portable 默认移除实例 ID，instance-bound 保留绑定 ID，均不导出凭据并记录审计。
       security:
         - bearerAuth: []
         - sessionAuth: []
@@ -2470,7 +2473,7 @@ paths:
       responses:
         "200":
           description: BubblePilotWorkflow JSON 清单。
-        "403":
+        "401":
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
@@ -2478,7 +2481,7 @@ paths:
     patch:
       operationId: setWorkflowEnabled
       description: >-
-        二次验证后整体停止或恢复已发布工作流的新执行；不取消进行中的执行，
+        管理员登录后整体停止或恢复已发布工作流的新执行并记录审计；不取消进行中的执行，
         不修改触发器启停配置，也不追溯处理停用期间的消息。
       security:
         - bearerAuth: []
@@ -2499,7 +2502,7 @@ paths:
       responses:
         "200":
           description: 工作流的新执行接收状态已更新。
-        "403":
+        "401":
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
@@ -2526,6 +2529,7 @@ paths:
           $ref: "#/components/responses/Error"
     post:
       operationId: createTrigger
+      description: 管理员登录即可创建触发器，并记录审计；启用时仍要求已发布的活动工作流版本。
       security:
         - bearerAuth: []
         - sessionAuth: []
@@ -2603,6 +2607,7 @@ paths:
           $ref: "#/components/responses/Error"
     patch:
       operationId: setTriggerEnabled
+      description: 管理员登录即可启停触发器，并记录审计；启用时仍要求已发布的活动工作流版本。
       security:
         - bearerAuth: []
         - sessionAuth: []

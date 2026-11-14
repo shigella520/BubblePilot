@@ -730,15 +730,29 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
   it("does not purge terminal definitions that still have an in-flight occurrence", async () => {
     const s = await setup();
     const c = await create(s);
-    await pool.query(
-      "UPDATE scheduled_tasks SET lifecycle='cancelled',status='cancelled',finished_at=now()-interval '91 days' WHERE id=$1",
-      [c.task.id],
-    );
-    await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
-      "TASK_DELETE_NOT_FINISHED",
-    );
-    await s.tasks.purgeExpired();
-    expect((await s.tasks.detail(c.task.id)).task.id).toBe(c.task.id);
+    const lock = await pool.connect();
+    try {
+      await lock.query("BEGIN");
+      // Other suites change workflow/chat configuration and its database trigger
+      // can cancel every cancelled task's pending occurrence concurrently.
+      const pending = await lock.query(
+        "SELECT id FROM scheduled_task_occurrences WHERE task_id=$1 AND status='pending' FOR UPDATE",
+        [c.task.id],
+      );
+      expect(pending.rowCount).toBe(1);
+      await pool.query(
+        "UPDATE scheduled_tasks SET lifecycle='cancelled',status='cancelled',finished_at=now()-interval '91 days' WHERE id=$1",
+        [c.task.id],
+      );
+      await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
+        "TASK_DELETE_NOT_FINISHED",
+      );
+      await s.tasks.purgeExpired();
+      expect((await s.tasks.detail(c.task.id)).task.id).toBe(c.task.id);
+    } finally {
+      await lock.query("ROLLBACK");
+      lock.release();
+    }
   });
   it("persists once, scopes tools, and rejects other members", async () => {
     const s = await setup();

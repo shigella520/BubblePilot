@@ -161,8 +161,13 @@ describe("AgentRunner shared quota integration", () => {
           m.content.startsWith("<agent_budget_status>"),
       );
       expect(statuses).toHaveLength(1);
+      expect(statuses[0]!.role).toBe("user");
+      expect(r.messages.at(-1)).toBe(statuses[0]);
       expect(r.tools).toEqual(f.requests[0]?.tools);
       expect(r.toolChoice).toBe("auto");
+      expect(r.messages.filter((m) => m.role === "system")).toEqual(
+        f.requests[0]!.messages.filter((m) => m.role === "system"),
+      );
       return JSON.parse(
         (statuses[0]!.content as string)
           .replace("<agent_budget_status>", "")

@@ -3,12 +3,16 @@ import { computed, ref, watch } from "vue";
 import SensitiveUnlock from "./SensitiveUnlock.vue";
 import { useSessionStore } from "../stores/session";
 import AdminDetailDialog from "./AdminDetailDialog.vue";
-const props = defineProps<{
-  title: string;
-  busy?: boolean;
-  savedVersion?: unknown;
-  draft?: unknown;
-}>();
+const props = withDefaults(
+  defineProps<{
+    title: string;
+    busy?: boolean;
+    savedVersion?: unknown;
+    draft?: unknown;
+    sensitiveRequired?: boolean;
+  }>(),
+  { sensitiveRequired: true, savedVersion: undefined, draft: undefined },
+);
 const emit = defineEmits<{ close: [] }>();
 const session = useSessionStore();
 const baseline = ref(JSON.stringify(props.draft));
@@ -38,7 +42,7 @@ defineExpose({ close });
 </script>
 <template>
   <AdminDetailDialog :title="title" @close="close">
-    <SensitiveUnlock v-if="!session.sensitiveActive" />
+    <SensitiveUnlock v-if="sensitiveRequired && !session.sensitiveActive" />
     <fieldset
       class="dialog-form-content"
       :disabled="busy"
@@ -76,6 +80,7 @@ defineExpose({ close });
       >
         关闭
       </button>
+      <slot name="actions" />
     </footer>
   </AdminDetailDialog>
 </template>
@@ -90,6 +95,7 @@ defineExpose({ close });
   margin: 4px;
 }
 .dialog-form-content {
+  display: block;
   border: 0;
   padding: 0;
   margin: 0;
@@ -97,6 +103,9 @@ defineExpose({ close });
 }
 .dialog-form-footer {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
   justify-content: flex-end;
   margin-top: 20px;
 }

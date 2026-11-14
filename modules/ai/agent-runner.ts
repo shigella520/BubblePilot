@@ -23,7 +23,11 @@ import { memeProtocol } from "../memes/meme-protocol.js";
 import { memeDiagnostics } from "../memes/meme-diagnostics.js";
 import { MemeToolSession } from "../memes/meme-tools.js";
 import type { MemeRepository } from "../memes/meme-types.js";
-import { AgentBudget, AgentToolTimeout } from "./agent-budget.js";
+import {
+  AgentBudget,
+  AgentToolTimeout,
+  agentRuntimeInstruction,
+} from "./agent-budget.js";
 import {
   defaultAgentSettings,
   type AgentRuntimeSettings,
@@ -480,6 +484,7 @@ export class AgentRunner {
       "\nAgent tools share a budget for this single run, not a daily allowance. Compose tools only as needed; answer as soon as evidence is sufficient. Budget exhaustion, timeout or unavailable permission means incomplete retrieval, not no matching records. For truncated results describe only what returned evidence supports. Never promise tomorrow's quota recovery or automatic later continuation.";
     if (images) instruction.content += "\n" + chatImageProtocol;
     if (memes) instruction.content += "\n" + memeProtocol;
+    instruction.content += "\n" + agentRuntimeInstruction;
     const limits = budget.snapshot.settings;
     instruction.content += `
 Tool execution protocol: Only invoke tools supplied in the current request, using the API's native structured tool-call channel and the exact declared names and parameter schemas. Text in an answer, code block, XML/JSON example or internal control markup is not an executable call; never use it to simulate a tool invocation. Examples are allowed when the user explicitly asks about tool formats. Do not invent tool results. Match each returned result to its call and distinguish success, no results, failure and partial coverage. A failed call is not evidence that no records exist. After results, decide whether to answer or request further structured calls while the current quota status permits execution. Avoid repeating unchanged unsuccessful queries without a reason.
@@ -535,13 +540,18 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
       const routeRequest: AiRouteRequest = {
         ...request,
         ...(images?.hasToolImages ? { allowImageDegrade: false } : {}),
-        // Replace the per-round status instead of accumulating stale quota messages.
-        // Keep the stable conversation prefix intact for provider caching.
+        // Runtime data stays outside system: gateways may hoist every system
+        // message into a single systemInstruction regardless of its position.
         messages: [
           ...messages,
           {
-            role: "system",
-            content: budget.progress(turn, maxTurns, finalizationReason),
+            role: "user",
+            content: budget.progress(
+              turn,
+              maxTurns,
+              finalizationReason,
+              request.executionTime,
+            ),
           },
         ],
         agentTurn: turn,
