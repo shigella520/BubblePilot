@@ -75,6 +75,7 @@ async function loadRebuildStatus() {
 }
 async function rebuildChat(chat: Chat, target: "memory") {
   if (
+    !session.sensitiveActive ||
     !needsRebuild(chat.id, target) ||
     rebuildBusyIds.has(chat.id) ||
     !chat.enabled
@@ -628,7 +629,7 @@ function closeParticipantEditor() {
 }
 
 async function editParticipants(chat: Chat) {
-  if (!session.sensitiveActive || participantBusy.value) return;
+  if (!session.authenticated || participantBusy.value) return;
   if (participantChat.value?.id === chat.id) {
     closeParticipantEditor();
     return;
@@ -654,7 +655,7 @@ async function editParticipants(chat: Chat) {
 
 async function saveParticipants() {
   const chat = participantChat.value;
-  if (chat === null || !session.sensitiveActive || participantSaveBusy.value) {
+  if (chat === null || !session.authenticated || participantSaveBusy.value) {
     return;
   }
   participantSaveBusy.value = true;
@@ -857,8 +858,13 @@ watch(
     messagePager.clear();
     exportPreview.value = null;
     exportConfirmed.value = false;
-    closeParticipantEditor();
     closeMessageMedia();
+  },
+);
+watch(
+  () => session.authenticated,
+  (authenticated) => {
+    if (!authenticated) closeParticipantEditor();
   },
 );
 
@@ -913,7 +919,7 @@ onBeforeUnmount(() =>
         <p class="panel-description">
           这里列出 Webhook
           已发现的聊天。启停操作需要二次验证，并使用版本号防止并发覆盖。
-          长期记忆授权独立于聊天监听；已授权不代表全局服务已开启或索引已完成，可点击对应聊天的“配置”调整。角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建更新聊天共享历史并产生模型用量；索引记录在“历史索引”。
+          长期记忆授权独立于聊天监听；已授权不代表全局服务已开启或索引已完成，可点击对应聊天的“配置”调整。角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建需要二次验证，会更新聊天共享历史并产生模型用量；索引记录在“历史索引”。
         </p>
         <div class="table-shell">
           <table>
@@ -955,7 +961,7 @@ onBeforeUnmount(() =>
                     class="button secondary tiny"
                     type="button"
                     :disabled="
-                      !session.sensitiveActive ||
+                      !session.authenticated ||
                       participantBusy ||
                       participantSaveBusy
                     "
@@ -1018,7 +1024,15 @@ onBeforeUnmount(() =>
                       v-if="needsRebuild(chat.id, 'memory')"
                       class="button tiny secondary"
                       :disabled="
-                        !chat.enabled || rebuildBusyIds.has(chat.id) || busy
+                        !session.sensitiveActive ||
+                        !chat.enabled ||
+                        rebuildBusyIds.has(chat.id) ||
+                        busy
+                      "
+                      :title="
+                        !session.sensitiveActive
+                          ? '请先解锁敏感操作'
+                          : undefined
                       "
                       @click="rebuildChat(chat, 'memory')"
                     >
@@ -1056,6 +1070,7 @@ onBeforeUnmount(() =>
           :busy="participantSaveBusy || participantBusy"
           :saved-version="participantDrafts"
           :draft="participantDrafts"
+          :sensitive-required="false"
           @close="closeParticipantEditor"
         >
           <p v-if="message" role="status">{{ message }}</p>
@@ -1112,14 +1127,13 @@ onBeforeUnmount(() =>
               </tbody>
             </table>
           </div>
-          <div class="form-actions">
+          <template #actions>
             <button
+              v-if="participantDrafts.length"
               class="button primary"
               type="button"
               :disabled="
-                !session.sensitiveActive ||
-                participantBusy ||
-                participantSaveBusy
+                !session.authenticated || participantBusy || participantSaveBusy
               "
               :aria-busy="participantSaveBusy"
               @click="saveParticipants"
@@ -1128,7 +1142,7 @@ onBeforeUnmount(() =>
                 participantSaveBusy ? "保存中…" : "保存成员映射"
               }}
             </button>
-          </div>
+          </template>
         </AdminFormDialog>
         <CursorPagination
           :page="chatPager.pageNumber.value"

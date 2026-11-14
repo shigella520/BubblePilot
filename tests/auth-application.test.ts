@@ -13,6 +13,7 @@ import type { AiCallResult, AiProviderRecord } from "../modules/ai/ai-types.js";
 import { AuthService } from "../modules/auth/auth-service.js";
 import { ContextSettingsService } from "../modules/workflow/context-settings-service.js";
 import type { MessageAutomation } from "../modules/workflow/workflow-engine.js";
+import { newMessageWebhook } from "./fixtures/bluebubbles.js";
 import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
 import { InMemoryAuthRepository } from "./support/in-memory-auth-repository.js";
@@ -48,6 +49,8 @@ beforeAll(async () => {
 describe("Web admin authentication", () => {
   let application: FastifyInstance;
   let authRepository: InMemoryAuthRepository;
+  let archiveRepository: InMemoryArchiveRepository;
+  let aiRepository: InMemoryAiRepository;
 
   beforeEach(() => {
     const config: AppConfig = {
@@ -81,7 +84,8 @@ describe("Web admin authentication", () => {
       logLevel: "silent",
     };
     authRepository = new InMemoryAuthRepository();
-    const aiRepository = new InMemoryAiRepository();
+    aiRepository = new InMemoryAiRepository();
+    archiveRepository = new InMemoryArchiveRepository();
     const secrets = new EnvironmentSecretResolver({
       PREVIEW_AI_KEY: "fictional-server-secret",
     });
@@ -103,7 +107,7 @@ describe("Web admin authentication", () => {
         queueCapacity: 64,
       }),
     };
-    application = buildApplication(config, new InMemoryArchiveRepository(), {
+    application = buildApplication(config, archiveRepository, {
       logger: false,
       auth: new AuthService(authRepository, {
         loginPasswordHash,
@@ -253,6 +257,109 @@ describe("Web admin authentication", () => {
     ).toBe(403);
   });
 
+  it("allows member mapping reads and changes after login without step-up and retains audit", async () => {
+    const chatGuid = "iMessage;-;fictional-member-chat";
+    for (const messageGuid of ["fictional-discovery", "fictional-archived"]) {
+      const webhook = await application.inject({
+        method: "POST",
+        url: "/api/v1/webhooks/bluebubbles",
+        headers: {
+          "x-bubblepilot-webhook-secret":
+            "fictional-webhook-secret-32-chars-long",
+        },
+        payload: newMessageWebhook({ chatGuid, messageGuid }),
+      });
+      expect(webhook.statusCode).toBe(202);
+      if (messageGuid === "fictional-discovery") {
+        const chat = archiveRepository.chats.get(chatGuid);
+        if (!chat) throw new Error("Chat fixture not discovered");
+        const enabled = await archiveRepository.setChatMonitoring({
+          chatId: chat.id,
+          enabled: true,
+          expectedVersion: chat.version,
+        });
+        expect(enabled.status).toBe("ok");
+      }
+    }
+    const chat = archiveRepository.chats.get(chatGuid);
+    if (!chat) throw new Error("Chat fixture unavailable");
+    const url = `/api/v1/chats/${chat.id}/participants`;
+    const payload = {
+      expectedVersion: 1,
+      identities: [
+        {
+          senderId: "fictional-user@example.test",
+          realName: "虚构成员",
+          nickname: "虚构昵称",
+        },
+      ],
+    };
+    expect((await application.inject({ method: "GET", url })).statusCode).toBe(
+      401,
+    );
+    expect(
+      (await application.inject({ method: "PUT", url, payload })).statusCode,
+    ).toBe(401);
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const headers = {
+      cookie: login.cookies.map((c) => `${c.name}=${c.value}`).join("; "),
+      origin: "http://localhost",
+    };
+    const before = await application.inject({ method: "GET", url, headers });
+    expect(before.statusCode).toBe(200);
+    expect(before.json()).toMatchObject({
+      data: {
+        version: 1,
+        participants: [{ senderId: "fictional-user@example.test" }],
+      },
+    });
+    const saved = await application.inject({
+      method: "PUT",
+      url,
+      headers,
+      payload,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toMatchObject({
+      data: {
+        version: 2,
+        participants: [{ realName: "虚构成员", nickname: "虚构昵称" }],
+      },
+    });
+    expect(authRepository.grants.size).toBe(0);
+    for (const action of ["chat.participants.view", "chat.participants.update"])
+      expect(authRepository.auditEvents).toContainEqual(
+        expect.objectContaining({
+          action,
+          targetId: chat.id,
+          outcome: "succeeded",
+        }),
+      );
+    expect(JSON.stringify(authRepository.auditEvents)).not.toContain(
+      "虚构成员",
+    );
+    expect(JSON.stringify(authRepository.auditEvents)).not.toContain(
+      "虚构昵称",
+    );
+    expect(
+      (await application.inject({ method: "PUT", url, headers, payload }))
+        .statusCode,
+    ).toBe(409);
+    expect(
+      (
+        await application.inject({
+          method: "GET",
+          url: `/api/v1/chats/${chat.id}/messages`,
+          headers,
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+
   it("allows signed-in workflow imports without step-up and retains audit and unpublished candidate state", async () => {
     const manifest = {
       kind: "BubblePilotWorkflow",
@@ -345,6 +452,286 @@ describe("Web admin authentication", () => {
       }),
     );
   });
+
+  it.each(["idle", "scheduled"] as const)(
+    "allows authenticated %s workflow management without step-up and keeps validations and audits",
+    async (kind) => {
+      const provider = await aiRepository.createProvider({
+        name: "Fictional workflow provider",
+        apiKind: "chat-completions",
+        baseUrl: "https://ai.example.test/v1",
+        model: "fictional-model",
+        secretRef: "PREVIEW_AI_KEY",
+        parameters: {},
+        requestTimeoutMs: 5_000,
+        enabled: true,
+        capabilities: { functionCalling: true, hostedWebSearch: false },
+      });
+      if (provider.status !== "ok") throw new Error("Provider fixture failed");
+      await aiRepository.updateProviderCapabilityProbe(provider.value.id, {
+        functionCalling: "verified",
+        hostedWebSearch: "unknown",
+        checkedAt: new Date(0).toISOString(),
+      });
+      const route = await aiRepository.createRoute({
+        name: "Fictional workflow route",
+        providerIds: [provider.value.id],
+        fallbackEnabled: true,
+        retryPolicy: { maxRounds: 1, initialDelayMs: 0 },
+        degradePolicy: { failureThreshold: 3, cooldownMs: 60_000 },
+        enabled: true,
+      });
+      if (route.status !== "ok") throw new Error("Route fixture failed");
+      const chatId = "fictional-workflow-chat";
+      const definition = {
+        schemaVersion: "1",
+        name: "Fictional proactive workflow",
+        startNodeId: "message-trigger",
+        nodes: [
+          {
+            id: "message-trigger",
+            type: "message-trigger",
+            version: 1,
+            config: {
+              [kind]: { enabled: true, chatIds: [chatId], timeZone: "UTC" },
+            },
+            onSuccess: "ai",
+          },
+          {
+            id: "ai",
+            type: "ai-chat",
+            version: 1,
+            config: {
+              providerRouteId: route.value.id,
+              systemPrompt: "Fictional role",
+              promptTemplate: "Respond naturally",
+              outputVariable: "answer",
+              outputFormat: "text",
+            },
+            onSuccess: "reply",
+          },
+          {
+            id: "reply",
+            type: "reply",
+            version: 1,
+            config: { text: "{{variables.answer}}" },
+            onSuccess: "end",
+          },
+          { id: "end", type: "end", version: 1, config: {} },
+        ],
+      };
+      const login = await application.inject({
+        method: "POST",
+        url: "/api/v1/auth/session",
+        payload: { password: loginPassword },
+      });
+      const headers = {
+        cookie: login.cookies.map((c) => `${c.name}=${c.value}`).join("; "),
+        origin: "http://localhost",
+      };
+      const created = await application.inject({
+        method: "POST",
+        url: "/api/v1/workflows",
+        headers,
+        payload: { name: definition.name, definition },
+      });
+      expect(created.statusCode).toBe(201);
+      const workflowId = created.json<{ data: { workflowId: string } }>().data
+        .workflowId;
+      const publishUrl = `/api/v1/workflows/${workflowId}/versions/1/publish`;
+      const blocked = await application.inject({
+        method: "POST",
+        url: publishUrl,
+        headers,
+      });
+      expect(blocked.statusCode).toBe(409);
+      expect(blocked.json()).toMatchObject({
+        error: {
+          code:
+            kind === "idle" ? "IDLE_CHAT_UNAVAILABLE" : "TASK_CHAT_UNAVAILABLE",
+        },
+      });
+      archiveRepository.chats.set(chatId, {
+        id: "00000000-0000-4000-8000-000000000001",
+        providerChatId: chatId,
+        type: "group",
+        displayName: "Fictional chat",
+        enabled: true,
+        memoryAuthorized: false,
+        messageCount: 0,
+        version: 1,
+        updatedAt: new Date(0).toISOString(),
+        deletedAt: null,
+        messages: [],
+        participantIdentityVersion: 1,
+        participantIdentities: new Map(),
+      });
+      expect(
+        (await application.inject({ method: "POST", url: publishUrl, headers }))
+          .statusCode,
+      ).toBe(200);
+      const revisedDefinition = {
+        ...definition,
+        nodes: definition.nodes.map((node) =>
+          node.id === "ai"
+            ? {
+                ...node,
+                config: {
+                  ...node.config,
+                  systemPrompt: "Updated fictional role",
+                },
+              }
+            : node,
+        ),
+      };
+      const next = await application.inject({
+        method: "POST",
+        url: `/api/v1/workflows/${workflowId}/versions`,
+        headers,
+        payload: { definition: revisedDefinition },
+      });
+      expect(next.statusCode).toBe(201);
+      const published = await application.inject({
+        method: "POST",
+        url: `/api/v1/workflows/${workflowId}/versions/2/publish`,
+        headers,
+      });
+      expect(published.statusCode).toBe(200);
+      const publishedNodes = published.json<{
+        data: {
+          definition: {
+            nodes: Array<{ id: string; config: { systemPrompt?: string } }>;
+          };
+        };
+      }>().data.definition.nodes;
+      expect(
+        publishedNodes.find((node) => node.id === "ai")?.config.systemPrompt,
+      ).toBe("Updated fictional role");
+      const enabledUrl = `/api/v1/workflows/${workflowId}/enabled`;
+      for (const enabled of [false, true])
+        expect(
+          (
+            await application.inject({
+              method: "PATCH",
+              url: enabledUrl,
+              headers,
+              payload: { enabled },
+            })
+          ).statusCode,
+        ).toBe(200);
+      const triggerPayload = {
+        name: "Fictional extra trigger",
+        workflowId,
+        workflowVersion: 2,
+        enabled: true,
+        conditions: { chatIds: [chatId] },
+      };
+      const trigger = await application.inject({
+        method: "POST",
+        url: "/api/v1/triggers",
+        headers,
+        payload: triggerPayload,
+      });
+      expect(trigger.statusCode).toBe(201);
+      const triggerId = trigger.json<{ data: { id: string } }>().data.id;
+      const triggerUrl = `/api/v1/triggers/${triggerId}`;
+      for (const enabled of [false, true])
+        expect(
+          (
+            await application.inject({
+              method: "PATCH",
+              url: triggerUrl,
+              headers,
+              payload: { enabled },
+            })
+          ).statusCode,
+        ).toBe(200);
+      const exportUrl = `/api/v1/workflows/${workflowId}/versions/2/export?mode=instance-bound`;
+      const exported = await application.inject({
+        method: "GET",
+        url: exportUrl,
+        headers,
+      });
+      expect(exported.statusCode).toBe(200);
+      expect(exported.body).toContain(route.value.id);
+      expect(exported.body).toContain(chatId);
+      expect(exported.body).not.toContain("fictional-server-secret");
+      expect(authRepository.grants.size).toBe(0);
+      for (const request of [
+        { method: "POST" as const, url: publishUrl },
+        {
+          method: "PATCH" as const,
+          url: enabledUrl,
+          payload: { enabled: true },
+        },
+        {
+          method: "POST" as const,
+          url: "/api/v1/triggers",
+          payload: triggerPayload,
+        },
+        {
+          method: "PATCH" as const,
+          url: triggerUrl,
+          payload: { enabled: true },
+        },
+        { method: "GET" as const, url: exportUrl },
+      ])
+        expect((await application.inject(request)).statusCode).toBe(401);
+      expect(
+        (
+          await application.inject({
+            method: "PUT",
+            url: triggerUrl,
+            headers,
+            payload: {
+              name: "Updated fictional trigger",
+              conditions: { chatIds: [chatId] },
+            },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await application.inject({
+            method: "DELETE",
+            url: triggerUrl,
+            headers,
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await application.inject({
+            method: "DELETE",
+            url: `/api/v1/workflows/${workflowId}`,
+            headers,
+          })
+        ).statusCode,
+      ).toBe(200);
+      for (const action of [
+        "workflow.create",
+        "workflow.version.create",
+        "workflow.enabled.update",
+        "workflow.delete",
+        "workflow.idle.publish",
+        "workflow.idle.enable",
+        "workflow.idle.trigger.create",
+        "workflow.idle.trigger.enable",
+        "trigger.update",
+        "trigger.delete",
+        "workflow.export",
+      ])
+        expect(authRepository.auditEvents).toContainEqual(
+          expect.objectContaining({ action, outcome: "succeeded" }),
+        );
+      expect(authRepository.auditEvents).toContainEqual(
+        expect.objectContaining({
+          action: "workflow.idle.publish",
+          outcome: "failed",
+        }),
+      );
+    },
+  );
 
   it("requires sensitive authorization and audits bulk recovery closure", async () => {
     const url = "/api/v1/executions/recovery/close";
