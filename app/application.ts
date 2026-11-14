@@ -126,7 +126,10 @@ import {
   type WorkflowBindingCatalog,
   type WorkflowCapability,
 } from "../modules/workflow/workflow-manifest.js";
-import type { MessageAutomation } from "../modules/workflow/workflow-engine.js";
+import type {
+  AutomationResult,
+  MessageAutomation,
+} from "../modules/workflow/workflow-engine.js";
 import type {
   ExecutionRecoveryClaim,
   WorkflowExecutionStatus,
@@ -355,6 +358,15 @@ const triggerPreviewBodySchema = z.object({
     contentType: z.enum(["text", "attachment", "mixed", "unknown"]),
     text: z.string().nullable(),
     isFromMe: z.boolean().default(false),
+    replyTarget: z
+      .enum([
+        "none",
+        "same-workflow",
+        "other-workflow",
+        "participant",
+        "unknown",
+      ])
+      .optional(),
   }),
 });
 
@@ -835,17 +847,21 @@ export function buildApplication(
       executionIds: [] as readonly string[],
       matchedTriggerIds: [] as readonly string[],
       activeTriggerCount: 0,
-    };
+    } as AutomationResult;
     let automationOutcome = outcome.result.automationOutcome;
     if (outcome.automationEnvelope !== null) {
       let decision: AutomationOutcome;
       if (options.workflow === undefined) {
         decision = "not-evaluated";
       } else {
-        const dispatchOptions =
-          outcome.contextTrigger === undefined
-            ? undefined
-            : { contextTrigger: outcome.contextTrigger };
+        const dispatchOptions = {
+          ...(outcome.contextTrigger === undefined
+            ? {}
+            : { contextTrigger: outcome.contextTrigger }),
+          ...(outcome.result.status === "duplicate"
+            ? { retryPending: true }
+            : {}),
+        };
         automation = await (options.workflow.dispatcher === undefined
           ? options.workflow.engine.handleMessage(
               outcome.automationEnvelope,
@@ -866,6 +882,7 @@ export function buildApplication(
         outcome.automationEnvelope.provider,
         outcome.result.eventId,
         decision,
+        automation.replyWake,
       );
     }
     request.log.info(
@@ -3618,6 +3635,9 @@ export function buildApplication(
             sample,
             triggerConditions(body.conditions),
             body.includeFromMe,
+            body.sample.replyTarget === undefined
+              ? undefined
+              : body.sample.replyTarget === "same-workflow",
           ),
         };
       },

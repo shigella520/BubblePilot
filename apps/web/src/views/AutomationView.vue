@@ -57,6 +57,7 @@ interface Trigger {
 }
 interface TriggerPreviewResult {
   matched: boolean;
+  matchSource?: "ordinary" | "reply" | null;
   checks: Array<{
     field:
       "chat" | "sender" | "contentType" | "text" | "timeWindow" | "isFromMe";
@@ -194,6 +195,7 @@ const triggerPreviewForm = reactive({
   contentType: "text",
   text: "fictional preview message",
   isFromMe: false,
+  replyTarget: "none",
 });
 const triggerPreview = ref<TriggerPreviewResult | null>(null);
 const aiFlowForm = reactive({
@@ -808,6 +810,7 @@ async function previewTrigger() {
             contentType: triggerPreviewForm.contentType,
             text: triggerPreviewForm.text || null,
             isFromMe: triggerPreviewForm.isFromMe,
+            replyTarget: triggerPreviewForm.replyTarget,
           },
         }),
       },
@@ -1474,14 +1477,22 @@ onMounted(load);
                   ><span>样本文本</span
                   ><input v-model="triggerPreviewForm.text"
                 /></label>
+                <label class="wide-field"
+                  ><span>样本引用对象</span
+                  ><select v-model="triggerPreviewForm.replyTarget">
+                    <option value="none">无引用</option>
+                    <option value="same-workflow">本工作流的 Bot</option>
+                    <option value="other-workflow">其他工作流的 Bot</option>
+                    <option value="participant">普通成员</option>
+                    <option value="unknown">无法确认</option>
+                  </select></label
+                >
               </div>
               <label class="checkbox-field"
                 ><input
                   v-model="triggerPreviewForm.isFromMe"
                   type="checkbox"
-                /><span
-                  >样本由 Bot 自己发送（生产规则仍固定拒绝自触发）</span
-                ></label
+                /><span>样本由网关本人发送（引用入口不会自触发）</span></label
               >
               <div class="form-actions trigger-preview-actions">
                 <div
@@ -1492,6 +1503,11 @@ onMounted(load);
                   <strong>{{
                     triggerPreview.matched ? "匹配" : "不匹配"
                   }}</strong>
+                  <span v-if="triggerPreview.matchSource">{{
+                    triggerPreview.matchSource === "reply"
+                      ? "回复 Bot 消息"
+                      : "原条件匹配"
+                  }}</span>
                   <span
                     v-for="check in triggerPreview.checks"
                     :key="check.field"

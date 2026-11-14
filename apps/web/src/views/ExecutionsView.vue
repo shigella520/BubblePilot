@@ -106,6 +106,7 @@ function imageToolLabel(details: Record<string, unknown> | null) {
   return `图片未加载：${reasons[reason] ?? reason}`;
 }
 interface Execution {
+  messageMatchSource?: "ordinary" | "reply" | null;
   triggerEvent?: {
     schemaVersion: string;
     scheduled?: {
@@ -1537,6 +1538,15 @@ function contextSnapshotValue(
               {{ detail.botIdentity.version }}
             </p>
             <p v-else>未记录角色身份</p>
+            <p v-if="!detail.triggerEvent">
+              消息触发方式：{{
+                detail.messageMatchSource === "reply"
+                  ? "回复 Bot 消息"
+                  : detail.messageMatchSource === "ordinary"
+                    ? "原条件匹配"
+                    : "未记录"
+              }}
+            </p>
           </section>
           <section v-if="detail.contextSnapshot" class="context-snapshot-card">
             <div class="context-snapshot-heading">

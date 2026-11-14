@@ -150,6 +150,7 @@ describe("AI workflow", () => {
   let replyGateway: CapturingReplyGateway;
   let rawRequestStore: AiRawRequestStore;
   let application: FastifyInstance;
+  let engine: WorkflowEngine;
   let routeId: string;
 
   beforeEach(async () => {
@@ -188,7 +189,7 @@ describe("AI workflow", () => {
     }
     routeId = route.value.id;
     const routing = new AiRoutingService(aiRepository, aiClient, secrets);
-    const engine = new WorkflowEngine(
+    engine = new WorkflowEngine(
       workflows,
       createDefaultNodeRegistry(workflows, replyGateway, {
         archive,
@@ -669,6 +670,42 @@ describe("AI workflow", () => {
     expect(unrelatedAttempt.body).not.toContain("Fictional AI answer");
 
     expect(detail.body).not.toContain("Fictional AI answer");
+    const replyInput = newMessageWebhook({
+      messageGuid: "fictional-direct-reply",
+      text: "please explain further",
+    });
+    const replyEvent = new BlueBubblesWebhookAdapter().normalize(
+      {
+        ...replyInput,
+        data: {
+          ...replyInput.data,
+          threadOriginatorGuid: "fictional-outbound-message",
+          threadOriginatorPart: "0",
+        },
+      },
+      "fictional-correlation",
+    );
+    if (replyEvent.kind !== "message")
+      throw new Error("fictional reply fixture failed");
+    replyEvent.envelope.message.replyTo = {
+      status: "available",
+      text_preview: "Fictional AI answer",
+      truncated: false,
+    };
+    await archive.ingestMessage(replyEvent.envelope, true);
+    const followupStart = aiClient.requests.length;
+    const followup = await engine.handleMessage(replyEvent.envelope);
+    expect(followup.replyWake).toEqual({
+      status: "resolved",
+      decision: "reply",
+    });
+    const followupPrompt = JSON.stringify(
+      aiClient.requests[followupStart]?.messages,
+    );
+    expect(followupPrompt).toContain("please explain further");
+    expect(followupPrompt).toContain("<reply_to>");
+    expect(followupPrompt).toContain("Fictional AI answer");
+    expect(replyGateway.commands).toHaveLength(2);
     for (const nickname of ["新昵称", null]) {
       const saved = await archive.saveChatParticipantIdentities({
         chatId: chat!.id,

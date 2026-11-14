@@ -31,6 +31,13 @@ import type {
 } from "./workflow-repository.js";
 import type { MessageEnvelope } from "../ingestion/message-envelope.js";
 import type { ConversationContextTrigger } from "./conversation-context-service.js";
+import type {
+  MessageMatchSource,
+  ReplyWakeChoice,
+  ReplyWakeDecision,
+  ReplyWakeSnapshot,
+  ReplyWakeStatus,
+} from "../ingestion/reply-wakeup.js";
 import {
   linkPreviewItemSchema,
   linkPreviewStatusSchema,
@@ -81,6 +88,7 @@ interface TriggerRow {
 }
 
 interface ExecutionRow {
+  message_match_source: MessageMatchSource | null;
   trigger_event: BackgroundWorkflowEvent | null;
   bot_identity: BotIdentity | null;
   id: string;
@@ -193,7 +201,7 @@ const triggerSelect = `SELECT
   t.created_at, t.updated_at, t.deleted_at`;
 
 const executionSelect = `SELECT
-  e.id, e.trigger_event, e.bot_identity, e.startup_closure, e.provider, e.external_event_id,
+  e.id, e.trigger_event, e.bot_identity, e.startup_closure, e.message_match_source, e.provider, e.external_event_id,
   source_message.provider_message_id AS source_provider_message_id,
   source_chat.provider_chat_id, source_chat.display_name AS chat_display_name,
   e.trigger_id,
@@ -272,6 +280,7 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
       ? null
       : Number(row.cached_prompt_tokens ?? 0);
   return {
+    messageMatchSource: row.message_match_source,
     triggerEvent: row.trigger_event,
     startupClosure: row.startup_closure ?? null,
     id: row.id,
@@ -372,9 +381,16 @@ function summary(value: string): string {
 
 export class PostgresWorkflowRepository implements WorkflowRepository {
   private readonly pool: Pool;
+  private readonly replyWakePool: Pool;
 
   constructor(databaseUrl: string, queryTimeoutMs?: number) {
     this.pool = createPostgresPool(databaseUrl, 10, queryTimeoutMs);
+    // A slow provenance lookup must not hold up ordinary message matching.
+    this.replyWakePool = createPostgresPool(
+      databaseUrl,
+      3,
+      Math.min(queryTimeoutMs ?? 250, 250),
+    );
   }
 
   async createWorkflow(
@@ -738,17 +754,184 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     }));
   }
 
+  async resolveReplyWake(
+    envelope: MessageEnvelope,
+  ): Promise<ReplyWakeSnapshot> {
+    type Row = {
+      reply_wake_policy: string | null;
+      reply_wake_status: ReplyWakeStatus | null;
+      reply_wake_workflow_id: string | null;
+      reply_wake_decision: ReplyWakeDecision | null;
+      reply_wake_trigger_id: string | null;
+      reply_wake_workflow_version_id: string | null;
+      automation_outcome: string;
+      source_matches: boolean | null;
+      eligible: boolean | null;
+      is_from_me: boolean | null;
+      reply_target_guid: string | null;
+      workflows: string[];
+      pending: boolean;
+    };
+    const values = [
+      envelope.provider,
+      envelope.eventId,
+      envelope.message.providerMessageId,
+      envelope.chat.providerChatId,
+      envelope.metadata.payloadHash,
+    ];
+    const read = async () =>
+      (
+        await this.replyWakePool.query<Row>(
+          `SELECT i.reply_wake_policy, i.reply_wake_status, i.reply_wake_workflow_id,
+        i.reply_wake_decision, i.reply_wake_trigger_id, i.reply_wake_workflow_version_id,
+        i.automation_outcome,
+        (m.provider_message_id=$3 AND c.provider_chat_id=$4 AND i.payload_hash=$5) AS source_matches,
+        (c.enabled AND c.deleted_at IS NULL AND m.content_redacted_at IS NULL
+          AND m.revision_state NOT IN ('retracted','unresolved')) AS eligible,
+        m.is_from_me, m.reply_target_guid,
+        ARRAY(SELECT v.workflow_id::text FROM outbound_deliveries d
+          JOIN workflow_executions e ON e.id=d.execution_id
+          JOIN workflow_versions v ON v.id=e.workflow_version_id
+          WHERE d.provider=i.provider AND d.provider_chat_id=c.provider_chat_id
+            AND d.provider_message_id=m.reply_target_guid AND d.status='confirmed'
+          ORDER BY d.id LIMIT 2) AS workflows,
+        EXISTS(SELECT 1 FROM outbound_deliveries d WHERE d.provider=i.provider
+          AND d.provider_chat_id=c.provider_chat_id AND d.status IN ('pending','sending')
+          AND d.updated_at>now()-interval '2 minutes') AS pending
+       FROM inbound_events i
+       LEFT JOIN messages m ON m.provider=i.provider AND m.provider_message_id=$3 AND m.source_event_id=i.id
+       LEFT JOIN chats c ON c.id=m.chat_id
+       WHERE i.provider=$1 AND i.external_event_id=$2`,
+          values,
+        )
+      ).rows[0];
+    let row = await read();
+    if (!row || row.reply_wake_policy !== "v1")
+      return { status: "legacy", workflowId: null };
+    if (!row.source_matches || row.automation_outcome !== "evaluation-pending")
+      return { status: "unavailable", workflowId: null };
+    const snapshot = (value: Row): ReplyWakeSnapshot => ({
+      status: value.reply_wake_status!,
+      workflowId: value.reply_wake_workflow_id,
+      ...(value.reply_wake_decision
+        ? {
+            decision: value.reply_wake_decision,
+            triggerId: value.reply_wake_trigger_id,
+            workflowVersionId: value.reply_wake_workflow_version_id,
+          }
+        : {}),
+    });
+    if (row.reply_wake_status) return snapshot(row);
+    if (!row.eligible) return { status: "unavailable", workflowId: null };
+    if (
+      !row.is_from_me &&
+      row.reply_target_guid &&
+      row.workflows.length === 0 &&
+      row.pending
+    ) {
+      // One short retry for a send whose provider ID may still be committing.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      row = await read();
+      if (
+        !row ||
+        !row.source_matches ||
+        row.automation_outcome !== "evaluation-pending"
+      )
+        return { status: "unavailable", workflowId: null };
+      if (row.reply_wake_status) return snapshot(row);
+      if (!row.eligible) return { status: "unavailable", workflowId: null };
+    }
+    const status: ReplyWakeStatus = row.is_from_me
+      ? "from-me"
+      : !row.reply_target_guid
+        ? "no-reference"
+        : row.workflows.length > 1
+          ? "ambiguous"
+          : row.workflows.length === 1
+            ? "resolved"
+            : "unmatched";
+    const workflowId =
+      status === "resolved" ? (row.workflows[0] ?? null) : null;
+    const saved = await this.replyWakePool.query<{
+      reply_wake_status: ReplyWakeStatus;
+      reply_wake_workflow_id: string | null;
+    }>(
+      `UPDATE inbound_events SET reply_wake_status=$3,reply_wake_workflow_id=$4
+       WHERE provider=$1 AND external_event_id=$2 AND reply_wake_policy='v1'
+         AND reply_wake_status IS NULL AND automation_outcome='evaluation-pending'
+       RETURNING reply_wake_status,reply_wake_workflow_id`,
+      [envelope.provider, envelope.eventId, status, workflowId],
+    );
+    if (saved.rows[0])
+      return {
+        status: saved.rows[0].reply_wake_status,
+        workflowId: saved.rows[0].reply_wake_workflow_id,
+      };
+    const winner = await read();
+    return winner?.reply_wake_status &&
+      winner.automation_outcome === "evaluation-pending"
+      ? snapshot(winner)
+      : { status: "unavailable", workflowId: null };
+  }
+
+  async freezeReplyWakeChoice(
+    envelope: MessageEnvelope,
+    choice: ReplyWakeChoice,
+  ): Promise<ReplyWakeChoice | null> {
+    type ChoiceRow = {
+      reply_wake_decision: ReplyWakeDecision;
+      reply_wake_trigger_id: string | null;
+      reply_wake_workflow_version_id: string | null;
+    };
+    const values = [
+      envelope.provider,
+      envelope.eventId,
+      choice.decision,
+      choice.triggerId,
+      choice.workflowVersionId,
+    ];
+    const saved = await this.replyWakePool.query<ChoiceRow>(
+      `UPDATE inbound_events i SET reply_wake_decision=$3,reply_wake_trigger_id=$4,reply_wake_workflow_version_id=$5
+       WHERE i.provider=$1 AND i.external_event_id=$2 AND i.reply_wake_status='resolved'
+         AND i.reply_wake_decision IS NULL AND i.automation_outcome='evaluation-pending'
+         AND ($3<>'reply' OR EXISTS(SELECT 1 FROM bot_triggers t
+           JOIN workflow_versions v ON v.id=t.workflow_version_id JOIN workflows w ON w.id=v.workflow_id
+           WHERE t.id=$4 AND v.id=$5 AND v.workflow_id=i.reply_wake_workflow_id
+             AND t.enabled AND t.deleted_at IS NULL AND v.status='published' AND w.status='active'))
+       RETURNING reply_wake_decision,reply_wake_trigger_id,reply_wake_workflow_version_id`,
+      values,
+    );
+    const row =
+      saved.rows[0] ??
+      (
+        await this.replyWakePool.query<ChoiceRow>(
+          `SELECT reply_wake_decision,reply_wake_trigger_id,reply_wake_workflow_version_id FROM inbound_events
+       WHERE provider=$1 AND external_event_id=$2 AND reply_wake_status='resolved'
+         AND reply_wake_decision IS NOT NULL AND automation_outcome='evaluation-pending'`,
+          values.slice(0, 2),
+        )
+      ).rows[0];
+    return row
+      ? {
+          decision: row.reply_wake_decision,
+          triggerId: row.reply_wake_trigger_id,
+          workflowVersionId: row.reply_wake_workflow_version_id,
+        }
+      : null;
+  }
+
   async createExecution(input: {
     envelope: WorkflowEvent;
     trigger: TriggerBinding;
     contextTrigger?: ConversationContextTrigger;
+    messageMatchSource?: MessageMatchSource;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }> {
     const id = randomUUID();
     const inserted = await this.pool.query<IdentifierRow>(
       `INSERT INTO workflow_executions (
          id, provider, external_event_id, source_message_id, trigger_id,
          workflow_version_id, correlation_id, status, trigger_message_index,
-         context_snapshot,trigger_event,target_chat_id
+         context_snapshot,trigger_event,target_chat_id,message_match_source
        ) VALUES (
          $1, $2, $3,
          COALESCE(
@@ -761,7 +944,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
          $5, $6, $7, 'created',
          COALESCE($8::bigint, (SELECT message_index FROM messages
           WHERE provider = $2 AND provider_message_id = $4)),
-         $9::jsonb,$10::jsonb,$11::uuid
+         $9::jsonb,$10::jsonb,$11::uuid,$12
        )
        ON CONFLICT (provider, external_event_id, trigger_id, workflow_version_id)
        DO NOTHING
@@ -782,6 +965,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         input.envelope.message === null
           ? backgroundMetadata(input.envelope).chatId
           : null,
+        input.messageMatchSource ?? null,
       ],
     );
     const persistedId = inserted.rows[0]?.id ?? id;
@@ -913,11 +1097,11 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         `INSERT INTO workflow_executions (
            id, provider, external_event_id, source_message_id, trigger_id,
            workflow_version_id, retry_of_execution_id, recovery_attempt,
-           correlation_id, status, trigger_message_index, context_snapshot
+           correlation_id, status, trigger_message_index, context_snapshot, message_match_source
          ) SELECT
            $2, provider, $3, source_message_id, trigger_id,
            workflow_version_id, id, recovery_attempt + 1, $4, 'created'
-           , trigger_message_index, context_snapshot
+           , trigger_message_index, context_snapshot, message_match_source
          FROM workflow_executions WHERE id = $1`,
         [executionId, recoveryId, syntheticEventId, correlationId],
       );
@@ -1402,7 +1586,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   }
 
   async close(): Promise<void> {
-    await this.pool.end();
+    await Promise.all([this.pool.end(), this.replyWakePool.end()]);
   }
 
   private async getTrigger(triggerId: string): Promise<TriggerRecord | null> {

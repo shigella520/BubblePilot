@@ -53,6 +53,7 @@ export type TriggerConditions = z.infer<typeof triggerConditionsSchema>;
 
 export interface TriggerMatchExplanation {
   matched: boolean;
+  matchSource?: "ordinary" | "reply" | null;
   checks: readonly {
     field:
       "chat" | "sender" | "contentType" | "text" | "timeWindow" | "isFromMe";
@@ -176,6 +177,7 @@ export function matchTrigger(
   envelope: MessageEnvelope,
   conditions: TriggerConditions,
   includeFromMe: boolean,
+  replyToThisWorkflow?: boolean,
 ): TriggerMatchExplanation {
   const checks: TriggerMatchExplanation["checks"] = [
     {
@@ -213,5 +215,15 @@ export function matchTrigger(
       ),
     },
   ];
-  return { matched: checks.every((check) => check.matched), checks };
+  const ordinary = checks.every((check) => check.matched);
+  if (replyToThisWorkflow === undefined) return { matched: ordinary, checks };
+  const reply =
+    replyToThisWorkflow &&
+    !envelope.message.isFromMe &&
+    checks.every((check) => check.field === "text" || check.matched);
+  return {
+    matched: ordinary || reply,
+    checks,
+    matchSource: ordinary ? "ordinary" : reply ? "reply" : null,
+  };
 }

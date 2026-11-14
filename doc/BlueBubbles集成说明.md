@@ -153,6 +153,8 @@ correlationId
 
 新增 `updated-message` 内容修订分支：只在存在有效编辑／撤回时间时归一化为 `message-revision-v1`，仅送达／已读事件继续忽略。新消息读取 `threadOriginatorGuid`／`threadOriginatorPart`，保存引用关系，不生成额外自动化事件。
 
+新消息的引用目标还用于默认唤醒原 Bot 工作流：仅在同网关、同聊天唯一匹配 BubblePilot 已确认出站记录时，允许不满足该工作流的文本匹配条件。目标字段缺失、归属无法确认或查询失败时沿用普通匹配；部分标识不决定归属，引用正文仍受原有读取限制。线程内继续回复和表情目标在不同 BlueBubbles／iMessage 版本中的目标 ID 需实际验收，详见[引用 Bot 消息唤醒](迭代需求-引用Bot消息唤醒.md)。
+
 固定上游提交的[可行性证据](experiments/message-revisions/README.md)表明 Webhook 使用通知序列化，更新事件省略 `chats`，摘要及引用部分可能缺失。不能复用新消息必填合同或依靠空正文判断撤回。适配器仅对本地已归档目标调用单条详情接口，显式请求 `chats,attachments,attributedBody,messageSummaryInfo`；不补拉未归档的引用目标。请求最多 8 秒（同时受现有网关超时限制）、响应最多 2 MiB、禁止重定向，不记录凭据或完整摘要；只提取当前状态，不保存编辑历史。
 
 引用新消息缺少部分标识时可以进行一次有界详情查询；失败返回未解析引用并由队列有限重试，不导致新消息自动化失败。更新详情可能比通知更新，以详情源时间为准；404／网络失败不是撤回证据。`dateEdited`、`dateRetracted`、`partCount` 与 `messageSummaryInfo[0].retractedParts` 综合判断。多部分精确映射未获目标环境验证时，返回 partial／unresolved 并隐藏无法确认的内容；引用仅对显式部分 `0` 或完整三段数字格式 `0:<数字>:<数字>` 的无附件文本目标展开（例如 `0:0:1`）；保留原始标识，不把后两段解释成正文裁剪范围。非零部分、格式不完整或带额外字符的标识保留未解析状态。禁止按附件顺序猜部分标识。

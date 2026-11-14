@@ -10,6 +10,10 @@ import type {
   LinkPreviewDiagnostic,
 } from "../ingestion/link-preview.js";
 import type { MessageImageSummary } from "../ai/image-summary-types.js";
+import type {
+  ReplyWakeDecision,
+  ReplyWakeStatus,
+} from "../ingestion/reply-wakeup.js";
 
 export type IngestionStatus = "archived" | "ignored" | "duplicate";
 
@@ -32,6 +36,10 @@ export interface IngestionResult {
 
 export interface InboundEventSummary {
   archiveUpdate?: { status: string; reason: string | null; attempts: number };
+  replyWake?: {
+    status: ReplyWakeStatus;
+    decision: ReplyWakeDecision | null;
+  } | null;
   id: string;
   provider: string;
   eventId: string;
@@ -178,6 +186,7 @@ export interface ArchiveRepository {
     provider: string,
     eventId: string,
     outcome: AutomationOutcome,
+    replyWake?: { status: ReplyWakeStatus; decision: ReplyWakeDecision | null },
   ): Promise<AutomationOutcome>;
   listInboundEvents(
     options: PageOptions,

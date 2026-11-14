@@ -2549,7 +2549,7 @@ paths:
   /api/v1/triggers/preview:
     post:
       operationId: previewTrigger
-      description: 仅返回逐项匹配结果，不创建执行或调用有副作用的节点。
+      description: 使用样本返回逐项匹配结果，不查询真实消息、不创建执行或调用有副作用的节点。不检查工作流或触发器启用状态。
       security:
         - bearerAuth: []
         - sessionAuth: []
@@ -2562,6 +2562,42 @@ paths:
       responses:
         "200":
           description: 可解释的条件匹配结果。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [matched, checks]
+                    properties:
+                      matched: { type: boolean }
+                      matchSource:
+                        enum: [ordinary, reply, null]
+                        description: 样本提供 replyTarget 时返回；两种条件均匹配时为 ordinary。
+                      checks:
+                        type: array
+                        items:
+                          type: object
+                          required: [field, matched]
+                          properties:
+                            field:
+                              {
+                                enum:
+                                  [
+                                    chat,
+                                    sender,
+                                    contentType,
+                                    text,
+                                    timeWindow,
+                                    isFromMe,
+                                  ],
+                              }
+                            matched: { type: boolean }
+                          additionalProperties: false
+                    additionalProperties: false
+                additionalProperties: false
         "400":
           $ref: "#/components/responses/Error"
   /api/v1/triggers/{triggerId}:
@@ -3212,7 +3248,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: 可选 startupClosure（runId/reasonCode/reason/previousStatus/closedAt）说明启动自动关闭；未知投递仍待核实。执行、节点尝试、含用途和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；接口不返回完整 Prompt、聊天正文、AI 输出、Secret、原图或原始响应体。 表情工具可选 version=1、kind=meme 诊断描述候选数量、截断、选择或受控失败；select_meme 的 resultCount 为 null，选择成功不代表已发送。旧诊断缺失不反推结果。
+          description: 可选 startupClosure（runId/reasonCode/reason/previousStatus/closedAt）说明启动自动关闭；未知投递仍待核实。可选 messageMatchSource 为 ordinary、reply 或 null，分别表示原条件、回复 Bot 消息或未记录。执行、节点尝试、含用途和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；接口不返回完整 Prompt、聊天正文、AI 输出、Secret、原图或原始响应体。表情工具可选 version=1、kind=meme 诊断描述候选数量、截断、选择或受控失败；select_meme 的 resultCount 为 null，选择成功不代表已发送。旧诊断缺失不反推结果。
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/ai-attempts/{attemptId}/raw-request:
@@ -4512,6 +4548,25 @@ components:
             - no-active-triggers
             - no-trigger-match
             - matched
+        replyWake:
+          type: object
+          description: 已评估引用的有限诊断；旧记录或未评估时可省略，不含引用正文。
+          required: [status, decision]
+          properties:
+            status:
+              enum:
+                [
+                  resolved,
+                  unmatched,
+                  ambiguous,
+                  unavailable,
+                  from-me,
+                  no-reference,
+                  lookup-error,
+                ]
+            decision:
+              enum: [ordinary, reply, blocked, not-applicable, null]
+          additionalProperties: false
         receivedAt:
           type: string
           format: date-time
@@ -4942,6 +4997,9 @@ components:
             isFromMe:
               type: boolean
               default: false
+            replyTarget:
+              enum: [none, same-workflow, other-workflow, participant, unknown]
+              description: 虚构引用对象，仅用于无副作用预览。
           additionalProperties: false
       additionalProperties: false
   responses:

@@ -190,6 +190,7 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
     _provider: string,
     eventId: string,
     outcome: AutomationOutcome,
+    replyWake?: InboundEventSummary["replyWake"],
   ): Promise<AutomationOutcome> {
     const event = this.events.get(eventId);
     if (event === undefined) {
@@ -197,6 +198,7 @@ export class InMemoryArchiveRepository implements ArchiveRepository {
     }
     if (event.automationOutcome === "evaluation-pending") {
       event.automationOutcome = outcome;
+      if (replyWake) event.replyWake = replyWake;
     }
     return Promise.resolve(event.automationOutcome);
   }

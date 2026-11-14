@@ -39,6 +39,7 @@ interface InboundEvent {
   ingestionStatus: "accepted" | "ignored" | "completed" | "failed";
   automationOutcome: AutomationOutcome;
   archiveUpdate?: { status: string; reason: string | null; attempts: number };
+  replyWake?: { status: string; decision: string | null } | null;
   receivedAt: string;
 }
 const inboundEvents = ref<InboundEvent[]>([]);
@@ -127,6 +128,25 @@ const outcomeLabels: Record<AutomationOutcome, string> = {
   matched: "已命中并创建执行",
 };
 
+function replyWakeLabel(value: NonNullable<InboundEvent["replyWake"]>): string {
+  if (value.status === "resolved") {
+    if (value.decision === "reply") return "引用 Bot 消息触发";
+    if (value.decision === "ordinary") return "原条件已匹配";
+    if (!value.decision) return "引用已识别，等待匹配";
+    if (value.decision === "not-applicable") return "引用已识别，但未完成匹配";
+    return "引用已识别，其他条件未通过";
+  }
+  const labels: Record<string, string> = {
+    unmatched: "引用目标未确认归属",
+    ambiguous: "引用目标归属存在冲突",
+    unavailable: "引用目标不可判定",
+    "from-me": "网关本人消息不走引用入口",
+    "no-reference": "未发现引用关系",
+    "lookup-error": "引用归属查询失败",
+  };
+  return labels[value.status] ?? "引用状态未记录";
+}
+
 function outcomeClass(outcome: AutomationOutcome): string {
   if (outcome === "matched") return "succeeded";
   if (["evaluation-pending", "not-evaluated"].includes(outcome))
@@ -212,6 +232,13 @@ onMounted(load);
                   class="table-status"
                   :class="outcomeClass(event.automationOutcome)"
                   >{{ outcomeLabels[event.automationOutcome] }}</span
+                >
+                <small class="muted"
+                  ><br />{{
+                    event.replyWake
+                      ? replyWakeLabel(event.replyWake)
+                      : "引用状态未记录"
+                  }}</small
                 >
               </td>
               <td>

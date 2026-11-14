@@ -1287,6 +1287,110 @@ describe("workflow application", () => {
     });
   });
 
+  it("dispatches a direct reply without the trigger text and exposes its reason", async () => {
+    await configureWorkflow(
+      parseWorkflowDefinition({
+        schemaVersion: "1",
+        name: "fictional reply",
+        startNodeId: "reply",
+        nodes: workflowDefinition.nodes.filter((node) =>
+          ["reply", "done"].includes(node.id),
+        ),
+      }),
+    );
+    const headers = { "x-bubblepilot-webhook-secret": webhookSecret };
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers,
+      payload: newMessageWebhook({
+        messageGuid: "fictional-first",
+        text: "/ping hello",
+      }),
+    });
+    const quoted = newMessageWebhook({
+      messageGuid: "fictional-followup",
+      text: "please explain",
+    });
+    const result = await application.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/bluebubbles",
+      headers,
+      payload: {
+        ...quoted,
+        data: {
+          ...quoted.data,
+          threadOriginatorGuid: "fictional-outbound-message",
+          threadOriginatorPart: "0",
+        },
+      },
+    });
+    expect(result.statusCode).toBe(202);
+    const body = result.json<{
+      data: { executionIds: string[]; automationOutcome: string };
+    }>().data;
+    expect(body.automationOutcome).toBe("matched");
+    expect(body.executionIds).toHaveLength(1);
+    expect(gateway.commands).toHaveLength(2);
+    expect(
+      (await workflows.getExecution(body.executionIds[0]!))?.messageMatchSource,
+    ).toBe("reply");
+    const events = await application.inject({
+      method: "GET",
+      url: "/api/v1/inbound-events?limit=20",
+      headers: { authorization: `Bearer ${apiAccessToken}` },
+    });
+    const eventData = events.json<{
+      data: Array<{
+        eventId: string;
+        replyWake?: { status: string; decision: string | null };
+      }>;
+    }>().data;
+    expect(
+      eventData.find(
+        (event) => event.eventId === "new-message:fictional-followup",
+      )?.replyWake,
+    ).toEqual({ status: "resolved", decision: "reply" });
+  });
+
+  it("previews synthetic reply targets without creating executions", async () => {
+    const preview = async (replyTarget: string) =>
+      application.inject({
+        method: "POST",
+        url: "/api/v1/triggers/preview",
+        headers: { authorization: `Bearer ${apiAccessToken}` },
+        payload: {
+          conditions: { text: { kind: "prefix", value: "/ping" } },
+          sample: {
+            providerChatId: monitoredChatId,
+            senderId: "fictional@example.test",
+            contentType: "text",
+            text: "hello",
+            replyTarget,
+          },
+        },
+      });
+    expect(
+      (await preview("same-workflow")).json<{
+        data: { matched: boolean; matchSource: string | null };
+      }>().data,
+    ).toMatchObject({
+      matched: true,
+      matchSource: "reply",
+    });
+    expect(
+      (await preview("other-workflow")).json<{
+        data: { matched: boolean; matchSource: string | null };
+      }>().data,
+    ).toMatchObject({
+      matched: false,
+      matchSource: null,
+    });
+    expect(
+      await workflows.listExecutions({ limit: 10, cursor: null }),
+    ).toHaveLength(0);
+  });
+
   it("does not resume a scheduled retry after the execution is closed", async () => {
     gateway.results.push({
       status: "failed",

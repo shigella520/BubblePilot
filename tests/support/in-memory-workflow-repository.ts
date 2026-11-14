@@ -23,6 +23,11 @@ import type {
   WorkflowVersionRecord,
 } from "../../modules/workflow/workflow-repository.js";
 import type { ConversationContextTrigger } from "../../modules/workflow/conversation-context-service.js";
+import type {
+  MessageMatchSource,
+  ReplyWakeChoice,
+  ReplyWakeSnapshot,
+} from "../../modules/ingestion/reply-wakeup.js";
 
 interface StoredWorkflow extends WorkflowRecord {
   versions: WorkflowVersionRecord[];
@@ -42,6 +47,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   readonly deletedTriggerIds = new Set<string>();
   readonly executions = new Map<string, StoredExecution>();
   readonly deliveries = new Map<string, OutboundDeliveryRecord>();
+  readonly replyWakeSnapshots = new Map<string, ReplyWakeSnapshot>();
 
   async createWorkflow(
     name: string,
@@ -327,10 +333,56 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     return Promise.resolve(bindings);
   }
 
+  async resolveReplyWake(
+    envelope: MessageEnvelope,
+  ): Promise<ReplyWakeSnapshot> {
+    const previous = this.replyWakeSnapshots.get(envelope.eventId);
+    if (previous) return previous;
+    const target = envelope.message.replyReference?.targetGuid;
+    const matches = [...this.deliveries.values()].filter(
+      (delivery) =>
+        delivery.providerChatId === envelope.chat.providerChatId &&
+        delivery.status === "confirmed" &&
+        delivery.providerMessageId === target,
+    );
+    const workflowId =
+      matches.length === 1
+        ? (this.executions.get(matches[0]!.executionId)?.workflowId ?? null)
+        : null;
+    const result: ReplyWakeSnapshot = envelope.message.isFromMe
+      ? { status: "from-me", workflowId: null }
+      : !target
+        ? { status: "no-reference", workflowId: null }
+        : matches.length > 1
+          ? { status: "ambiguous", workflowId: null }
+          : workflowId
+            ? { status: "resolved", workflowId }
+            : { status: "unmatched", workflowId: null };
+    this.replyWakeSnapshots.set(envelope.eventId, result);
+    return result;
+  }
+
+  async freezeReplyWakeChoice(
+    envelope: MessageEnvelope,
+    choice: ReplyWakeChoice,
+  ): Promise<ReplyWakeChoice | null> {
+    const snapshot = this.replyWakeSnapshots.get(envelope.eventId);
+    if (!snapshot || snapshot.status !== "resolved") return null;
+    if (snapshot.decision)
+      return {
+        decision: snapshot.decision,
+        triggerId: snapshot.triggerId ?? null,
+        workflowVersionId: snapshot.workflowVersionId ?? null,
+      };
+    Object.assign(snapshot, choice);
+    return choice;
+  }
+
   async createExecution(input: {
     envelope: MessageEnvelope;
     trigger: TriggerBinding;
     contextTrigger?: ConversationContextTrigger;
+    messageMatchSource?: MessageMatchSource;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }> {
     const existing = [...this.executions.values()].find(
       (execution) =>
@@ -343,6 +395,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       return { execution: this.executionRecord(existing), created: false };
     }
     const execution: StoredExecution = {
+      messageMatchSource: input.messageMatchSource ?? null,
       id: randomUUID(),
       provider: input.envelope.provider,
       externalEventId: input.envelope.eventId,
@@ -463,6 +516,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
     }
     const now = new Date().toISOString();
     const recovery: StoredExecution = {
+      messageMatchSource: source.messageMatchSource ?? null,
       id: randomUUID(),
       provider: source.provider,
       externalEventId: `${source.externalEventId}:manual-retry:${randomUUID()}`,
@@ -850,6 +904,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
 
   private executionRecord(execution: StoredExecution): WorkflowExecutionRecord {
     return {
+      messageMatchSource: execution.messageMatchSource ?? null,
       id: execution.id,
       provider: execution.provider,
       externalEventId: execution.externalEventId,
