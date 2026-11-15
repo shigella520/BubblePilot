@@ -1,4 +1,5 @@
 import { AgentBudget } from "../modules/ai/agent-budget.js";
+import { restoreToolArguments } from "../modules/ai/tool-schema.js";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +29,10 @@ import {
   vi,
 } from "vitest";
 import { MemoryRepository } from "../modules/memory/memory-repository.js";
-import { MemoryService } from "../modules/memory/memory-service.js";
+import {
+  MemoryService,
+  memoryTools,
+} from "../modules/memory/memory-service.js";
 import { defaultMemoryConfig } from "../modules/memory/memory-types.js";
 import type { EmbeddingClient } from "../modules/memory/embedding-client.js";
 const url = process.env.TEST_DATABASE_URL;
@@ -1043,9 +1047,9 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     const spy = vi
       .spyOn(repo.archiveQueries, "aggregate")
       .mockRejectedValueOnce(new Error("fictional query failure"));
-    expect(await invoke({})).toEqual({
+    expect(await invoke({})).toMatchObject({
       status: "unavailable",
-      reason: "invalid-or-unavailable",
+      reason: "query-failed",
     });
     spy.mockRestore();
     const other = await service.session((await repo.scope(id, 999, null))!);
@@ -1394,6 +1398,52 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
         ) as { status: string }
       ).status,
     ).toBe("unavailable");
+  });
+  it("keeps null sender filters inside the authorized chat and trigger boundary", async () => {
+    const id = await chat();
+    await message(id, "虚构备份：先前的合法记录");
+    const trigger = await message(id, "虚构当前问题");
+    await message(id, "虚构备份：触发之后的消息");
+    await message(await chat(), "虚构备份：另一个聊天的消息");
+    const scope = (await repo.scopeForEvent(
+      "bluebubbles",
+      trigger,
+      randomUUID(),
+    ))!;
+    const session = await service.session(scope);
+    const definition = memoryTools.find(
+      (tool) => tool.name === "search_chat_history",
+    )!;
+    const argumentsJson = restoreToolArguments(
+      definition.parameters,
+      JSON.stringify({
+        query: "备份",
+        limit: null,
+        from: null,
+        to: null,
+        senderId: null,
+        botWorkflowId: null,
+      }),
+    );
+    const result = await session.execute("search_chat_history", argumentsJson);
+    expect(result).toContain("先前的合法记录");
+    expect(result).not.toContain("触发之后的消息");
+    expect(result).not.toContain("另一个聊天的消息");
+    const invalid = await session.execute(
+      "search_chat_history",
+      '{"query":"备份","senderId":""}',
+    );
+    expect(JSON.parse(invalid)).toMatchObject({
+      reason: "invalid-arguments",
+      issues: [{ field: "senderId", code: "too_small" }],
+    });
+    await repo.authorize(id, false, 1);
+    const revoked = await session.execute("search_chat_history", argumentsJson);
+    expect(JSON.parse(revoked)).toMatchObject({
+      status: "unavailable",
+      reason: "source-unavailable",
+    });
+    expect(revoked).not.toContain("先前的合法记录");
   });
   it("history tools report edited and withdrawn states without admin-only retained text", async () => {
     const id = await chat();

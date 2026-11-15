@@ -4,6 +4,8 @@ import {
   mcpModelDefinition,
   decodeMcpArguments,
   mcpSchemaValidator,
+  validateMcpArguments,
+  PluginArgumentsError,
 } from "../modules/plugins/plugin-schema.js";
 import {
   strictToolParameters,
@@ -110,5 +112,35 @@ describe("MCP contracts remain independent of model strict schemas", () => {
       data: undefined,
       errorMessage: "MCP output does not match its approved schema",
     });
+  });
+  it("reports only approved argument names and validation keywords", () => {
+    const contract = {
+      type: "object",
+      properties: { timeout_seconds: { type: "integer", minimum: 1 } },
+      additionalProperties: false,
+    };
+    try {
+      validateMcpArguments(contract, { timeout_seconds: null });
+      throw new Error("Expected validation failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PluginArgumentsError);
+      expect((error as PluginArgumentsError).issues).toEqual([
+        { field: "timeout_seconds", code: "type" },
+      ]);
+    }
+    try {
+      validateMcpArguments(contract, {
+        "fictional-private-field": "private-value",
+      });
+      throw new Error("Expected validation failure");
+    } catch (error) {
+      expect(
+        JSON.stringify((error as PluginArgumentsError).issues),
+      ).not.toContain("fictional-private");
+      expect((error as PluginArgumentsError).issues).toEqual([
+        { code: "additionalProperties" },
+      ]);
+    }
+    expect(() => validateMcpArguments(contract, {})).not.toThrow();
   });
 });

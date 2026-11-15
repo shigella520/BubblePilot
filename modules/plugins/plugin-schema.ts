@@ -4,6 +4,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
 import type { jsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/types.js";
 import type { AiToolDefinition } from "../ai/ai-types.js";
+import { ApplicationError } from "../../app/errors.js";
 import { pluginError } from "./plugin-types.js";
 
 /** Each contract has an isolated reference registry. No remote schema loading or mutation. */
@@ -38,6 +39,66 @@ export function compileMcpSchema(
   } catch {
     return pluginError("SCHEMA_UNSUPPORTED");
   }
+}
+
+export class PluginArgumentsError extends ApplicationError {
+  constructor(readonly issues: { field?: string; code: string }[]) {
+    super(
+      "PLUGIN_INVALID_TOOL_ARGUMENTS",
+      "插件操作未完成：INVALID_TOOL_ARGUMENTS",
+      400,
+    );
+  }
+}
+
+/** Return only approved schema field names and validator keywords, never input values. */
+export function validateMcpArguments(
+  schema: Record<string, unknown>,
+  args: unknown,
+): void {
+  const validate = compileMcpSchema(schema);
+  if (validate(args)) return;
+  const properties =
+    schema.properties && typeof schema.properties === "object"
+      ? (schema.properties as Record<string, unknown>)
+      : {};
+  const allowedCodes = new Set([
+    "type",
+    "required",
+    "additionalProperties",
+    "minLength",
+    "maxLength",
+    "minimum",
+    "maximum",
+    "pattern",
+    "enum",
+    "const",
+    "format",
+    "anyOf",
+    "oneOf",
+    "minItems",
+    "maxItems",
+    "uniqueItems",
+  ]);
+  const issues = (validate.errors ?? []).slice(0, 5).map((issue) => {
+    const first = issue.instancePath
+      .split("/")[1]
+      ?.replace(/~1/g, "/")
+      .replace(/~0/g, "~");
+    const missing =
+      issue.keyword === "required" &&
+      typeof issue.params.missingProperty === "string"
+        ? issue.params.missingProperty
+        : undefined;
+    const field = first || missing;
+    return {
+      ...(field && Object.hasOwn(properties, field) ? { field } : {}),
+      code: allowedCodes.has(issue.keyword) ? issue.keyword : "invalid",
+    };
+  });
+  throw new PluginArgumentsError(
+    issues.length ? issues : [{ code: "invalid" }],
+  );
 }
 
 export const mcpSchemaValidator: jsonSchemaValidator = {

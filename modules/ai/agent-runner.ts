@@ -68,6 +68,8 @@ export const webSearchDefinition: AiToolDefinition = {
     properties: {
       query: {
         type: "string",
+        minLength: 1,
+        maxLength: 500,
         description:
           "A concise standalone web search query. Avoid combining a site: restriction with a year and many model names in one query.",
       },
@@ -83,6 +85,7 @@ function queryFromCall(call: AiToolCall): string | null {
     if (
       typeof value !== "object" ||
       value === null ||
+      Object.keys(value).length !== 1 ||
       !("query" in value) ||
       typeof value.query !== "string"
     ) {
@@ -717,10 +720,19 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         } else {
           try {
             const output = await budget.execute(async (context) => {
-              if (!registered || (!isMemory && !isPlugin && !query))
+              if (!registered)
+                return JSON.stringify({
+                  status: "unavailable",
+                  reason: "unknown-tool",
+                  guidance: "Use only tools provided in the current run.",
+                });
+              if (!isMemory && !isPlugin && !query)
                 return JSON.stringify({
                   status: "unavailable",
                   reason: "invalid-tool-arguments",
+                  issues: [{ field: "query", code: "invalid" }],
+                  guidance:
+                    "Supply exactly one non-empty query string of at most 500 characters.",
                 });
               if (isMemory || isPlugin) {
                 images?.beginCall(turn, call.id);

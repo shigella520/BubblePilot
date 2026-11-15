@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile, readdir } from "node:fs/promises";
 
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -45,14 +46,44 @@ describe.runIf(testDatabaseUrl !== undefined)(
   () => {
     let repository: PostgresWorkflowRepository;
     let archive: PostgresArchiveRepository;
+    let admin: Client;
+    let connection: string;
+    const name = `bubblepilot_workflow_${randomUUID().replaceAll("-", "")}_test`;
 
-    beforeAll(() => {
-      repository = new PostgresWorkflowRepository(testDatabaseUrl ?? "");
-      archive = new PostgresArchiveRepository(testDatabaseUrl ?? "");
-    });
+    beforeAll(async () => {
+      admin = new Client({ connectionString: testDatabaseUrl });
+      await admin.connect();
+      await admin.query(`CREATE DATABASE "${name}"`);
+      const address = new URL(testDatabaseUrl!);
+      address.pathname = `/${name}`;
+      connection = address.toString();
+      const db = new Client({ connectionString: connection });
+      await db.connect();
+      try {
+        for (const file of (
+          await readdir(new URL("../migrations/", import.meta.url))
+        )
+          .filter((file) => file.endsWith(".sql"))
+          .sort())
+          await db.query(
+            await readFile(
+              new URL(`../migrations/${file}`, import.meta.url),
+              "utf8",
+            ),
+          );
+      } finally {
+        await db.end();
+      }
+      repository = new PostgresWorkflowRepository(connection);
+      archive = new PostgresArchiveRepository(connection);
+    }, 30000);
 
     afterAll(async () => {
-      await Promise.all([repository.close(), archive.close()]);
+      await Promise.all([repository?.close(), archive?.close()]);
+      if (admin) {
+        await admin.query(`DROP DATABASE IF EXISTS "${name}"`);
+        await admin.end();
+      }
     });
 
     it("retains exported message and text bindings through import persistence and reload", async () => {
@@ -238,7 +269,7 @@ describe.runIf(testDatabaseUrl !== undefined)(
       );
       expect(messageExecutions[0]?.execution.id).toBe(first.executionIds[0]);
       const database = new Client({
-        connectionString: testDatabaseUrl,
+        connectionString: connection,
       });
       await database.connect();
       try {
@@ -277,7 +308,7 @@ describe.runIf(testDatabaseUrl !== undefined)(
 
       // Fictional delivery: closing resolves attention without rewriting delivery history.
       const attentionDatabase = new Client({
-        connectionString: testDatabaseUrl,
+        connectionString: connection,
       });
       await attentionDatabase.connect();
       try {

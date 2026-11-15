@@ -82,6 +82,9 @@ describe("strict tool schema", () => {
         },
       },
     });
+    expect(JSON.stringify(schema)).toContain(
+      "use null when no value is supplied",
+    );
     expect(JSON.stringify(schema)).not.toContain('"default"');
     assertStrictSchema(schema);
   });
@@ -179,6 +182,19 @@ describe("wire argument restoration", () => {
     expect(restoreToolArguments(s, "invalid json")).toBe("invalid json");
     expect(JSON.parse(restoreToolArguments(s, '{"limit":"wrong"}'))).toEqual({
       limit: "wrong",
+    });
+    expect(
+      JSON.parse(
+        restoreToolArguments(
+          s,
+          '{"id":null,"query":"","limit":0,"nested":{"x":false}}',
+        ),
+      ),
+    ).toEqual({
+      id: null,
+      query: "",
+      limit: 0,
+      nested: { x: false },
     });
     expect(JSON.parse(restoreToolArguments(s, "{}"))).toEqual({});
   });

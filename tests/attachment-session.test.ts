@@ -172,6 +172,15 @@ it("imports only issued references, reuses success and validates again after rev
     "ATTACHMENT_SESSION_INVALIDATED",
   );
 });
+it("explains invalid attachment references before downloading", async () => {
+  const f = await fixture();
+  const result = await f.call({ attachment_ref: "" });
+  expect(result.value).toMatchObject({
+    errorCode: "ATTACHMENT_ARGUMENTS_INVALID",
+    issues: [{ field: "attachment_ref", code: "invalid" }],
+  });
+  expect(f.download).not.toHaveBeenCalled();
+});
 it("only grants staged references actually returned, without spending capacity on discarded operations", async () => {
   const f = await fixture();
   const message = {

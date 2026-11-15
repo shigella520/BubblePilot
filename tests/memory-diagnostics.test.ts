@@ -15,6 +15,8 @@ import {
 } from "../modules/memory/memory-types.js";
 import type { MemoryToolDiagnostic } from "../modules/memory/memory-diagnostics.js";
 import { memoryToolLabel } from "../apps/web/src/utils/memory-tool-diagnostics.js";
+import { memoryTools } from "../modules/memory/memory-service.js";
+import { restoreToolArguments } from "../modules/ai/tool-schema.js";
 
 function fixture() {
   const client = {
@@ -61,7 +63,7 @@ function fixture() {
       },
       (diagnostic) => diagnostics.push(diagnostic),
     );
-  return { repository, encode, diagnostics, execute };
+  return { repository, encode, diagnostics, execute, session };
 }
 
 describe("history search diagnostics", () => {
@@ -76,9 +78,13 @@ describe("history search diagnostics", () => {
         }),
       ),
     ) as unknown;
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       status: "unavailable",
-      reason: "invalid-or-unavailable",
+      reason: "invalid-arguments",
+      issues: [
+        { field: "limit", code: "too_big", maximum: 20 },
+        { code: "unrecognized_keys" },
+      ],
     });
     expect(diagnostics[0]).toMatchObject({
       kind: "memory",
@@ -96,14 +102,84 @@ describe("history search diagnostics", () => {
       code: "unrecognized_keys",
     });
     expect(JSON.stringify(diagnostics)).not.toContain("fictional-private");
+    expect(JSON.stringify(result)).not.toContain("fictional-private");
     expect(
       memoryToolLabel("search_chat_history", { ...diagnostics[0] }),
     ).toContain("结果数量超出上限");
   });
 
+  it("reports empty filters and accepts null placeholders without broadening a requested identity", async () => {
+    const { execute, repository } = fixture();
+    const bad = JSON.parse(
+      await execute(
+        JSON.stringify({
+          query: "fictional-topic",
+          botWorkflowId: "",
+          senderId: "",
+          from: "",
+          to: "",
+        }),
+      ),
+    ) as { issues: { field?: string; code: string }[]; guidance: string };
+    expect(bad.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "botWorkflowId",
+          code: "invalid_format",
+        }),
+        expect.objectContaining({ field: "senderId", code: "too_small" }),
+        expect.objectContaining({ field: "from", code: "invalid_format" }),
+        expect.objectContaining({ field: "to", code: "invalid_format" }),
+      ]),
+    );
+    expect(bad.guidance).toContain("Do not guess identities");
+    expect(repository.candidates).not.toHaveBeenCalled();
+    const definition = memoryTools.find(
+      (tool) => tool.name === "search_chat_history",
+    )!;
+    const corrected = restoreToolArguments(
+      definition.parameters,
+      JSON.stringify({
+        query: "fictional-topic",
+        botWorkflowId: null,
+        senderId: null,
+        from: null,
+        to: null,
+        limit: null,
+      }),
+    );
+    expect(JSON.parse(await execute(corrected))).toMatchObject({
+      status: "no-results",
+    });
+    expect(repository.candidates).toHaveBeenCalledWith(
+      expect.anything(),
+      { query: "fictional-topic" },
+      null,
+    );
+  });
+
+  it("explains conditional rules for chat statistics without leaking input", async () => {
+    const { session } = fixture();
+    const result = JSON.parse(
+      await session.execute(
+        "count_chat_messages",
+        JSON.stringify({ groupBy: "day" }),
+      ),
+    ) as { reason: string; issues: { guidance?: string }[] };
+    expect(result.reason).toBe("invalid-arguments");
+    expect(result.issues).toContainEqual({
+      code: "custom",
+      guidance: "Time grouping requires both from and to.",
+    });
+  });
+
   it("distinguishes invalid JSON and a database failure without copying errors", async () => {
     const invalid = fixture();
-    await invalid.execute('{"query":"fictional-private');
+    const badJson = await invalid.execute('{"query":"fictional-private');
+    expect(JSON.parse(badJson)).toMatchObject({
+      reason: "invalid-arguments",
+      issues: [{ code: "invalid_json" }],
+    });
     expect(invalid.diagnostics[0]?.failure).toEqual({
       stage: "arguments",
       category: "invalid-json",
@@ -112,7 +188,19 @@ describe("history search diagnostics", () => {
     const error = new pg.DatabaseError("fictional-private-error", 0, "error");
     error.code = "57014";
     database.repository.coverage.mockRejectedValueOnce(error);
-    await database.execute('{"query":"fictional-private-query"}');
+    const failed = await database.execute(
+      '{"query":"fictional-private-query"}',
+    );
+    expect(JSON.parse(failed)).toMatchObject({
+      status: "unavailable",
+      reason: "query-failed",
+      failure: {
+        stage: "coverage",
+        category: "database-error",
+        errorCode: "57014",
+      },
+    });
+    expect(failed).not.toContain("fictional-private");
     expect(database.diagnostics[0]?.failure).toEqual({
       stage: "coverage",
       category: "database-error",
@@ -134,6 +222,13 @@ describe("history search diagnostics", () => {
     expect(result).toMatchObject({
       status: "no-results",
       retrievalMode: "keyword-only",
+      warnings: [
+        {
+          component: "semantic",
+          code: "MEMORY_EMBEDDING_HTTP_ERROR",
+          httpStatus: 429,
+        },
+      ],
     });
     expect(diagnostics[0]).toMatchObject({
       status: "no-results",
@@ -161,8 +256,15 @@ describe("history search diagnostics", () => {
     );
     const result = JSON.parse(await execute('{"query":"fictional-topic"}')) as {
       retrievalMode: string;
+      warnings: unknown[];
     };
     expect(result.retrievalMode).toBe("hybrid");
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({
+        component: "keyword",
+        code: "KEYWORD_SEARCH_FAILED",
+      }),
+    );
     expect(diagnostics[0]).toMatchObject({
       mode: "hybrid",
       keywordFailure: { stage: "keyword-search", category: "internal-error" },
@@ -170,5 +272,24 @@ describe("history search diagnostics", () => {
     expect(
       memoryToolLabel("search_chat_history", { ...diagnostics[0] }),
     ).toContain("关键词检索失败");
+  });
+
+  it("tells the model when both retrieval branches fail", async () => {
+    const { execute, repository, encode } = fixture();
+    repository.candidates.mockRejectedValueOnce(new Error("fictional-secret"));
+    encode.mockRejectedValueOnce(
+      new EmbeddingError("MEMORY_EMBEDDING_UNAVAILABLE"),
+    );
+    const text = await execute('{"query":"fictional-private-query"}');
+    expect(JSON.parse(text)).toMatchObject({
+      status: "unavailable",
+      reason: "retrieval-unavailable",
+      warnings: [
+        { component: "semantic", code: "MEMORY_EMBEDDING_UNAVAILABLE" },
+        { component: "keyword", code: "KEYWORD_SEARCH_FAILED" },
+      ],
+    });
+    expect(text).not.toContain("fictional-secret");
+    expect(text).not.toContain("fictional-private-query");
   });
 });

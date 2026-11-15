@@ -36,7 +36,7 @@ export const importChatAttachmentDefinition: AiToolDefinition = {
     "Import one authorized attachment_ref into the configured sandbox for THIS run. Reuses an existing sandbox. Returns a path, not file contents. Repeated successful imports reuse the original path without overwriting modifications. Counts against tool and file budgets.",
   parameters: {
     type: "object",
-    properties: { attachment_ref: { type: "string" } },
+    properties: { attachment_ref: { type: "string", minLength: 1 } },
     required: ["attachment_ref"],
     additionalProperties: false,
   },
@@ -300,7 +300,8 @@ export class AttachmentSession {
           if (
             !args ||
             Object.keys(args).length !== 1 ||
-            typeof args.attachment_ref !== "string"
+            typeof args.attachment_ref !== "string" ||
+            !args.attachment_ref.trim()
           )
             throw new AttachmentError("ATTACHMENT_ARGUMENTS_INVALID");
           const result = await this.import(args.attachment_ref, ctx);
@@ -326,21 +327,28 @@ export class AttachmentSession {
         } catch (error) {
           const code = ctx.signal.aborted
             ? "ATTACHMENT_CANCELLED"
-            : error instanceof AttachmentError
-              ? error.code
-              : error instanceof ApplicationError &&
-                  error.code.startsWith("PLUGIN_")
+            : error instanceof SyntaxError
+              ? "ATTACHMENT_ARGUMENTS_INVALID"
+              : error instanceof AttachmentError
                 ? error.code
-                : "ATTACHMENT_IMPORT_FAILED";
+                : error instanceof ApplicationError &&
+                    error.code.startsWith("PLUGIN_")
+                  ? error.code
+                  : "ATTACHMENT_IMPORT_FAILED";
           return {
             text: JSON.stringify({
               status: "unavailable",
               errorCode: code,
               retryable: false,
+              ...(code === "ATTACHMENT_ARGUMENTS_INVALID"
+                ? { issues: [{ field: "attachment_ref", code: "invalid" }] }
+                : {}),
               guidance:
-                code === "ATTACHMENT_REFERENCE_UNAVAILABLE"
-                  ? "No download or import was started. Query the attachment again with query_chat_messages or read_chat_excerpt and use the exact attachment_ref returned in THIS run. Context display IDs, message IDs and references from earlier runs are not import references. If no valid reference is returned, explain the limitation; do not guess a reference or assume the user must resend the file."
-                  : "Do not claim the file was read. Explain the limitation; do not replay unknown imports or commands.",
+                code === "ATTACHMENT_ARGUMENTS_INVALID"
+                  ? "Provide exactly one non-empty attachment_ref supplied in this run."
+                  : code === "ATTACHMENT_REFERENCE_UNAVAILABLE"
+                    ? "No download or import was started. Query the attachment again with query_chat_messages or read_chat_excerpt and use the exact attachment_ref returned in THIS run. Context display IDs, message IDs and references from earlier runs are not import references. If no valid reference is returned, explain the limitation; do not guess a reference or assume the user must resend the file."
+                    : "Do not claim the file was read. Explain the limitation; do not replay unknown imports or commands.",
             }),
             diagnostics: {
               ...this.channel.metadata,

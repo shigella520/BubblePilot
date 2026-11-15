@@ -3,12 +3,15 @@ import type { Pool, PoolClient } from "pg";
 import { z } from "zod";
 import type { RegisteredAgentTool } from "../ai/agent-tool-registry.js";
 import type { AgentToolContext } from "../ai/agent-budget.js";
+import { toolArgumentIssues } from "../ai/tool-argument-errors.js";
 import type {
   WorkflowRepository,
   TriggerBinding,
 } from "../workflow/workflow-repository.js";
 import {
   taskSettingsSchema,
+  taskValidationRules,
+  taskErrorMessage,
   cancelTaskSchema,
   createTaskSchema,
   listTasksSchema,
@@ -263,9 +266,28 @@ export class TaskService {
             return JSON.stringify({
               status: "failed",
               errorCode: "TASK_RESULT_BUDGET",
+              guidance:
+                "The remaining tool output budget is insufficient; no task change was made.",
             });
           ctx.signal.throwIfAborted();
-          const parsed = schema.parse(JSON.parse(args));
+          let parsed;
+          try {
+            parsed = schema.parse(JSON.parse(args));
+          } catch (error) {
+            const issues = toolArgumentIssues(
+              error,
+              z.toJSONSchema(schema, { io: "input" }),
+              taskValidationRules,
+            );
+            if (!issues) throw error;
+            return JSON.stringify({
+              status: "failed",
+              errorCode: "TASK_ARGUMENTS_INVALID",
+              issues,
+              guidance:
+                "Correct the reported fields and rules using the tool schema. Use null for unused optional fields; do not guess a task ID or time.",
+            });
+          }
           const scope = await this.scope(executionId);
           const actor: TaskActor = {
             kind: "member",
@@ -330,11 +352,11 @@ export class TaskService {
           return JSON.stringify({
             status: "failed",
             errorCode:
+              e instanceof TaskError ? e.code : "TASK_OPERATION_FAILED",
+            guidance:
               e instanceof TaskError
-                ? e.code
-                : e instanceof z.ZodError || e instanceof SyntaxError
-                  ? "TASK_ARGUMENTS_INVALID"
-                  : "TASK_OPERATION_FAILED",
+                ? taskErrorMessage(e.code)
+                : "The task operation did not complete. Do not claim it succeeded or automatically repeat a mutation with an unknown outcome.",
           });
         }
       },

@@ -88,6 +88,10 @@ const embeddingCodes = new Set([
 const reasons = new Set([
   "source-unavailable",
   "invalid-or-unavailable",
+  "invalid-arguments",
+  "reference-unavailable",
+  "query-failed",
+  "retrieval-unavailable",
   "invalid-cursor",
   "tool-output",
   "tool-duration",

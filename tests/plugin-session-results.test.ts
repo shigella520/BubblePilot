@@ -80,6 +80,26 @@ function fixture(callTimeoutSeconds?: number) {
 }
 afterEach(() => vi.restoreAllMocks());
 describe("MCP large-result session lifecycle", () => {
+  it("returns actionable envelope errors before calling the remote tool", async () => {
+    const f = fixture();
+    const output = (await f.ext.execute("{}", f.ctx)) as MultimodalToolResult;
+    expect(JSON.parse(output.text)).toMatchObject({
+      code: "PLUGIN_INVALID_TOOL_ARGUMENTS",
+      issues: [{ field: "arguments_json", code: "required" }],
+      retryInThisAnswer: true,
+    });
+    expect(f.call).not.toHaveBeenCalled();
+    const malformed = (await f.ext.execute(
+      '{"arguments_json":',
+      f.ctx,
+    )) as MultimodalToolResult;
+    expect(JSON.parse(malformed.text)).toMatchObject({
+      code: "PLUGIN_INVALID_ARGUMENTS",
+      retryInThisAnswer: true,
+    });
+    expect(f.call).not.toHaveBeenCalled();
+    await f.session.close();
+  });
   it("checks authorization again on reads and caps the remote timeout", async () => {
     const f = fixture();
     const output = (await f.ext.execute(

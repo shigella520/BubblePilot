@@ -18,7 +18,9 @@ export const scheduleSchema = z.union([
               .array(z.number().int().min(1).max(7))
               .min(1)
               .max(7)
-              .refine((v) => new Set(v).size === v.length),
+              .refine((v) => new Set(v).size === v.length, {
+                message: "Weekdays must not contain duplicates.",
+              }),
             localTime,
           })
           .strict(),

@@ -982,16 +982,28 @@ describe("AgentRunner", () => {
       );
     },
   );
-  it("persists redacted history failure diagnostics without exposing them to the model", async () => {
+  it("sends actionable validation errors to the model while keeping audit metadata redacted", async () => {
     const { repository, client, routing, request } = await setup();
     const memoryRepository = {
       scopeForEvent: vi.fn().mockResolvedValue({}),
       allowed: vi.fn().mockResolvedValue(true),
+      coverage: vi.fn().mockResolvedValue({ total: 0, indexed: 0, pending: 0 }),
+      candidates: vi.fn().mockResolvedValue([]),
+      pool: {
+        connect: vi.fn().mockResolvedValue({
+          query: vi.fn().mockResolvedValue({ rows: [] }),
+          release: vi.fn(),
+        }),
+      },
     };
     const sessionFactory = vi.fn();
     const memory = {
       repository: memoryRepository,
       session: sessionFactory,
+      embedding: {
+        identity: vi.fn().mockResolvedValue("fictional-model"),
+        encode: vi.fn().mockResolvedValue([[1, 0]]),
+      },
     } as unknown as MemoryService;
     const session = new MemorySession(memory, {
       chatId: "fictional-chat",
@@ -1008,10 +1020,10 @@ describe("AgentRunner", () => {
     sessionFactory.mockResolvedValue(session);
     vi.spyOn(client, "call").mockImplementation((_provider, input) => {
       client.requests.push(input);
+      const responses = input.messages.filter((item) => item.role === "tool");
       return Promise.resolve(
-        input.messages.some((item) => item.role === "tool")
-          ? { status: "succeeded", text: "无法查询历史", durationMs: 1 }
-          : {
+        responses.length === 0
+          ? {
               status: "succeeded",
               text: "",
               durationMs: 1,
@@ -1025,7 +1037,28 @@ describe("AgentRunner", () => {
                   }),
                 },
               ],
-            },
+            }
+          : responses.length === 1
+            ? {
+                status: "succeeded",
+                text: "",
+                durationMs: 1,
+                toolCalls: [
+                  {
+                    id: "fictional-retry",
+                    name: "search_chat_history",
+                    arguments: JSON.stringify({
+                      query: "fictional-private-query",
+                      limit: 8,
+                      from: null,
+                      to: null,
+                      senderId: null,
+                      botWorkflowId: null,
+                    }),
+                  },
+                ],
+              }
+            : { status: "succeeded", text: "没有找到相关历史", durationMs: 1 },
       );
     });
     const result = await new AgentRunner(
@@ -1059,7 +1092,19 @@ describe("AgentRunner", () => {
     const toolResult = client.requests[1]?.messages.find(
       (item) => item.role === "tool",
     );
+    expect(JSON.stringify(toolResult)).toContain('\\"field\\":\\"limit\\"');
+    expect(JSON.stringify(toolResult)).toContain('\\"maximum\\":20');
+    expect(JSON.stringify(toolResult)).not.toContain("fictional-private-query");
     expect(JSON.stringify(toolResult)).not.toContain("validationIssues");
+    expect(repository.toolExecutions[1]).toMatchObject({
+      status: "succeeded",
+      toolName: "search_chat_history",
+    });
+    expect(memoryRepository.candidates).toHaveBeenCalledWith(
+      expect.anything(),
+      { query: "fictional-private-query", limit: 8 },
+      null,
+    );
   });
   it("does not force history calls for a greeting and does not grant tools without runtime context", async () => {
     const { repository, client, routing, request } = await setup();

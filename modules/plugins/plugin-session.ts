@@ -5,8 +5,13 @@ import {
   resultLimits,
   normalizeMcpResult,
 } from "./plugin-result-store.js";
-import { mcpModelDefinition, decodeMcpArguments } from "./plugin-schema.js";
-import { pluginFailureGuidance } from "./plugin-guidance.js";
+import {
+  mcpModelDefinition,
+  decodeMcpArguments,
+  PluginArgumentsError,
+  validateMcpArguments,
+} from "./plugin-schema.js";
+import { pluginErrorGuidance } from "./plugin-guidance.js";
 import type {
   AgentToolRegistry,
   MultimodalToolResult,
@@ -187,9 +192,17 @@ export class PluginSession {
         diagnostics: "plugin",
         execute: async (raw, ctx): Promise<MultimodalToolResult> => {
           try {
-            const args: unknown = JSON.parse(raw);
+            let args: unknown;
+            try {
+              args = JSON.parse(raw);
+            } catch (error) {
+              if (error instanceof SyntaxError)
+                pluginError("INVALID_ARGUMENTS");
+              throw error;
+            }
             if (!args || typeof args !== "object" || Array.isArray(args))
               pluginError("INVALID_ARGUMENTS");
+            validateMcpArguments(parameters, args);
             await this.guard?.();
             const result = await fn(args as Record<string, unknown>, ctx);
             await this.guard?.();
@@ -226,7 +239,10 @@ export class PluginSession {
               ...(code === "PLUGIN_RESULT_BUDGET"
                 ? { reason: "tool-output" }
                 : {}),
-              ...pluginFailureGuidance,
+              ...(e instanceof PluginArgumentsError
+                ? { issues: e.issues }
+                : {}),
+              ...pluginErrorGuidance(code),
             });
             return {
               text,
@@ -256,7 +272,7 @@ export class PluginSession {
       });
     const idSchema = {
       type: "object",
-      properties: { id: { type: "string" } },
+      properties: { id: { type: "string", minLength: 1 } },
       required: ["id"],
       additionalProperties: false,
     };
@@ -354,7 +370,7 @@ export class PluginSession {
           {
             type: "object",
             properties: {
-              result_ref: { type: "string" },
+              result_ref: { type: "string", minLength: 1 },
               ...(search
                 ? { query: { type: "string", minLength: 1, maxLength: 256 } }
                 : { offset: { type: "integer", minimum: 0 } }),
