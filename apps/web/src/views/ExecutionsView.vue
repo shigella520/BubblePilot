@@ -6,6 +6,7 @@ import {
 } from "../utils/plugin-tool-diagnostics";
 import ExecutionImageResult from "../components/ExecutionImageResult.vue";
 import { memeToolLabel } from "../utils/meme-tool-diagnostics";
+import { memoryToolLabel } from "../utils/memory-tool-diagnostics";
 import MemeDeliveries from "../components/MemeDeliveries.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
@@ -2307,6 +2308,11 @@ function contextSnapshotValue(
                     <span v-if="item.responseDetails?.image_ref">
                       · {{ item.responseDetails.image_ref }}</span
                     >
+                  </p>
+                  <p
+                    v-if="memoryToolLabel(item.toolName, item.responseDetails)"
+                  >
+                    {{ memoryToolLabel(item.toolName, item.responseDetails) }}
                   </p>
                   <p v-if="memeToolLabel(item.toolName, item.responseDetails)">
                     {{ item.durationMs }} ms ·

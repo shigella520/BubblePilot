@@ -113,7 +113,10 @@ describe("memory foundations", () => {
     );
     await expect(
       client.encode(defaultMemoryConfig, null, ["x"]),
-    ).rejects.toMatchObject({ code: "MEMORY_EMBEDDING_HTTP_ERROR" });
+    ).rejects.toMatchObject({
+      code: "MEMORY_EMBEDDING_HTTP_ERROR",
+      httpStatus: 500,
+    });
   });
   it("retains exact identifiers and Chinese words", () => {
     expect(keywordTokens("虚构订单 DEMO-2026-0312 备份方案")).toContain(

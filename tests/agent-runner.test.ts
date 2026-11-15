@@ -1,5 +1,9 @@
 import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
-import type { MemoryService } from "../modules/memory/memory-service.js";
+import {
+  MemorySession,
+  type MemoryService,
+} from "../modules/memory/memory-service.js";
+import { defaultMemoryConfig } from "../modules/memory/memory-types.js";
 import { randomUUID } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
@@ -978,6 +982,85 @@ describe("AgentRunner", () => {
       );
     },
   );
+  it("persists redacted history failure diagnostics without exposing them to the model", async () => {
+    const { repository, client, routing, request } = await setup();
+    const memoryRepository = {
+      scopeForEvent: vi.fn().mockResolvedValue({}),
+      allowed: vi.fn().mockResolvedValue(true),
+    };
+    const sessionFactory = vi.fn();
+    const memory = {
+      repository: memoryRepository,
+      session: sessionFactory,
+    } as unknown as MemoryService;
+    const session = new MemorySession(memory, {
+      chatId: "fictional-chat",
+      upperIndex: 10,
+      executionId: request.executionId ?? null,
+      generation: {
+        id: "fictional-generation",
+        config: defaultMemoryConfig,
+        encrypted_secret: null,
+        identity: "fictional-model",
+        status: "active",
+      },
+    });
+    sessionFactory.mockResolvedValue(session);
+    vi.spyOn(client, "call").mockImplementation((_provider, input) => {
+      client.requests.push(input);
+      return Promise.resolve(
+        input.messages.some((item) => item.role === "tool")
+          ? { status: "succeeded", text: "无法查询历史", durationMs: 1 }
+          : {
+              status: "succeeded",
+              text: "",
+              durationMs: 1,
+              toolCalls: [
+                {
+                  id: "fictional-call",
+                  name: "search_chat_history",
+                  arguments: JSON.stringify({
+                    query: "fictional-private-query",
+                    limit: 999,
+                  }),
+                },
+              ],
+            },
+      );
+    });
+    const result = await new AgentRunner(
+      routing,
+      undefined,
+      repository,
+      undefined,
+      undefined,
+      memory,
+    ).run({
+      ...request,
+      webSearch: "disabled",
+      memoryEvent: { provider: "bluebubbles", messageId: "fictional" },
+    });
+    expect(result.status).toBe("succeeded");
+    expect(repository.toolExecutions[0]).toMatchObject({
+      status: "failed",
+      errorCode: "MEMORY_RETRIEVAL_UNAVAILABLE",
+      responseDetails: {
+        kind: "memory",
+        failure: {
+          stage: "validation",
+          category: "invalid-arguments",
+          validationIssues: [{ field: "limit", code: "too_big" }],
+        },
+      },
+    });
+    expect(JSON.stringify(repository.toolExecutions)).not.toContain(
+      "fictional-private-query",
+    );
+    const toolResult = client.requests[1]?.messages.find(
+      (item) => item.role === "tool",
+    );
+    expect(JSON.stringify(toolResult)).not.toContain("validationIssues");
+  });
   it("does not force history calls for a greeting and does not grant tools without runtime context", async () => {
     const { repository, client, routing, request } = await setup();
     vi.spyOn(client, "call").mockResolvedValue({

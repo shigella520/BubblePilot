@@ -42,6 +42,13 @@ import {
   type EmbeddingClient,
 } from "./embedding-client.js";
 import { chunkMessages, fuseRanks, type MemoryMessage } from "./chunking.js";
+import {
+  memoryFailureDiagnostic,
+  memoryResultDiagnostic,
+  type MemoryDiagnosticStage,
+  type MemoryFailureDiagnostic,
+  type MemoryToolDiagnostic,
+} from "./memory-diagnostics.js";
 import type { MemoryRepository } from "./memory-repository.js";
 import {
   chatExcerptSchema,
@@ -373,6 +380,9 @@ export class MemorySession {
   }
   private operationContext?: AgentToolContext;
   private elapsed = 0;
+  private diagnosticStage: MemoryDiagnosticStage = "arguments";
+  private embeddingFallback?: MemoryFailureDiagnostic;
+  private keywordFailure?: MemoryFailureDiagnostic;
   constructor(
     private readonly service: MemoryService,
     readonly scope: MemoryScope,
@@ -492,8 +502,10 @@ export class MemorySession {
       retrievalId: this.id,
       truncated: false,
     };
+    this.diagnosticStage = "authorization";
     if (!(await repository.allowed(this.scope))) return result;
     this.checkActive();
+    this.diagnosticStage = "coverage";
     result.coverage = await repository.coverage(this.scope);
     const generation = this.scope.generation;
     const secret = generation.encrypted_secret
@@ -502,11 +514,13 @@ export class MemorySession {
     let keywordFailed = false;
     const keywordPromise = repository
       .candidates(this.scope, query, null)
-      .catch(() => {
+      .catch((error: unknown) => {
         keywordFailed = true;
+        this.keywordFailure = memoryFailureDiagnostic("keyword-search", error);
         return [];
       });
     let vector: number[] | null = null;
+    let embeddingStage: MemoryDiagnosticStage = "embedding-identity";
     try {
       if (
         (await this.service.embedding.identity(
@@ -523,6 +537,7 @@ export class MemorySession {
       )
         throw new EmbeddingError("MEMORY_MODEL_CHANGED");
       this.checkActive();
+      embeddingStage = "embedding-query";
       vector =
         (
           await this.service.embedding.encode(
@@ -538,11 +553,13 @@ export class MemorySession {
             ),
           )
         )[0] ?? null;
-    } catch {
+    } catch (error) {
+      this.embeddingFallback = memoryFailureDiagnostic(embeddingStage, error);
       vector = null;
     }
     const keywords = await keywordPromise;
     this.checkActive();
+    this.diagnosticStage = "vector-search";
     const semantic = vector
       ? await repository.candidates(this.scope, query, vector)
       : [];
@@ -555,6 +572,7 @@ export class MemorySession {
       keywords.length >= executionPolicy.search.candidates ||
       semantic.length >= executionPolicy.search.candidates;
     result.selectionLimited = candidates.length > limit;
+    this.diagnosticStage = "source-read";
     for (const candidate of candidates.slice(0, limit)) {
       this.checkActive();
       const evidence = await this.add(
@@ -586,6 +604,7 @@ export class MemorySession {
         : name === "count_chat_messages"
           ? chatCountQuerySchema.parse(parsed)
           : chatExtremaQuerySchema.parse(parsed);
+    this.diagnosticStage = "archive-query";
     const timeZone = chatTimeZone(this.scope.timeZone);
     const { cursor, limit, ...binding } = query;
     const fingerprint = hashJson({
@@ -754,13 +773,16 @@ export class MemorySession {
     }
   }
   private async query(name: string, args: string): Promise<string> {
+    this.diagnosticStage = "arguments";
     const parsed = JSON.parse(args) as unknown;
+    this.diagnosticStage = "authorization";
     if (!(await this.validate()))
       return JSON.stringify({
         status: "unavailable",
         reason: "source-unavailable",
       });
     this.checkActive();
+    this.diagnosticStage = "validation";
     if (
       [
         "query_chat_messages",
@@ -769,13 +791,14 @@ export class MemorySession {
       ].includes(name)
     )
       return this.archive(name, parsed);
-    if (name === "search_chat_history")
-      return JSON.stringify(
-        await this.searchWithinBudget(memorySearchSchema.parse(parsed)),
-      );
+    if (name === "search_chat_history") {
+      const query = memorySearchSchema.parse(parsed);
+      return JSON.stringify(await this.searchWithinBudget(query));
+    }
     if (name !== "read_chat_excerpt") throw new Error("Unknown memory tool");
     const { ref, before, after, attachmentOffset } =
       chatExcerptSchema.parse(parsed);
+    this.diagnosticStage = "source-read";
     const entry = ref ? this.evidence.get(ref) : undefined;
     const first = entry?.messages[0],
       last = entry?.messages.at(-1);
@@ -844,7 +867,15 @@ export class MemorySession {
     name: string,
     args: string,
     context?: AgentToolContext,
+    onDiagnostic?: (diagnostic: MemoryToolDiagnostic) => void,
   ): Promise<string> {
+    const report = (diagnostic: MemoryToolDiagnostic) => {
+      try {
+        onDiagnostic?.(diagnostic);
+      } catch {
+        // Diagnostics cannot change the tool outcome.
+      }
+    };
     if (!context) {
       const budget = new AgentBudget({
         ...defaultAgentSettings,
@@ -853,13 +884,21 @@ export class MemorySession {
         updatedAt: null,
       });
       try {
-        return await budget.execute((ctx) => this.execute(name, args, ctx));
+        return await budget.execute((ctx) =>
+          this.execute(name, args, ctx, onDiagnostic),
+        );
       } catch {
-        return JSON.stringify({
+        const content = JSON.stringify({
           status: "unavailable",
           reason: "tool-duration",
           truncated: true,
         });
+        report(
+          memoryResultDiagnostic(content, {
+            failure: { stage: "timeout", category: "timeout" },
+          }),
+        );
+        return content;
       }
     }
     // Each operation owns a staging map. Timed-out work cannot modify the live session.
@@ -871,15 +910,33 @@ export class MemorySession {
     staged.cursors = new Map(this.cursors);
     staged.operationContext = context;
     const started = Date.now();
+    const finish = (content: string, failure?: MemoryFailureDiagnostic) => {
+      report(
+        memoryResultDiagnostic(content, {
+          ...(failure ? { failure } : {}),
+          ...(staged.embeddingFallback
+            ? { embeddingFallback: staged.embeddingFallback }
+            : {}),
+          ...(staged.keywordFailure
+            ? { keywordFailure: staged.keywordFailure }
+            : {}),
+        }),
+      );
+      return content;
+    };
     try {
       const raw = await staged.query(name, args);
       staged.checkActive();
+      staged.diagnosticStage = "source-validation";
       if (!(await staged.validate()))
-        return JSON.stringify({
-          status: "unavailable",
-          reason: "source-unavailable",
-        });
+        return finish(
+          JSON.stringify({
+            status: "unavailable",
+            reason: "source-unavailable",
+          }),
+        );
       staged.checkActive();
+      staged.diagnosticStage = "output-fitting";
       const fitted = fitToolOutput(raw, context.maxOutputCharacters);
       const content =
         fitted.content ??
@@ -904,6 +961,7 @@ export class MemorySession {
         const entry = staged.evidence.get(item.ref);
         return entry && !this.evidence.has(item.ref) ? [entry] : [];
       });
+      staged.diagnosticStage = "record-sources";
       const client = await this.service.repository.pool.connect();
       let released = false;
       const cancel = () => {
@@ -959,18 +1017,29 @@ export class MemorySession {
         if (!released) client.release();
       }
       this.elapsed += Math.max(0, Date.now() - started);
-      return content;
+      return finish(content);
     } catch (error) {
-      if (context.signal.aborted || Date.now() >= context.deadline)
+      if (context.signal.aborted || Date.now() >= context.deadline) {
+        report({
+          kind: "memory",
+          version: 1,
+          status: "unavailable",
+          reason: "tool-duration",
+          failure: { stage: "timeout", category: "timeout" },
+        });
         throw new AgentToolTimeout();
+      }
       if (error instanceof AgentToolTimeout) throw error;
-      return JSON.stringify({
-        status: "unavailable",
-        reason:
-          error instanceof ChatQueryError
-            ? error.reason
-            : "invalid-or-unavailable",
-      });
+      return finish(
+        JSON.stringify({
+          status: "unavailable",
+          reason:
+            error instanceof ChatQueryError
+              ? error.reason
+              : "invalid-or-unavailable",
+        }),
+        memoryFailureDiagnostic(staged.diagnosticStage, error),
+      );
     }
   }
   async validate(): Promise<boolean> {

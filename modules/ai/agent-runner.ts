@@ -384,8 +384,18 @@ export class AgentRunner {
       for (const definition of memoryTools)
         registry.register({
           definition,
-          execute: (args, context) =>
-            memory.execute(definition.name, args, context),
+          execute: async (args, context) => {
+            let diagnostics: Record<string, unknown> | undefined;
+            const text = await memory.execute(
+              definition.name,
+              args,
+              context,
+              (value) => {
+                diagnostics = { ...value };
+              },
+            );
+            return diagnostics ? { text, diagnostics } : text;
+          },
           diagnostics: "metadata-only",
         });
     if (
@@ -665,6 +675,8 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         const isPlugin = registered?.diagnostics === "plugin";
         const isTask = registered?.metadata?.capability === "scheduled-task";
         const isMemory = registered?.diagnostics === "metadata-only";
+        const isHistory =
+          isMemory && memoryTools.some((tool) => tool.name === call.name);
         const isMeme =
           call.name === "search_memes" || call.name === "select_meme";
         const query = call.name === "web_search" ? queryFromCall(call) : null;
@@ -720,6 +732,8 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                 if (Date.now() >= context.deadline)
                   throw new AgentToolTimeout();
                 if (typeof output === "string") return output;
+                if (isHistory && output.diagnostics)
+                  responseDetails = output.diagnostics;
                 if (isPlugin) {
                   responseDetails = output.diagnostics ?? null;
                   if (output.diagnostics?.outcome === "error")
@@ -792,6 +806,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
               errorCode = "AI_AGENT_INVALID_TOOL_ARGUMENTS";
             if (isMemory)
               responseDetails = {
+                ...(responseDetails ?? {}),
                 outcome: "completed",
                 metadataOnly: true,
                 sourceRefs: memory?.references?.() ?? [],
@@ -898,8 +913,20 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
           resultCount = details.resultCount;
           errorCode = details.errorCode;
         }
+        if (isHistory && errorCode === "AI_AGENT_TOOL_TIMEOUT")
+          responseDetails = {
+            ...(responseDetails ?? {}),
+            kind: "memory",
+            version: 1,
+            status: "unavailable",
+            reason: "tool-duration",
+            failure: { stage: "timeout", category: "timeout" },
+          };
         if (call.name === "count_chat_messages") {
-          responseDetails = chatCountDiagnostics(call.arguments, content);
+          responseDetails = {
+            ...(responseDetails ?? {}),
+            ...chatCountDiagnostics(call.arguments, content),
+          };
         }
         await this.repository?.recordToolExecution({
           executionId,
