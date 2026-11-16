@@ -118,6 +118,9 @@ export function strictToolParameters(tool: AiToolDefinition): Schema {
               ? converted
               : {
                   description:
+                    (typeof converted.description === "string"
+                      ? `${converted.description} `
+                      : "") +
                     "Optional field: use null when no value is supplied. Preserve meaningful empty strings, zero and false only when the tool permits them.",
                   anyOf: [converted, { type: "null" }],
                 },

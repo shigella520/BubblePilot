@@ -35,7 +35,7 @@ interface Task {
   timeZone: string;
   status: string;
   version: number;
-  schedule?: TaskSchedule;
+  schedule: TaskSchedule;
   lifecycle?: string;
   scheduleSummary?: string;
   upcoming?: string[];
@@ -223,9 +223,7 @@ function edit(task: Task) {
   content.value = task.content ?? "";
   summary.value = task.summary ?? "";
   draftSchedule.value = JSON.parse(
-    JSON.stringify(
-      task.schedule ?? { kind: "once", scheduledAt: task.scheduledAt },
-    ),
+    JSON.stringify(task.schedule),
   ) as TaskSchedule;
   draftZone.value = task.timeZone;
   preview.value = {
@@ -258,10 +256,8 @@ async function save() {
   if (!editing.value || previewKey.value !== scheduleKey()) return;
   const task = editing.value;
   const changed =
-    JSON.stringify(draftSchedule.value) !==
-      JSON.stringify(
-        task.schedule ?? { kind: "once", scheduledAt: task.scheduledAt },
-      ) || draftZone.value !== task.timeZone;
+    JSON.stringify(draftSchedule.value) !== JSON.stringify(task.schedule) ||
+    draftZone.value !== task.timeZone;
   if (
     !changed &&
     content.value === task.content &&
@@ -432,7 +428,7 @@ onBeforeUnmount(() => generation++);
                 {{ task.summary || taskOverview(task.content) }}
               </p>
               <p class="task-help">{{ task.scheduleSummary ?? "单次提醒" }}</p>
-              <small v-if="task.schedule?.kind === 'recurring'"
+              <small v-if="task.schedule.kind === 'recurring'"
                 >已消耗 {{ task.consumedCount ?? 0 }} 次</small
               >
             </td>

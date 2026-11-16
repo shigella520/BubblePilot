@@ -28,15 +28,27 @@ describe("strict tool schema", () => {
   it("compiles every application tool and capability probe without mutating definitions", () => {
     const definitions = allToolDefinitions();
     expect(definitions.map((t) => t.name).sort()).toEqual([
+      "cancel_scheduled_task",
       "capability_probe",
       "count_chat_messages",
+      "create_scheduled_task",
+      "fictional_mcp",
       "get_chat_message_extrema",
       "import_chat_attachment",
+      "list_scheduled_tasks",
+      "load_plugin_skill",
+      "pause_scheduled_task",
       "query_chat_messages",
       "read_chat_excerpt",
+      "read_plugin_reference",
+      "read_tool_result",
+      "resume_scheduled_task",
       "search_chat_history",
       "search_memes",
+      "search_tool_result",
       "select_meme",
+      "skip_next_scheduled_task",
+      "update_scheduled_task",
       "view_chat_image",
       "web_search",
     ]);
@@ -56,7 +68,12 @@ describe("strict tool schema", () => {
         type: "object",
         properties: {
           query: { type: "string" },
-          mode: { type: "string", enum: ["first", "last"], default: "first" },
+          mode: {
+            type: "string",
+            enum: ["first", "last"],
+            default: "first",
+            description: "Select a mode.",
+          },
           nested: {
             type: "object",
             properties: { n: { type: "integer", minimum: 1 } },
@@ -85,6 +102,10 @@ describe("strict tool schema", () => {
     expect(JSON.stringify(schema)).toContain(
       "use null when no value is supplied",
     );
+    expect(
+      (schema.properties as Record<string, { description: string }>).mode!
+        .description,
+    ).toContain("Select a mode.");
     expect(JSON.stringify(schema)).not.toContain('"default"');
     assertStrictSchema(schema);
   });

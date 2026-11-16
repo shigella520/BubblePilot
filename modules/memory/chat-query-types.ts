@@ -20,8 +20,18 @@ function instantMicros(value: string): bigint {
   );
 }
 const fields = {
-  botWorkflowId: z.string().uuid().optional(),
-  senderId: z.string().trim().min(1).max(255).optional(),
+  botWorkflowId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Exact Bot workflow UUID; mutually exclusive with senderId."),
+  senderId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .optional()
+    .describe("Exact known sender ID; mutually exclusive with botWorkflowId."),
   from: timestamp.optional(),
   to: timestamp.optional(),
   dailyTime: z
@@ -35,8 +45,14 @@ const fields = {
     .array(z.string().trim().min(1).max(100))
     .min(1)
     .max(10)
-    .optional(),
-  keywordMode: z.enum(["all", "any"]).optional(),
+    .optional()
+    .describe(
+      "One to ten literal keywords; must be supplied together with keywordMode.",
+    ),
+  keywordMode: z
+    .enum(["all", "any"])
+    .optional()
+    .describe("Match all or any keywords; supply only with keywords."),
 };
 const validIdentity = (v: ChatFilters) => !(v.senderId && v.botWorkflowId);
 const validRange = (v: ChatFilters) =>
@@ -78,14 +94,30 @@ export interface ChatFilters {
 }
 const cursor = z.string().uuid().optional();
 const attachmentFields = {
-  hasAttachments: z.boolean().optional(),
-  attachmentName: z.string().trim().min(1).max(200).optional(),
+  hasAttachments: z
+    .boolean()
+    .optional()
+    .describe(
+      "false cannot be combined with attachmentName or attachmentType.",
+    ),
+  attachmentName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      "Literal filename filter; cannot be combined with hasAttachments=false.",
+    ),
   attachmentType: z
     .string()
     .trim()
     .toLowerCase()
     .regex(/^(?:[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+|\.[a-z0-9]{1,16})$/u)
-    .optional(),
+    .optional()
+    .describe(
+      "Exact MIME or extension; cannot be combined with hasAttachments=false.",
+    ),
 };
 export const chatMessageQuerySchema = z
   .object({
@@ -130,8 +162,16 @@ export const chatCountQuerySchema = z
         "hourOfDay",
         "weekday",
       ])
-      .default("none"),
-    breakdownBy: z.enum(["sender", "hourOfDay"]).optional(),
+      .default("none")
+      .describe(
+        "Time grouping requires both from and to. none cannot use a cursor.",
+      ),
+    breakdownBy: z
+      .enum(["sender", "hourOfDay"])
+      .optional()
+      .describe(
+        "Only with a time grouping: sender for any time group; hourOfDay only for weekday.",
+      ),
     orderBy: z.enum(["group", "countDesc"]).optional(),
     authorKind: z.enum(["participant", "bot", "unknown"]).optional(),
   })

@@ -173,6 +173,78 @@ describe("history search diagnostics", () => {
     });
   });
 
+  it.each([
+    [
+      "query_chat_messages",
+      {
+        senderId: "fictional-private",
+        botWorkflowId: "00000000-0000-4000-8000-000000000001",
+      },
+      "Use either senderId or botWorkflowId, not both.",
+    ],
+    [
+      "query_chat_messages",
+      { keywords: ["fictional-private"] },
+      "Provide keywords and keywordMode together.",
+    ],
+    [
+      "query_chat_messages",
+      { hasAttachments: false, attachmentName: "fictional-private" },
+      "Do not combine hasAttachments=false with attachmentName or attachmentType.",
+    ],
+    [
+      "query_chat_messages",
+      { from: "2030-01-02T00:00:00Z", to: "2030-01-01T00:00:00Z" },
+      "from must be no later than to.",
+    ],
+    [
+      "query_chat_messages",
+      { dailyTime: { from: "09:00", to: "09:00" } },
+      "dailyTime from and to must differ.",
+    ],
+    [
+      "count_chat_messages",
+      { groupBy: "none", cursor: "00000000-0000-4000-8000-000000000001" },
+      "An ungrouped query cannot use a cursor.",
+    ],
+    [
+      "count_chat_messages",
+      { groupBy: "sender", breakdownBy: "sender" },
+      "breakdownBy requires a time grouping; hourOfDay breakdown requires weekday grouping.",
+    ],
+    [
+      "get_chat_message_extrema",
+      { pick: "first", groupBy: "day" },
+      "Time grouping requires both from and to.",
+    ],
+    [
+      "search_chat_history",
+      {
+        query: "fictional-private",
+        senderId: "fictional-private",
+        botWorkflowId: "00000000-0000-4000-8000-000000000001",
+      },
+      "Use either senderId or botWorkflowId, not both.",
+    ],
+  ])(
+    "returns a safe correction for %s conditional parameters",
+    async (name, args, rule) => {
+      const { session } = fixture();
+      const result = await session.execute(name, JSON.stringify(args));
+      const payload = JSON.parse(result) as {
+        reason: string;
+        issues: { code: string; guidance?: string }[];
+      };
+      expect(payload.reason).toBe("invalid-arguments");
+      expect(
+        payload.issues.some(
+          (issue) => issue.code === "custom" && issue.guidance === rule,
+        ),
+      ).toBe(true);
+      expect(result).not.toContain("fictional-private");
+    },
+  );
+
   it("distinguishes invalid JSON and a database failure without copying errors", async () => {
     const invalid = fixture();
     const badJson = await invalid.execute('{"query":"fictional-private');

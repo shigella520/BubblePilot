@@ -91,4 +91,61 @@ describe("model-facing scheduled task errors", () => {
       guidance: "任务已发生变化，请刷新后重试。",
     });
   });
+  it("rejects conflicting legacy fields before mutation and tells the model how to correct them", async () => {
+    const f = fixture();
+    const tools = await f.service.tools("fictional-execution");
+    const create = vi.spyOn(f.service, "create");
+    const result = await tools
+      .find((item) => item.definition.name === "create_scheduled_task")!
+      .execute(
+        JSON.stringify({
+          summary: "虚构提醒",
+          content: "虚构任务",
+          timeZone: "UTC",
+          scheduledAt: "2030-01-02T05:00:00Z",
+          schedule: {
+            kind: "recurring",
+            startsAt: "2030-01-02T05:00:00Z",
+            rule: { type: "daily", localTime: "05:00" },
+            end: { kind: "never" },
+          },
+        }),
+        f.context,
+      );
+    const conflict = JSON.parse(result as string) as {
+      errorCode: string;
+      issues: { code: string }[];
+      guidance: string;
+    };
+    expect(conflict.errorCode).toBe("TASK_ARGUMENTS_INVALID");
+    expect(
+      conflict.issues.some((issue) => issue.code === "unrecognized_keys"),
+    ).toBe(true);
+    expect(conflict.guidance).toContain("do not submit it at the top level");
+    expect(create).not.toHaveBeenCalled();
+    const change = vi.spyOn(f.service, "change");
+    const update = await tools
+      .find((item) => item.definition.name === "update_scheduled_task")!
+      .execute(
+        JSON.stringify({
+          id: "00000000-0000-4000-8000-000000000001",
+          expectedVersion: 1,
+          timeZone: "UTC",
+        }),
+        f.context,
+      );
+    const invalidUpdate = JSON.parse(update as string) as {
+      errorCode: string;
+      issues: { guidance?: string }[];
+    };
+    expect(invalidUpdate.errorCode).toBe("TASK_ARGUMENTS_INVALID");
+    expect(
+      invalidUpdate.issues.some(
+        (issue) =>
+          issue.guidance ===
+          "Provide the complete schedule when changing timeZone.",
+      ),
+    ).toBe(true);
+    expect(change).not.toHaveBeenCalled();
+  });
 });

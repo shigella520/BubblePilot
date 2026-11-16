@@ -1,7 +1,16 @@
 import { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
 import { InMemoryAgentSettingsRepository } from "./support/in-memory-agent-settings-repository.js";
 import type { FastifyInstance } from "fastify";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest";
 
 import { buildApplication } from "../app/application.js";
 import type { AppConfig } from "../app/config.js";
@@ -18,6 +27,10 @@ import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
 import { InMemoryAuthRepository } from "./support/in-memory-auth-repository.js";
 import { InMemoryWorkflowRepository } from "./support/in-memory-workflow-repository.js";
+import type {
+  TaskService,
+  TaskRow,
+} from "../modules/scheduled-tasks/task-service.js";
 
 const loginPassword = "fictional-login-password";
 const sensitivePassword = "fictional-sensitive-password";
@@ -51,6 +64,8 @@ describe("Web admin authentication", () => {
   let authRepository: InMemoryAuthRepository;
   let archiveRepository: InMemoryArchiveRepository;
   let aiRepository: InMemoryAiRepository;
+  let taskService: TaskService;
+  let taskChange: Mock<TaskService["change"]>;
 
   beforeEach(() => {
     const config: AppConfig = {
@@ -86,6 +101,10 @@ describe("Web admin authentication", () => {
     authRepository = new InMemoryAuthRepository();
     aiRepository = new InMemoryAiRepository();
     archiveRepository = new InMemoryArchiveRepository();
+    taskChange = vi
+      .fn<TaskService["change"]>()
+      .mockResolvedValue({ id: "fictional-task" } as TaskRow);
+    taskService = { change: taskChange } as unknown as TaskService;
     const secrets = new EnvironmentSecretResolver({
       PREVIEW_AI_KEY: "fictional-server-secret",
     });
@@ -150,6 +169,7 @@ describe("Web admin authentication", () => {
       workflow: {
         repository: workflowRepository,
         engine: workflowEngine,
+        tasks: taskService,
       },
     });
   });
@@ -255,6 +275,58 @@ describe("Web admin authentication", () => {
         })
       ).statusCode,
     ).toBe(403);
+  });
+
+  it("accepts schedule edits and rejects removed top-level scheduledAt before calling the service", async () => {
+    const url = "/api/v1/scheduled-tasks/00000000-0000-4000-8000-000000000001";
+    const headers = {
+      authorization: "Bearer fictional-api-access-token-32-chars-long",
+    };
+    const time = "2030-01-02T05:00:00Z";
+    const old = await application.inject({
+      method: "PATCH",
+      url,
+      headers,
+      payload: { expectedVersion: 1, scheduledAt: time },
+    });
+    expect(old.statusCode).toBe(400);
+    const mixed = await application.inject({
+      method: "PATCH",
+      url,
+      headers,
+      payload: {
+        expectedVersion: 1,
+        scheduledAt: time,
+        schedule: { kind: "once", scheduledAt: time },
+      },
+    });
+    expect(mixed.statusCode).toBe(400);
+    const zoneOnly = await application.inject({
+      method: "PATCH",
+      url,
+      headers,
+      payload: { expectedVersion: 1, timeZone: "UTC" },
+    });
+    expect(zoneOnly.statusCode).toBe(400);
+    expect(taskChange).not.toHaveBeenCalled();
+    const schedule = { kind: "once", scheduledAt: time };
+    const updated = await application.inject({
+      method: "PATCH",
+      url,
+      headers,
+      payload: { expectedVersion: 1, timeZone: "UTC", schedule },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(taskChange).toHaveBeenCalledWith(
+      { kind: "admin", id: "api-token" },
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        expectedVersion: 1,
+        timeZone: "UTC",
+        schedule,
+      },
+      false,
+    );
   });
 
   it("allows member mapping reads and changes after login without step-up and retains audit", async () => {

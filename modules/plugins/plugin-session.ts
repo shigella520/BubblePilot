@@ -406,6 +406,9 @@ export class PluginSession {
           async (args, ctx) => {
             const mcpArgs = decodeMcpArguments(args);
             await this.check(p, undefined, tool);
+            // Reject invalid original arguments before connecting or discovering
+            // a remote MCP service; retain its approved contract verbatim.
+            validateMcpArguments(tool.definition.parameters, mcpArgs);
             const client = await this.clientFor(p, tool, ctx.signal);
             const remainingMs = ctx.deadline - Date.now();
             ctx.signal.throwIfAborted();
