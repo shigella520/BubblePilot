@@ -63,9 +63,21 @@ onBeforeUnmount(() => {
   background: #16233870;
 }
 .panel-head {
+  flex-direction: row;
+  align-items: center;
   padding: 20px 24px;
   margin: 0;
   border-bottom: 1px solid #e0e4e8;
+}
+.panel-head h2 {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: clamp(20px, 6vw, 24px);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.panel-head .button {
+  flex: 0 0 auto;
 }
 .admin-detail-body {
   padding: 20px 24px;

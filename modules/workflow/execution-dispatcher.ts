@@ -6,7 +6,10 @@ export interface WorkflowExecutionDispatcher {
   readonly mode: "in-process" | "external-worker";
   dispatch(
     envelope: MessageEnvelope,
-    options?: { contextTrigger?: ConversationContextTrigger },
+    options?: {
+      contextTrigger?: ConversationContextTrigger;
+      retryPending?: boolean;
+    },
   ): Promise<AutomationResult>;
 }
 
@@ -17,7 +20,10 @@ export class InProcessWorkflowExecutionDispatcher implements WorkflowExecutionDi
 
   dispatch(
     envelope: MessageEnvelope,
-    options?: { contextTrigger?: ConversationContextTrigger },
+    options?: {
+      contextTrigger?: ConversationContextTrigger;
+      retryPending?: boolean;
+    },
   ): Promise<AutomationResult> {
     return this.automation.handleMessage(envelope, options);
   }

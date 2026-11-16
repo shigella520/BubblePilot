@@ -1340,6 +1340,7 @@ onMounted(async () => {
         </div>
         <AdminFormDialog
           v-if="providerDialog"
+          :sensitive-required="false"
           :title="providerForm.id ? '编辑 Provider' : '新建 Provider'"
           :busy="providerFormBusy"
           :draft="providerForm"
@@ -1571,6 +1572,7 @@ onMounted(async () => {
         </div>
         <AdminFormDialog
           v-if="routeDialog"
+          :sensitive-required="false"
           :title="routeForm.id ? '编辑 路由' : '新建 路由'"
           :busy="routeFormBusy"
           :draft="routeForm"

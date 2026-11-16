@@ -23,6 +23,10 @@ import type {
 import { runtimeTimeZone } from "./context-time.js";
 import type { ConversationContextTrigger } from "./conversation-context-service.js";
 import type {
+  ReplyWakeDecision,
+  ReplyWakeStatus,
+} from "../ingestion/reply-wakeup.js";
+import type {
   HistoryCoverage,
   ConversationContextSnapshot,
 } from "./conversation-context-service.js";
@@ -31,12 +35,16 @@ export interface AutomationResult {
   executionIds: readonly string[];
   matchedTriggerIds: readonly string[];
   activeTriggerCount: number;
+  replyWake?: { status: ReplyWakeStatus; decision: ReplyWakeDecision | null };
 }
 
 export interface MessageAutomation {
   handleMessage(
     envelope: MessageEnvelope,
-    options?: { contextTrigger?: ConversationContextTrigger },
+    options?: {
+      contextTrigger?: ConversationContextTrigger;
+      retryPending?: boolean;
+    },
   ): Promise<AutomationResult>;
   retryExecution(
     executionId: string,
@@ -65,12 +73,40 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+async function withinReplyWakeBudget<T>(
+  operation: () => Promise<T>,
+  deadline: number,
+): Promise<T> {
+  const remaining = deadline - performance.now();
+  if (remaining <= 0) throw new Error("Reply wake lookup timed out");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Reply wake lookup timed out")),
+          remaining,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 function executionIsolationKey(
   workflowId: string,
   provider: string,
   providerChatId: string,
 ): string {
   return `${workflowId}\u0000${provider}\u0000${providerChatId}`;
+}
+
+function replyTriggerEnabled(binding: TriggerBinding): boolean {
+  return !binding.definition.nodes.some(
+    (node) => node.type === "message-trigger" && !node.config.enabled,
+  );
 }
 
 export class WorkflowEngine implements MessageAutomation {
@@ -101,10 +137,13 @@ export class WorkflowEngine implements MessageAutomation {
 
   async handleMessage(
     envelope: MessageEnvelope,
-    options: { contextTrigger?: ConversationContextTrigger } = {},
+    options: {
+      contextTrigger?: ConversationContextTrigger;
+      retryPending?: boolean;
+    } = {},
   ): Promise<AutomationResult> {
     const bindings = await this.repository.listActiveTriggerBindings();
-    const matched = bindings.filter(
+    const candidates = bindings.filter(
       (binding) =>
         !binding.definition.nodes.some(
           (node) =>
@@ -112,9 +151,101 @@ export class WorkflowEngine implements MessageAutomation {
             (node.config.idle !== undefined ||
               node.config.scheduled !== undefined) &&
             !node.config.enabled,
-        ) &&
+        ),
+    );
+    let ordinary = candidates.filter(
+      (binding) =>
         matchTrigger(envelope, binding.conditions, binding.includeFromMe)
           .matched,
+    );
+    let reply: TriggerBinding | undefined;
+    let replyWake: AutomationResult["replyWake"];
+    if (
+      !envelope.metadata.isReplay &&
+      (envelope.message.replyReference || options.retryPending)
+    ) {
+      const deadline = performance.now() + 2_000;
+      try {
+        const snapshot = await withinReplyWakeBudget(
+          () => this.repository.resolveReplyWake(envelope),
+          deadline,
+        );
+        if (snapshot.status !== "legacy") {
+          let decision: ReplyWakeDecision = "not-applicable";
+          if (snapshot.status === "resolved" && snapshot.workflowId) {
+            const ordinaryOwner = ordinary.some(
+              (binding) => binding.workflowId === snapshot.workflowId,
+            );
+            const potential = ordinaryOwner
+              ? undefined
+              : candidates
+                  .filter(
+                    (binding) =>
+                      binding.workflowId === snapshot.workflowId &&
+                      replyTriggerEnabled(binding) &&
+                      matchTrigger(
+                        envelope,
+                        binding.conditions,
+                        binding.includeFromMe,
+                        true,
+                      ).matchSource === "reply",
+                  )
+                  .sort(
+                    (a, b) =>
+                      a.createdAt.localeCompare(b.createdAt) ||
+                      a.id.localeCompare(b.id),
+                  )[0];
+            const choice = snapshot.decision
+              ? {
+                  decision: snapshot.decision,
+                  triggerId: snapshot.triggerId ?? null,
+                  workflowVersionId: snapshot.workflowVersionId ?? null,
+                }
+              : await withinReplyWakeBudget(
+                  () =>
+                    this.repository.freezeReplyWakeChoice(envelope, {
+                      decision: ordinaryOwner
+                        ? "ordinary"
+                        : potential
+                          ? "reply"
+                          : "blocked",
+                      triggerId: potential?.id ?? null,
+                      workflowVersionId: potential?.workflowVersionId ?? null,
+                    }),
+                  deadline,
+                );
+            if (choice?.decision === "reply") {
+              // A retry must not reinterpret this event using a later trigger/version.
+              ordinary = ordinary.filter(
+                (binding) => binding.workflowId !== snapshot.workflowId,
+              );
+              reply = candidates.find(
+                (binding) =>
+                  binding.workflowId === snapshot.workflowId &&
+                  binding.id === choice.triggerId &&
+                  binding.workflowVersionId === choice.workflowVersionId &&
+                  replyTriggerEnabled(binding) &&
+                  matchTrigger(
+                    envelope,
+                    binding.conditions,
+                    binding.includeFromMe,
+                    true,
+                  ).matched,
+              );
+              decision = reply ? "reply" : "blocked";
+            } else if (choice?.decision === "ordinary" && ordinaryOwner)
+              decision = "ordinary";
+            else decision = "blocked";
+          }
+          replyWake = { status: snapshot.status, decision };
+        }
+      } catch {
+        // A failed provenance lookup never suppresses an ordinary match.
+        replyWake = { status: "lookup-error", decision: "not-applicable" };
+      }
+    }
+    const matched = candidates.filter(
+      (binding) => ordinary.includes(binding) || binding === reply,
     );
     const executionIds: string[] = [];
 
@@ -124,6 +255,7 @@ export class WorkflowEngine implements MessageAutomation {
           const claimed = await this.repository.createExecution({
             envelope,
             trigger,
+            messageMatchSource: trigger === reply ? "reply" : "ordinary",
             ...(options.contextTrigger === undefined
               ? {}
               : { contextTrigger: options.contextTrigger }),
@@ -146,6 +278,7 @@ export class WorkflowEngine implements MessageAutomation {
       executionIds,
       matchedTriggerIds: matched.map((trigger) => trigger.id),
       activeTriggerCount: bindings.length,
+      ...(replyWake ? { replyWake } : {}),
     };
   }
 
@@ -341,6 +474,9 @@ export class WorkflowEngine implements MessageAutomation {
           inputSummary: {
             eventId: envelope.eventId,
             triggerType: triggerType(envelope),
+            ...(node.type === "message-trigger"
+              ? { matchSource: execution.messageMatchSource ?? null }
+              : {}),
             contentType: envelope.message?.contentType ?? null,
             hasText: envelope.message?.text != null,
             attachmentCount: envelope.message?.attachments.length ?? 0,

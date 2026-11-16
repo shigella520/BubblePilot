@@ -5,6 +5,7 @@ import { normalizeWebSearchPolicy } from "../../../../../modules/ai/web-search-p
 import AttachmentHandlingSettings from "./AttachmentHandlingSettings.vue";
 import ScheduledTriggerSettings from "./ScheduledTriggerSettings.vue";
 import IdleTriggerSettings from "./IdleTriggerSettings.vue";
+import TriggerPreview from "./TriggerPreview.vue";
 import { ref, onMounted } from "vue";
 import { apiRequest } from "../../services/api";
 const plugins = ref<Array<{ id: string; name: string; enabled: boolean }>>([]);
@@ -445,6 +446,10 @@ function configVisible(item: any): boolean {
       /></label>
       <small>{{ item.description }}</small>
     </div>
+    <TriggerPreview
+      v-if="node.data.block.type === 'message-trigger'"
+      :config="props.config"
+    />
     <button class="button danger" type="button" @click="emit('remove')">
       删除动作块
     </button>

@@ -273,7 +273,12 @@ const messageRetention =
         ),
       )
     : undefined;
-const replyGateway = new ManagedBlueBubblesReplyGateway(blueBubblesSettings);
+const replyGateway = new ManagedBlueBubblesReplyGateway(
+  blueBubblesSettings,
+  (diagnostic) => {
+    application.log.warn(diagnostic, "BlueBubbles delivery diagnostic");
+  },
+);
 const linkPreviewEnricher = new ManagedLinkPreviewEnricher(
   blueBubblesSettings,
   new OpenGraphClient(networkSettings.trustedHosts),

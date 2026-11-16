@@ -112,10 +112,12 @@ describe("meme tool scope", () => {
         .get("search_memes")!
         .execute('{"query":"开心"}', f.context),
     ).toContain("no-results");
-    await expect(
-      f.registry
-        .get("search_memes")!
-        .execute('{"query":"开心","limit":11}', f.context),
-    ).resolves.toContain("invalid-arguments");
+    const invalid = await f.registry
+      .get("search_memes")!
+      .execute('{"query":"开心","limit":11}', f.context);
+    expect(JSON.parse(invalid as string)).toMatchObject({
+      status: "invalid-arguments",
+      issues: [{ field: "limit", code: "too_big", maximum: 10 }],
+    });
   });
 });

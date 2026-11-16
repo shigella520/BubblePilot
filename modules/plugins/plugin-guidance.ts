@@ -7,6 +7,57 @@ export const pluginFailureGuidance = {
   nextAction:
     "Use existing evidence or the authorized built-in web_search if useful. Do not claim that page content was retrieved. Explain unverifiable details instead of inventing them.",
 } as const;
+
+/** Do not replay calls with an unknown remote outcome. Argument errors occur before the tool call. */
+export function pluginErrorGuidance(code: string) {
+  if (
+    code === "PLUGIN_INVALID_ARGUMENTS" ||
+    code === "PLUGIN_INVALID_TOOL_ARGUMENTS"
+  )
+    return {
+      contentAvailable: false,
+      retryInThisAnswer: true,
+      nextAction:
+        "The tool arguments were rejected before execution. Correct the reported fields using the tool schema. For MCP arguments_json, provide a JSON object and omit unused optional fields unless that schema explicitly accepts null. Do not repeat unchanged arguments.",
+    };
+  const reasons: Record<string, string> = {
+    PLUGIN_REFERENCE_UNAVAILABLE:
+      "The reference is unavailable in this run. Use an exact authorized reference returned by the current run; do not guess it.",
+    PLUGIN_PERMISSION_REVOKED: "Plugin authorization was revoked or changed.",
+    PLUGIN_TOOL_REVIEW_REQUIRED:
+      "The remote tool changed and requires administrator review.",
+    PLUGIN_MCP_TIMEOUT:
+      "The plugin call timed out; the remote outcome may be unknown.",
+    PLUGIN_MCP_CANCELLED:
+      "The plugin call was cancelled; the remote outcome may be unknown.",
+    PLUGIN_MCP_TRANSPORT_ERROR:
+      "The plugin connection failed; the remote outcome may be unknown.",
+    PLUGIN_MCP_PROTOCOL_ERROR: "The remote service returned a protocol error.",
+    PLUGIN_SESSION_INVALIDATED: "The plugin session is no longer available.",
+    PLUGIN_REMOTE_AUTH_DENIED:
+      "The remote service rejected its configured credentials.",
+    PLUGIN_RATE_LIMITED: "The remote service rate-limited the request.",
+    PLUGIN_BILLING_REQUIRED:
+      "The remote service reported a billing restriction.",
+    PLUGIN_MCP_OUTPUT_INVALID:
+      "The remote response did not match the approved output schema.",
+    PLUGIN_RESPONSE_TOO_LARGE: "The remote response exceeded its size limit.",
+    PLUGIN_UNSUPPORTED_RESULT:
+      "The remote response uses an unsupported content type.",
+    PLUGIN_RESULT_STORAGE_LIMIT:
+      "The run has insufficient space for another stored result.",
+    PLUGIN_NETWORK_TARGET_DENIED:
+      "The remote network target is not authorized.",
+    PLUGIN_RESULT_BUDGET:
+      "The result exceeds this run's remaining output budget.",
+  };
+  return {
+    ...pluginFailureGuidance,
+    nextAction:
+      "Do not claim the operation completed. If the remote outcome is unknown, do not automatically repeat it. For web research, use existing evidence or authorized web search if useful, and explain unverified details.",
+    ...(reasons[code] ? { failureReason: reasons[code] } : {}),
+  };
+}
 /** Only explicit structured codes are classified. Arbitrary text is not billing evidence. */
 export function pluginResultErrorCode(value: unknown): string {
   if (!value || typeof value !== "object") return "PLUGIN_REMOTE_TOOL_ERROR";

@@ -106,7 +106,8 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         name: "textValue",
         label: "消息匹配内容",
         type: "text",
-        description: "留空表示不限制消息文本。",
+        description:
+          "留空表示不限制消息文本。直接回复本工作流 Bot 消息时可不包含匹配内容，其他限制仍生效。",
       },
       {
         name: "textKind",

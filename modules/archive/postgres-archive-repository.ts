@@ -38,6 +38,10 @@ import {
   type LinkPreviewBundle,
   type LinkPreviewDiagnostic,
 } from "../ingestion/link-preview.js";
+import type {
+  ReplyWakeDecision,
+  ReplyWakeStatus,
+} from "../ingestion/reply-wakeup.js";
 
 interface IdentifierRow {
   id: string;
@@ -60,6 +64,8 @@ interface InboundEventRow {
   event_type: string;
   status: "accepted" | "ignored" | "completed" | "failed";
   automation_outcome: AutomationOutcome;
+  reply_wake_status: ReplyWakeStatus | null;
+  reply_wake_decision: ReplyWakeDecision | null;
   received_at: Date;
 }
 
@@ -218,6 +224,14 @@ function messageAttachments(value: unknown): readonly MessageAttachment[] {
 function inboundEventSummary(row: InboundEventRow): InboundEventSummary {
   return {
     ...(row.archive_update ? { archiveUpdate: row.archive_update } : {}),
+    ...(row.reply_wake_status
+      ? {
+          replyWake: {
+            status: row.reply_wake_status,
+            decision: row.reply_wake_decision,
+          },
+        }
+      : {}),
     id: row.id,
     provider: row.provider,
     eventId: row.external_event_id,
@@ -268,6 +282,11 @@ export class PostgresArchiveRepository implements ArchiveRepository {
         correlationId: envelope.correlationId,
         eventType: envelope.metadata.eventType,
         payloadHash: envelope.metadata.payloadHash,
+        replyWakePolicy:
+          !envelope.metadata.isReplay &&
+          envelope.metadata.eventType === "new-message"
+            ? "v1"
+            : null,
       });
 
       if (event.rowCount === 0) {
@@ -504,17 +523,26 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     provider: string,
     eventId: string,
     outcome: AutomationOutcome,
+    replyWake?: InboundEventSummary["replyWake"],
   ): Promise<AutomationOutcome> {
     const updated = await this.pool.query<{
       automation_outcome: AutomationOutcome;
     }>(
       `UPDATE inbound_events
-       SET automation_outcome = $3
+       SET automation_outcome = $3,
+           reply_wake_status = CASE WHEN reply_wake_policy='v1' THEN COALESCE(reply_wake_status,$4) ELSE reply_wake_status END,
+           reply_wake_result = CASE WHEN reply_wake_policy='v1' THEN $5 ELSE reply_wake_result END
        WHERE provider = $1
          AND external_event_id = $2
          AND automation_outcome = 'evaluation-pending'
        RETURNING automation_outcome`,
-      [provider, eventId, outcome],
+      [
+        provider,
+        eventId,
+        outcome,
+        replyWake?.status ?? null,
+        replyWake?.decision ?? null,
+      ],
     );
     return (
       updated.rows[0]?.automation_outcome ??
@@ -528,7 +556,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
     const result = await this.pool.query<InboundEventRow>(
       `SELECT
          id, provider, external_event_id, correlation_id, event_type, status,
-         automation_outcome, received_at,
+         automation_outcome, reply_wake_status, reply_wake_result AS reply_wake_decision, received_at,
          (SELECT jsonb_build_object('status',j.status,'reason',j.reason,'attempts',j.attempts)
           FROM message_revision_jobs j WHERE j.event_key=inbound_events.external_event_id) archive_update
        FROM inbound_events
@@ -1121,13 +1149,14 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       correlationId: string;
       eventType: string;
       payloadHash: string;
+      replyWakePolicy: "v1" | null;
     },
   ): Promise<QueryResult<ClaimedEventRow>> {
     return client.query<ClaimedEventRow>(
       `INSERT INTO inbound_events (
          id, provider, external_event_id, correlation_id, event_type, status,
-         payload_hash, automation_outcome
-       ) VALUES ($1, $2, $3, $4, $5, 'accepted', $6, 'evaluation-pending')
+         payload_hash, automation_outcome, reply_wake_policy
+       ) VALUES ($1, $2, $3, $4, $5, 'accepted', $6, 'evaluation-pending', $7)
        ON CONFLICT (provider, external_event_id) DO UPDATE SET
          correlation_id = EXCLUDED.correlation_id,
          received_at = NOW(),
@@ -1145,6 +1174,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
         event.correlationId,
         event.eventType,
         event.payloadHash,
+        event.replyWakePolicy,
       ],
     );
   }

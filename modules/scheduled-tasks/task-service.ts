@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import { z } from "zod";
+import type { z } from "zod";
 import type { RegisteredAgentTool } from "../ai/agent-tool-registry.js";
 import type { AgentToolContext } from "../ai/agent-budget.js";
+import { toolArgumentIssues } from "../ai/tool-argument-errors.js";
 import type {
   WorkflowRepository,
   TriggerBinding,
 } from "../workflow/workflow-repository.js";
 import {
   taskSettingsSchema,
+  taskValidationRules,
+  taskErrorMessage,
   cancelTaskSchema,
   createTaskSchema,
   listTasksSchema,
@@ -16,6 +19,10 @@ import {
   TaskError,
   validateSchedule,
 } from "./task-policy.js";
+import {
+  taskToolDefinitions,
+  taskToolSchemas,
+} from "./task-tool-definitions.js";
 
 import {
   nextScheduledTime,
@@ -221,130 +228,127 @@ export class TaskService {
       if (e instanceof TaskError) return [];
       throw e;
     }
-    const schemas = {
-      create_scheduled_task: createTaskSchema,
-      list_scheduled_tasks: listTasksSchema,
-      update_scheduled_task: updateTaskSchema,
-      cancel_scheduled_task: cancelTaskSchema,
-      pause_scheduled_task: cancelTaskSchema,
-      resume_scheduled_task: cancelTaskSchema,
-      skip_next_scheduled_task: cancelTaskSchema,
-    };
-    const descriptions = {
-      create_scheduled_task:
-        "Create a one-time or recurring reminder only for the current user's explicit request. Confirm only after success. Provide summary (short title) and content (full instructions). Use absolute datetime with offset and IANA timezone.",
-      list_scheduled_tasks:
-        "List this member's reminder tasks in this chat and workflow before changing or cancelling them.",
-      update_scheduled_task:
-        "Change a reminder owned by this member, using the ID and version returned by list. To fill a missing summary, send only id, expectedVersion and summary; this does not reschedule or interrupt execution.",
-      pause_scheduled_task:
-        "Pause this member's recurring reminder. Future occurrences stop until resumed.",
-      resume_scheduled_task:
-        "Resume this member's recurring reminder from its next future occurrence; do not catch up paused times.",
-      skip_next_scheduled_task:
-        "Skip exactly one next occurrence of this member's recurring reminder, using its current version. Counts toward the occurrence limit.",
-      cancel_scheduled_task:
-        "Cancel this member's reminder. Sending already started cannot be guaranteed cancelled.",
-    };
-    return Object.entries(schemas).map(([name, schema]) => ({
-      definition: {
-        name,
-        description:
-          descriptions[name as keyof typeof descriptions] +
-          ` Configured reminder timezone: ${zone}.`,
-        parameters: z.toJSONSchema(schema, { io: "input" }),
-      },
-      diagnostics: "metadata-only" as const,
-      metadata: { capability: "scheduled-task" },
-      execute: async (args: string, ctx: AgentToolContext) => {
-        try {
-          // Reserve enough response budget BEFORE committing a mutation.
-          if (ctx.maxOutputCharacters < 3000)
-            return JSON.stringify({
-              status: "failed",
-              errorCode: "TASK_RESULT_BUDGET",
-            });
-          ctx.signal.throwIfAborted();
-          const parsed = schema.parse(JSON.parse(args));
-          const scope = await this.scope(executionId);
-          const actor: TaskActor = {
-            kind: "member",
-            id: scope.sender_id,
-            executionId,
-            chatId: scope.chat_id,
-            workflowId: scope.workflow_id,
-          };
-          if (name === "create_scheduled_task")
-            return JSON.stringify({
-              status: "created",
-              task: publicTask(
-                await this.create(
-                  executionId,
-                  createTaskSchema.parse(parsed),
-                  ctx,
-                ),
-              ),
-            });
-          if (name === "list_scheduled_tasks") {
-            const q = listTasksSchema.parse(parsed);
-            const items = await this.list({
-              ...q,
+    return taskToolDefinitions(zone).map((definition) => {
+      const name = definition.name as keyof typeof taskToolSchemas;
+      const schema = taskToolSchemas[name];
+      return {
+        definition,
+        diagnostics: "metadata-only" as const,
+        metadata: { capability: "scheduled-task" },
+        execute: async (args: string, ctx: AgentToolContext) => {
+          try {
+            // Reserve enough response budget BEFORE committing a mutation.
+            if (ctx.maxOutputCharacters < 3000)
+              return JSON.stringify({
+                status: "failed",
+                errorCode: "TASK_RESULT_BUDGET",
+                guidance:
+                  "The remaining tool output budget is insufficient; no task change was made.",
+              });
+            ctx.signal.throwIfAborted();
+            let parsed;
+            try {
+              parsed = schema.parse(JSON.parse(args));
+            } catch (error) {
+              const issues = toolArgumentIssues(
+                error,
+                definition.parameters,
+                taskValidationRules,
+              );
+              if (!issues) throw error;
+              return JSON.stringify({
+                status: "failed",
+                errorCode: "TASK_ARGUMENTS_INVALID",
+                issues,
+                guidance:
+                  name === "create_scheduled_task"
+                    ? "Provide summary, content, timeZone and one complete schedule. Use scheduledAt only inside a once schedule; do not submit it at the top level. Follow the selected schedule variant and do not guess a time."
+                    : name === "update_scheduled_task"
+                      ? "Provide the task id and expectedVersion, plus at least one change. Use schedule, not a top-level scheduledAt; changing timeZone also requires a complete schedule. Use null for unchanged optional fields."
+                      : "Correct the reported fields and rules using the tool schema. Use null for unused optional fields; do not guess a task ID or time.",
+              });
+            }
+            const scope = await this.scope(executionId);
+            const actor: TaskActor = {
+              kind: "member",
+              id: scope.sender_id,
+              executionId,
               chatId: scope.chat_id,
               workflowId: scope.workflow_id,
-              senderId: scope.sender_id,
+            };
+            if (name === "create_scheduled_task")
+              return JSON.stringify({
+                status: "created",
+                task: publicTask(
+                  await this.create(
+                    executionId,
+                    createTaskSchema.parse(parsed),
+                    ctx,
+                  ),
+                ),
+              });
+            if (name === "list_scheduled_tasks") {
+              const q = listTasksSchema.parse(parsed);
+              const items = await this.list({
+                ...q,
+                chatId: scope.chat_id,
+                workflowId: scope.workflow_id,
+                senderId: scope.sender_id,
+              });
+              const output = JSON.stringify({ status: "ok", ...items });
+              return output.length <= ctx.maxOutputCharacters
+                ? output
+                : JSON.stringify({
+                    status: "failed",
+                    errorCode: "TASK_RESULT_BUDGET",
+                    guidance: "Request fewer tasks.",
+                  });
+            }
+            const action =
+              name === "pause_scheduled_task"
+                ? "pause"
+                : name === "resume_scheduled_task"
+                  ? "resume"
+                  : name === "skip_next_scheduled_task"
+                    ? "skip"
+                    : null;
+            const updated = action
+              ? await this.control(
+                  actor,
+                  cancelTaskSchema.parse(parsed),
+                  action,
+                  ctx,
+                )
+              : await this.change(
+                  actor,
+                  name === "cancel_scheduled_task"
+                    ? cancelTaskSchema.parse(parsed)
+                    : updateTaskSchema.parse(parsed),
+                  name === "cancel_scheduled_task",
+                  ctx,
+                );
+            return JSON.stringify({ status: "ok", task: publicTask(updated) });
+          } catch (e) {
+            return JSON.stringify({
+              status: "failed",
+              errorCode:
+                e instanceof TaskError ? e.code : "TASK_OPERATION_FAILED",
+              guidance:
+                e instanceof TaskError
+                  ? taskErrorMessage(e.code)
+                  : "The task operation did not complete. Do not claim it succeeded or automatically repeat a mutation with an unknown outcome.",
             });
-            const output = JSON.stringify({ status: "ok", ...items });
-            return output.length <= ctx.maxOutputCharacters
-              ? output
-              : JSON.stringify({
-                  status: "failed",
-                  errorCode: "TASK_RESULT_BUDGET",
-                  guidance: "Request fewer tasks.",
-                });
           }
-          const action =
-            name === "pause_scheduled_task"
-              ? "pause"
-              : name === "resume_scheduled_task"
-                ? "resume"
-                : name === "skip_next_scheduled_task"
-                  ? "skip"
-                  : null;
-          const updated = action
-            ? await this.control(
-                actor,
-                cancelTaskSchema.parse(parsed),
-                action,
-                ctx,
-              )
-            : await this.change(
-                actor,
-                name === "cancel_scheduled_task"
-                  ? cancelTaskSchema.parse(parsed)
-                  : updateTaskSchema.parse(parsed),
-                name === "cancel_scheduled_task",
-                ctx,
-              );
-          return JSON.stringify({ status: "ok", task: publicTask(updated) });
-        } catch (e) {
-          return JSON.stringify({
-            status: "failed",
-            errorCode:
-              e instanceof TaskError
-                ? e.code
-                : e instanceof z.ZodError || e instanceof SyntaxError
-                  ? "TASK_ARGUMENTS_INVALID"
-                  : "TASK_OPERATION_FAILED",
-          });
-        }
-      },
-    }));
+        },
+      };
+    });
   }
   async create(
     executionId: string,
     input: z.infer<typeof createTaskSchema>,
     ctx: AgentToolContext,
   ): Promise<TaskRow> {
+    input = createTaskSchema.parse(input);
     return this.transaction(async (db) => {
       const scope = await this.scope(executionId, db);
       const actor: TaskActor = {
@@ -379,10 +383,7 @@ export class TaskService {
         ).rowCount
       )
         throw new TaskError("TASK_DELETED");
-      const schedule: TaskSchedule = input.schedule ?? {
-        kind: "once",
-        scheduledAt: input.scheduledAt!,
-      };
+      const schedule = input.schedule;
       const at = validateSchedule(schedule, input.timeZone, settings.now);
       const counts = (
         await db.query<{ total: number; member: number }>(
@@ -409,7 +410,7 @@ export class TaskService {
             scope.sender_id,
             scope.message_id,
             executionId,
-            scope.body?.slice(0, 8000) ?? "",
+            input.requestSnapshot,
             input.content,
             at,
             input.timeZone,
@@ -424,7 +425,7 @@ export class TaskService {
       ).rows[0]!;
       await this.ensureOccurrence(db, task);
       await this.event(db, task, "created", actor, {
-        scheduledAt: input.scheduledAt,
+        scheduledAt: at.toISOString(),
         timeZone: input.timeZone,
       });
       if (
@@ -468,14 +469,18 @@ export class TaskService {
       expectedVersion: number;
       summary?: string | undefined;
       content?: string | undefined;
-      scheduledAt?: string | undefined;
       timeZone?: string | undefined;
       schedule?: TaskSchedule | undefined;
     },
     cancel: boolean,
     ctx?: AgentToolContext,
   ): Promise<TaskRow> {
-    return this.mutate(actor, input, cancel ? "cancel" : "update", ctx);
+    return this.mutate(
+      actor,
+      cancel ? cancelTaskSchema.parse(input) : updateTaskSchema.parse(input),
+      cancel ? "cancel" : "update",
+      ctx,
+    );
   }
   async control(
     actor: TaskActor,
@@ -492,7 +497,6 @@ export class TaskService {
       expectedVersion: number;
       summary?: string | undefined;
       content?: string | undefined;
-      scheduledAt?: string | undefined;
       timeZone?: string | undefined;
       schedule?: TaskSchedule | undefined;
     },
@@ -526,7 +530,6 @@ export class TaskService {
         input.summary !== undefined &&
         input.content === undefined &&
         input.schedule === undefined &&
-        input.scheduledAt === undefined &&
         input.timeZone === undefined;
       if (summaryOnly) {
         if (task.content === null) throw new TaskError("TASK_CONTENT_CLEARED");
@@ -590,14 +593,9 @@ export class TaskService {
           "SELECT now() AS now,catchup_minutes FROM scheduled_task_settings WHERE id=1",
         )
       ).rows[0]!;
-      let schedule = input.schedule ?? task.schedule;
+      const schedule = input.schedule ?? task.schedule;
       const zone = input.timeZone ?? task.timezone;
-      if (input.scheduledAt) {
-        if (task.schedule.kind !== "once" || input.schedule)
-          throw new TaskError("TASK_LEGACY_UPDATE_UNSUPPORTED");
-        schedule = { kind: "once", scheduledAt: input.scheduledAt };
-      }
-      if (input.timeZone && !input.schedule && !input.scheduledAt)
+      if (input.timeZone && !input.schedule)
         throw new TaskError("TASK_TIME_REQUIRED_WITH_TIMEZONE");
       if (input.schedule && input.schedule.kind !== task.schedule.kind)
         throw new TaskError("TASK_KIND_IMMUTABLE");
@@ -609,7 +607,7 @@ export class TaskService {
         throw new TaskError("TASK_COUNT_BELOW_CONSUMED");
       let at: Date | null = task.scheduled_at;
       let lifecycle = task.lifecycle;
-      if (action === "update" && (input.schedule || input.scheduledAt)) {
+      if (action === "update" && input.schedule) {
         if (
           schedule.kind === "recurring" &&
           schedule.end.kind === "count" &&
@@ -898,7 +896,7 @@ export class TaskService {
     >(
       `SELECT t.*,c.display_name AS chat_name,w.name AS workflow_name,i.real_name AS creator_real_name FROM scheduled_tasks t JOIN chats c ON c.id=t.chat_id JOIN workflows w ON w.id=t.workflow_id
    LEFT JOIN chat_participant_identities i ON i.chat_id=t.chat_id AND i.sender_id=t.creator_sender_id
-   WHERE ($1::uuid IS NULL OR t.workflow_id=$1) AND ($2::uuid IS NULL OR t.chat_id=$2) AND ($3::text IS NULL OR t.creator_sender_id=$3) AND ($4::text IS NULL OR t.status=$4) AND ($7::text IS NULL OR t.lifecycle=$7) ORDER BY t.scheduled_at DESC,t.id DESC LIMIT $5 OFFSET $6`,
+   WHERE ($1::uuid IS NULL OR t.workflow_id=$1) AND ($2::uuid IS NULL OR t.chat_id=$2) AND ($3::text IS NULL OR t.creator_sender_id=$3) AND ($4::text IS NULL OR t.status=$4) AND ($7::text IS NULL OR t.lifecycle=$7) ORDER BY t.created_at DESC,t.id DESC LIMIT $5 OFFSET $6`,
       [
         options.workflowId ?? null,
         options.chatId ?? null,

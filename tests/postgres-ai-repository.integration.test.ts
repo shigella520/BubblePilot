@@ -509,6 +509,44 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
         },
       },
     ]);
+    await repository.recordToolExecution({
+      executionId: diagnosticExecutionId,
+      nodeId: "memory-node",
+      providerId: primary.value.id,
+      toolCallId: "fictional-memory-call",
+      toolName: "search_chat_history",
+      status: "failed",
+      durationMs: 2,
+      resultCount: 0,
+      queryHash: "b".repeat(64),
+      errorCode: "MEMORY_RETRIEVAL_UNAVAILABLE",
+      requestDetails: { retrievalId: "fictional-retrieval" },
+      responseDetails: {
+        kind: "memory",
+        version: 1,
+        status: "unavailable",
+        failure: {
+          stage: "validation",
+          category: "invalid-arguments",
+          validationIssues: [{ field: "limit", code: "too_big" }],
+        },
+      },
+    });
+    await expect(
+      repository.listToolExecutions(diagnosticExecutionId, "memory-node"),
+    ).resolves.toMatchObject([
+      {
+        toolName: "search_chat_history",
+        responseDetails: {
+          kind: "memory",
+          failure: {
+            stage: "validation",
+            category: "invalid-arguments",
+            validationIssues: [{ field: "limit", code: "too_big" }],
+          },
+        },
+      },
+    ]);
     const attachmentChat = randomUUID();
     const attachmentMessage = randomUUID();
     const attachmentEvent = randomUUID();

@@ -141,6 +141,15 @@ function fixture(overrides: Partial<ImageInputRuntimeSettings> = {}) {
   };
 }
 describe("runtime chat image access", () => {
+  it("explains invalid image references without attempting a fetch", async () => {
+    const f = fixture();
+    const result = await f.invoke('{"image_ref":""}');
+    expect(parseResult(result.text)).toMatchObject({
+      status: "invalid-arguments",
+      issues: [{ field: "image_ref", code: "invalid" }],
+    });
+    expect(f.fetcher).not.toHaveBeenCalled();
+  });
   it("registers only with both existing input switches enabled", () => {
     expect(fixture({ enabled: false }).session).toBeUndefined();
     expect(

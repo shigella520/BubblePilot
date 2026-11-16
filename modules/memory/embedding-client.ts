@@ -24,7 +24,10 @@ export const embeddingConfigSchema = z.object({
 });
 export type EmbeddingConfig = z.infer<typeof embeddingConfigSchema>;
 export class EmbeddingError extends ApplicationError {
-  constructor(code: string) {
+  constructor(
+    code: string,
+    readonly httpStatus?: number,
+  ) {
     super(code, "Embedding 服务暂不可用或返回不符合模型合同的数据。", 503);
   }
 }
@@ -64,7 +67,11 @@ export class HttpEmbeddingClient implements EmbeddingClient {
         },
         body: JSON.stringify(body),
       });
-      if (!response.ok) throw new EmbeddingError("MEMORY_EMBEDDING_HTTP_ERROR");
+      if (!response.ok)
+        throw new EmbeddingError(
+          "MEMORY_EMBEDDING_HTTP_ERROR",
+          response.status,
+        );
       if (!response.body) throw new EmbeddingError("MEMORY_EMBEDDING_EMPTY");
       const reader =
         response.body.getReader() as ReadableStreamDefaultReader<Uint8Array>;

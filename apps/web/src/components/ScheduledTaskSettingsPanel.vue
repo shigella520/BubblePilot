@@ -142,6 +142,7 @@ onBeforeUnmount(() => generation++);
     </p>
     <AdminFormDialog
       v-if="draft"
+      :sensitive-required="true"
       title="定时任务设置"
       :busy="saving"
       :saved-version="current?.version"

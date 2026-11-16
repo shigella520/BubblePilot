@@ -48,16 +48,22 @@ const plugin: InstalledPlugin = {
     },
   },
 };
-function fixture(callTimeoutSeconds?: number) {
+function fixture(
+  callTimeoutSeconds?: number,
+  parameters?: Record<string, unknown>,
+) {
   const p = structuredClone(plugin);
+  if (parameters) p.config.tools[0]!.definition.parameters = parameters;
   if (callTimeoutSeconds !== undefined)
     p.config.connections.mock!.callTimeoutSeconds = callTimeoutSeconds;
   const session = new PluginSession(
     { get: () => Promise.resolve(p) } as unknown as PluginService,
     [structuredClone(p)],
   );
-  vi.spyOn(PluginMcp.prototype, "connect").mockResolvedValue();
-  vi.spyOn(PluginMcp.prototype, "discover").mockResolvedValue([tool]);
+  const connect = vi.spyOn(PluginMcp.prototype, "connect").mockResolvedValue();
+  const discover = vi
+    .spyOn(PluginMcp.prototype, "discover")
+    .mockResolvedValue([tool]);
   vi.spyOn(PluginMcp.prototype, "close").mockResolvedValue();
   const call = vi.spyOn(PluginMcp.prototype, "call").mockResolvedValue({
     status: "success",
@@ -76,10 +82,61 @@ function fixture(callTimeoutSeconds?: number) {
     maxOutputCharacters: 64000,
     toolCallId: "first",
   };
-  return { p, session, registry, call, ext, controller, ctx };
+  return {
+    p,
+    session,
+    registry,
+    call,
+    connect,
+    discover,
+    ext,
+    controller,
+    ctx,
+  };
 }
 afterEach(() => vi.restoreAllMocks());
 describe("MCP large-result session lifecycle", () => {
+  it("returns actionable envelope errors before calling the remote tool", async () => {
+    const f = fixture();
+    const output = (await f.ext.execute("{}", f.ctx)) as MultimodalToolResult;
+    expect(JSON.parse(output.text)).toMatchObject({
+      code: "PLUGIN_INVALID_TOOL_ARGUMENTS",
+      issues: [{ field: "arguments_json", code: "required" }],
+      retryInThisAnswer: true,
+    });
+    expect(f.call).not.toHaveBeenCalled();
+    const malformed = (await f.ext.execute(
+      '{"arguments_json":',
+      f.ctx,
+    )) as MultimodalToolResult;
+    expect(JSON.parse(malformed.text)).toMatchObject({
+      code: "PLUGIN_INVALID_ARGUMENTS",
+      retryInThisAnswer: true,
+    });
+    expect(f.call).not.toHaveBeenCalled();
+    await f.session.close();
+  });
+  it("reports original MCP contract errors without connecting to the remote service", async () => {
+    const f = fixture(undefined, {
+      type: "object",
+      properties: { path: { type: "string" }, timeout: { type: "integer" } },
+      required: ["path"],
+      additionalProperties: false,
+    });
+    const output = (await f.ext.execute(
+      JSON.stringify({ arguments_json: JSON.stringify({ timeout: null }) }),
+      f.ctx,
+    )) as MultimodalToolResult;
+    expect(JSON.parse(output.text)).toMatchObject({
+      code: "PLUGIN_INVALID_TOOL_ARGUMENTS",
+      issues: [{ field: "path", code: "required" }],
+      retryInThisAnswer: true,
+    });
+    expect(f.connect).not.toHaveBeenCalled();
+    expect(f.discover).not.toHaveBeenCalled();
+    expect(f.call).not.toHaveBeenCalled();
+    await f.session.close();
+  });
   it("checks authorization again on reads and caps the remote timeout", async () => {
     const f = fixture();
     const output = (await f.ext.execute(

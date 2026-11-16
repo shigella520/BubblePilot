@@ -11,6 +11,10 @@ export const memorySettingsSchema = embeddingConfigSchema.extend({
   expectedVersion: z.number().int().min(0),
   secret: z.string().max(8192).optional(),
 });
+export const memorySearchValidationRules = [
+  "Use either senderId or botWorkflowId, not both.",
+  "from must be no later than to.",
+] as const;
 export const memorySearchSchema = z
   .object({
     botWorkflowId: z.string().uuid().optional(),
@@ -23,14 +27,15 @@ export const memorySearchSchema = z
       .optional(),
     from: z.string().datetime({ offset: true }).optional(),
     to: z.string().datetime({ offset: true }).optional(),
-    senderId: z.string().max(255).optional(),
+    senderId: z.string().trim().min(1).max(255).optional(),
   })
   .strict()
-  .refine(
-    (v) =>
-      !(v.senderId && v.botWorkflowId) &&
-      (!v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to)),
-  );
+  .refine((v) => !(v.senderId && v.botWorkflowId), {
+    message: memorySearchValidationRules[0],
+  })
+  .refine((v) => !v.from || !v.to || Date.parse(v.from) <= Date.parse(v.to), {
+    message: memorySearchValidationRules[1],
+  });
 export const chatExcerptSchema = z
   .object({
     ref: z.string().min(1),
@@ -87,6 +92,14 @@ export interface MemorySearchResult {
   selectionLimited?: boolean;
   exhaustive?: false;
   status: "succeeded" | "no-results" | "partial" | "unavailable";
+  reason?: string;
+  guidance?: string;
+  warnings?: {
+    component: "semantic" | "keyword";
+    code: string;
+    httpStatus?: number;
+    guidance: string;
+  }[];
   retrievalMode: "hybrid" | "keyword-only";
   evidence: Evidence[];
   coverage: MemoryCoverage;

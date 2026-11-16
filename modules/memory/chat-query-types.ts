@@ -8,7 +8,9 @@ const timeOfDay = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u);
 const timestamp = z
   .string()
   .datetime({ offset: true })
-  .refine((value) => (value.match(/\.(\d+)/u)?.[1]?.length ?? 0) <= 6);
+  .refine((value) => (value.match(/\.(\d+)/u)?.[1]?.length ?? 0) <= 6, {
+    message: "Timestamps may have at most six fractional-second digits.",
+  });
 function instantMicros(value: string): bigint {
   if (!Number.isFinite(Date.parse(value))) return 0n;
   const fraction = value.match(/\.(\d+)/u)?.[1] ?? "";
@@ -18,29 +20,65 @@ function instantMicros(value: string): bigint {
   );
 }
 const fields = {
-  botWorkflowId: z.string().uuid().optional(),
-  senderId: z.string().trim().min(1).max(255).optional(),
+  botWorkflowId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe("Exact Bot workflow UUID; mutually exclusive with senderId."),
+  senderId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .optional()
+    .describe("Exact known sender ID; mutually exclusive with botWorkflowId."),
   from: timestamp.optional(),
   to: timestamp.optional(),
   dailyTime: z
     .object({ from: timeOfDay, to: z.union([timeOfDay, z.literal("24:00")]) })
     .strict()
-    .refine((v) => v.from !== v.to)
+    .refine((v) => v.from !== v.to, {
+      message: "dailyTime from and to must differ.",
+    })
     .optional(),
   keywords: z
     .array(z.string().trim().min(1).max(100))
     .min(1)
     .max(10)
-    .optional(),
-  keywordMode: z.enum(["all", "any"]).optional(),
+    .optional()
+    .describe(
+      "One to ten literal keywords; must be supplied together with keywordMode.",
+    ),
+  keywordMode: z
+    .enum(["all", "any"])
+    .optional()
+    .describe("Match all or any keywords; supply only with keywords."),
 };
-function validFilter(v: ChatFilters) {
-  return (
-    !(v.senderId && v.botWorkflowId) &&
-    (!v.from || !v.to || instantMicros(v.from) <= instantMicros(v.to)) &&
-    (v.keywords !== undefined) === (v.keywordMode !== undefined)
-  );
-}
+const validIdentity = (v: ChatFilters) => !(v.senderId && v.botWorkflowId);
+const validRange = (v: ChatFilters) =>
+  !v.from || !v.to || instantMicros(v.from) <= instantMicros(v.to);
+const validKeywords = (v: ChatFilters) =>
+  (v.keywords !== undefined) === (v.keywordMode !== undefined);
+const identityRule = "Use either senderId or botWorkflowId, not both.";
+const rangeRule = "from must be no later than to.";
+const keywordRule = "Provide keywords and keywordMode together.";
+const attachmentRule =
+  "Do not combine hasAttachments=false with attachmentName or attachmentType.";
+const groupRangeRule = "Time grouping requires both from and to.";
+const groupCursorRule = "An ungrouped query cannot use a cursor.";
+const breakdownRule =
+  "breakdownBy requires a time grouping; hourOfDay breakdown requires weekday grouping.";
+export const chatQueryValidationRules = [
+  identityRule,
+  rangeRule,
+  keywordRule,
+  attachmentRule,
+  groupRangeRule,
+  groupCursorRule,
+  breakdownRule,
+  "Timestamps may have at most six fractional-second digits.",
+  "dailyTime from and to must differ.",
+] as const;
 export interface ChatFilters {
   senderId?: string | undefined;
   botWorkflowId?: string | undefined;
@@ -56,14 +94,30 @@ export interface ChatFilters {
 }
 const cursor = z.string().uuid().optional();
 const attachmentFields = {
-  hasAttachments: z.boolean().optional(),
-  attachmentName: z.string().trim().min(1).max(200).optional(),
+  hasAttachments: z
+    .boolean()
+    .optional()
+    .describe(
+      "false cannot be combined with attachmentName or attachmentType.",
+    ),
+  attachmentName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      "Literal filename filter; cannot be combined with hasAttachments=false.",
+    ),
   attachmentType: z
     .string()
     .trim()
     .toLowerCase()
     .regex(/^(?:[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+|\.[a-z0-9]{1,16})$/u)
-    .optional(),
+    .optional()
+    .describe(
+      "Exact MIME or extension; cannot be combined with hasAttachments=false.",
+    ),
 };
 export const chatMessageQuerySchema = z
   .object({
@@ -75,10 +129,13 @@ export const chatMessageQuerySchema = z
     cursor,
   })
   .strict()
-  .refine(validFilter)
+  .refine(validIdentity, { message: identityRule })
+  .refine(validRange, { message: rangeRule })
+  .refine(validKeywords, { message: keywordRule })
   .refine(
     (v) =>
       v.hasAttachments !== false || (!v.attachmentName && !v.attachmentType),
+    { message: attachmentRule },
   );
 const groupFields = {
   ...fields,
@@ -86,15 +143,10 @@ const groupFields = {
   limit: z.number().int().min(1).max(100).default(31),
   cursor,
 };
-function validGrouping(
-  v: ChatFilters & { groupBy: string; cursor?: string | undefined },
-) {
-  return (
-    validFilter(v) &&
-    (v.groupBy !== "day" || !!(v.from && v.to)) &&
-    (v.groupBy !== "none" || !v.cursor)
-  );
-}
+const validGroupCursor = (v: {
+  groupBy: string;
+  cursor?: string | undefined;
+}) => v.groupBy !== "none" || !v.cursor;
 export const chatCountQuerySchema = z
   .object({
     ...groupFields,
@@ -110,28 +162,51 @@ export const chatCountQuerySchema = z
         "hourOfDay",
         "weekday",
       ])
-      .default("none"),
-    breakdownBy: z.enum(["sender", "hourOfDay"]).optional(),
+      .default("none")
+      .describe(
+        "Time grouping requires both from and to. none cannot use a cursor.",
+      ),
+    breakdownBy: z
+      .enum(["sender", "hourOfDay"])
+      .optional()
+      .describe(
+        "Only with a time grouping: sender for any time group; hourOfDay only for weekday.",
+      ),
     orderBy: z.enum(["group", "countDesc"]).optional(),
     authorKind: z.enum(["participant", "bot", "unknown"]).optional(),
   })
   .strict()
-  .refine(validGrouping)
+  .refine(validIdentity, { message: identityRule })
+  .refine(validRange, { message: rangeRule })
+  .refine(validKeywords, { message: keywordRule })
+  .refine(validGroupCursor, { message: groupCursorRule })
   .refine(
     (v) =>
       v.hasAttachments !== false || (!v.attachmentName && !v.attachmentType),
+    { message: attachmentRule },
   )
-  .refine((v) => ["none", "sender"].includes(v.groupBy) || !!(v.from && v.to))
+  .refine((v) => ["none", "sender"].includes(v.groupBy) || !!(v.from && v.to), {
+    message: groupRangeRule,
+  })
   .refine(
     (v) =>
       !v.breakdownBy ||
       (!["none", "sender"].includes(v.groupBy) &&
         (v.breakdownBy === "sender" || v.groupBy === "weekday")),
+    {
+      message: breakdownRule,
+    },
   );
 export const chatExtremaQuerySchema = z
   .object({ ...groupFields, pick: z.enum(["first", "last"]) })
   .strict()
-  .refine(validGrouping);
+  .refine(validIdentity, { message: identityRule })
+  .refine(validRange, { message: rangeRule })
+  .refine(validKeywords, { message: keywordRule })
+  .refine(validGroupCursor, { message: groupCursorRule })
+  .refine((v) => v.groupBy !== "day" || !!(v.from && v.to), {
+    message: groupRangeRule,
+  });
 export type ChatMessageQuery = z.infer<typeof chatMessageQuerySchema>;
 export type ChatCountQuery = z.infer<typeof chatCountQuerySchema>;
 export type ChatExtremaQuery = z.infer<typeof chatExtremaQuerySchema>;

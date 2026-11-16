@@ -121,6 +121,12 @@ correlationId
 
 `unknown` 不自动重发。运维者必须先确认 BlueBubbles 中的外部事实，再关闭或按安全边界处理执行。
 
+文字和附件发送异常会输出 `event=bluebubbles.delivery-diagnostic` 的结构化 WARN 日志。用 `correlationId` 关联执行，用 `providerTempGuid` 关联投递记录；只接受 UUID 格式的关联字段。日志包含发送类型／方式、错误码、耗时、配置超时、是否超时、HTTP 状态、完整读取后的响应字节数，以及白名单内的异常类型和底层原因码（例如 `ECONNRESET`、`UND_ERR_SOCKET`）。未知原因不复制原始字符串，嵌套 cause／AggregateError 只做有界读取。
+
+`stage` 区分 `prepare`（构造请求）、`request`（等待响应头）、`http-status`（HTTP 拒绝）、`response-body`（读取响应正文）、`response-json`（解析 JSON）、`receipt`（验证回执）。HTTP 状态为空表示未取得响应对象，不能据此断言请求未到达网关；同样，HTTP 200 后正文读取或 JSON 解析失败仍属于结果未知。异常消息、堆栈、原始请求／响应、URL、Header、聊天 ID、文件名和文件正文均不入日志。
+
+正常确认发送不增加诊断日志。文字 2xx JSON 回执缺少 guid 时记录 `BLUEBUBBLES_REPLY_RECEIPT_MISSING_GUID`，但维持原有 confirmed 行为；附件回执不完整仍为 unknown。日志回调失败不影响发送结果，不触发额外重试。本次诊断无数据库迁移、配置开关或超时／重试语义变化；只能定位升级后的新异常，不能补回过去未记录的底层原因。
+
 ## 幂等与兼容性
 
 - 入站事件唯一键：`provider + externalEventId`；
@@ -152,6 +158,8 @@ correlationId
 ## 编辑、撤回与引用接入
 
 新增 `updated-message` 内容修订分支：只在存在有效编辑／撤回时间时归一化为 `message-revision-v1`，仅送达／已读事件继续忽略。新消息读取 `threadOriginatorGuid`／`threadOriginatorPart`，保存引用关系，不生成额外自动化事件。
+
+新消息的引用目标还用于默认唤醒原 Bot 工作流：仅在同网关、同聊天唯一匹配 BubblePilot 已确认出站记录时，允许不满足该工作流的文本匹配条件。目标字段缺失、归属无法确认或查询失败时沿用普通匹配；部分标识不决定归属，引用正文仍受原有读取限制。线程内继续回复和表情目标在不同 BlueBubbles／iMessage 版本中的目标 ID 需实际验收，详见[引用 Bot 消息唤醒](迭代需求-引用Bot消息唤醒.md)。
 
 固定上游提交的[可行性证据](experiments/message-revisions/README.md)表明 Webhook 使用通知序列化，更新事件省略 `chats`，摘要及引用部分可能缺失。不能复用新消息必填合同或依靠空正文判断撤回。适配器仅对本地已归档目标调用单条详情接口，显式请求 `chats,attachments,attributedBody,messageSummaryInfo`；不补拉未归档的引用目标。请求最多 8 秒（同时受现有网关超时限制）、响应最多 2 MiB、禁止重定向，不记录凭据或完整摘要；只提取当前状态，不保存编辑历史。
 

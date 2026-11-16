@@ -21,6 +21,9 @@ import { parseWorkflowDefinition } from "../modules/workflow/workflow-definition
 import { parseTriggerConditions } from "../modules/workflow/trigger-matcher.js";
 import { AgentRunner } from "../modules/ai/agent-runner.js";
 import { AiRoutingService } from "../modules/ai/ai-routing-service.js";
+import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
+import { compileMcpSchema } from "../modules/plugins/plugin-schema.js";
+import { assertStrictSchema } from "./support/tool-schema-fixtures.js";
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/webhook-adapter.js";
@@ -239,7 +242,11 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
     const input = {
       summary: "抢火车票提醒",
       content: "提醒抢火车票",
-      scheduledAt: new Date(Date.now() + 3600000).toISOString(),
+      requestSnapshot: "用户先要求提醒抢火车票，随后确认在约定时间提醒。",
+      schedule: {
+        kind: "once" as const,
+        scheduledAt: new Date(Date.now() + 3600000).toISOString(),
+      },
       timeZone: "UTC",
     };
     const task = await s.tasks.create(execution.execution.id, input, ctx);
@@ -251,6 +258,69 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       [id],
     );
   }
+  it("stores the model's multi-turn commission while retaining source attribution", async () => {
+    const s = await setup();
+    const c = await create(s);
+    const source = (
+      await pool.query<{ body: string }>(
+        "SELECT body FROM messages WHERE id=$1",
+        [c.task.source_message_id],
+      )
+    ).rows[0]!;
+    expect(c.task.request_snapshot).toBe(c.input.requestSnapshot);
+    expect(c.task.request_snapshot).not.toBe(source.body);
+    expect(c.task.source_execution_id).toBe(c.executionId);
+    expect(c.task.source_message_id).toBeTruthy();
+    expect((await s.tasks.detail(c.task.id)).task.request_snapshot).toBe(
+      c.input.requestSnapshot,
+    );
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      {
+        id: c.task.id,
+        expectedVersion: 1,
+        summary: "新的任务概要",
+      },
+      false,
+    );
+    expect((await s.tasks.detail(c.task.id)).task.request_snapshot).toBe(
+      c.input.requestSnapshot,
+    );
+  });
+  it("paginates by creation time, not due time, and keeps status filtering explicit", async () => {
+    const s = await setup();
+    const a = await create(s),
+      b = await create(s),
+      c = await create(s);
+    await pool.query(
+      "UPDATE scheduled_tasks SET created_at='2030-01-01',scheduled_at='2030-04-01',expires_at='2030-04-02' WHERE id=$1",
+      [a.task.id],
+    );
+    await pool.query(
+      "UPDATE scheduled_tasks SET created_at='2030-01-02',scheduled_at='2030-03-01',expires_at='2030-03-02',status='cancelled',lifecycle='cancelled' WHERE id=$1",
+      [b.task.id],
+    );
+    await pool.query(
+      "UPDATE scheduled_tasks SET created_at='2030-01-03',scheduled_at='2030-02-01',expires_at='2030-02-02' WHERE id=$1",
+      [c.task.id],
+    );
+    const options = {
+      workflowId: a.task.workflow_id,
+      status: "pending",
+      limit: 1,
+    };
+    const first = await s.tasks.list(options);
+    expect(first.items.map((t) => t.id)).toEqual([c.task.id]);
+    expect(first.hasMore).toBe(true);
+    const second = await s.tasks.list({ ...options, offset: 1 });
+    expect(second.items.map((t) => t.id)).toEqual([a.task.id]);
+    expect(second.hasMore).toBe(false);
+    expect(
+      (await s.tasks.list({ workflowId: a.task.workflow_id })).items.map(
+        (t) => t.id,
+      ),
+    ).toEqual([c.task.id, b.task.id, a.task.id]);
+  });
   it("resolves creator real names within each chat using the current mapping without changing ownership", async () => {
     const first = await setup();
     const second = await setup();
@@ -730,15 +800,29 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
   it("does not purge terminal definitions that still have an in-flight occurrence", async () => {
     const s = await setup();
     const c = await create(s);
-    await pool.query(
-      "UPDATE scheduled_tasks SET lifecycle='cancelled',status='cancelled',finished_at=now()-interval '91 days' WHERE id=$1",
-      [c.task.id],
-    );
-    await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
-      "TASK_DELETE_NOT_FINISHED",
-    );
-    await s.tasks.purgeExpired();
-    expect((await s.tasks.detail(c.task.id)).task.id).toBe(c.task.id);
+    const lock = await pool.connect();
+    try {
+      await lock.query("BEGIN");
+      // Other suites change workflow/chat configuration and its database trigger
+      // can cancel every cancelled task's pending occurrence concurrently.
+      const pending = await lock.query(
+        "SELECT id FROM scheduled_task_occurrences WHERE task_id=$1 AND status='pending' FOR UPDATE",
+        [c.task.id],
+      );
+      expect(pending.rowCount).toBe(1);
+      await pool.query(
+        "UPDATE scheduled_tasks SET lifecycle='cancelled',status='cancelled',finished_at=now()-interval '91 days' WHERE id=$1",
+        [c.task.id],
+      );
+      await expect(s.tasks.remove(c.task.id, 1)).rejects.toThrow(
+        "TASK_DELETE_NOT_FINISHED",
+      );
+      await s.tasks.purgeExpired();
+      expect((await s.tasks.detail(c.task.id)).task.id).toBe(c.task.id);
+    } finally {
+      await lock.query("ROLLBACK");
+      lock.release();
+    }
   });
   it("persists once, scopes tools, and rejects other members", async () => {
     const s = await setup();
@@ -774,6 +858,55 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
     await due(c.task.id);
     await s.scheduler.tick();
     expect(s.send).not.toHaveBeenCalled();
+  });
+  it("uses schedule for single-task creation and rescheduling and rejects the removed input", async () => {
+    const s = await setup();
+    const c = await create(s);
+    const original = await s.tasks.detail(c.task.id);
+    expect(original.task.schedule).toEqual(c.input.schedule);
+    expect(
+      original.events.find((event) => event.event_type === "created")
+        ?.change_data,
+    ).toEqual({
+      scheduledAt: c.task.scheduled_at.toISOString(),
+      timeZone: "UTC",
+    });
+    await expect(
+      s.tasks.create(
+        c.executionId,
+        {
+          summary: "虚构",
+          content: "虚构",
+          timeZone: "UTC",
+          scheduledAt: c.input.schedule.scheduledAt,
+        } as never,
+        c.ctx,
+      ),
+    ).rejects.toThrow(/scheduledAt/);
+    await expect(
+      s.tasks.change(
+        { kind: "admin", id: "fixture" },
+        {
+          id: c.task.id,
+          expectedVersion: 1,
+          scheduledAt: c.input.schedule.scheduledAt,
+        } as never,
+        false,
+      ),
+    ).rejects.toThrow(/scheduledAt/);
+    expect((await s.tasks.detail(c.task.id)).task.version).toBe(1);
+    const scheduledAt = new Date(Date.now() + 7200000).toISOString();
+    const updated = await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      {
+        id: c.task.id,
+        expectedVersion: 1,
+        schedule: { kind: "once", scheduledAt },
+      },
+      false,
+    );
+    expect(updated.schedule).toEqual({ kind: "once", scheduledAt });
+    expect(updated.scheduled_at.toISOString()).toBe(scheduledAt);
   });
   it("requests the model at due time with latest history and sends exactly once", async () => {
     const s = await setup(undefined, true, true);
@@ -943,7 +1076,10 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
         {
           id: c.task.id,
           expectedVersion: 1,
-          scheduledAt: new Date(Date.now() + 7200000).toISOString(),
+          schedule: {
+            kind: "once",
+            scheduledAt: new Date(Date.now() + 7200000).toISOString(),
+          },
           timeZone: "UTC",
         },
         false,
@@ -1051,6 +1187,183 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       ),
     ).toBe(true);
   });
+  it.each([
+    ["chat-completions", "once"],
+    ["chat-completions", "recurring"],
+    ["responses", "once"],
+    ["responses", "recurring"],
+  ] as const)(
+    "creates a %s %s reminder through the strict tool wire and PostgreSQL",
+    async (apiKind, kind) => {
+      const s = await setup();
+      const seed = await create(s);
+      const repository = new InMemoryAiRepository();
+      const provider = await repository.createProvider({
+        name: "Fictional provider",
+        apiKind,
+        baseUrl: "https://ai.example.test/v1",
+        model: "fictional-model",
+        secretRef: "FICTIONAL_KEY",
+        parameters: {},
+        requestTimeoutMs: 5000,
+        enabled: true,
+        capabilities: { functionCalling: true, hostedWebSearch: false },
+      });
+      if (provider.status !== "ok")
+        throw new Error("fictional provider setup failed");
+      await repository.updateProviderCapabilityProbe(provider.value.id, {
+        functionCalling: "verified",
+        hostedWebSearch: "unknown",
+        checkedAt: new Date(0).toISOString(),
+      });
+      const route = await repository.createRoute({
+        name: "Fictional route",
+        providerIds: [provider.value.id],
+        fallbackEnabled: true,
+        retryPolicy: { maxRounds: 1, initialDelayMs: 0 },
+        degradePolicy: { failureThreshold: 3, cooldownMs: 60000 },
+        enabled: true,
+      });
+      if (route.status !== "ok")
+        throw new Error("fictional route setup failed");
+      const at = new Date(Date.now() + 7200000).toISOString();
+      const schedule =
+        kind === "once"
+          ? { kind: "once", scheduledAt: at }
+          : {
+              kind: "recurring",
+              startsAt: at,
+              rule: { type: "interval", everyMinutes: 120 },
+              end: { kind: "count", count: 3 },
+            };
+      const calls = [
+        {
+          name: "list_scheduled_tasks",
+          arguments: JSON.stringify({
+            status: null,
+            offset: null,
+            limit: null,
+          }),
+        },
+        {
+          name: "create_scheduled_task",
+          arguments: JSON.stringify({
+            summary: "虚构回归提醒",
+            content: "虚构提醒正文",
+            requestSnapshot: "创建者先提出虚构提醒，随后确认时间与执行要求。",
+            timeZone: "UTC",
+            schedule,
+          }),
+        },
+      ];
+      const payloads: Array<Record<string, unknown>> = [];
+      const fetcher = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+        const payload = JSON.parse(
+          typeof init?.body === "string" ? init.body : "{}",
+        ) as Record<string, unknown>;
+        payloads.push(payload);
+        const index = payloads.length - 1;
+        const tools = payload.tools as Array<{
+          function?: { name: string; parameters: Record<string, unknown> };
+          name?: string;
+          parameters?: Record<string, unknown>;
+        }>;
+        for (const tool of tools)
+          assertStrictSchema((tool.function ?? tool).parameters);
+        const call = calls[index];
+        if (call) {
+          const tool = tools
+            .map((t) => t.function ?? t)
+            .find((t) => t.name === call.name)!;
+          expect(
+            compileMcpSchema(tool.parameters!)(JSON.parse(call.arguments)),
+          ).toBe(true);
+        }
+        return Promise.resolve(
+          Response.json(
+            apiKind === "responses"
+              ? call
+                ? {
+                    output: [
+                      {
+                        type: "function_call",
+                        call_id: `task-${index}`,
+                        ...call,
+                      },
+                    ],
+                  }
+                : { output_text: "提醒已设置。" }
+              : {
+                  choices: [
+                    {
+                      finish_reason: call ? "tool_calls" : "stop",
+                      message: call
+                        ? {
+                            content: null,
+                            tool_calls: [
+                              {
+                                id: `task-${index}`,
+                                type: "function",
+                                function: call,
+                              },
+                            ],
+                          }
+                        : { content: "提醒已设置。" },
+                    },
+                  ],
+                },
+          ),
+        );
+      });
+      const secrets = new EnvironmentSecretResolver({
+        FICTIONAL_KEY: "fictional-secret",
+      });
+      const routing = new AiRoutingService(
+        repository,
+        new OpenAiCompatibleClient(secrets, fetcher),
+        secrets,
+        true,
+      );
+      const result = await new AgentRunner(routing).run({
+        runtimeTools: await s.tasks.tools(seed.executionId),
+        executionId: seed.executionId,
+        nodeId: "ai",
+        routeId: route.value.id,
+        messages: [{ role: "user", content: "请设置虚构提醒。" }],
+        maxOutputTokens: 256,
+        maxOutputCharacters: 1000,
+        temperature: 0,
+        outputFormat: "text",
+        protectedPrompt: null,
+      });
+      expect(result).toMatchObject({
+        status: "succeeded",
+        text: "提醒已设置。",
+      });
+      expect(payloads).toHaveLength(3);
+      const outputs = (
+        apiKind === "responses" ? payloads[2]!.input : payloads[2]!.messages
+      ) as Array<Record<string, unknown>>;
+      for (const id of ["task-0", "task-1"])
+        expect(
+          outputs.some((item) =>
+            apiKind === "responses"
+              ? item.type === "function_call_output" && item.call_id === id
+              : item.role === "tool" && item.tool_call_id === id,
+          ),
+        ).toBe(true);
+      const list = await s.tasks.list({
+        workflowId: seed.task.workflow_id,
+        chatId: seed.task.chat_id,
+        senderId: seed.task.creator_sender_id,
+      });
+      const created = list.items.find(
+        (item) => item.summary === "虚构回归提醒",
+      );
+      expect(created).toMatchObject({ schedule, timeZone: "UTC" });
+      expect(created?.id).not.toBe(seed.task.id);
+    },
+  );
   async function recurring(s: Awaited<ReturnType<typeof setup>>, count = 3) {
     const seed = await create(s);
     await s.tasks.change(
@@ -1063,6 +1376,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       {
         summary: "虚构周期提醒",
         content: "虚构周期提醒",
+        requestSnapshot: "请按确认的周期提醒虚构事项。",
         timeZone: "UTC",
         schedule: {
           kind: "recurring",
@@ -1259,11 +1573,14 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
           {
             id: c.task.id,
             expectedVersion: 2,
-            scheduledAt: new Date(Date.now() + 3600000).toISOString(),
+            schedule: {
+              kind: "once",
+              scheduledAt: new Date(Date.now() + 3600000).toISOString(),
+            },
           },
           false,
         ),
-      ).rejects.toThrow("TASK_LEGACY_UPDATE_UNSUPPORTED");
+      ).rejects.toThrow("TASK_KIND_IMMUTABLE");
       if (paused)
         await s.tasks.control(
           { kind: "admin", id: "fixture" },

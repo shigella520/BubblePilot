@@ -6,6 +6,7 @@ import {
   scheduleSummary,
   type TaskSchedule,
 } from "../../../../modules/scheduled-tasks/task-schedule";
+import { updateTaskSchema } from "../../../../modules/scheduled-tasks/task-policy";
 import { createRouter, createWebHashHistory } from "vue-router";
 import { FileClock } from "@lucide/vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
@@ -14,6 +15,7 @@ import { useSessionStore } from "../stores/session";
 import ScheduledTasksPanel from "../components/workflow/ScheduledTasksPanel.vue";
 import "../styles/tokens.css";
 import "../styles/base.css";
+const fixtureSchedule = (value: TaskSchedule): TaskSchedule => value;
 const tasks = Array.from({ length: 5 }, (_, i) => ({
   id: `00000000-0000-4000-8000-00000000000${i + 1}`,
   summary: i === 0 ? "读书会场地预订" : null,
@@ -24,17 +26,19 @@ const tasks = Array.from({ length: 5 }, (_, i) => ({
     "提醒提交周末计划",
     "提醒喝水",
   ][i],
-  schedule: (i === 0
-    ? {
-        kind: "recurring",
-        startsAt: new Date(Date.now() + 3600000).toISOString(),
-        rule: { type: "weekly", weekdays: [1, 3, 5], localTime: "09:00" },
-        end: { kind: "count", count: 12 },
-      }
-    : {
-        kind: "once",
-        scheduledAt: new Date(Date.now() + 3600000).toISOString(),
-      }) satisfies TaskSchedule,
+  schedule: fixtureSchedule(
+    i === 0
+      ? {
+          kind: "recurring",
+          startsAt: new Date(Date.now() + 3600000).toISOString(),
+          rule: { type: "weekly", weekdays: [1, 3, 5], localTime: "09:00" },
+          end: { kind: "count", count: 12 },
+        }
+      : {
+          kind: "once",
+          scheduledAt: new Date(Date.now() + 3600000).toISOString(),
+        },
+  ),
   lifecycle: i === 0 ? "active" : i === 2 ? "cancelled" : "completed",
   consumedCount: i === 0 ? 2 : 1,
   scheduledAt: new Date(Date.now() + 3600000).toISOString(),
@@ -208,13 +212,40 @@ window.fetch = (input, init) => {
       task.version++;
       data = task;
     } else if (task && init?.method === "PATCH") {
-      const changes = JSON.parse(
+      const body = JSON.parse(
         typeof init.body === "string" ? init.body : "{}",
-      ) as {
-        content?: string;
-        scheduledAt?: string;
-      };
-      Object.assign(task, changes, { version: task.version + 1 });
+      ) as Record<string, unknown>;
+      const parsed = updateTaskSchema.safeParse({ ...body, id: task.id });
+      if (!parsed.success || parsed.data.expectedVersion !== task.version)
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: {
+                code: parsed.success
+                  ? "TASK_VERSION_CONFLICT"
+                  : "INVALID_REQUEST",
+                message: "模拟任务更新失败，请检查参数与版本。",
+              },
+            }),
+            { status: parsed.success ? 409 : 400 },
+          ),
+        );
+      const changes = parsed.data;
+      if (changes.summary !== undefined) task.summary = changes.summary;
+      if (changes.content !== undefined) task.content = changes.content;
+      if (changes.schedule !== undefined) task.schedule = changes.schedule;
+      if (changes.timeZone !== undefined) task.timeZone = changes.timeZone;
+      task.version++;
+      if (changes.schedule || changes.timeZone) {
+        task.scheduleSummary = scheduleSummary(task.schedule);
+        task.upcoming = schedulePreview(
+          task.schedule,
+          task.timeZone,
+          new Date(),
+          task.consumedCount,
+        );
+        task.scheduledAt = task.upcoming[0] ?? task.scheduledAt;
+      }
       data = task;
     } else if (task)
       data = {
@@ -236,7 +267,8 @@ window.fetch = (input, init) => {
         task: {
           summary: task.summary,
           content: task.content,
-          request_snapshot: "兰博，明天早上五点提醒我抢火车票。",
+          request_snapshot:
+            "用户先要求提醒预订读书会场地，随后补充需整理参与人数、候选地点和交通方式，最终确认按约定周期提醒。",
           status: task.status,
           scheduled_at: task.scheduledAt,
           timezone: task.timeZone,

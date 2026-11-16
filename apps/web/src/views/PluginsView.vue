@@ -439,6 +439,7 @@ async function remove() {
     </p>
     <AdminFormDialog
       v-if="showImport || preview || selected"
+      :sensitive-required="true"
       :title="showImport ? '安装插件' : '管理插件'"
       :busy="busy"
       :saved-version="selected?.version"

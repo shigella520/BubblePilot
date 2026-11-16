@@ -286,7 +286,7 @@ describe("AiRoutingService", () => {
     expect(
       new Set(client.requests.map((request) => request.sessionId)).size,
     ).toBe(1);
-    expect(client.requests[0]?.sessionId).toMatch(/^bp_[a-f0-9]{64}$/u);
+    expect(client.requests[0]?.sessionId).toMatch(/^[a-f0-9]{64}$/u);
     expect(
       new Set(client.requests.map((request) => request.clientRequestId)).size,
     ).toBe(3);

@@ -511,9 +511,9 @@ export class AiRoutingService {
           ...(candidate.provider.sessionAffinity === "session-id-header" &&
           request.sessionAffinityKey !== undefined
             ? {
-                sessionId: `bp_${sha256(
+                sessionId: sha256(
                   `${candidate.provider.id}\u0000${request.sessionAffinityKey}`,
-                ).slice("sha256:".length)}`,
+                ).slice("sha256:".length),
               }
             : {}),
           ...(request.promptTraceKey === undefined

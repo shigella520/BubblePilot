@@ -18,7 +18,11 @@ import {
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { ApplicationError } from "../../app/errors.js";
-import { compileMcpSchema, mcpSchemaValidator } from "./plugin-schema.js";
+import {
+  compileMcpSchema,
+  mcpSchemaValidator,
+  validateMcpArguments,
+} from "./plugin-schema.js";
 import { safeFetch } from "./plugin-network.js";
 import { digest } from "./plugin-package.js";
 import {
@@ -312,8 +316,7 @@ export class PluginMcp {
     timeout: number,
   ) {
     if (signal.aborted) pluginError("MCP_CANCELLED");
-    if (!compileMcpSchema(tool.definition.parameters)(args))
-      pluginError("INVALID_TOOL_ARGUMENTS");
+    validateMcpArguments(tool.definition.parameters, args);
     // Validate against the pinned contract below, not the SDK's last-page cache.
     // Error results need not satisfy a successful outputSchema.
     const controller = new AbortController();

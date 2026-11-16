@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { Client } from "pg";
 import { describe, expect, it } from "vitest";
+import { scheduleSchema } from "../modules/scheduled-tasks/task-schedule.js";
 const url = process.env.TEST_DATABASE_URL;
 describe.runIf(!!url)("recurring task migration", () => {
   it("preserves v1 execution identities and backfills pending, running and terminal single tasks", async () => {
@@ -107,11 +108,20 @@ describe.runIf(!!url)("recurring task migration", () => {
           lifecycle: string;
           consumed_count: number;
           status: string;
+          scheduled_at: Date;
         }>(
-          "SELECT t.id,t.schedule,t.lifecycle,t.consumed_count,o.status FROM scheduled_tasks t JOIN scheduled_task_occurrences o ON o.task_id=t.id",
+          "SELECT t.id,t.schedule,t.lifecycle,t.consumed_count,t.scheduled_at,o.status FROM scheduled_tasks t JOIN scheduled_task_occurrences o ON o.task_id=t.id",
         )
       ).rows;
       expect(rows).toHaveLength(3);
+      for (const row of rows) {
+        const schedule = scheduleSchema.parse(row.schedule);
+        expect(schedule.kind).toBe("once");
+        if (schedule.kind === "once")
+          expect(new Date(schedule.scheduledAt).getTime()).toBe(
+            row.scheduled_at.getTime(),
+          );
+      }
       expect(rows.find((r) => r.id === tasks[0])).toMatchObject({
         schedule: { kind: "once" },
         lifecycle: "active",

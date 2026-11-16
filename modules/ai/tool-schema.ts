@@ -116,7 +116,14 @@ export function strictToolParameters(tool: AiToolDefinition): Schema {
             key,
             required.includes(key) || acceptsNull(child)
               ? converted
-              : { anyOf: [converted, { type: "null" }] },
+              : {
+                  description:
+                    (typeof converted.description === "string"
+                      ? `${converted.description} `
+                      : "") +
+                    "Optional field: use null when no value is supplied. Preserve meaningful empty strings, zero and false only when the tool permits them.",
+                  anyOf: [converted, { type: "null" }],
+                },
           ];
         }),
       );

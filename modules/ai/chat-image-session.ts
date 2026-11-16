@@ -47,6 +47,7 @@ export const chatImageToolDefinition: AiToolDefinition = {
     properties: {
       image_ref: {
         type: "string",
+        minLength: 1,
         description: "Image reference supplied in this Agent run",
       },
     },
@@ -219,6 +220,18 @@ export class ChatImageSession {
         status,
         reason,
         ...(ref ? { image_ref: ref } : {}),
+        ...(reason === "invalid-arguments"
+          ? {
+              issues: [{ field: "image_ref", code: "invalid" }],
+              guidance:
+                "Provide the exact non-empty image_ref supplied in this run.",
+            }
+          : reason === "reference-unavailable"
+            ? {
+                guidance:
+                  "Use an image_ref supplied in this run; do not guess or reuse a reference from an earlier run.",
+              }
+            : {}),
       }),
     });
     let ref: string;
@@ -227,6 +240,7 @@ export class ChatImageSession {
       if (
         !value ||
         typeof value.image_ref !== "string" ||
+        !value.image_ref.trim() ||
         Object.keys(value).length !== 1
       )
         return output("invalid-arguments", "invalid-arguments");

@@ -5,6 +5,7 @@ import {
 import { z } from "zod";
 import type { AgentToolRegistry } from "../ai/agent-tool-registry.js";
 import type { AgentToolContext } from "../ai/agent-budget.js";
+import { toolArgumentIssues } from "../ai/tool-argument-errors.js";
 import {
   memeLimits,
   type MemeRepository,
@@ -27,6 +28,7 @@ export class MemeToolSession {
           properties: {
             query: {
               type: "string",
+              maxLength: 200,
               description: "空格分隔的简短关键词；空字符串表示浏览已启用候选。",
             },
             limit: { type: "integer", minimum: 1, maximum: 10 },
@@ -37,7 +39,7 @@ export class MemeToolSession {
       },
       diagnostics: "metadata-only",
       execute: (args, context) =>
-        this.execute(() => this.search(args, context)),
+        this.execute("search_memes", () => this.search(args, context)),
     });
     registry.register({
       definition: {
@@ -45,26 +47,48 @@ export class MemeToolSession {
         description: memeSelectDescription,
         parameters: {
           type: "object",
-          properties: { id: { type: ["string", "null"] } },
+          properties: {
+            id: {
+              anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
+              description:
+                "Choose an exact ID returned by search_memes; null clears the current selection.",
+            },
+          },
           required: ["id"],
           additionalProperties: false,
         },
       },
       diagnostics: "metadata-only",
       execute: (args, context) =>
-        this.execute(() => this.select(args, context)),
+        this.execute("select_meme", () => this.select(args, context)),
     });
   }
-  private async execute(operation: () => Promise<string>): Promise<string> {
+  private async execute(
+    name: "search_memes" | "select_meme",
+    operation: () => Promise<string>,
+  ): Promise<string> {
     try {
       return await operation();
     } catch (error) {
-      if (error instanceof z.ZodError || error instanceof SyntaxError)
+      if (error instanceof z.ZodError || error instanceof SyntaxError) {
+        const properties =
+          name === "search_memes" ? { query: {}, limit: {} } : { id: {} };
         return JSON.stringify({
           status: "invalid-arguments",
-          reason: "参数不符合工具定义，请检查后重试。",
+          reason: "invalid-arguments",
+          issues: toolArgumentIssues(error, { properties }),
+          guidance:
+            name === "search_memes"
+              ? "Use a query up to 200 characters; an empty query browses candidates. limit is 1–10 or null when unused."
+              : "Use an exact candidate UUID returned by search_memes, or null to clear the selection.",
         });
-      return JSON.stringify({ status: "unavailable", reason: "query-failed" });
+      }
+      return JSON.stringify({
+        status: "unavailable",
+        reason: "query-failed",
+        guidance:
+          "The meme operation did not complete; do not claim it succeeded.",
+      });
     }
   }
   private async search(args: string, context: AgentToolContext) {

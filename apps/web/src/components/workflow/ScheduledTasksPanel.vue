@@ -35,7 +35,7 @@ interface Task {
   timeZone: string;
   status: string;
   version: number;
-  schedule?: TaskSchedule;
+  schedule: TaskSchedule;
   lifecycle?: string;
   scheduleSummary?: string;
   upcoming?: string[];
@@ -88,7 +88,7 @@ const items = ref<Task[]>([]),
   chats = ref<Array<{ id: string; displayName: string | null }>>([]);
 const workflowId = ref(""),
   chatId = ref(""),
-  status = ref(""),
+  status = ref("pending"),
   offset = ref(0),
   hasMore = ref(false),
   busy = ref(false),
@@ -223,9 +223,7 @@ function edit(task: Task) {
   content.value = task.content ?? "";
   summary.value = task.summary ?? "";
   draftSchedule.value = JSON.parse(
-    JSON.stringify(
-      task.schedule ?? { kind: "once", scheduledAt: task.scheduledAt },
-    ),
+    JSON.stringify(task.schedule),
   ) as TaskSchedule;
   draftZone.value = task.timeZone;
   preview.value = {
@@ -258,10 +256,8 @@ async function save() {
   if (!editing.value || previewKey.value !== scheduleKey()) return;
   const task = editing.value;
   const changed =
-    JSON.stringify(draftSchedule.value) !==
-      JSON.stringify(
-        task.schedule ?? { kind: "once", scheduledAt: task.scheduledAt },
-      ) || draftZone.value !== task.timeZone;
+    JSON.stringify(draftSchedule.value) !== JSON.stringify(task.schedule) ||
+    draftZone.value !== task.timeZone;
   if (
     !changed &&
     content.value === task.content &&
@@ -372,7 +368,7 @@ onBeforeUnmount(() => generation++);
         <p class="eyebrow">SCHEDULED TASKS</p>
         <h2>定时任务</h2>
         <p>
-          按聊天和角色登记的单次与周期提醒。修改、暂停、跳过、取消和删除需要敏感验证。已结束任务按系统设置中的保留天数自动清理。
+          按创建时间从新到旧排列，默认显示待执行任务。修改、暂停、跳过、取消和删除需要敏感验证。已结束任务按系统设置中的保留天数自动清理。
         </p>
       </div>
       <button
@@ -432,7 +428,7 @@ onBeforeUnmount(() => generation++);
                 {{ task.summary || taskOverview(task.content) }}
               </p>
               <p class="task-help">{{ task.scheduleSummary ?? "单次提醒" }}</p>
-              <small v-if="task.schedule?.kind === 'recurring'"
+              <small v-if="task.schedule.kind === 'recurring'"
                 >已消耗 {{ task.consumedCount ?? 0 }} 次</small
               >
             </td>
@@ -548,6 +544,7 @@ onBeforeUnmount(() => generation++);
     </footer>
     <AdminFormDialog
       v-if="deleting"
+      :sensitive-required="true"
       title="删除定时任务"
       :busy="mutating"
       @close="deleting = null"
@@ -717,11 +714,11 @@ onBeforeUnmount(() => generation++);
         </section>
         <section class="task-card">
           <h3 class="task-section-label">
-            <MessageSquare :size="17" />原始委托
+            <MessageSquare :size="17" />委托说明
           </h3>
-          <blockquote class="task-quote">
+          <div class="task-quote">
             {{ detail.task.request_snapshot ?? "内容已清理" }}
-          </blockquote>
+          </div>
         </section>
         <section v-if="detail.occurrences" class="task-card">
           <h3 class="task-section-label">

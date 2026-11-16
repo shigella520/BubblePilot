@@ -126,7 +126,10 @@ import {
   type WorkflowBindingCatalog,
   type WorkflowCapability,
 } from "../modules/workflow/workflow-manifest.js";
-import type { MessageAutomation } from "../modules/workflow/workflow-engine.js";
+import type {
+  AutomationResult,
+  MessageAutomation,
+} from "../modules/workflow/workflow-engine.js";
 import type {
   ExecutionRecoveryClaim,
   WorkflowExecutionStatus,
@@ -355,6 +358,15 @@ const triggerPreviewBodySchema = z.object({
     contentType: z.enum(["text", "attachment", "mixed", "unknown"]),
     text: z.string().nullable(),
     isFromMe: z.boolean().default(false),
+    replyTarget: z
+      .enum([
+        "none",
+        "same-workflow",
+        "other-workflow",
+        "participant",
+        "unknown",
+      ])
+      .optional(),
   }),
 });
 
@@ -835,17 +847,21 @@ export function buildApplication(
       executionIds: [] as readonly string[],
       matchedTriggerIds: [] as readonly string[],
       activeTriggerCount: 0,
-    };
+    } as AutomationResult;
     let automationOutcome = outcome.result.automationOutcome;
     if (outcome.automationEnvelope !== null) {
       let decision: AutomationOutcome;
       if (options.workflow === undefined) {
         decision = "not-evaluated";
       } else {
-        const dispatchOptions =
-          outcome.contextTrigger === undefined
-            ? undefined
-            : { contextTrigger: outcome.contextTrigger };
+        const dispatchOptions = {
+          ...(outcome.contextTrigger === undefined
+            ? {}
+            : { contextTrigger: outcome.contextTrigger }),
+          ...(outcome.result.status === "duplicate"
+            ? { retryPending: true }
+            : {}),
+        };
         automation = await (options.workflow.dispatcher === undefined
           ? options.workflow.engine.handleMessage(
               outcome.automationEnvelope,
@@ -866,6 +882,7 @@ export function buildApplication(
         outcome.automationEnvelope.provider,
         outcome.result.eventId,
         decision,
+        automation.replyWake,
       );
     }
     request.log.info(
@@ -1985,7 +2002,7 @@ export function buildApplication(
 
   application.get(
     "/api/v1/chats/:chatId/participants",
-    { preHandler: requireSensitive("chat.participants.view", "chat") },
+    { preHandler: requireAuditedAdmin("chat.participants.view", "chat") },
     async (request) => {
       const parameters = chatParametersSchema.parse(request.params);
       const participants = await repository.getChatParticipants(
@@ -2004,7 +2021,7 @@ export function buildApplication(
 
   application.put(
     "/api/v1/chats/:chatId/participants",
-    { preHandler: requireSensitive("chat.participants.update", "chat") },
+    { preHandler: requireAuditedAdmin("chat.participants.update", "chat") },
     async (request) => {
       const parameters = chatParametersSchema.parse(request.params);
       const body = chatParticipantIdentitiesBodySchema.parse(request.body);
@@ -2855,7 +2872,7 @@ export function buildApplication(
     );
     application.post(
       "/api/v1/chats/:chatId/bot-identity/rebuild",
-      { preHandler: requireAuditedAdmin("bot-identity.rebuild", "chat") },
+      { preHandler: requireSensitive("bot-identity.rebuild", "chat") },
       async (request) => ({
         data: await identity.rebuild(
           z.object({ chatId: z.string().uuid() }).parse(request.params).chatId,
@@ -3009,34 +3026,12 @@ export function buildApplication(
 
     application.get(
       "/api/v1/workflows/:workflowId/versions/:version/export",
-      { preHandler: requireAdmin },
+      { preHandler: requireAuditedAdmin("workflow.export", "workflow") },
       async (request, reply) => {
         const parameters = workflowVersionParametersSchema.parse(
           request.params,
         );
         const query = workflowManifestExportQuerySchema.parse(request.query);
-        const principal = principals.get(request);
-        if (
-          query.mode === "instance-bound" &&
-          principal?.kind === "session" &&
-          options.auth !== undefined &&
-          !(await options.auth.hasSensitiveGrant(principal.sessionId))
-        ) {
-          await audit(
-            request,
-            "workflow.export",
-            "workflow",
-            parameters.workflowId,
-            "denied",
-            principal,
-            { reason: "sensitive-auth-required" },
-          );
-          throw new ApplicationError(
-            "SENSITIVE_AUTH_REQUIRED",
-            "Sensitive operation verification is required.",
-            403,
-          );
-        }
         const version = await workflowRepository.getWorkflowVersion(
           parameters.workflowId,
           parameters.version,
@@ -3060,10 +3055,6 @@ export function buildApplication(
           mode: query.mode,
           catalog: await workflowBindingCatalog(),
           schemaUrl: "/api/v1/workflows/schema",
-        });
-        sensitiveAudits.set(request, {
-          action: "workflow.export",
-          targetType: "workflow",
         });
         const safeName =
           version.workflowName
@@ -3283,7 +3274,7 @@ export function buildApplication(
 
     application.post(
       "/api/v1/workflows",
-      { preHandler: requireAdmin },
+      { preHandler: requireAuditedAdmin("workflow.create", "workflow") },
       async (request, reply) => {
         const body = workflowBodySchema.parse(request.body);
         const definition = workflowDefinition(body.definition);
@@ -3297,7 +3288,9 @@ export function buildApplication(
 
     application.post(
       "/api/v1/workflows/:workflowId/versions",
-      { preHandler: requireAdmin },
+      {
+        preHandler: requireAuditedAdmin("workflow.version.create", "workflow"),
+      },
       async (request, reply) => {
         const parameters = workflowParametersSchema.parse(request.params);
         const body = workflowVersionBodySchema.parse(request.body);
@@ -3334,7 +3327,7 @@ export function buildApplication(
 
     application.delete(
       "/api/v1/workflows/:workflowId",
-      { preHandler: requireAdmin },
+      { preHandler: requireAuditedAdmin("workflow.delete", "workflow") },
       async (request) => {
         const parameters = workflowParametersSchema.parse(request.params);
         const result = await workflowRepository.deleteWorkflow(
@@ -3359,7 +3352,7 @@ export function buildApplication(
     application.post(
       "/api/v1/workflows/:workflowId/versions/:version/publish",
       {
-        preHandler: requireAdmin,
+        preHandler: requireAuditedAdmin("workflow.publish", "workflow"),
       },
       async (request) => {
         const parameters = workflowVersionParametersSchema.parse(
@@ -3376,7 +3369,10 @@ export function buildApplication(
               (node.config.idle?.enabled || node.config.scheduled?.enabled),
           )
         ) {
-          await requireSensitive("workflow.idle.publish", "workflow")(request);
+          sensitiveAudits.set(request, {
+            action: "workflow.idle.publish",
+            targetType: "workflow",
+          });
           for (const node of candidate.definition.nodes) {
             if (node.type !== "message-trigger" || !node.config.idle?.enabled)
               continue;
@@ -3538,7 +3534,7 @@ export function buildApplication(
     application.patch(
       "/api/v1/workflows/:workflowId/enabled",
       {
-        preHandler: requireAdmin,
+        preHandler: requireAuditedAdmin("workflow.enabled.update", "workflow"),
       },
       async (request) => {
         const parameters = workflowParametersSchema.parse(request.params);
@@ -3559,7 +3555,10 @@ export function buildApplication(
                 ),
             )
           )
-            await requireSensitive("workflow.idle.enable", "workflow")(request);
+            sensitiveAudits.set(request, {
+              action: "workflow.idle.enable",
+              targetType: "workflow",
+            });
         }
         const workflow = await workflowRepository.setWorkflowEnabled(
           parameters.workflowId,
@@ -3636,6 +3635,9 @@ export function buildApplication(
             sample,
             triggerConditions(body.conditions),
             body.includeFromMe,
+            body.sample.replyTarget === undefined
+              ? undefined
+              : body.sample.replyTarget === "same-workflow",
           ),
         };
       },
@@ -3643,7 +3645,7 @@ export function buildApplication(
 
     application.post(
       "/api/v1/triggers",
-      { preHandler: requireAdmin },
+      { preHandler: requireAuditedAdmin("trigger.create", "trigger") },
       async (request, reply) => {
         const body = triggerBodySchema.parse(request.body);
         if (body.enabled) {
@@ -3658,10 +3660,10 @@ export function buildApplication(
                 (node.config.idle?.enabled || node.config.scheduled?.enabled),
             )
           )
-            await requireSensitive(
-              "workflow.idle.trigger.create",
-              "trigger",
-            )(request);
+            sensitiveAudits.set(request, {
+              action: "workflow.idle.trigger.create",
+              targetType: "trigger",
+            });
         }
         const trigger = await workflowRepository.createTrigger({
           ...body,
@@ -3701,10 +3703,10 @@ export function buildApplication(
                 (node.config.idle?.enabled || node.config.scheduled?.enabled),
             )
           )
-            await requireSensitive(
-              "workflow.idle.trigger.enable",
-              "trigger",
-            )(request);
+            sensitiveAudits.set(request, {
+              action: "workflow.idle.trigger.enable",
+              targetType: "trigger",
+            });
         }
         const trigger = await workflowRepository.updateTriggerEnabled(
           parameters.triggerId,
@@ -3723,7 +3725,7 @@ export function buildApplication(
 
     application.put(
       "/api/v1/triggers/:triggerId",
-      { preHandler: requireAdmin },
+      { preHandler: requireAuditedAdmin("trigger.update", "trigger") },
       async (request) => {
         const parameters = triggerParametersSchema.parse(request.params);
         const body = triggerUpdateBodySchema.parse(request.body);
@@ -3747,7 +3749,7 @@ export function buildApplication(
 
     application.delete(
       "/api/v1/triggers/:triggerId",
-      { preHandler: requireAdmin },
+      { preHandler: requireAuditedAdmin("trigger.delete", "trigger") },
       async (request) => {
         const parameters = triggerParametersSchema.parse(request.params);
         const result = await workflowRepository.deleteTrigger(

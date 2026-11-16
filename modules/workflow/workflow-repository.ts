@@ -7,6 +7,11 @@ import type { MessageEnvelope } from "../ingestion/message-envelope.js";
 import type { ConversationContextTrigger } from "./conversation-context-service.js";
 import type { TriggerConditions } from "./trigger-matcher.js";
 import type {
+  MessageMatchSource,
+  ReplyWakeChoice,
+  ReplyWakeSnapshot,
+} from "../ingestion/reply-wakeup.js";
+import type {
   WorkflowDefinition,
   WorkflowNode,
 } from "./workflow-definition.js";
@@ -70,6 +75,7 @@ export interface StartupExecutionClosure {
 }
 
 export interface WorkflowExecutionRecord {
+  messageMatchSource?: MessageMatchSource | null;
   startupClosure?: StartupExecutionClosure | null;
   triggerEvent?: BackgroundWorkflowEvent | null;
   botIdentity?: BotIdentity | null;
@@ -246,10 +252,16 @@ export interface WorkflowRepository {
   ): Promise<"deleted" | "not-found" | "referenced">;
   listTriggers(): Promise<readonly TriggerRecord[]>;
   listActiveTriggerBindings(): Promise<readonly TriggerBinding[]>;
+  resolveReplyWake(envelope: MessageEnvelope): Promise<ReplyWakeSnapshot>;
+  freezeReplyWakeChoice(
+    envelope: MessageEnvelope,
+    choice: ReplyWakeChoice,
+  ): Promise<ReplyWakeChoice | null>;
   createExecution(input: {
     envelope: WorkflowEvent;
     trigger: TriggerBinding;
     contextTrigger?: ConversationContextTrigger;
+    messageMatchSource?: MessageMatchSource;
   }): Promise<{ execution: WorkflowExecutionRecord; created: boolean }>;
   createManualRetry(
     executionId: string,
