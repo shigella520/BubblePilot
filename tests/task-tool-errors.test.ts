@@ -101,6 +101,7 @@ describe("model-facing scheduled task errors", () => {
         JSON.stringify({
           summary: "虚构提醒",
           content: "虚构任务",
+          requestSnapshot: "请设置虚构任务。",
           timeZone: "UTC",
           scheduledAt: "2030-01-02T05:00:00Z",
           schedule: {

@@ -88,7 +88,7 @@ const items = ref<Task[]>([]),
   chats = ref<Array<{ id: string; displayName: string | null }>>([]);
 const workflowId = ref(""),
   chatId = ref(""),
-  status = ref(""),
+  status = ref("pending"),
   offset = ref(0),
   hasMore = ref(false),
   busy = ref(false),
@@ -368,7 +368,7 @@ onBeforeUnmount(() => generation++);
         <p class="eyebrow">SCHEDULED TASKS</p>
         <h2>定时任务</h2>
         <p>
-          按聊天和角色登记的单次与周期提醒。修改、暂停、跳过、取消和删除需要敏感验证。已结束任务按系统设置中的保留天数自动清理。
+          按创建时间从新到旧排列，默认显示待执行任务。修改、暂停、跳过、取消和删除需要敏感验证。已结束任务按系统设置中的保留天数自动清理。
         </p>
       </div>
       <button
@@ -713,11 +713,11 @@ onBeforeUnmount(() => generation++);
         </section>
         <section class="task-card">
           <h3 class="task-section-label">
-            <MessageSquare :size="17" />原始委托
+            <MessageSquare :size="17" />委托说明
           </h3>
-          <blockquote class="task-quote">
+          <div class="task-quote">
             {{ detail.task.request_snapshot ?? "内容已清理" }}
-          </blockquote>
+          </div>
         </section>
         <section v-if="detail.occurrences" class="task-card">
           <h3 class="task-section-label">

@@ -123,6 +123,7 @@ describe("recurring calendar", () => {
     const base = {
       summary: "Fictional reminder",
       content: "fictional",
+      requestSnapshot: "Fictional request",
       timeZone: "UTC",
       schedule: schedule({ type: "interval", everyMinutes: 180 }),
     };

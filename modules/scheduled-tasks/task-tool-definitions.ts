@@ -19,7 +19,7 @@ export const taskToolSchemas = {
 
 const descriptions: Record<keyof typeof taskToolSchemas, string> = {
   create_scheduled_task:
-    "Create a one-time or recurring reminder only for the current user's explicit request. Required: summary, content, timeZone and schedule. A one-time schedule has kind=once and scheduledAt; a recurring schedule has kind=recurring, startsAt, rule and end. Do not put scheduledAt at the top level. Use absolute datetimes with offsets and an IANA timezone. Confirm only after success.",
+    "Create a one-time or recurring reminder only for the current user's explicit request. Required: summary, content, requestSnapshot, timeZone and schedule. requestSnapshot faithfully synthesizes this creator's confirmed request across relevant turns, including clarifications; do not copy only the last confirmation or invent authorization. It is explanatory context, not a verbatim quote or extra execution authority. A one-time schedule has kind=once and scheduledAt; a recurring schedule has kind=recurring, startsAt, rule and end. Do not put scheduledAt at the top level. Use absolute datetimes with offsets and an IANA timezone. Confirm only after success.",
   list_scheduled_tasks:
     "List this member's reminder tasks in this chat and workflow before changing or cancelling them. status, offset and limit are optional; use null when no filter or value is supplied.",
   update_scheduled_task:

@@ -267,7 +267,8 @@ window.fetch = (input, init) => {
         task: {
           summary: task.summary,
           content: task.content,
-          request_snapshot: "兰博，明天早上五点提醒我抢火车票。",
+          request_snapshot:
+            "用户先要求提醒预订读书会场地，随后补充需整理参与人数、候选地点和交通方式，最终确认按约定周期提醒。",
           status: task.status,
           scheduled_at: task.scheduledAt,
           timezone: task.timeZone,

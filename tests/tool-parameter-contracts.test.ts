@@ -24,7 +24,13 @@ const required: Record<string, string[]> = {
   read_plugin_reference: ["id"],
   read_tool_result: ["result_ref"],
   search_tool_result: ["result_ref", "query"],
-  create_scheduled_task: ["summary", "content", "timeZone", "schedule"],
+  create_scheduled_task: [
+    "summary",
+    "content",
+    "requestSnapshot",
+    "timeZone",
+    "schedule",
+  ],
   list_scheduled_tasks: [],
   update_scheduled_task: ["id", "expectedVersion"],
   cancel_scheduled_task: ["id", "expectedVersion"],
@@ -114,6 +120,7 @@ describe("model tool parameter contracts", () => {
       const input = {
         summary: "虚构提醒",
         content: "虚构内容",
+        requestSnapshot: "请设置虚构提醒。",
         timeZone: "UTC",
         schedule,
       };
@@ -164,6 +171,7 @@ describe("model tool parameter contracts", () => {
       taskToolSchemas.create_scheduled_task.safeParse({
         summary: "x",
         content: "y",
+        requestSnapshot: "Fictional request",
         timeZone: "UTC",
         schedule: {
           ...schedules[0],

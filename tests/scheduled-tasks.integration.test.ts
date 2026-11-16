@@ -242,6 +242,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
     const input = {
       summary: "抢火车票提醒",
       content: "提醒抢火车票",
+      requestSnapshot: "用户先要求提醒抢火车票，随后确认在约定时间提醒。",
       schedule: {
         kind: "once" as const,
         scheduledAt: new Date(Date.now() + 3600000).toISOString(),
@@ -257,6 +258,69 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       [id],
     );
   }
+  it("stores the model's multi-turn commission while retaining source attribution", async () => {
+    const s = await setup();
+    const c = await create(s);
+    const source = (
+      await pool.query<{ body: string }>(
+        "SELECT body FROM messages WHERE id=$1",
+        [c.task.source_message_id],
+      )
+    ).rows[0]!;
+    expect(c.task.request_snapshot).toBe(c.input.requestSnapshot);
+    expect(c.task.request_snapshot).not.toBe(source.body);
+    expect(c.task.source_execution_id).toBe(c.executionId);
+    expect(c.task.source_message_id).toBeTruthy();
+    expect((await s.tasks.detail(c.task.id)).task.request_snapshot).toBe(
+      c.input.requestSnapshot,
+    );
+    await s.tasks.change(
+      { kind: "admin", id: "fixture" },
+      {
+        id: c.task.id,
+        expectedVersion: 1,
+        summary: "新的任务概要",
+      },
+      false,
+    );
+    expect((await s.tasks.detail(c.task.id)).task.request_snapshot).toBe(
+      c.input.requestSnapshot,
+    );
+  });
+  it("paginates by creation time, not due time, and keeps status filtering explicit", async () => {
+    const s = await setup();
+    const a = await create(s),
+      b = await create(s),
+      c = await create(s);
+    await pool.query(
+      "UPDATE scheduled_tasks SET created_at='2030-01-01',scheduled_at='2030-04-01',expires_at='2030-04-02' WHERE id=$1",
+      [a.task.id],
+    );
+    await pool.query(
+      "UPDATE scheduled_tasks SET created_at='2030-01-02',scheduled_at='2030-03-01',expires_at='2030-03-02',status='cancelled',lifecycle='cancelled' WHERE id=$1",
+      [b.task.id],
+    );
+    await pool.query(
+      "UPDATE scheduled_tasks SET created_at='2030-01-03',scheduled_at='2030-02-01',expires_at='2030-02-02' WHERE id=$1",
+      [c.task.id],
+    );
+    const options = {
+      workflowId: a.task.workflow_id,
+      status: "pending",
+      limit: 1,
+    };
+    const first = await s.tasks.list(options);
+    expect(first.items.map((t) => t.id)).toEqual([c.task.id]);
+    expect(first.hasMore).toBe(true);
+    const second = await s.tasks.list({ ...options, offset: 1 });
+    expect(second.items.map((t) => t.id)).toEqual([a.task.id]);
+    expect(second.hasMore).toBe(false);
+    expect(
+      (await s.tasks.list({ workflowId: a.task.workflow_id })).items.map(
+        (t) => t.id,
+      ),
+    ).toEqual([c.task.id, b.task.id, a.task.id]);
+  });
   it("resolves creator real names within each chat using the current mapping without changing ownership", async () => {
     const first = await setup();
     const second = await setup();
@@ -1186,6 +1250,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
           arguments: JSON.stringify({
             summary: "虚构回归提醒",
             content: "虚构提醒正文",
+            requestSnapshot: "创建者先提出虚构提醒，随后确认时间与执行要求。",
             timeZone: "UTC",
             schedule,
           }),
@@ -1311,6 +1376,7 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
       {
         summary: "虚构周期提醒",
         content: "虚构周期提醒",
+        requestSnapshot: "请按确认的周期提醒虚构事项。",
         timeZone: "UTC",
         schedule: {
           kind: "recurring",

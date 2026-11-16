@@ -16,6 +16,45 @@ import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { compileMcpSchema } from "../modules/plugins/plugin-schema.js";
 describe("scheduled reminder policy", () => {
+  it("requires a bounded synthesized request at creation without rewriting it on updates", () => {
+    const base = {
+      summary: "读书会提醒",
+      content: "提醒携带读书会资料",
+      timeZone: "UTC",
+      schedule: { kind: "once", scheduledAt: "2030-01-02T05:00:00Z" },
+    };
+    for (const requestSnapshot of [
+      undefined,
+      null,
+      "",
+      "   ",
+      "字".repeat(8001),
+    ])
+      expect(
+        createTaskSchema.safeParse({ ...base, requestSnapshot }).success,
+      ).toBe(false);
+    const requestSnapshot = "先约定提醒带资料，随后确认时间并补充需要带书。";
+    expect(
+      createTaskSchema.parse({
+        ...base,
+        requestSnapshot: ` ${requestSnapshot} `,
+      }).requestSnapshot,
+    ).toBe(requestSnapshot);
+    expect(
+      createTaskSchema.safeParse({
+        ...base,
+        requestSnapshot: "字".repeat(8000),
+      }).success,
+    ).toBe(true);
+    expect(
+      updateTaskSchema.safeParse({
+        id: "00000000-0000-4000-8000-000000000001",
+        expectedVersion: 1,
+        summary: "新概要",
+        requestSnapshot,
+      }).success,
+    ).toBe(false);
+  });
   it("validates retention settings without resetting omitted legacy values", () => {
     const base = {
       paused: false,
@@ -63,6 +102,7 @@ describe("scheduled reminder policy", () => {
     expect(
       createTaskSchema.safeParse({
         summary: "Task",
+        requestSnapshot: "Fictional request",
         content: "task",
         schedule: { kind: "once", scheduledAt: "2030-01-02T05:00:00Z" },
         timeZone: "UTC",
@@ -79,6 +119,7 @@ describe("scheduled reminder policy", () => {
   it("requires a bounded single-line summary for creation and accepts summary-only updates", () => {
     const input = {
       content: "虚构任务正文",
+      requestSnapshot: "请在约定时间提醒虚构事项。",
       timeZone: "UTC",
       schedule: { kind: "once", scheduledAt: "2030-01-02T05:00:00Z" },
     };
@@ -115,7 +156,12 @@ describe("scheduled reminder policy", () => {
   });
   it("uses one schedule field across the tool and service contracts", () => {
     const once = { kind: "once", scheduledAt: "2030-01-02T05:00:00Z" };
-    const base = { summary: "提醒", content: "虚构提醒", timeZone: "UTC" };
+    const base = {
+      summary: "提醒",
+      content: "虚构提醒",
+      requestSnapshot: "请设置虚构提醒",
+      timeZone: "UTC",
+    };
     expect(createTaskSchema.parse({ ...base, schedule: once })).toEqual({
       ...base,
       schedule: once,
