@@ -483,8 +483,10 @@ describe.each(["chat-completions", "responses"] as const)(
           f.node.id,
         ].join("\u0000"),
       );
-      const oldSession = `bp_${digest(`${f.providerId}\u0000${oldScope}`).slice("sha256:".length)}`;
-      expect(f.sessionIds[0]).toBe(oldSession);
+      const expectedSession = digest(`${f.providerId}\u0000${oldScope}`).slice(
+        "sha256:".length,
+      );
+      expect(f.sessionIds[0]).toBe(expectedSession);
       const messageSession = f.sessionIds[0];
       const backgroundSession = f.sessionIds[1];
       const scheduledScope = digest(
@@ -496,14 +498,17 @@ describe.each(["chat-completions", "responses"] as const)(
           "scheduled",
         ].join("\u0000"),
       );
-      const scheduledSession = `bp_${digest(`${f.providerId}\u0000${scheduledScope}`).slice("sha256:".length)}`;
+      const scheduledSession = digest(
+        `${f.providerId}\u0000${scheduledScope}`,
+      ).slice("sha256:".length);
       expect(backgroundSession).toBe(scheduledSession);
-      expect(backgroundSession).toMatch(/^bp_[a-f0-9]{64}$/u);
+      expect(backgroundSession).toMatch(/^[a-f0-9]{64}$/u);
       expect(backgroundSession).not.toBe(messageSession);
       for (const i of [2, 3, 4, 6])
         expect(f.sessionIds[i]).toBe(messageSession);
       for (const i of [5, 7]) expect(f.sessionIds[i]).toBe(backgroundSession);
       for (const [i, payload] of f.payloads.entries()) {
+        expect(f.sessionIds[i]).toMatch(/^[a-f0-9]{64}$/u);
         if (apiKind === "responses")
           expect(payload.prompt_cache_key).toBe(f.sessionIds[i]);
         else expect(payload).not.toHaveProperty("prompt_cache_key");

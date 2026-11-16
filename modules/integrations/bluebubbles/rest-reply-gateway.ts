@@ -7,6 +7,10 @@ import type {
   SendReplyCommand,
 } from "./reply-gateway.js";
 import { normalizeIMessageText } from "./imessage-text.js";
+import {
+  DeliveryDiagnostics,
+  type DeliveryDiagnosticSink,
+} from "./delivery-diagnostics.js";
 
 const successResponseSchema = z
   .object({
@@ -25,6 +29,7 @@ export interface BlueBubblesRestReplyGatewayOptions {
   method: "private-api" | "apple-script";
   timeoutMs: number;
   fetchImplementation?: typeof fetch;
+  onDiagnostic?: DeliveryDiagnosticSink | undefined;
 }
 
 export class BlueBubblesRestReplyGateway implements ReplyGateway {
@@ -44,6 +49,14 @@ export class BlueBubblesRestReplyGateway implements ReplyGateway {
     endpoint.searchParams.set("password", this.options.accessToken);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs);
+    const diagnostic = new DeliveryDiagnostics(
+      "attachment",
+      "apple-script",
+      command,
+      this.options.timeoutMs,
+      controller.signal,
+      this.options.onDiagnostic,
+    );
     try {
       const form = new FormData();
       form.set("chatGuid", command.providerChatId);
@@ -55,19 +68,24 @@ export class BlueBubblesRestReplyGateway implements ReplyGateway {
         new Blob([new Uint8Array(command.bytes)], { type: command.mimeType }),
         command.filename,
       );
+      diagnostic.stage = "request";
       const response = await this.fetchImplementation(endpoint, {
         method: "POST",
         headers: { "x-bubblepilot-correlation-id": command.correlationId },
         body: form,
         signal: controller.signal,
       });
-      if (!response.ok)
+      diagnostic.httpStatus = response.status;
+      diagnostic.stage = "http-status";
+      if (!response.ok) {
+        diagnostic.report(`BLUEBUBBLES_HTTP_${response.status}`);
         return {
           status: response.status >= 500 ? "unknown" : "failed",
           code: `BLUEBUBBLES_HTTP_${response.status}`,
           summary: `Attachment request returned HTTP ${response.status}.`,
           retryable: response.status === 429,
         };
+      }
       const parsed = z
         .object({
           data: z.object({
@@ -75,22 +93,27 @@ export class BlueBubblesRestReplyGateway implements ReplyGateway {
             error: z.number().optional(),
           }),
         })
-        .safeParse(await response.json());
-      if (!parsed.success)
+        .safeParse(await diagnostic.readJson(response));
+      if (!parsed.success) {
+        diagnostic.report("BLUEBUBBLES_ATTACHMENT_RESULT_UNKNOWN");
         return {
           status: "unknown",
           code: "BLUEBUBBLES_ATTACHMENT_RESULT_UNKNOWN",
           summary: "Attachment receipt could not be confirmed.",
         };
-      if (parsed.data.data.error && parsed.data.data.error !== 0)
+      }
+      if (parsed.data.data.error && parsed.data.data.error !== 0) {
+        diagnostic.report("BLUEBUBBLES_ATTACHMENT_REJECTED");
         return {
           status: "failed",
           code: "BLUEBUBBLES_ATTACHMENT_REJECTED",
           summary: "The attachment was rejected by the gateway.",
           retryable: false,
         };
+      }
       return { status: "confirmed", providerMessageId: parsed.data.data.guid };
-    } catch {
+    } catch (error) {
+      diagnostic.report("BLUEBUBBLES_ATTACHMENT_RESULT_UNKNOWN", error);
       return {
         status: "unknown",
         code: "BLUEBUBBLES_ATTACHMENT_RESULT_UNKNOWN",
@@ -113,6 +136,14 @@ export class BlueBubblesRestReplyGateway implements ReplyGateway {
       () => controller.abort(),
       this.options.timeoutMs,
     );
+    const diagnostic = new DeliveryDiagnostics(
+      "text",
+      this.options.method,
+      command,
+      this.options.timeoutMs,
+      controller.signal,
+      this.options.onDiagnostic,
+    );
 
     try {
       const payload: Record<string, unknown> = {
@@ -126,6 +157,7 @@ export class BlueBubblesRestReplyGateway implements ReplyGateway {
         payload.partIndex = 0;
       }
 
+      diagnostic.stage = "request";
       const response = await this.fetchImplementation(endpoint, {
         method: "POST",
         headers: {
@@ -137,8 +169,14 @@ export class BlueBubblesRestReplyGateway implements ReplyGateway {
         signal: controller.signal,
       });
 
+      diagnostic.httpStatus = response.status;
+      diagnostic.stage = "http-status";
       if (response.ok) {
-        const parsed = successResponseSchema.safeParse(await response.json());
+        const parsed = successResponseSchema.safeParse(
+          await diagnostic.readJson(response),
+        );
+        if (!parsed.success || !parsed.data.data?.guid)
+          diagnostic.report("BLUEBUBBLES_REPLY_RECEIPT_MISSING_GUID");
         return {
           status: "confirmed",
           providerMessageId: parsed.success
@@ -148,6 +186,11 @@ export class BlueBubblesRestReplyGateway implements ReplyGateway {
       }
 
       const retryable = response.status === 429 || response.status >= 500;
+      diagnostic.report(
+        response.status === 429
+          ? "BLUEBUBBLES_RATE_LIMITED"
+          : `BLUEBUBBLES_HTTP_${response.status}`,
+      );
       return {
         status: "failed",
         code:
@@ -161,6 +204,12 @@ export class BlueBubblesRestReplyGateway implements ReplyGateway {
       const timedOut =
         error instanceof Error &&
         (error.name === "AbortError" || controller.signal.aborted);
+      diagnostic.report(
+        timedOut
+          ? "BLUEBUBBLES_REPLY_TIMEOUT"
+          : "BLUEBUBBLES_REPLY_RESULT_UNKNOWN",
+        error,
+      );
       return {
         status: "unknown",
         code: timedOut

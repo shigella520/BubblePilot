@@ -284,10 +284,10 @@ describe.each(["chat-completions", "responses"] as const)(
       );
       const scope = sha256(["image-summary", imageJob.id].join("\u0000"));
       expect(ids[0]).toBe(
-        `bp_${sha256(`${providers[0]!.id}\u0000${scope}`).slice("sha256:".length)}`,
+        sha256(`${providers[0]!.id}\u0000${scope}`).slice("sha256:".length),
       );
       expect(ids[1]).toBe(ids[0]);
-      expect(ids[2]).toMatch(/^bp_[a-f0-9]{64}$/u);
+      expect(ids[2]).toMatch(/^[a-f0-9]{64}$/u);
       expect(ids[2]).not.toBe(ids[0]);
       for (const [index, request] of requests.entries()) {
         expect(JSON.stringify(request.body)).not.toContain(imageJob.id);
@@ -319,7 +319,9 @@ describe.each(["chat-completions", "responses"] as const)(
       for (const [index, request] of requests.entries()) {
         expect(request.url).toContain(index === 0 ? "primary." : "backup.");
         expect(ids[index]).toBe(
-          `bp_${sha256(`${providers[index]!.id}\u0000${scope}`).slice("sha256:".length)}`,
+          sha256(`${providers[index]!.id}\u0000${scope}`).slice(
+            "sha256:".length,
+          ),
         );
         if (apiKind === "responses") {
           expect(request.body.prompt_cache_key).toBe(ids[index]);

@@ -6,9 +6,13 @@ import type {
 } from "./reply-gateway.js";
 import { BlueBubblesRestReplyGateway } from "./rest-reply-gateway.js";
 import type { BlueBubblesSettingsService } from "./settings-service.js";
+import type { DeliveryDiagnosticSink } from "./delivery-diagnostics.js";
 
 export class ManagedBlueBubblesReplyGateway implements ReplyGateway {
-  constructor(private readonly settings: BlueBubblesSettingsService) {}
+  constructor(
+    private readonly settings: BlueBubblesSettingsService,
+    private readonly onDiagnostic?: DeliveryDiagnosticSink,
+  ) {}
 
   async sendAttachment(
     command: SendAttachmentCommand,
@@ -19,6 +23,7 @@ export class ManagedBlueBubblesReplyGateway implements ReplyGateway {
       accessToken: current.accessToken,
       method: "apple-script",
       timeoutMs: current.requestTimeoutMs,
+      onDiagnostic: this.onDiagnostic,
     }).sendAttachment(command);
   }
   async sendReply(command: SendReplyCommand): Promise<DeliveryResult> {
@@ -28,6 +33,7 @@ export class ManagedBlueBubblesReplyGateway implements ReplyGateway {
       accessToken: current.accessToken,
       method: current.sendMethod,
       timeoutMs: current.requestTimeoutMs,
+      onDiagnostic: this.onDiagnostic,
     }).sendReply(command);
   }
 }

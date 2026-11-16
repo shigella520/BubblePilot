@@ -121,6 +121,12 @@ correlationId
 
 `unknown` 不自动重发。运维者必须先确认 BlueBubbles 中的外部事实，再关闭或按安全边界处理执行。
 
+文字和附件发送异常会输出 `event=bluebubbles.delivery-diagnostic` 的结构化 WARN 日志。用 `correlationId` 关联执行，用 `providerTempGuid` 关联投递记录；只接受 UUID 格式的关联字段。日志包含发送类型／方式、错误码、耗时、配置超时、是否超时、HTTP 状态、完整读取后的响应字节数，以及白名单内的异常类型和底层原因码（例如 `ECONNRESET`、`UND_ERR_SOCKET`）。未知原因不复制原始字符串，嵌套 cause／AggregateError 只做有界读取。
+
+`stage` 区分 `prepare`（构造请求）、`request`（等待响应头）、`http-status`（HTTP 拒绝）、`response-body`（读取响应正文）、`response-json`（解析 JSON）、`receipt`（验证回执）。HTTP 状态为空表示未取得响应对象，不能据此断言请求未到达网关；同样，HTTP 200 后正文读取或 JSON 解析失败仍属于结果未知。异常消息、堆栈、原始请求／响应、URL、Header、聊天 ID、文件名和文件正文均不入日志。
+
+正常确认发送不增加诊断日志。文字 2xx JSON 回执缺少 guid 时记录 `BLUEBUBBLES_REPLY_RECEIPT_MISSING_GUID`，但维持原有 confirmed 行为；附件回执不完整仍为 unknown。日志回调失败不影响发送结果，不触发额外重试。本次诊断无数据库迁移、配置开关或超时／重试语义变化；只能定位升级后的新异常，不能补回过去未记录的底层原因。
+
 ## 幂等与兼容性
 
 - 入站事件唯一键：`provider + externalEventId`；
