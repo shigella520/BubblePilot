@@ -544,6 +544,7 @@ onBeforeUnmount(() => generation++);
     </footer>
     <AdminFormDialog
       v-if="deleting"
+      :sensitive-required="true"
       title="删除定时任务"
       :busy="mutating"
       @close="deleting = null"

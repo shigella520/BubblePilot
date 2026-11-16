@@ -51,7 +51,7 @@ async function verify() {
     <KeyRound :size="20" />
     <div>
       <strong>需要二次验证</strong
-      ><span>查看正文或修改生产配置前，请输入独立的敏感操作密码。</span>
+      ><span>查看受保护内容或执行敏感操作前，请输入独立的敏感操作密码。</span>
     </div>
     <input
       v-model="password"

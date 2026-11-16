@@ -631,6 +631,7 @@ onBeforeUnmount(() => {
         </button>
         <AdminFormDialog
           v-if="backfillDialog"
+          :sensitive-required="true"
           title="新建历史补建任务"
           :busy="busy"
           @close="backfillDialog = false"

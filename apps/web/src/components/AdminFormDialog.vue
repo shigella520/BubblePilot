@@ -9,9 +9,9 @@ const props = withDefaults(
     busy?: boolean;
     savedVersion?: unknown;
     draft?: unknown;
-    sensitiveRequired?: boolean;
+    sensitiveRequired: boolean;
   }>(),
-  { sensitiveRequired: true, savedVersion: undefined, draft: undefined },
+  { savedVersion: undefined, draft: undefined },
 );
 const emit = defineEmits<{ close: [] }>();
 const session = useSessionStore();
