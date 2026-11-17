@@ -1,3 +1,5 @@
+import type { AiChatRequest } from "../modules/ai/ai-types.js";
+import type { AiClient } from "../modules/ai/openai-compatible-client.js";
 import { describe, expect, it, vi } from "vitest";
 import { AiManagementService } from "../modules/ai/ai-management-service.js";
 import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.js";
@@ -154,7 +156,72 @@ describe.each(["responses", "chat-completions"] as const)(
                   400,
                 )
               : response(wireBody),
-          );
+          )
+          .mockImplementationOnce((_url, init) => {
+            const body = JSON.parse(
+              typeof init?.body === "string" ? init.body : "{}",
+            ) as {
+              input?: Array<{
+                type: string;
+                call_id?: string;
+                output?: string;
+                arguments?: string;
+              }>;
+              messages?: Array<{
+                role: string;
+                content: string;
+                tool_call_id?: string;
+                tool_calls?: unknown[];
+              }>;
+              tools?: unknown;
+            };
+            expect(body.tools).toBeUndefined();
+            const output =
+              apiKind === "responses"
+                ? body.input?.find(
+                    (item) => item.type === "function_call_output",
+                  )?.output
+                : body.messages?.find((item) => item.role === "tool")?.content;
+            if (!output) throw new Error("Missing tool result");
+            if (apiKind === "responses") {
+              expect(body.input).toContainEqual({
+                type: "function_call",
+                call_id: validCall.id,
+                name: validCall.name,
+                arguments: validCall.arguments,
+              });
+              expect(
+                body.input?.find((item) => item.type === "function_call_output")
+                  ?.call_id,
+              ).toBe(validCall.id);
+            } else {
+              expect(
+                body.messages?.find((item) => item.role === "assistant")
+                  ?.tool_calls,
+              ).toEqual([
+                {
+                  id: validCall.id,
+                  type: "function",
+                  function: {
+                    name: validCall.name,
+                    arguments: validCall.arguments,
+                  },
+                },
+              ]);
+              expect(
+                body.messages?.find((item) => item.role === "tool")
+                  ?.tool_call_id,
+              ).toBe(validCall.id);
+            }
+            const receipt = (JSON.parse(output) as { receipt: string }).receipt;
+            return Promise.resolve(
+              response(
+                apiKind === "responses"
+                  ? { output_text: receipt }
+                  : { choices: [{ message: { content: receipt } }] },
+              ),
+            );
+          });
         const secrets = new EnvironmentSecretResolver({
           FIXTURE_KEY: "fictional-secret",
         });
@@ -173,7 +240,7 @@ describe.each(["responses", "chat-completions"] as const)(
           (await repository.getProvider(created.value.id))?.capabilityProbe
             ?.functionCalling,
         ).toBe(expected);
-        expect(fetcher).toHaveBeenCalledTimes(2);
+        expect(fetcher).toHaveBeenCalledTimes(expected === "verified" ? 3 : 2);
         const body = fetcher.mock.calls[1]?.[1]?.body;
         expect(typeof body).toBe("string");
         const payload = JSON.parse(
@@ -261,4 +328,199 @@ it("publishes legacy required search with the same mixed-provider rules as auto"
       false,
     );
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+describe("function probe round-trip boundaries", () => {
+  async function setup(
+    sessionAffinity: "disabled" | "session-id-header" = "session-id-header",
+  ) {
+    const repository = new InMemoryAiRepository();
+    const created = await repository.createProvider({
+      name: "Fictional closure",
+      apiKind: "responses",
+      baseUrl: "https://ai.example.test/v1",
+      model: "fictional",
+      secretRef: "FIXTURE_KEY",
+      parameters: {},
+      requestTimeoutMs: 1000,
+      enabled: true,
+      sessionAffinity,
+      capabilities: {
+        functionCalling: true,
+        hostedWebSearch: false,
+        imageInput: false,
+      },
+    });
+    if (created.status !== "ok") throw new Error("fixture");
+    return {
+      repository,
+      provider: created.value,
+      secrets: new EnvironmentSecretResolver({ FIXTURE_KEY: "fictional" }),
+    };
+  }
+
+  it.each(["disabled", "session-id-header"] as const)(
+    "isolates successive tests with affinity %s and pairs the two tool rounds",
+    async (sessionAffinity) => {
+      const { repository, provider, secrets } = await setup(sessionAffinity);
+      const requests: AiChatRequest[] = [];
+      const client: AiClient = {
+        call(_provider, request) {
+          requests.push(structuredClone(request));
+          const output = request.messages.find((m) => m.role === "tool");
+          if (output && typeof output.content === "string") {
+            expect(request.tools).toBeUndefined();
+            const receipt = (JSON.parse(output.content) as { receipt: string })
+              .receipt;
+            expect(JSON.stringify(requests.at(-2)?.messages)).not.toContain(
+              receipt,
+            );
+            return Promise.resolve({
+              status: "succeeded",
+              text: receipt,
+              durationMs: 7,
+            });
+          }
+          return Promise.resolve(
+            request.tools
+              ? {
+                  status: "succeeded",
+                  text: "",
+                  toolCalls: [validCall],
+                  durationMs: 5,
+                }
+              : { status: "succeeded", text: "OK", durationMs: 3 },
+          );
+        },
+      };
+      const service = new AiManagementService(repository, client, secrets);
+      for (let i = 0; i < 2; i++) {
+        const result = await service.testProvider(provider.id);
+        expect(result?.checks[1]).toMatchObject({
+          status: "verified",
+          attempts: 2,
+          durationMs: 12,
+        });
+        expect(result?.durationMs).toBe(15);
+      }
+      expect(requests).toHaveLength(6);
+      expect(requests[1]?.messages).not.toEqual(requests[4]?.messages);
+      expect(requests[0]?.messages).not.toEqual(requests[3]?.messages);
+      expect(new Set(requests.map((r) => r.clientRequestId)).size).toBe(6);
+      if (sessionAffinity === "session-id-header") {
+        expect(requests[1]?.sessionId).toMatch(/^[a-f0-9]{64}$/);
+        expect(requests[1]?.sessionId).toBe(requests[2]?.sessionId);
+        expect(requests[4]?.sessionId).toBe(requests[5]?.sessionId);
+        expect(requests[1]?.sessionId).not.toBe(requests[4]?.sessionId);
+        expect(requests[0]?.sessionId).not.toBe(requests[1]?.sessionId);
+      } else
+        expect(requests.every((r) => r.sessionId === undefined)).toBe(true);
+    },
+  );
+
+  it.each(["wrong-receipt", "extra-call", "http409", "timeout"] as const)(
+    "never verifies or retries a %s closing response",
+    async (outcome) => {
+      const { repository, provider, secrets } = await setup();
+      let calls = 0;
+      const client: AiClient = {
+        call(_provider, request) {
+          calls++;
+          if (calls === 1)
+            return Promise.resolve({
+              status: "succeeded",
+              text: "OK",
+              durationMs: 2,
+            });
+          if (calls === 2)
+            return Promise.resolve({
+              status: "succeeded",
+              text: "",
+              toolCalls: [validCall],
+              durationMs: 3,
+            });
+          expect(request.messages.at(-1)).toMatchObject({
+            role: "tool",
+            toolCallId: validCall.id,
+          });
+          if (outcome === "http409" || outcome === "timeout")
+            return Promise.resolve({
+              status: "failed",
+              code:
+                outcome === "http409"
+                  ? "AI_PROVIDER_HTTP_409"
+                  : "AI_PROVIDER_TIMEOUT",
+              category: outcome === "http409" ? "model" : "timeout",
+              summary: "Fictional failure",
+              retryable: true,
+              fallbackAllowed: true,
+              countsForDegrade: false,
+              durationMs: 11,
+            });
+          return Promise.resolve({
+            status: "succeeded",
+            text: "OK",
+            durationMs: 11,
+            ...(outcome === "extra-call" ? { toolCalls: [validCall] } : {}),
+          });
+        },
+      };
+      const result = await new AiManagementService(
+        repository,
+        client,
+        secrets,
+      ).testProvider(provider.id);
+      expect(calls).toBe(3);
+      expect(result?.checks[1]).toMatchObject({
+        status: "failed",
+        attempts: 2,
+        durationMs: 14,
+        errorCode:
+          outcome === "http409"
+            ? "AI_PROVIDER_HTTP_409"
+            : outcome === "timeout"
+              ? "AI_PROVIDER_TIMEOUT"
+              : "AI_FUNCTION_PROBE_ROUNDTRIP_MISMATCH",
+      });
+      expect(
+        (await repository.getProvider(provider.id))?.capabilityProbe
+          ?.functionCalling,
+      ).toBe("failed");
+    },
+  );
+
+  it("does not retry an initial 409 or send a fabricated tool result", async () => {
+    const { repository, provider, secrets } = await setup();
+    let calls = 0;
+    const client: AiClient = {
+      call() {
+        calls++;
+        return Promise.resolve(
+          calls === 1
+            ? { status: "succeeded", text: "OK", durationMs: 1 }
+            : {
+                status: "failed",
+                code: "AI_PROVIDER_HTTP_409",
+                category: "model",
+                summary: "Fictional conflict",
+                retryable: false,
+                fallbackAllowed: false,
+                countsForDegrade: false,
+                durationMs: 2,
+              },
+        );
+      },
+    };
+    const result = await new AiManagementService(
+      repository,
+      client,
+      secrets,
+    ).testProvider(provider.id);
+    expect(calls).toBe(2);
+    expect(result?.checks[1]).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      errorCode: "AI_PROVIDER_HTTP_409",
+    });
+  });
 });

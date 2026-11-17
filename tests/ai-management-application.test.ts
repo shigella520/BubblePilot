@@ -63,6 +63,17 @@ class SuccessfulAiClient implements AiClient {
   ): Promise<AiCallResult> {
     this.calls.push(provider);
     this.requests.push(request);
+    const toolResult = request.messages.find(
+      (message) => message.role === "tool",
+    );
+    if (toolResult && typeof toolResult.content === "string") {
+      const result = JSON.parse(toolResult.content) as { receipt: string };
+      return Promise.resolve({
+        status: "succeeded",
+        text: result.receipt,
+        durationMs: 5,
+      });
+    }
     if (request.tools?.some((tool) => tool.name === "capability_probe")) {
       return Promise.resolve({
         status: "succeeded",
@@ -444,7 +455,7 @@ describe("AI management API", () => {
       data: {
         checks: [
           { name: "connectivity", status: "verified", attempts: 1 },
-          { name: "functionCalling", status: "verified", attempts: 1 },
+          { name: "functionCalling", status: "verified", attempts: 2 },
           { name: "hostedWebSearch", status: "verified", attempts: 1 },
           {
             name: "imageInput",
@@ -455,10 +466,10 @@ describe("AI management API", () => {
         ],
       },
     });
-    expect(client.requests).toHaveLength(4);
+    expect(client.requests).toHaveLength(5);
     expect(client.requests[1]).toMatchObject({ toolChoice: "auto" });
-    expect(client.requests[2]).toMatchObject({ webSearch: "auto" });
-    const imageContent = client.requests[3]?.messages[0]?.content;
+    expect(client.requests[3]).toMatchObject({ webSearch: "auto" });
+    const imageContent = client.requests[4]?.messages[0]?.content;
     expect(Array.isArray(imageContent)).toBe(true);
     const imagePart =
       typeof imageContent === "string"
@@ -470,7 +481,7 @@ describe("AI management API", () => {
         : imageContent?.find((part) => part.type === "text");
     expect(imagePart?.dataUrl).toMatch(/^data:image\/png;base64,/u);
     expect(textPart?.text).toContain("Image capability test v4");
-    expect(client.requests[3]).toMatchObject({ maxOutputTokens: 128 });
+    expect(client.requests[4]).toMatchObject({ maxOutputTokens: 128 });
     await expect(repository.getProvider(providerId)).resolves.toMatchObject({
       capabilityProbe: {
         functionCalling: "verified",

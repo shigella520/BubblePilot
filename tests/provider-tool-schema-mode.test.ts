@@ -327,14 +327,29 @@ describe("provider tool parameter mode", () => {
           .fn<typeof fetch>()
           .mockImplementation((_url, init) => {
             const body = payloadFrom(init);
-            if (!body.tools)
+            if (!body.tools) {
+              const output =
+                apiKind === "responses"
+                  ? (
+                      body.input as
+                        Array<{ type: string; output?: string }> | undefined
+                    )?.find((item) => item.type === "function_call_output")
+                      ?.output
+                  : (
+                      body.messages as
+                        Array<{ role: string; content?: string }> | undefined
+                    )?.find((item) => item.role === "tool")?.content;
+              const text = output
+                ? (JSON.parse(output) as { receipt: string }).receipt
+                : "OK";
               return Promise.resolve(
                 Response.json(
                   apiKind === "responses"
-                    ? { output_text: "OK" }
-                    : { choices: [{ message: { content: "OK" } }] },
+                    ? { output_text: text }
+                    : { choices: [{ message: { content: text } }] },
                 ),
               );
+            }
             const tool = body.tools[0]!.function ?? body.tools[0]!;
             expect(tool.strict).toBe(toolSchemaMode === "strict");
             expect(tool.parameters.required).toEqual(

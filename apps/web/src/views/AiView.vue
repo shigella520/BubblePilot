@@ -579,14 +579,15 @@ async function providerAction(
           responsePreview: string | null;
         }>;
       }>(`/api/v1/ai/providers/${item.id}/test`, { method: "POST" });
+      const allVerified = result.checks.every(
+        (check) => check.status === "verified",
+      );
       feedback = result.success
-        ? `AI Provider「${item.name}」连接测试成功：${result.message}（${result.model} · ${result.durationMs} ms）。`
+        ? `AI Provider「${item.name}」${allVerified ? "测试通过" : "连接正常，但部分能力未通过"}：${result.message}（${result.model} · ${result.durationMs} ms）。`
         : `AI Provider「${item.name}」连接测试失败：${result.message}${
             result.errorCode === null ? "" : `（${result.errorCode}）`
           }（${result.durationMs} ms）。`;
-      feedbackIsError =
-        !result.success ||
-        result.checks.some((check) => check.status !== "verified");
+      feedbackIsError = !result.success || !allVerified;
       const imageMismatch = result.checks.find(
         (check) =>
           check.name === "imageInput" &&
