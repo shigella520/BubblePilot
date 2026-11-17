@@ -7,7 +7,7 @@ import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 const validCall = {
   id: "probe-call",
   name: "capability_probe",
-  arguments: '{"acknowledgement":"bubblepilot-probe"}',
+  arguments: '{"acknowledgement":"bubblepilot-probe","note":null}',
 };
 
 describe.each(["responses", "chat-completions"] as const)(

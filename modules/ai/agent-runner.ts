@@ -666,15 +666,16 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
       });
       for (const originalCall of result.toolCalls) {
         const registered = registry.get(originalCall.name);
-        const call = registered
-          ? {
-              ...originalCall,
-              arguments: restoreToolArguments(
-                registered.definition.parameters,
-                originalCall.arguments,
-              ),
-            }
-          : originalCall;
+        const call =
+          registered && result.toolSchemaMode !== "compatible"
+            ? {
+                ...originalCall,
+                arguments: restoreToolArguments(
+                  registered.definition.parameters,
+                  originalCall.arguments,
+                ),
+              }
+            : originalCall;
         const isPlugin = registered?.diagnostics === "plugin";
         const isTask = registered?.metadata?.capability === "scheduled-task";
         const isMemory = registered?.diagnostics === "metadata-only";

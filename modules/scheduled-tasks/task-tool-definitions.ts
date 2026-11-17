@@ -21,9 +21,9 @@ const descriptions: Record<keyof typeof taskToolSchemas, string> = {
   create_scheduled_task:
     "Create a one-time or recurring reminder only for the current user's explicit request. Required: summary, content, requestSnapshot, timeZone and schedule. requestSnapshot faithfully synthesizes this creator's confirmed request across relevant turns, including clarifications; do not copy only the last confirmation or invent authorization. It is explanatory context, not a verbatim quote or extra execution authority. A one-time schedule has kind=once and scheduledAt; a recurring schedule has kind=recurring, startsAt, rule and end. Do not put scheduledAt at the top level. Use absolute datetimes with offsets and an IANA timezone. Confirm only after success.",
   list_scheduled_tasks:
-    "List this member's reminder tasks in this chat and workflow before changing or cancelling them. status, offset and limit are optional; use null when no filter or value is supplied.",
+    "List this member's reminder tasks in this chat and workflow before changing or cancelling them. status, offset and limit are optional; follow the current tool schema for unused fields.",
   update_scheduled_task:
-    "Change a reminder owned by this member. Required: id and expectedVersion from list, plus at least one of summary, content, timeZone or schedule. Use null for unchanged fields. When changing timeZone, provide the complete schedule as well. Do not put scheduledAt at the top level; use schedule. A summary-only update does not reschedule or interrupt execution.",
+    "Change a reminder owned by this member. Required: id and expectedVersion from list, plus at least one of summary, content, timeZone or schedule. Represent unchanged optional fields according to the current tool schema. When changing timeZone, provide the complete schedule as well. Do not put scheduledAt at the top level; use schedule. A summary-only update does not reschedule or interrupt execution.",
   pause_scheduled_task:
     "Pause this member's recurring reminder using its id and expectedVersion. Future occurrences stop until resumed.",
   resume_scheduled_task:

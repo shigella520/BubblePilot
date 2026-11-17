@@ -20,6 +20,63 @@ describe.runIf(testDatabaseUrl !== undefined)("PostgresAiRepository", () => {
     await Promise.all([repository.close(), inspectionPool.end()]);
   });
 
+  it("defaults legacy providers to strict and persists mode through edits and version conflicts", async () => {
+    const created = await repository.createProvider({
+      name: `Mode ${randomUUID()}`,
+      apiKind: "responses",
+      baseUrl: "https://fixture.example.test/v1",
+      model: "fictional",
+      parameters: {},
+      requestTimeoutMs: 5000,
+      enabled: true,
+    });
+    if (created.status !== "ok") throw new Error("fixture");
+    expect(created.value.toolSchemaMode).toBe("strict");
+    const updated = await repository.updateProvider(
+      created.value.id,
+      created.value.version,
+      { ...created.value, toolSchemaMode: "compatible" },
+    );
+    if (updated.status !== "ok") throw new Error("update");
+    expect(updated.value.toolSchemaMode).toBe("compatible");
+    expect(
+      (await repository.getProvider(created.value.id))?.toolSchemaMode,
+    ).toBe("compatible");
+    expect(
+      (await repository.listProviders()).find((p) => p.id === created.value.id)
+        ?.toolSchemaMode,
+    ).toBe("compatible");
+    expect(
+      (
+        await repository.updateProvider(
+          created.value.id,
+          created.value.version,
+          { ...created.value, toolSchemaMode: "strict" },
+        )
+      ).status,
+    ).toBe("conflict");
+    const disabled = await repository.setProviderEnabled(
+      created.value.id,
+      updated.value.version,
+      false,
+    );
+    expect(disabled).toMatchObject({
+      status: "ok",
+      value: { toolSchemaMode: "compatible" },
+    });
+    expect(
+      await repository.updateProviderCapabilityProbe(created.value.id, {
+        functionCalling: "verified",
+        hostedWebSearch: "unknown",
+        checkedAt: null,
+      }),
+    ).toMatchObject({ toolSchemaMode: "compatible" });
+    const column = await inspectionPool.query<{ column_default: string }>(
+      "SELECT column_default FROM information_schema.columns WHERE table_name='ai_providers' AND column_name='tool_schema_mode'",
+    );
+    expect(column.rows[0]?.column_default).toContain("strict");
+  });
+
   it("persists provider order, current route configuration, and health independently", async () => {
     const suffix = randomUUID();
     const primary = await repository.createProvider({

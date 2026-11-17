@@ -105,13 +105,20 @@ export const capabilityProbeTool: AiToolDefinition = {
     type: "object",
     properties: {
       acknowledgement: { type: "string", enum: ["bubblepilot-probe"] },
+      note: {
+        type: "string",
+        description: "Optional note. Leave unused for this probe.",
+      },
     },
     required: ["acknowledgement"],
     additionalProperties: false,
   },
 };
 
-function functionProbeVerified(result: AiCallResult): boolean {
+function functionProbeVerified(
+  result: AiCallResult,
+  compatible = false,
+): boolean {
   if (result.status !== "succeeded" || result.toolCalls?.length !== 1)
     return false;
   const call = result.toolCalls[0]!;
@@ -122,7 +129,8 @@ function functionProbeVerified(result: AiCallResult): boolean {
       args !== null &&
       typeof args === "object" &&
       !Array.isArray(args) &&
-      Object.keys(args).length === 1 &&
+      Object.keys(args).length === (compatible ? 1 : 2) &&
+      (compatible ? !("note" in args) : "note" in args && args.note === null) &&
       "acknowledgement" in args &&
       args.acknowledgement === "bubblepilot-probe"
     );
@@ -287,7 +295,7 @@ export class AiManagementService {
           {
             role: "user",
             content:
-              'This is a harmless function-calling capability test. Use the native structured tool-call channel to call capability_probe exactly once with {"acknowledgement":"bubblepilot-probe"}. Do not answer in prose or print JSON as text. No external action is performed.',
+              'This is a harmless function-calling capability test. Use the native structured tool-call channel to call capability_probe exactly once with acknowledgement="bubblepilot-probe". Leave the optional note unused according to its schema. Do not answer in prose or print JSON as text. No external action is performed.',
           },
         ],
         maxOutputTokens: 1024,
@@ -296,7 +304,10 @@ export class AiManagementService {
         toolChoice: "auto",
       });
       totalDurationMs += functionProbe.durationMs;
-      const verified = functionProbeVerified(functionProbe);
+      const verified = functionProbeVerified(
+        functionProbe,
+        provider.toolSchemaMode === "compatible",
+      );
       const notObserved =
         functionProbe.status === "succeeded" &&
         !functionProbe.toolCalls?.length;
@@ -550,6 +561,7 @@ export class AiManagementService {
       ...configuration,
       baseUrl: normalizeAiBaseUrl(configuration.baseUrl),
       sessionAffinity: configuration.sessionAffinity ?? "disabled",
+      toolSchemaMode: configuration.toolSchemaMode ?? "strict",
       reasoningEffort: configuration.reasoningEffort ?? "default",
       capabilities: configuration.capabilities ?? {
         functionCalling: false,

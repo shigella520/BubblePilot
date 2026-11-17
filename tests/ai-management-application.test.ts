@@ -71,7 +71,7 @@ class SuccessfulAiClient implements AiClient {
           {
             id: "fictional-call",
             name: "capability_probe",
-            arguments: '{"acknowledgement":"bubblepilot-probe"}',
+            arguments: '{"acknowledgement":"bubblepilot-probe","note":null}',
           },
         ],
         durationMs: 7,
@@ -303,6 +303,56 @@ describe("AI management API", () => {
       };
     }>().data;
   }
+
+  it("round trips provider tool modes with defaulting, validation and version control", async () => {
+    const initial = await createProvider("Mode fixture", "FICTIONAL_KEY");
+    const url = `/api/v1/ai/providers/${initial.id}`;
+    const get = await request({ method: "GET", url });
+    const configuration = get.json<{ data: Record<string, unknown> }>().data;
+    expect(configuration.toolSchemaMode).toBe("strict");
+    const update = await request({
+      method: "PUT",
+      url,
+      payload: {
+        ...configuration,
+        expectedVersion: initial.version,
+        toolSchemaMode: "compatible",
+      },
+    });
+    expect(update.statusCode).toBe(200);
+    expect(update.json()).toMatchObject({
+      data: { toolSchemaMode: "compatible" },
+    });
+    expect((await request({ method: "GET", url })).json()).toMatchObject({
+      data: { toolSchemaMode: "compatible" },
+    });
+    expect(
+      (
+        await request({
+          method: "PUT",
+          url,
+          payload: {
+            ...configuration,
+            expectedVersion: initial.version,
+            toolSchemaMode: "strict",
+          },
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(
+      (
+        await request({
+          method: "PUT",
+          url,
+          payload: {
+            ...configuration,
+            expectedVersion: initial.version + 1,
+            toolSchemaMode: "auto",
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
 
   it("returns long-period and realtime AI usage with strict query validation", async () => {
     const providerId = "11111111-1111-4111-8111-111111111111";
