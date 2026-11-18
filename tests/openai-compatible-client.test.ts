@@ -123,7 +123,7 @@ describe("OpenAiCompatibleClient", () => {
         retryable: false,
         fallbackAllowed: false,
         countsForDegrade: false,
-        summary: "Invalid strict tool schema: fictional at /properties/x/$ref",
+        summary: "Invalid tool schema: fictional at /properties/x/$ref",
       });
       expect(fetcher).not.toHaveBeenCalled();
     },

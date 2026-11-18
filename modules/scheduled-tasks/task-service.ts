@@ -264,8 +264,8 @@ export class TaskService {
                   name === "create_scheduled_task"
                     ? "Provide summary, content, timeZone and one complete schedule. Use scheduledAt only inside a once schedule; do not submit it at the top level. Follow the selected schedule variant and do not guess a time."
                     : name === "update_scheduled_task"
-                      ? "Provide the task id and expectedVersion, plus at least one change. Use schedule, not a top-level scheduledAt; changing timeZone also requires a complete schedule. Use null for unchanged optional fields."
-                      : "Correct the reported fields and rules using the tool schema. Use null for unused optional fields; do not guess a task ID or time.",
+                      ? "Provide the task id and expectedVersion, plus at least one change. Use schedule, not a top-level scheduledAt; changing timeZone also requires a complete schedule. Represent unchanged optional fields according to the current tool schema."
+                      : "Correct the reported fields and rules using the tool schema. Represent unused optional fields according to the current tool schema; do not guess a task ID or time.",
               });
             }
             const scope = await this.scope(executionId);

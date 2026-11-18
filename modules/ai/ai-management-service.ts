@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type { AiToolDefinition } from "./ai-types.js";
 import type { AiClient } from "./openai-compatible-client.js";
 import type { WebSearchTool } from "./web-search-tool.js";
@@ -105,13 +106,20 @@ export const capabilityProbeTool: AiToolDefinition = {
     type: "object",
     properties: {
       acknowledgement: { type: "string", enum: ["bubblepilot-probe"] },
+      note: {
+        type: "string",
+        description: "Optional note. Leave unused for this probe.",
+      },
     },
     required: ["acknowledgement"],
     additionalProperties: false,
   },
 };
 
-function functionProbeVerified(result: AiCallResult): boolean {
+function functionProbeVerified(
+  result: AiCallResult,
+  compatible = false,
+): boolean {
   if (result.status !== "succeeded" || result.toolCalls?.length !== 1)
     return false;
   const call = result.toolCalls[0]!;
@@ -122,13 +130,33 @@ function functionProbeVerified(result: AiCallResult): boolean {
       args !== null &&
       typeof args === "object" &&
       !Array.isArray(args) &&
-      Object.keys(args).length === 1 &&
+      Object.keys(args).length === (compatible ? 1 : 2) &&
+      (compatible ? !("note" in args) : "note" in args && args.note === null) &&
       "acknowledgement" in args &&
       args.acknowledgement === "bubblepilot-probe"
     );
   } catch {
     return false;
   }
+}
+
+/** Separate administrative probes from chats and from other clicks. */
+function probeIdentity(
+  provider: AiProviderRecord,
+  runId: string,
+  phase: string,
+  turn = 1,
+) {
+  return {
+    clientRequestId: `provider-probe:${runId}:${phase}:${turn}`,
+    ...(provider.sessionAffinity === "session-id-header"
+      ? {
+          sessionId: createHash("sha256")
+            .update(`provider-probe\0${provider.id}\0${runId}\0${phase}`)
+            .digest("hex"),
+        }
+      : {}),
+  };
 }
 
 async function probeWithRetry(
@@ -258,11 +286,13 @@ export class AiManagementService {
     if (provider === null) {
       return null;
     }
+    const probeId = randomUUID();
     const result = await this.client.call(provider, {
+      ...probeIdentity(provider, probeId, "connectivity"),
       messages: [
         {
           role: "user",
-          content: "Connectivity test. Reply with the single word OK.",
+          content: `Connectivity test. Reply with the single word OK. Probe ID: ${probeId}:connectivity.`,
         },
       ],
       // Reasoning-capable OpenAI-compatible models may consume the first
@@ -282,24 +312,67 @@ export class AiManagementService {
       result.status === "succeeded" &&
       provider.capabilities?.functionCalling
     ) {
-      const functionProbe = await this.client.call(provider, {
+      const probeRequest: AiChatRequest = {
+        ...probeIdentity(provider, probeId, "function"),
         messages: [
           {
             role: "user",
-            content:
-              'This is a harmless function-calling capability test. Use the native structured tool-call channel to call capability_probe exactly once with {"acknowledgement":"bubblepilot-probe"}. Do not answer in prose or print JSON as text. No external action is performed.',
+            content: `This is a harmless function-calling capability test. Use the native structured tool-call channel to call capability_probe exactly once with acknowledgement="bubblepilot-probe". Leave the optional note unused according to its schema. Do not print a tool call as text. After receiving the simulated tool result, reply with exactly its receipt value and nothing else; do not call another tool. No external action is performed. Probe ID: ${probeId}:function.`,
           },
         ],
         maxOutputTokens: 1024,
         temperature: 0,
         tools: [capabilityProbeTool],
         toolChoice: "auto",
-      });
-      totalDurationMs += functionProbe.durationMs;
-      const verified = functionProbeVerified(functionProbe);
+      };
+      const functionProbe = await this.client.call(provider, probeRequest);
+      const validCall = functionProbeVerified(
+        functionProbe,
+        provider.toolSchemaMode === "compatible",
+      );
       const notObserved =
         functionProbe.status === "succeeded" &&
         !functionProbe.toolCalls?.length;
+      let checkedResult = functionProbe;
+      let calls = 1;
+      let durationMs = functionProbe.durationMs;
+      let verified = false;
+      let mismatchCode = notObserved
+        ? "AI_FUNCTION_PROBE_NOT_OBSERVED"
+        : "AI_FUNCTION_PROBE_MISMATCH";
+      if (validCall && functionProbe.status === "succeeded") {
+        // A fresh receipt is visible only in the tool output: an arbitrary OK
+        // cannot prove that the upstream accepted and read the client result.
+        const receipt = `probe-complete-${randomUUID()}`;
+        checkedResult = await this.client.call(provider, {
+          ...probeIdentity(provider, probeId, "function", 2),
+          messages: [
+            ...probeRequest.messages,
+            {
+              role: "assistant",
+              content: functionProbe.text,
+              toolCalls: functionProbe.toolCalls!,
+            },
+            {
+              role: "tool",
+              toolCallId: functionProbe.toolCalls![0]!.id,
+              content: JSON.stringify({ status: "succeeded", receipt }),
+            },
+          ],
+          maxOutputTokens: 1024,
+          temperature: 0,
+          // No tools on the closing turn. Never dispatch a business tool or
+          // enter an unbounded loop if the provider requests another call.
+        });
+        calls++;
+        durationMs += checkedResult.durationMs;
+        verified =
+          checkedResult.status === "succeeded" &&
+          !checkedResult.toolCalls?.length &&
+          checkedResult.text.trim() === receipt;
+        mismatchCode = "AI_FUNCTION_PROBE_ROUNDTRIP_MISMATCH";
+      }
+      totalDurationMs += durationMs;
       functionCalling = verified
         ? "verified"
         : notObserved
@@ -307,13 +380,11 @@ export class AiManagementService {
           : "failed";
       const check = probeCheck(
         "functionCalling",
-        functionProbe,
-        1,
-        functionProbe.durationMs,
+        checkedResult,
+        calls,
+        durationMs,
         verified,
-        notObserved
-          ? "AI_FUNCTION_PROBE_NOT_OBSERVED"
-          : "AI_FUNCTION_PROBE_MISMATCH",
+        mismatchCode,
       );
       check.status = functionCalling;
       checks.push(check);
@@ -323,11 +394,11 @@ export class AiManagementService {
       provider.capabilities?.hostedWebSearch
     ) {
       const searchProbe = await this.client.call(provider, {
+        ...probeIdentity(provider, probeId, "search"),
         messages: [
           {
             role: "user",
-            content:
-              "Capability test. Search the web for the official OpenAI website and reply with OK.",
+            content: `Capability test. Search the web for the official OpenAI website and reply with OK. Probe ID: ${probeId}:search.`,
           },
         ],
         maxOutputTokens: 128,
@@ -374,13 +445,14 @@ export class AiManagementService {
           this.client,
           provider,
           {
+            ...probeIdentity(provider, probeId, "image"),
             messages: [
               {
                 role: "user",
                 content: [
                   {
                     type: "text",
-                    text: "Image capability test v4. The image contains three large labeled vertical color panels. Read all three labels and identify each panel color. Reply with only the three color names from left to right.",
+                    text: `Image capability test v4. The image contains three large labeled vertical color panels. Read all three labels and identify each panel color. Reply with only the three color names from left to right. Probe ID: ${probeId}:image.`,
                   },
                   {
                     type: "image",
@@ -550,6 +622,7 @@ export class AiManagementService {
       ...configuration,
       baseUrl: normalizeAiBaseUrl(configuration.baseUrl),
       sessionAffinity: configuration.sessionAffinity ?? "disabled",
+      toolSchemaMode: configuration.toolSchemaMode ?? "strict",
       reasoningEffort: configuration.reasoningEffort ?? "default",
       capabilities: configuration.capabilities ?? {
         functionCalling: false,

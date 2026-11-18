@@ -586,6 +586,7 @@ export class AiRoutingService {
             status: "succeeded",
             text: result.text,
             toolCalls: result.toolCalls ?? [],
+            toolSchemaMode: candidate.provider.toolSchemaMode ?? "strict",
             providerId: candidate.provider.id,
             providerName: candidate.provider.name,
             providerVersion: candidate.provider.version,

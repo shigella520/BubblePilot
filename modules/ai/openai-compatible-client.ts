@@ -1,4 +1,9 @@
-import { strictToolParameters, ToolSchemaError } from "./tool-schema.js";
+import {
+  strictToolParameters,
+  compatibleToolParameters,
+  toolParameterInstruction,
+  ToolSchemaError,
+} from "./tool-schema.js";
 import { z } from "zod";
 
 import { hashJson, sha256 } from "../../app/canonical-json.js";
@@ -876,11 +881,16 @@ export class OpenAiCompatibleClient implements AiClient {
         durationMs: elapsed(startedAt),
       });
     }
+    const toolSchemaMode = provider.toolSchemaMode ?? "strict";
     let tools: AiChatRequest["tools"];
     try {
       tools = request.tools?.map((tool) => ({
         ...tool,
-        parameters: strictToolParameters(tool),
+        description: `${tool.description} ${toolParameterInstruction(toolSchemaMode)}`,
+        parameters:
+          toolSchemaMode === "compatible"
+            ? compatibleToolParameters(tool)
+            : strictToolParameters(tool),
       }));
     } catch (error) {
       if (!(error instanceof ToolSchemaError)) throw error;
@@ -904,7 +914,7 @@ export class OpenAiCompatibleClient implements AiClient {
             name: tool.name,
             description: tool.description,
             parameters: tool.parameters,
-            strict: true,
+            strict: toolSchemaMode === "strict",
           },
         }));
         payload.tool_choice = request.toolChoice ?? "auto";
@@ -927,7 +937,7 @@ export class OpenAiCompatibleClient implements AiClient {
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters,
-          strict: true,
+          strict: toolSchemaMode === "strict",
         }));
         payload.tool_choice = request.toolChoice ?? "auto";
       }

@@ -121,6 +121,117 @@ async function setup(answer?: string) {
 }
 
 describe("AgentRunner", () => {
+  it.each(["strict", "compatible"] as const)(
+    "restores only strict placeholders after fallback to %s",
+    async (mode) => {
+      const { repository, request } = await setup();
+      const primary = [...repository.providers.values()][0]!;
+      primary.toolSchemaMode = mode === "strict" ? "compatible" : "strict";
+      const backup = await repository.createProvider({
+        ...primary,
+        name: "Fictional backup",
+        toolSchemaMode: mode,
+      });
+      if (backup.status !== "ok") throw new Error("fixture");
+      await repository.updateProviderCapabilityProbe(backup.value.id, {
+        functionCalling: "verified",
+        hostedWebSearch: "unknown",
+        checkedAt: null,
+      });
+      const route = await repository.getRoute(request.routeId);
+      if (!route) throw new Error("fixture");
+      await repository.updateRoute(route.id, route.version, {
+        ...route,
+        providerIds: [primary.id, backup.value.id],
+      });
+      const originalArgs = '{"optional":null,"clearable":null}';
+      const client: AiClient = {
+        call: async (provider, req) => {
+          await Promise.resolve();
+          if (provider.id === primary.id)
+            return {
+              status: "failed",
+              code: "FIXTURE_503",
+              category: "server-error",
+              summary: "Fixture",
+              retryable: false,
+              fallbackAllowed: true,
+              countsForDegrade: false,
+              durationMs: 1,
+            };
+          if (req.messages.some((m) => m.role === "tool")) {
+            expect(
+              req.messages.find((m) => m.toolCalls)?.toolCalls?.[0]?.arguments,
+            ).toBe(originalArgs);
+            return {
+              status: "succeeded",
+              text: "已处理虚构结果",
+              durationMs: 1,
+            };
+          }
+          return {
+            status: "succeeded",
+            text: "",
+            toolCalls: [
+              {
+                id: "fixture-call",
+                name: "fixture_tool",
+                arguments: originalArgs,
+              },
+            ],
+            durationMs: 1,
+          };
+        },
+      };
+      const execute = vi.fn(async (json: string) => {
+        await Promise.resolve();
+        expect(JSON.parse(json)).toEqual(
+          mode === "strict"
+            ? { clearable: null }
+            : { optional: null, clearable: null },
+        );
+        return JSON.stringify({
+          status: mode === "compatible" ? "failed" : "succeeded",
+          code: mode === "compatible" ? "INVALID_ARGUMENTS" : null,
+        });
+      });
+      const routing = new AiRoutingService(
+        repository,
+        client,
+        new EnvironmentSecretResolver({ FICTIONAL_KEY: "fixture" }),
+        true,
+      );
+      const result = await new AgentRunner(routing, undefined, repository).run({
+        ...request,
+        webSearch: "disabled",
+        runtimeTools: [
+          {
+            definition: {
+              name: "fixture_tool",
+              description: "Fixture",
+              parameters: {
+                type: "object",
+                properties: {
+                  optional: { type: "string" },
+                  clearable: { type: ["string", "null"] },
+                },
+                required: ["clearable"],
+              },
+            },
+            execute,
+            diagnostics: "metadata-only",
+          },
+        ],
+      });
+      expect(result).toMatchObject({
+        status: "succeeded",
+        toolSchemaMode: mode,
+        providerId: backup.value.id,
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it.each(["responses", "chat-completions"] as const)(
     "pairs paginated count results on the %s wire without fetching message bodies",
     async (apiKind) => {
