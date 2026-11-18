@@ -95,6 +95,30 @@ const outputSchema: Tool["outputSchema"] = {
 };
 const tool: Tool = { name: "fictional_extract", inputSchema, outputSchema };
 describe("MCP discovery and result contracts", () => {
+  it("accepts standard mixed content while preserving the approved output contract", async () => {
+    const content: CallToolResult["content"] = [
+      { type: "text", text: "fictional chart" },
+      { type: "image", mimeType: "image/png", data: "ZmljdGlvbmFs" },
+      {
+        type: "resource_link",
+        name: "ignored",
+        uri: "https://example.test/image",
+      },
+    ];
+    const { client } = await fixture([tool], {
+      content,
+      structuredContent: { count: 1 },
+    });
+    const [approved] = await client.discover("fixture");
+    const result = await client.call(
+      approved!,
+      { schema: {} },
+      new AbortController().signal,
+      5000,
+    );
+    expect(result.content).toEqual(content);
+  });
+
   it("discovers pages without rejecting maps and preserves output contracts", async () => {
     const { client, calls } = await fixture(
       [tool, { name: "no_args", inputSchema: { type: "object" } }],

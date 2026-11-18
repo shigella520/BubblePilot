@@ -1,3 +1,4 @@
+import type { PreparedImageInput } from "./native-image-input.js";
 import type { AttachmentContext } from "../attachments/attachment-catalogue.js";
 import type { AttachmentRunInput } from "../attachments/attachment-session.js";
 import type { RegisteredAgentTool } from "./agent-tool-registry.js";
@@ -52,6 +53,7 @@ const aiProviderConfigurationBaseSchema = z.object({
       "max",
     ])
     .default("default"),
+  toolSchemaMode: z.enum(["strict", "compatible"]).default("strict"),
   sessionAffinity: z
     .enum(["disabled", "session-id-header"])
     .default("disabled"),
@@ -130,6 +132,7 @@ export const aiRouteEnabledSchema = z.object({
 });
 
 export type AiApiKind = "chat-completions" | "responses";
+export type AiToolSchemaMode = "strict" | "compatible";
 export type AiSessionAffinity = "disabled" | "session-id-header";
 export type AiReasoningEffort =
   "default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -173,6 +176,7 @@ export interface AiProviderConfiguration {
   requestTimeoutMs: number;
   reasoningEffort?: AiReasoningEffort;
   sessionAffinity?: AiSessionAffinity;
+  toolSchemaMode?: AiToolSchemaMode;
   enabled: boolean;
   capabilities?: AiProviderCapabilities | undefined;
 }
@@ -617,6 +621,8 @@ export interface AiUsageReport {
 }
 
 export interface AiRouteSuccess {
+  /** Mode of the provider that produced this turn, including fallback. */
+  toolSchemaMode?: AiToolSchemaMode;
   selectedMeme?: SelectedMeme | null;
   agentBudget?: AgentBudgetSnapshot;
   status: "succeeded";
@@ -650,6 +656,7 @@ export interface AiRouteRequest {
   runtimeTools?: RegisteredAgentTool[];
   idleDecision?: boolean;
   imageSession?: ChatImageSession | undefined;
+  preparedImageInput?: PreparedImageInput | undefined;
   allowMemes?: boolean;
   pluginIds?: string[];
   executionId: string | null;

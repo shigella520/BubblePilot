@@ -1,3 +1,8 @@
+import type { ToolSyncRecord } from "./plugin-tool-sync.js";
+import {
+  PluginToolSynchronizer,
+  type ToolObservation,
+} from "./plugin-tool-synchronizer.js";
 import type { AttachmentHandling } from "../attachments/attachment-policy.js";
 import {
   attachmentTargets,
@@ -36,6 +41,30 @@ export class PluginService {
     this.pool = new Pool({ connectionString: databaseUrl });
     this.cipher = new SettingsCipher(key);
   }
+  private syncTimer: ReturnType<typeof setInterval> | undefined;
+  private syncJob: Promise<void> | undefined;
+  async syncTools(
+    id: string,
+    source: "scheduled" | "call",
+    observation?: ToolObservation,
+  ) {
+    return new PluginToolSynchronizer(this).check(id, source, observation);
+  }
+  async syncDueTools() {
+    if (this.syncJob) return this.syncJob;
+    this.syncJob = (async () => {
+      const rows = await this.pool.query<{ id: string }>(
+        `SELECT p.id FROM plugins p JOIN plugin_versions v ON v.plugin_id=p.id AND v.hash=p.revision WHERE p.enabled AND (v.metadata->>'toolSyncLastCheck' IS NULL OR (v.metadata->>'toolSyncLastCheck')::timestamptz < now()-interval '1 hour')`,
+      );
+      for (const row of rows.rows)
+        await this.syncTools(row.id, "scheduled").catch(() => undefined);
+    })();
+    try {
+      await this.syncJob;
+    } finally {
+      this.syncJob = undefined;
+    }
+  }
   async init() {
     await this.storage.init();
     await this.storage.cleanup();
@@ -47,6 +76,10 @@ export class PluginService {
       void this.collect().catch(() => undefined);
     }, 3600000);
     this.cleanupTimer.unref();
+    this.syncTimer = setInterval(() => {
+      void this.syncDueTools().catch(() => undefined);
+    }, 60_000);
+    this.syncTimer.unref();
   }
   async collect() {
     const rows = await this.pool.query<{ hash: string }>(
@@ -57,6 +90,8 @@ export class PluginService {
   }
   async close() {
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    if (this.syncTimer) clearInterval(this.syncTimer);
+    await this.syncJob;
     await Promise.allSettled([...this.jobs]);
     await this.pool.end();
   }
@@ -143,7 +178,7 @@ export class PluginService {
   }
   async get(id: string, revision?: string): Promise<InstalledPlugin> {
     const r = await this.pool.query(
-      "SELECT p.*,v.encrypted_config,v.hash FROM plugins p JOIN plugin_versions v ON v.plugin_id=p.id AND v.hash=COALESCE($2,p.revision) WHERE p.id=$1",
+      "SELECT p.*,v.encrypted_config,v.hash,v.metadata FROM plugins p JOIN plugin_versions v ON v.plugin_id=p.id AND v.hash=COALESCE($2,p.revision) WHERE p.id=$1",
       [id, revision ?? null],
     );
     const p = r.rows[0] as
@@ -155,6 +190,11 @@ export class PluginService {
           revision: string;
           hash: string;
           encrypted_config: string;
+          metadata: {
+            pendingReview?: string[];
+            toolSyncHistory?: ToolSyncRecord[];
+            toolSyncLastCheck?: string;
+          };
         }
       | undefined;
     if (!p) pluginError("NOT_FOUND", 404);
@@ -165,6 +205,9 @@ export class PluginService {
       version: p.version,
       revision: p.hash,
       package: parsePluginPackage((await this.storage.read(p.hash)).files, "."),
+      pendingReview: p.metadata.pendingReview ?? [],
+      toolSyncHistory: p.metadata.toolSyncHistory ?? [],
+      toolSyncLastCheck: p.metadata.toolSyncLastCheck ?? null,
       config: JSON.parse(
         this.cipher.decrypt(p.encrypted_config),
       ) as PluginConfiguration,
@@ -197,12 +240,18 @@ export class PluginService {
       ).rows as { workflow_id: string; version: number }[],
     };
   }
-  async markToolReview(id: string, revision: string, tool: string) {
+  async markToolReview(
+    id: string,
+    revision: string,
+    tool: string,
+    expectedVersion?: number,
+  ) {
     await this.pool.query(
       `UPDATE plugin_versions SET metadata=jsonb_set(metadata,'{pendingReview}',
         COALESCE(metadata->'pendingReview','[]'::jsonb) || to_jsonb($3::text))
-       WHERE plugin_id=$1 AND hash=$2 AND NOT COALESCE(metadata->'pendingReview','[]'::jsonb) ? $3`,
-      [id, revision, tool],
+       WHERE plugin_id=$1 AND hash=$2 AND NOT COALESCE(metadata->'pendingReview','[]'::jsonb) ? $3
+       AND ($4::integer IS NULL OR EXISTS(SELECT 1 FROM plugins WHERE id=$1 AND version=$4 AND revision=$2))`,
+      [id, revision, tool, expectedVersion ?? null],
     );
   }
   async discover(connections: Record<string, Connection>) {
@@ -379,6 +428,7 @@ export class PluginService {
     approved: string[],
     disabledSkills: string[],
     disabledTools: string[],
+    autoSyncTools?: boolean,
   ) {
     const p = await this.get(id);
     for (const [name, c] of Object.entries(connections))
@@ -398,7 +448,13 @@ export class PluginService {
     );
     if (approved.length !== tools.length) pluginError("TOOL_CHANGED", 409);
     return this.mutate(id, expectedVersion, {
-      config: { connections, tools, disabledSkills, disabledTools },
+      config: {
+        connections,
+        tools,
+        disabledSkills,
+        disabledTools,
+        autoSyncTools: autoSyncTools ?? p.config.autoSyncTools ?? false,
+      },
     });
   }
   async runtimeSettings() {

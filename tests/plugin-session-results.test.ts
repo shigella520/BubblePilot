@@ -148,7 +148,8 @@ describe("MCP large-result session lifecycle", () => {
       delivery: "partial",
       responseBytes: 25000,
     });
-    output.commit?.();
+    await output.validateCommit?.();
+    output.commitResult?.();
     f.p.config.disabledTools.push("mock/page");
     const denied = (await f.registry
       .get("read_tool_result")!
@@ -177,7 +178,7 @@ describe("MCP large-result session lifecycle", () => {
         '{"arguments_json":"{}"}',
         f.ctx,
       )) as MultimodalToolResult;
-      expect(output.commit).toBeUndefined();
+      expect(output.commitResult).toBeUndefined();
       expect(output.diagnostics?.outcome).toBe("error");
       expect(parsePayload(output.text).result_ref).toBeUndefined();
       await f.session.close();
@@ -193,7 +194,7 @@ describe("MCP large-result session lifecycle", () => {
       code: "PLUGIN_RESULT_BUDGET",
       reason: "tool-output",
     });
-    expect(output.commit).toBeUndefined();
+    expect(output.commitResult).toBeUndefined();
     await f.session.close();
   });
 });

@@ -3586,7 +3586,27 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object }
+            schema:
+              type: object
+              required:
+                [
+                  expectedVersion,
+                  connections,
+                  approved,
+                  disabledSkills,
+                  disabledTools,
+                ]
+              additionalProperties: false
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                connections:
+                  { type: object, additionalProperties: { type: object } }
+                approved: { type: array, items: { type: string } }
+                disabledSkills: { type: array, items: { type: string } }
+                disabledTools: { type: array, items: { type: string } }
+                autoSyncTools:
+                  type: boolean
+                  description: Opt in to hourly compatible updates for already approved tools; absent retains the saved setting (legacy default false). Does not authorize new tools, addresses, or credentials.
       responses:
         "200":
           description: Operation result in data envelope
@@ -4663,6 +4683,10 @@ components:
           enum: [default, none, minimal, low, medium, high, xhigh, max]
           default: default
           description: Provider default reasoning effort. Default omits the protocol field; Responses uses reasoning.effort and Chat Completions uses reasoning_effort. Model support varies.
+        toolSchemaMode:
+          enum: [strict, compatible]
+          default: strict
+          description: Strict requires all fields with nullable placeholders; compatible preserves business required fields and omits unused optional parameters. Server validation and authorization remain enforced.
         sessionAffinity:
           enum: [disabled, session-id-header]
           default: disabled

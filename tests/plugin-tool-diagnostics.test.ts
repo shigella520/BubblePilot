@@ -100,3 +100,34 @@ it("explains partial delivery and links local reads to the original MCP tool", a
   ).toBe("读取结果 · example-mcp / read_page");
   expect(pluginToolErrorLabel("PLUGIN_RESULT_STORAGE_LIMIT")).toContain("暂存");
 });
+
+it("distinguishes prepared media from actual dispatched requests", async () => {
+  const { pluginImageRows } =
+    await import("../apps/web/src/utils/plugin-tool-diagnostics.js");
+  const details = {
+    images: [
+      {
+        imageInputId: "fictional-image",
+        block_index: 1,
+        status: "committed",
+        width: 32,
+        height: 24,
+        bytes: 100,
+      },
+    ],
+  };
+  expect(pluginImageRows(details)[0]?.state).toContain("未记录实际发送");
+  expect(
+    pluginImageRows(details, [
+      {
+        status: "succeeded",
+        diagnostics: {
+          imageInputs: {
+            dispatched: true,
+            images: [{ imageInputId: "fictional-image" }],
+          },
+        },
+      },
+    ])[0]?.state,
+  ).toContain("请求成功");
+});

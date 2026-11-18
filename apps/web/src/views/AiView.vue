@@ -11,6 +11,7 @@ import {
   GripVertical,
   Image,
   MessageCircle,
+  Pencil,
   Plus,
   RefreshCw,
   Route,
@@ -40,6 +41,7 @@ interface Provider {
   requestTimeoutMs: number;
   reasoningEffort?: ReasoningEffort;
   sessionAffinity?: "disabled" | "session-id-header";
+  toolSchemaMode?: "strict" | "compatible";
   enabled: boolean;
   sortOrder: number;
   version: number;
@@ -134,6 +136,7 @@ interface ProviderForm {
   requestTimeoutMs: number;
   reasoningEffort: ReasoningEffort;
   sessionAffinity: "disabled" | "session-id-header";
+  toolSchemaMode: "strict" | "compatible";
   enabled: boolean;
   functionCalling: boolean;
   hostedWebSearch: boolean;
@@ -210,6 +213,7 @@ const providerForm = reactive<ProviderForm>({
   requestTimeoutMs: 30000,
   reasoningEffort: "default",
   sessionAffinity: "disabled",
+  toolSchemaMode: "strict",
   enabled: true,
   functionCalling: false,
   hostedWebSearch: false,
@@ -423,6 +427,7 @@ function resetProvider() {
     requestTimeoutMs: 30000,
     reasoningEffort: "default",
     sessionAffinity: "disabled",
+    toolSchemaMode: "strict",
     enabled: true,
     functionCalling: false,
     hostedWebSearch: false,
@@ -442,6 +447,7 @@ function editProvider(item: Provider) {
     requestTimeoutMs: item.requestTimeoutMs,
     reasoningEffort: item.reasoningEffort ?? "default",
     sessionAffinity: item.sessionAffinity ?? "disabled",
+    toolSchemaMode: item.toolSchemaMode ?? "strict",
     enabled: item.enabled,
     functionCalling: item.capabilities?.functionCalling ?? false,
     hostedWebSearch: item.capabilities?.hostedWebSearch ?? false,
@@ -467,6 +473,7 @@ async function saveProvider() {
       requestTimeoutMs: providerForm.requestTimeoutMs,
       reasoningEffort: providerForm.reasoningEffort,
       sessionAffinity: providerForm.sessionAffinity,
+      toolSchemaMode: providerForm.toolSchemaMode,
       enabled: providerForm.enabled,
       capabilities: {
         functionCalling: providerForm.functionCalling,
@@ -572,14 +579,15 @@ async function providerAction(
           responsePreview: string | null;
         }>;
       }>(`/api/v1/ai/providers/${item.id}/test`, { method: "POST" });
+      const allVerified = result.checks.every(
+        (check) => check.status === "verified",
+      );
       feedback = result.success
-        ? `AI Provider「${item.name}」连接测试成功：${result.message}（${result.model} · ${result.durationMs} ms）。`
+        ? `AI Provider「${item.name}」${allVerified ? "测试通过" : "连接正常，但部分能力未通过"}：${result.message}（${result.model} · ${result.durationMs} ms）。`
         : `AI Provider「${item.name}」连接测试失败：${result.message}${
             result.errorCode === null ? "" : `（${result.errorCode}）`
           }（${result.durationMs} ms）。`;
-      feedbackIsError =
-        !result.success ||
-        result.checks.some((check) => check.status !== "verified");
+      feedbackIsError = !result.success || !allVerified;
       const imageMismatch = result.checks.find(
         (check) =>
           check.name === "imageInput" &&
@@ -1045,10 +1053,9 @@ onMounted(async () => {
           <span class="state-badge">全局配置</span>
         </div>
         <p class="panel-description">
-          启用后，所有 AI
-          对话会自动携带当前消息图片、链接卡片主图和最近历史图片。图片由
-          BubblePilot 安全下载后通过 Provider
-          原生多模态协议发送；失败时降级为文本回复。
+          启用后，AI
+          对话可按下方来源设置携带聊天图片，也可接收已授权工具返回的图片。
+          两类图片共用总数量和体积额度；工具图片需要支持视觉的模型，失败时明确说明，不能静默去图后声称已看图。
         </p>
         <form
           v-if="imageInputSettings"
@@ -1283,7 +1290,7 @@ onMounted(async () => {
                 class="button tiny secondary"
                 @click="editProvider(item)"
               >
-                编辑</button
+                <Pencil :size="14" />编辑</button
               ><button
                 class="button tiny secondary provider-reset-action"
                 :disabled="providerResetBusyIds.has(item.id)"
@@ -1420,6 +1427,20 @@ onMounted(async () => {
                   <option value="session-id-header">固定会话与缓存键</option>
                 </select></label
               >
+              <label class="wide-field">
+                <span>工具参数模式</span>
+                <select v-model="providerForm.toolSchemaMode">
+                  <option value="strict">严格模式（默认）</option>
+                  <option value="compatible">兼容模式</option>
+                </select>
+                <small
+                  >{{
+                    providerForm.toolSchemaMode === "compatible"
+                      ? "可选参数未使用时省略，适用于严格模式兼容不佳的渠道。"
+                      : "可选参数未使用时传 null，由上游约束参数格式。"
+                  }}两种模式均保留服务端参数校验和权限检查。</small
+                >
+              </label>
               <label class="checkbox-field"
                 ><input
                   v-model="providerForm.functionCalling"

@@ -1,4 +1,4 @@
-import type { AiToolDefinition } from "./ai-types.js";
+import type { AiToolDefinition, AiToolSchemaMode } from "./ai-types.js";
 
 type Schema = Record<string, unknown>;
 function object(value: unknown): value is Schema {
@@ -39,12 +39,29 @@ const types = new Set([
 
 export class ToolSchemaError extends Error {
   constructor(tool: string, path: string) {
-    super(`Invalid strict tool schema: ${tool} at ${path}`);
+    super(`Invalid tool schema: ${tool} at ${path}`);
   }
 }
 
 /** Build a wire-only schema. Business definitions and defaults stay untouched. */
 export function strictToolParameters(tool: AiToolDefinition): Schema {
+  return toolParameters(tool, "strict");
+}
+
+export function compatibleToolParameters(tool: AiToolDefinition): Schema {
+  return toolParameters(tool, "compatible");
+}
+
+export function toolParameterInstruction(mode: AiToolSchemaMode): string {
+  return mode === "compatible"
+    ? "Optional parameters not used must be omitted. Do not supply null unless the field schema explicitly permits it for a business purpose. Follow nested field schemas and preserve meaningful zero, false and empty strings."
+    : "All declared fields are required on the wire. Use null for unused optional parameters where their schema permits it. Preserve business-defined null values, zero, false and meaningful empty strings.";
+}
+
+function toolParameters(
+  tool: AiToolDefinition,
+  mode: AiToolSchemaMode,
+): Schema {
   const visit = (value: unknown, path: string, depth: number): Schema => {
     const fail = (suffix = ""): never => {
       throw new ToolSchemaError(tool.name, path + suffix);
@@ -114,7 +131,9 @@ export function strictToolParameters(tool: AiToolDefinition): Schema {
           );
           return [
             key,
-            required.includes(key) || acceptsNull(child)
+            mode === "compatible" ||
+            required.includes(key) ||
+            acceptsNull(child)
               ? converted
               : {
                   description:
@@ -127,7 +146,10 @@ export function strictToolParameters(tool: AiToolDefinition): Schema {
           ];
         }),
       );
-      result.required = Object.keys(value.properties);
+      result.required =
+        mode === "strict"
+          ? Object.keys(value.properties)
+          : [...(required as string[])];
       result.additionalProperties = false;
     } else if (
       value.properties !== undefined ||

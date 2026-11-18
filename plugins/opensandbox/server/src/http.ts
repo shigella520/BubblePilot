@@ -1,3 +1,4 @@
+import { imageCommand, imageReply } from "./images.js";
 import type { CommandTimeouts } from "./config.js";
 import type { ServerResponse } from "node:http";
 import { AttachmentTransfers } from "./attachment-http.js";
@@ -162,6 +163,49 @@ function register(
           .record(z.string(), z.unknown())
           .parse(JSON.parse(result.stdout));
       }),
+  );
+  server.registerTool(
+    "view_image",
+    {
+      description:
+        "View a PNG/JPEG/WebP/GIF image in this run's /workspace. Returns a bounded static preview (first frame only), not a download or chat file delivery. Requires an existing sandbox. Crop detailed regions with run_command when a preview is insufficient.",
+      inputSchema: { path },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async ({ path }, extra) => {
+      try {
+        const result = await session.run(
+          imageCommand(path),
+          commands.defaultSeconds,
+          extra.signal,
+        );
+        if (result.status !== "completed")
+          return reply(
+            {
+              status: result.status,
+              guidance:
+                "The image was not supplied. Check sandbox state and remaining execution time.",
+            },
+            true,
+          );
+        extra.signal.throwIfAborted();
+        return imageReply(result.stdout);
+      } catch (error) {
+        return reply(
+          {
+            status:
+              error instanceof ToolError
+                ? error.message
+                : "image_preview_failed",
+          },
+          true,
+        );
+      }
+    },
   );
 }
 async function body(req: IncomingMessage): Promise<unknown> {

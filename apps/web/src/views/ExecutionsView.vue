@@ -2,6 +2,7 @@
 import {
   pluginToolPresentation,
   pluginDeliveryLabel,
+  pluginImageRows,
   pluginToolErrorLabel,
 } from "../utils/plugin-tool-diagnostics";
 import ExecutionImageResult from "../components/ExecutionImageResult.vue";
@@ -2259,6 +2260,29 @@ function contextSnapshotValue(
                     class="muted"
                   >
                     <p>{{ pluginDeliveryLabel(item.responseDetails) }}</p>
+                    <div
+                      v-for="image in pluginImageRows(
+                        item.responseDetails,
+                        detail.aiProviderAttempts,
+                      )"
+                      :id="
+                        image.anchorId
+                          ? `image-input-${image.anchorId}`
+                          : undefined
+                      "
+                      :key="image.key"
+                      class="tool-image-diagnostic"
+                    >
+                      <strong>工具图片 · 第 {{ image.block }} 个内容块</strong>
+                      <p>{{ image.state }}</p>
+                      <p v-if="image.dimensions">
+                        {{ image.dimensions }} · {{ image.bytes }} 字节<span
+                          v-if="image.firstFrameOnly"
+                        >
+                          · 仅首帧</span
+                        >
+                      </p>
+                    </div>
                     <p v-if="item.responseDetails?.diagnosticVersion === 1">
                       本次交付
                       {{ item.responseDetails.deliveredCharacters }} 字符 ·

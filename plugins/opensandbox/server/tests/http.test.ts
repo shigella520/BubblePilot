@@ -7,7 +7,7 @@ import { createMcpHttp } from "../src/http.js";
 import { fixture } from "./support.js";
 
 it("authenticates, discovers without allocation, separates sessions and revokes on DELETE", async () => {
-  const { pool, backend } = fixture();
+  const { pool, backend, run } = fixture();
   const service = createMcpHttp(pool, "fictional-test-token");
   await new Promise<void>((resolve) =>
     service.http.listen(0, "127.0.0.1", resolve),
@@ -38,6 +38,7 @@ it("authenticates, discovers without allocation, separates sessions and revokes 
       "run_command",
       "read_file",
       "write_file",
+      "view_image",
     ]);
     expect(
       listed.tools.find((t) => t.name === "run_command")!.inputSchema.properties
@@ -68,6 +69,38 @@ it("authenticates, discovers without allocation, separates sessions and revokes 
         })
       ).structuredContent,
     ).toMatchObject({ exitCode: 0, stdout: "4" });
+    const data = Buffer.from("fictional").toString("base64");
+    run.mockResolvedValueOnce({
+      status: "completed",
+      exitCode: 0,
+      stdout: JSON.stringify({
+        status: "viewed",
+        data,
+        mimeType: "image/png",
+        width: 1,
+        height: 1,
+        sourceWidth: 1,
+        sourceHeight: 1,
+        sourceBytes: 9,
+        bytes: 9,
+        transformed: true,
+        firstFrameOnly: false,
+        whiteBackground: false,
+      }),
+      stderr: "",
+      durationMs: 1,
+      truncated: false,
+    });
+    const viewed = await a.client.callTool({
+      name: "view_image",
+      arguments: { path: "/workspace/chart.png" },
+    });
+    expect(viewed.isError).toBe(false);
+    expect(viewed.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "image", mimeType: "image/png", data }),
+      ]),
+    );
     const old = a.transport.sessionId!;
     await a.transport.terminateSession();
     expect(

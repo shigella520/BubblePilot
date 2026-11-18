@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ToggleSwitch from "../components/ToggleSwitch.vue";
 import AdminFormDialog from "../components/AdminFormDialog.vue";
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { Boxes, Plus, RefreshCw, UploadCloud } from "@lucide/vue";
@@ -42,7 +43,23 @@ interface Package {
     headers: Record<string, string>;
   }>;
 }
+interface ToolSyncRecord {
+  checkedAt: string;
+  source: "scheduled" | "call";
+  status: "unchanged" | "updated" | "review" | "failed";
+  errorCode?: string;
+  changes: Array<{ tool: string; kind: string; paths: string[] }>;
+}
+const syncStatus = {
+  unchanged: "定义未变",
+  updated: "已自动同步",
+  review: "需要审核",
+  failed: "检查失败，保留原配置",
+};
 interface Detail {
+  toolSyncLastCheck?: string | null;
+  toolSyncHistory?: ToolSyncRecord[];
+  pendingReview?: string[];
   id: string;
   name: string;
   version: number;
@@ -50,6 +67,7 @@ interface Detail {
   revision: string;
   package: Package;
   config: {
+    autoSyncTools?: boolean;
     connections: Record<string, Connection>;
     tools: Tool[];
     disabledSkills: string[];
@@ -96,6 +114,7 @@ const items = ref<
   disabledTools = ref<string[]>([]),
   tested = ref(false);
 const previous = ref<Detail | null>(null);
+const autoSyncTools = ref(false);
 const workflowReferences = computed(() => {
   const groups = new Map<string, number[]>();
   for (const reference of selected.value?.references ?? []) {
@@ -177,6 +196,7 @@ function reset() {
   approved.value = [];
   content.value = "";
   tested.value = false;
+  autoSyncTools.value = false;
   previous.value = null;
 }
 async function stage(file?: File) {
@@ -271,6 +291,7 @@ async function open(id: string) {
     ) as Record<string, Connection>;
     for (const c of Object.values(connections.value))
       c.callTimeoutSeconds ??= 45;
+    autoSyncTools.value = selected.value!.config.autoSyncTools ?? false;
     tools.value = selected.value!.config.tools;
     approved.value = tools.value.map(
       (t) => `${t.server}/${t.definition.name}#${t.hash}`,
@@ -361,6 +382,7 @@ async function save() {
           approved: approved.value,
           disabledSkills: disabledSkills.value,
           disabledTools: disabledTools.value,
+          autoSyncTools: autoSyncTools.value,
         }),
       },
     );
@@ -448,6 +470,7 @@ async function remove() {
         approved,
         disabledSkills,
         disabledTools,
+        autoSyncTools,
         url,
         gitRef,
         directory,
@@ -567,6 +590,53 @@ async function remove() {
           <button v-if="Object.keys(connections).length" @click="test">
             测试连接并发现工具
           </button>
+          <section v-if="selected && !preview" class="tool-sync-panel">
+            <div class="tool-sync-heading">
+              <strong>自动同步已授权工具</strong>
+              <ToggleSwitch
+                v-model="autoSyncTools"
+                label="自动同步已授权工具"
+                :disabled="busy"
+              />
+            </div>
+            <p>
+              保存后生效。每小时检查，仅自动接收格式变化和明确兼容的可选参数新增；不新增工具、不改变服务地址或授权范围。
+            </p>
+            <p v-if="selected.toolSyncLastCheck">
+              最近检查：{{
+                new Date(selected.toolSyncLastCheck).toLocaleString()
+              }}
+            </p>
+            <p v-if="selected.pendingReview?.length" class="tool-sync-warning">
+              待审核：{{
+                selected.pendingReview.join("、")
+              }}。请重新发现工具、核对后保存授权。
+            </p>
+            <details v-if="selected.toolSyncHistory?.length">
+              <summary>最近同步记录</summary>
+              <article
+                v-for="record in selected.toolSyncHistory"
+                :key="record.checkedAt"
+                class="tool-sync-record"
+              >
+                <strong>{{ syncStatus[record.status] }}</strong>
+                <small
+                  >{{ new Date(record.checkedAt).toLocaleString() }} ·
+                  {{
+                    record.source === "scheduled" ? "定时检查" : "调用前检查"
+                  }}</small
+                >
+                <p v-if="record.errorCode">{{ record.errorCode }}</p>
+                <ul v-if="record.changes.length">
+                  <li v-for="change in record.changes" :key="change.tool">
+                    {{ change.tool }} ·
+                    {{ change.kind === "review" ? "待审核" : "兼容变化" }}
+                    <code>{{ change.paths.join("、") }}</code>
+                  </li>
+                </ul>
+              </article>
+            </details>
+          </section>
           <PluginToolPicker
             v-if="tools.length"
             :key="preview?.hash ?? selected?.id"
@@ -730,7 +800,7 @@ async function remove() {
   max-width: 100%;
   flex: 1;
 }
-.plugin-panel button,
+.plugin-panel button:not(.toggle-switch),
 .plugin-heading button {
   padding: 9px 14px;
   border: 1px solid #cbd5e1;
@@ -841,5 +911,40 @@ button:disabled {
   .plugin-panel {
     padding: 16px;
   }
+}
+</style>
+
+<style scoped>
+.tool-sync-panel {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+.tool-sync-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.tool-sync-heading :deep(button) {
+  flex-shrink: 0;
+}
+.tool-sync-panel p {
+  margin: 0.6rem 0;
+}
+.tool-sync-warning {
+  color: #9a5700;
+}
+.tool-sync-record {
+  border-top: 1px solid var(--border-color, #ddd);
+  padding-block: 0.75rem;
+}
+.tool-sync-record small,
+.tool-sync-record code {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 </style>

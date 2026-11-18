@@ -1,3 +1,6 @@
+import { prepareToolImages, type ToolMedia } from "../ai/tool-image-session.js";
+import type { RunImageSession } from "../ai/run-image-session.js";
+import { compareTools, toolContractHash } from "./plugin-tool-sync.js";
 import type { AttachmentHandling } from "../attachments/attachment-policy.js";
 import { assertAttachmentBinding } from "./plugin-attachments.js";
 import {
@@ -29,6 +32,7 @@ import {
 } from "./plugin-types.js";
 export class PluginSession {
   private closed = false;
+  private readonly reviewBlocked = new Set<string>();
   private readonly results = new PluginResultStore();
   private readonly clients = new Map<string, PluginMcp>();
   private readonly loaded = new Set<string>();
@@ -85,11 +89,15 @@ export class PluginSession {
         !current.config.tools.some(
           (t) =>
             t.server === tool.server &&
-            t.definition.name === tool.definition.name,
+            t.definition.name === tool.definition.name &&
+            compareTools(tool, t).kind !== "review",
         ) ||
         pinned.config.disabledTools.includes(key) ||
         !pinned.config.tools.some(
-          (t) => t.server === tool.server && t.hash === tool.hash,
+          (t) =>
+            t.server === tool.server &&
+            t.definition.name === tool.definition.name &&
+            compareTools(tool, t).kind !== "review",
         ) ||
         digest(current.config.connections[tool.server]) !==
           digest(p.config.connections[tool.server]) ||
@@ -113,16 +121,53 @@ export class PluginSession {
       this.clients.set(key, client);
       await client.connect(p.config.connections[tool.server]!, signal);
     }
-    const tools = await client.discover(tool.server, signal);
-    if (!tools.some((t) => t.hash === tool.hash)) {
-      await this.service.markToolReview(
-        p.id,
-        p.revision,
-        `${tool.server}/${tool.definition.name}`,
-      );
+    const toolKey = `${p.id}:${tool.server}/${tool.definition.name}`;
+    if (this.reviewBlocked.has(toolKey))
       pluginError("TOOL_REVIEW_REQUIRED", 409);
+    const current = await this.service.get(p.id);
+    const tools = await client.discover(tool.server, signal);
+    const remote = tools.find(
+      (t) =>
+        t.server === tool.server && t.definition.name === tool.definition.name,
+    );
+    const comparison = compareTools(tool, remote);
+    if (
+      comparison.kind === "unchanged" ||
+      (comparison.kind === "format" && !current.config.autoSyncTools)
+    ) {
+      await this.check(p, undefined, tool);
+      return client;
     }
-    return client;
+    if (current.config.autoSyncTools) {
+      await this.service.syncTools(p.id, "call", {
+        plugin: current,
+        server: tool.server,
+        tools,
+      });
+      const saved = await this.service.get(p.id);
+      const approved = saved.config.tools.find(
+        (t) =>
+          t.server === tool.server &&
+          t.definition.name === tool.definition.name,
+      );
+      if (
+        (comparison.kind === "compatible" || comparison.kind === "format") &&
+        remote &&
+        approved &&
+        toolContractHash(approved) === toolContractHash(remote)
+      ) {
+        await this.check(p, undefined, tool);
+        return client;
+      }
+    }
+    this.reviewBlocked.add(toolKey);
+    await this.service.markToolReview(
+      p.id,
+      p.revision,
+      `${tool.server}/${tool.definition.name}`,
+      current.version,
+    );
+    pluginError("TOOL_REVIEW_REQUIRED", 409);
   }
   attachmentChannel(config: AttachmentHandling) {
     assertAttachmentBinding(this.plugins, config);
@@ -171,7 +216,11 @@ export class PluginSession {
       },
     };
   }
-  register(registry: AgentToolRegistry) {
+  register(
+    registry: AgentToolRegistry,
+    visual?: RunImageSession,
+    capable: () => Promise<boolean> = () => Promise.resolve(false),
+  ) {
     const register = (
       name: string,
       description: string,
@@ -183,6 +232,8 @@ export class PluginSession {
         text: string;
         metadata: Record<string, unknown>;
         commit?: () => null;
+        media?: ToolMedia;
+        authorize?: () => Promise<void>;
       }>,
       metadata: Record<string, unknown> = {},
     ) =>
@@ -225,7 +276,17 @@ export class PluginSession {
                     }
                   : {}),
               },
-              ...(result.commit ? { commit: result.commit } : {}),
+              ...(result.media ? { media: result.media } : {}),
+              validateCommit: async () => {
+                await this.guard?.();
+                await result.authorize?.();
+              },
+              commitResult: () => {
+                ctx.signal.throwIfAborted();
+                if (this.closed) pluginError("SESSION_INVALIDATED");
+                if (Date.now() >= ctx.deadline) pluginError("MCP_TIMEOUT");
+                result.commit?.();
+              },
             };
           } catch (e) {
             const code = ctx.signal.aborted
@@ -392,7 +453,18 @@ export class PluginSession {
         if (
           p.config.disabledTools.includes(
             `${tool.server}/${tool.definition.name}`,
-          )
+          ) ||
+          (p.pendingReview?.includes(
+            `${tool.server}/${tool.definition.name}`,
+          ) &&
+            p.toolSyncHistory?.some((record) =>
+              record.changes.some(
+                (change) =>
+                  change.tool === `${tool.server}/${tool.definition.name}` &&
+                  change.kind === "review" &&
+                  change.before === toolContractHash(tool),
+              ),
+            ))
         )
           continue;
         const callTimeoutMs = connectionCallTimeoutMs(
@@ -423,8 +495,31 @@ export class PluginSession {
             ctx.signal.throwIfAborted();
             if (Date.now() >= ctx.deadline) pluginError("MCP_TIMEOUT");
             const { responseBytes, ...payload } = result;
+            const media = await prepareToolImages(
+              payload.content,
+              result.status === "error",
+              visual,
+              capable,
+              {
+                toolCallId: ctx.toolCallId ?? "",
+                tool: tool.definition.name,
+                server: tool.server,
+                pluginId: p.id,
+              },
+              ctx,
+            );
+            const normalized = normalizeMcpResult({
+              ...payload,
+              content: media.content,
+            });
             const prepared = this.results.prepare(
-              normalizeMcpResult(payload),
+              {
+                ...normalized,
+                ...(media.images.length ? { images: media.images } : {}),
+                ...(media.partial && result.status !== "error"
+                  ? { status: "partial" }
+                  : {}),
+              },
               {
                 pluginId: p.id,
                 pluginName: p.name,
@@ -436,12 +531,19 @@ export class PluginSession {
                 ...(result.errorCode ? { errorCode: result.errorCode } : {}),
               },
               () => this.check(p, undefined, tool),
-              ctx.maxOutputCharacters,
+              ctx.maxOutputCharacters -
+                media.media.parts.reduce(
+                  (n, part) => n + part.label.length,
+                  media.media.parts.length ? 256 : 0,
+                ),
             );
             return {
               ...prepared,
+              media: media.media,
+              authorize: () => this.check(p, undefined, tool),
               metadata: {
                 ...prepared.metadata,
+                ...(media.images.length ? { images: media.images } : {}),
                 // Serialized validated payload bytes, not transport/SSE framing.
                 responseBytes,
                 responsePayloadBytes: Buffer.byteLength(
