@@ -20,6 +20,9 @@ function contract(tool: ApprovedTool) {
       description: tool.definition.description.trim(),
     },
     ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+    ...(tool.imageExportVersion
+      ? { imageExportVersion: tool.imageExportVersion }
+      : {}),
     ...(tool.attachmentTransferVersion
       ? { attachmentTransferVersion: tool.attachmentTransferVersion }
       : {}),

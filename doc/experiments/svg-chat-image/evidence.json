@@ -1,0 +1,205 @@
+{
+  "renderer": [
+    {
+      "name": "chart-0",
+      "seconds": 0.158,
+      "returncode": 0,
+      "stderr": "Warning (in fontdb:466): Fallback to loading from known font dir paths.\n",
+      "bytes": 197353,
+      "dimensions": [1200, 760],
+      "alpha_corner": 0
+    },
+    {
+      "name": "chart-1",
+      "seconds": 0.16,
+      "returncode": 0,
+      "stderr": "Warning (in fontdb:466): Fallback to loading from known font dir paths.\n",
+      "bytes": 197353,
+      "dimensions": [1200, 760],
+      "alpha_corner": 0
+    },
+    {
+      "name": "chart-2",
+      "seconds": 0.153,
+      "returncode": 0,
+      "stderr": "Warning (in fontdb:466): Fallback to loading from known font dir paths.\n",
+      "bytes": 197353,
+      "dimensions": [1200, 760],
+      "alpha_corner": 0
+    },
+    {
+      "name": "chart-3",
+      "seconds": 0.16,
+      "returncode": 0,
+      "stderr": "Warning (in fontdb:466): Fallback to loading from known font dir paths.\n",
+      "bytes": 197353,
+      "dimensions": [1200, 760],
+      "alpha_corner": 0
+    },
+    {
+      "name": "chart-2x",
+      "seconds": 0.41,
+      "returncode": 0,
+      "stderr": "Warning (in fontdb:466): Fallback to loading from known font dir paths.\n",
+      "bytes": 461259,
+      "dimensions": [2400, 1520],
+      "alpha_corner": 0
+    },
+    {
+      "name": "foreign-object",
+      "seconds": 0.022,
+      "returncode": 0,
+      "stderr": "",
+      "bytes": 554,
+      "dimensions": [100, 100],
+      "alpha_corner": 0
+    },
+    {
+      "name": "relative-resource",
+      "seconds": 0.028,
+      "returncode": 0,
+      "stderr": "",
+      "bytes": 679,
+      "dimensions": [100, 100],
+      "alpha_corner": 255
+    },
+    {
+      "name": "file-resource",
+      "seconds": 0.022,
+      "returncode": 0,
+      "stderr": "Warning (in usvg::parser::image:110): 'file:///workspace/resource.png' is not a path to an image.\n",
+      "bytes": 554,
+      "dimensions": [100, 100],
+      "alpha_corner": 0
+    },
+    {
+      "name": "http-resource",
+      "seconds": 0.022,
+      "returncode": 0,
+      "stderr": "Warning (in usvg::parser::image:110): 'http://127.0.0.1:9/resource.png' is not a path to an image.\n",
+      "bytes": 554,
+      "dimensions": [100, 100],
+      "alpha_corner": 0
+    },
+    {
+      "name": "external-entity",
+      "seconds": 0.016,
+      "returncode": 1,
+      "stderr": "Error: unknown entity reference 'ext' at 1:139.\n"
+    }
+  ],
+  "safety": [
+    {
+      "name": "traversal",
+      "rejected": true,
+      "reason": "ValueError: invalid_path"
+    },
+    {
+      "name": "outside",
+      "rejected": true,
+      "reason": "ValueError: outside_workspace"
+    },
+    {
+      "name": "symlink",
+      "rejected": true,
+      "reason": "OSError: [Errno 40] Too many levels of symbolic links: 'link.png'"
+    },
+    {
+      "name": "parent_symlink",
+      "rejected": true,
+      "reason": "NotADirectoryError: [Errno 20] Not a directory: 'dirlink'"
+    },
+    {
+      "name": "fifo",
+      "rejected": true,
+      "reason": "ValueError: not_regular_file"
+    },
+    {
+      "name": "fake",
+      "rejected": true,
+      "reason": "UnidentifiedImageError: cannot identify image file <_io.BytesIO object at 0x7ffffd3f62f0>"
+    },
+    {
+      "name": "truncated",
+      "rejected": true,
+      "reason": "OSError: Truncated File Read"
+    },
+    {
+      "name": "bytes",
+      "rejected": true,
+      "reason": "ValueError: byte_limit"
+    },
+    {
+      "name": "pixels",
+      "rejected": true,
+      "reason": "ValueError: invalid_image"
+    }
+  ],
+  "foreignObject_is_blank": true,
+  "relative-resource_visible": true,
+  "file-resource_visible": false,
+  "http-resource_visible": false,
+  "preflight_rejections": [
+    "foreignObject",
+    "external_resource",
+    "css_url",
+    "xml_entity",
+    "oversized_dimensions",
+    "oversized_source"
+  ],
+  "large_png_bytes": 3151219,
+  "snapshot_sha256": "74ce1dd2ab532b177fae2fe395b4b6e739bf66c92e52d3fe81025649977683fb",
+  "snapshot_bytes": 461259,
+  "snapshot_survives_source_mutation": true,
+  "child_peak_rss_kib": 79712,
+  "versions": {
+    "resvg": "0.45.1",
+    "font_sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b",
+    "pillow": "13.0.0"
+  },
+  "transport": {
+    "unauthorizedRejected": true,
+    "failedTransfersRejected": ["/truncated", "/bad-hash", "/oversize"],
+    "cancelledTransferRejected": true,
+    "hashPreserved": true,
+    "midTransferTimeoutRejected": true,
+    "largeBinaryBytes": 3151219,
+    "survivesSandboxDeletion": true,
+    "multipartRequestsValidated": 4,
+    "delivery": [
+      {
+        "httpStatus": 200,
+        "result": {
+          "status": "confirmed",
+          "providerMessageId": "fictional-image-guid"
+        }
+      },
+      {
+        "httpStatus": 429,
+        "result": {
+          "status": "failed",
+          "code": "BLUEBUBBLES_HTTP_429",
+          "summary": "Attachment request returned HTTP 429.",
+          "retryable": true
+        }
+      },
+      {
+        "httpStatus": 503,
+        "result": {
+          "status": "unknown",
+          "code": "BLUEBUBBLES_HTTP_503",
+          "summary": "Attachment request returned HTTP 503.",
+          "retryable": false
+        }
+      },
+      {
+        "httpStatus": 200,
+        "result": {
+          "status": "unknown",
+          "code": "BLUEBUBBLES_ATTACHMENT_RESULT_UNKNOWN",
+          "summary": "Attachment receipt could not be confirmed."
+        }
+      }
+    ]
+  }
+}

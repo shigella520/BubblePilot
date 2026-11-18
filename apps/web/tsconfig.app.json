@@ -18,6 +18,7 @@
     "../../modules/scheduled-tasks/task-schedule.ts",
     "../../modules/scheduled-tasks/task-policy.ts",
     "../../modules/attachments/attachment-policy.ts",
+    "../../modules/generated-images/image-policy.ts",
     "../../modules/workflow/action-blocks.ts",
     "../../modules/ai/execution-policy.ts",
     "../../modules/ai/web-search-policy.ts",

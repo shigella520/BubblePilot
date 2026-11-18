@@ -1,5 +1,10 @@
 import { RunImageSession } from "./run-image-session.js";
 import {
+  GeneratedImageSession,
+  imageReplyGuidance,
+} from "../generated-images/image-session.js";
+import type { GeneratedImageStore } from "../generated-images/image-store.js";
+import {
   toolImageProtocol,
   toolImageSupplement,
 } from "./tool-image-session.js";
@@ -187,6 +192,7 @@ export class AgentRunner {
     private readonly memes?: MemeRepository,
     private readonly plugins?: PluginService,
     private readonly attachments?: AttachmentService,
+    private readonly generatedImages?: GeneratedImageStore,
   ) {}
 
   async run(request: AiRouteRequest): Promise<AiRouteResult> {
@@ -214,6 +220,7 @@ export class AgentRunner {
     let result: AiRouteResult;
     let plugins: PluginSession | undefined;
     let attachments: AttachmentSession | undefined;
+    let generated: GeneratedImageSession | undefined;
     try {
       if (request.pluginIds?.length) {
         if (
@@ -237,14 +244,43 @@ export class AgentRunner {
           plugins,
         );
       }
+      if (request.imageReplyInput) {
+        if (
+          !plugins ||
+          !this.generatedImages ||
+          request.outputFormat !== "text" ||
+          request.idleDecision ||
+          request.imageReplyInput.executionId !== request.executionId
+        )
+          throw new Error("Image reply unavailable");
+        generated = new GeneratedImageSession(
+          request.imageReplyInput,
+          plugins,
+          this.generatedImages,
+        );
+      }
       result = await this.runWithBudget(
         request,
         budget,
         plugins,
         attachments,
         visual,
+        generated,
       );
       await attachments?.validate();
+      if (generated && result.status !== "failed") {
+        await generated.validate();
+        result =
+          result.selectedMeme && generated.selection()
+            ? {
+                status: "failed",
+                code: "REPLY_MEDIA_CONFLICT",
+                summary: "不能在同一条回复中同时选择表情和生成图片。",
+                retryable: false,
+                attemptCount: result.attemptCount,
+              }
+            : { ...result, generatedImage: generated.selection() };
+      }
     } catch {
       result = {
         status: "failed",
@@ -254,6 +290,7 @@ export class AgentRunner {
         attemptCount: 0,
       };
     }
+    await generated?.close(result.status !== "failed").catch(() => undefined);
     await attachments?.close().catch(() => undefined);
     await plugins?.close().catch(() => undefined);
     if (visual.settings) budget.snapshot.images = visual.snapshot();
@@ -274,6 +311,7 @@ export class AgentRunner {
     attachments?: AttachmentSession,
     visual = request.imageSession?.visual ??
       new RunImageSession(request.preparedImageInput),
+    generated?: GeneratedImageSession,
   ): Promise<AiRouteResult> {
     const policy = normalizeWebSearchPolicy(request.webSearch);
     const sourceDisplay = request.webSearchSources ?? "full";
@@ -301,6 +339,7 @@ export class AgentRunner {
       this.routing.supportsImageTools(request.routeId),
     );
     attachments?.register(registry);
+    generated?.register(registry);
     if (attachments && memory)
       memory.stageAttachmentCatalogue = () => attachments.stageCatalogue();
     const attachmentContext =
@@ -318,6 +357,16 @@ export class AgentRunner {
         ? request.messages.length
         : request.messages.findIndex((message) => message.role !== "system"));
     let commitCatalogue: (() => void) | undefined;
+    if (generated) {
+      request = {
+        ...request,
+        messages: [
+          { role: "system", content: imageReplyGuidance },
+          ...request.messages,
+        ],
+      };
+      configurationMessageCount += 1;
+    }
     if (
       attachmentContext &&
       (attachments ||
@@ -584,6 +633,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         };
       const routeRequest: AiRouteRequest = {
         ...request,
+        allowEmptyOutput: !!generated?.selection(),
         ...(visual.hasToolImages ? { allowImageDegrade: false } : {}),
         // Runtime data stays outside system: gateways may hoist every system
         // message into a single systemInstruction regardless of its position.
@@ -657,7 +707,10 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
           const cleaned =
             rendered ??
             stripHistoricalCitationMarkers(answer, request.outputFormat);
-          if (cleaned === null || !cleaned.trim()) {
+          if (
+            cleaned === null ||
+            (!cleaned.trim() && !generated?.selection())
+          ) {
             if (budget.snapshot.citationHandling)
               budget.snapshot.citationHandling.finalAction = "failed";
             return {

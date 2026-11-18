@@ -146,6 +146,7 @@ const responseUsageSchema = z
   .passthrough();
 
 interface ParsedResponse {
+  explicitEmptyFinal?: boolean;
   supported: boolean;
   text: string | null;
   finishReason: string | null;
@@ -671,6 +672,8 @@ function chatResponse(body: unknown): ParsedResponse {
         : "";
   return {
     supported: true,
+    explicitEmptyFinal:
+      choice.finish_reason === "stop" && typeof content === "string",
     text,
     finishReason: choice.finish_reason ?? null,
     contentCharacters: text.length,
@@ -704,6 +707,14 @@ function responsesResponse(body: unknown): ParsedResponse {
     "";
   return {
     supported: true,
+    explicitEmptyFinal:
+      parsed.data.status === "completed" &&
+      (typeof parsed.data.output_text === "string" ||
+        !!parsed.data.output?.some(
+          (item) =>
+            item.type === "message" &&
+            item.content?.some((part) => typeof part.text === "string"),
+        )),
     text,
     finishReason: parsed.data.status ?? null,
     contentCharacters: text.length,
@@ -1059,7 +1070,11 @@ export class OpenAiCompatibleClient implements AiClient {
       }
       if (
         parsed.finishReason === "length" ||
-        parsed.finishReason === "incomplete"
+        parsed.finishReason === "incomplete" ||
+        (request.allowEmptyOutput &&
+          ["failed", "cancelled", "content_filter"].includes(
+            parsed.finishReason ?? "",
+          ))
       ) {
         return failure({
           category: "invalid-response",
@@ -1073,7 +1088,11 @@ export class OpenAiCompatibleClient implements AiClient {
         });
       }
       const text = parsed.text ?? "";
-      if (text.trim().length === 0 && parsed.toolCalls.length === 0) {
+      if (
+        text.trim().length === 0 &&
+        parsed.toolCalls.length === 0 &&
+        !(request.allowEmptyOutput && parsed.explicitEmptyFinal)
+      ) {
         return failure({
           category: "empty-output",
           code: "AI_PROVIDER_EMPTY_OUTPUT",

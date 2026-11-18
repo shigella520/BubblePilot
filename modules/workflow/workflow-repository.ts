@@ -133,7 +133,7 @@ export type OutboundDeliveryStatus =
   "pending" | "sending" | "confirmed" | "failed" | "unknown";
 
 export interface OutboundDeliveryRecord {
-  kind?: "text" | "meme";
+  kind?: "text" | "meme" | "generated_image";
   closedAt?: string | null;
   id: string;
   executionId: string;

@@ -394,6 +394,17 @@ export function importWorkflowManifest(input: {
   const attachmentWarnings: WorkflowManifestIssue[] = [];
   for (const node of nodes) {
     const config = clone(node.config);
+    if (node.type === "ai-chat" && config.imageReply) {
+      delete config.imageReply;
+      attachmentWarnings.push({
+        path: `/spec/nodes/${node.id}/config/imageReply`,
+        severity: "warning",
+        code: "IMAGE_REPLY_REBIND_REQUIRED",
+        message: "图片回复授权和对应图片连接已移除。",
+        suggestion:
+          "在目标实例重新选择沙箱、开启图片回复并连接生成图片输出后发布。",
+      });
+    }
     if (node.type === "ai-chat" && config.attachmentHandling) {
       delete config.attachmentHandling;
       attachmentWarnings.push({
@@ -428,6 +439,7 @@ export function importWorkflowManifest(input: {
     }
     node.config = config;
   }
+  for (const node of nodes) if (node.inputs) delete node.inputs.generatedImage;
   const raw = {
     schemaVersion: "1",
     name: manifest.metadata.name,
@@ -436,7 +448,13 @@ export function importWorkflowManifest(input: {
     nodes,
     ...(manifest.spec.edges === undefined
       ? {}
-      : { edges: clone(manifest.spec.edges) }),
+      : {
+          edges: clone(manifest.spec.edges).filter(
+            (edge) =>
+              edge.sourcePort !== "generatedImage" &&
+              edge.targetPort !== "generatedImage",
+          ),
+        }),
   };
   try {
     const definition =

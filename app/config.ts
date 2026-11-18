@@ -53,6 +53,22 @@ const environmentSchema = z
       .default(256),
     PLUGIN_STORAGE_PATH: z.string().min(1).default("./data/plugins"),
     MEME_STORAGE_PATH: z.string().min(1).default("./data/memes"),
+    GENERATED_IMAGE_STORAGE_PATH: z
+      .string()
+      .min(1)
+      .default("./data/generated-images"),
+    GENERATED_IMAGE_STORAGE_MAX_MIB: z.coerce
+      .number()
+      .int()
+      .min(64)
+      .max(102400)
+      .default(1024),
+    GENERATED_IMAGE_RETENTION_DAYS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(90)
+      .default(30),
     DATABASE_QUERY_TIMEOUT_MS: z.coerce
       .number()
       .int()
@@ -177,6 +193,9 @@ export interface AppConfig {
   host: string;
   port: number;
   memeStoragePath?: string;
+  generatedImageStoragePath?: string;
+  generatedImageStorageMaxMiB?: number;
+  generatedImageRetentionDays?: number;
   pluginStoragePath?: string;
   attachmentTempPath?: string;
   attachmentTempMaxMiB?: number;
@@ -233,6 +252,9 @@ export function loadConfig(
     host: parsed.APP_HOST,
     port: parsed.APP_PORT,
     memeStoragePath: parsed.MEME_STORAGE_PATH,
+    generatedImageStoragePath: parsed.GENERATED_IMAGE_STORAGE_PATH,
+    generatedImageStorageMaxMiB: parsed.GENERATED_IMAGE_STORAGE_MAX_MIB,
+    generatedImageRetentionDays: parsed.GENERATED_IMAGE_RETENTION_DAYS,
     pluginStoragePath: parsed.PLUGIN_STORAGE_PATH,
     attachmentTempPath: parsed.ATTACHMENT_TEMP_PATH,
     attachmentTempMaxMiB: parsed.ATTACHMENT_TEMP_MAX_MIB,

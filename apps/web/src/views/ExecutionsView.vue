@@ -9,6 +9,7 @@ import ExecutionImageResult from "../components/ExecutionImageResult.vue";
 import { memeToolLabel } from "../utils/meme-tool-diagnostics";
 import { memoryToolLabel } from "../utils/memory-tool-diagnostics";
 import MemeDeliveries from "../components/MemeDeliveries.vue";
+import GeneratedImageDeliveries from "../components/GeneratedImageDeliveries.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
 import MemorySources from "../components/MemorySources.vue";
@@ -199,7 +200,7 @@ interface ExecutionDetail extends Execution {
     outputSummary: unknown;
   }>;
   deliveries: Array<{
-    kind?: "text" | "meme";
+    kind?: "text" | "meme" | "generated_image";
     id: string;
     nodeId: string;
     status: string;
@@ -2425,6 +2426,10 @@ function contextSnapshotValue(
             </section>
             <section id="execution-outbound">
               <h3>出站发送</h3>
+              <GeneratedImageDeliveries
+                :execution-id="detail.id"
+                :sensitive-active="session.sensitiveActive"
+              />
               <MemeDeliveries
                 :execution-id="detail.id"
                 :sensitive-active="session.sensitiveActive"

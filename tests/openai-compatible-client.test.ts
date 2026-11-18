@@ -38,6 +38,73 @@ const request = {
 };
 
 describe("OpenAiCompatibleClient", () => {
+  it.each([
+    [
+      "chat-completions",
+      { choices: [{ message: { content: "" }, finish_reason: "stop" }] },
+      "succeeded",
+    ],
+    [
+      "chat-completions",
+      { choices: [{ message: {}, finish_reason: "stop" }] },
+      "failed",
+    ],
+    [
+      "chat-completions",
+      {
+        choices: [
+          { message: { content: "" }, finish_reason: "content_filter" },
+        ],
+      },
+      "failed",
+    ],
+    [
+      "responses",
+      {
+        status: "completed",
+        output: [
+          { type: "message", content: [{ type: "output_text", text: "" }] },
+        ],
+      },
+      "succeeded",
+    ],
+    ["responses", {}, "failed"],
+    ["responses", { status: "completed", output: [] }, "failed"],
+    ["responses", { status: "failed", output_text: "" }, "failed"],
+    [
+      "responses",
+      { status: "failed", output_text: "partial answer" },
+      "failed",
+    ],
+    [
+      "chat-completions",
+      {
+        choices: [
+          {
+            message: { content: "filtered answer" },
+            finish_reason: "content_filter",
+          },
+        ],
+      },
+      "failed",
+    ],
+  ] as const)(
+    "requires an explicit final message for a prepared image in %s: %j",
+    async (apiKind, payload, status) => {
+      const client = new OpenAiCompatibleClient(
+        new EnvironmentSecretResolver({ FICTIONAL_AI_KEY: "fictional" }),
+        () => Promise.resolve(new Response(JSON.stringify(payload))),
+      );
+      expect(
+        (
+          await client.call(
+            { ...provider, apiKind },
+            { ...request, allowEmptyOutput: true },
+          )
+        ).status,
+      ).toBe(status);
+    },
+  );
   it.each(["chat-completions", "responses"] as const)(
     "sends all tools through strict %s schema validation",
     async (apiKind) => {

@@ -325,7 +325,7 @@ export class MemeDeliveryService {
   }
   async recover() {
     await this.pool.query(
-      "UPDATE outbound_deliveries SET status='unknown',retryable=false,error_code='MEME_SEND_INTERRUPTED',error_summary='Interrupted delivery requires manual confirmation.',updated_at=now() WHERE send_lease_until<now() AND status='sending'",
+      "UPDATE outbound_deliveries SET status='unknown',retryable=false,error_code='MEME_SEND_INTERRUPTED',error_summary='Interrupted delivery requires manual confirmation.',updated_at=now() WHERE send_lease_until<now() AND status='sending' AND (kind='meme' OR id IN (SELECT text_delivery_id FROM meme_reply_plans))",
     );
     const pendingText = await this.pool.query<{ id: string }>(
       "SELECT d.id FROM outbound_deliveries d JOIN meme_reply_plans p ON p.text_delivery_id=d.id JOIN workflow_executions e ON e.id=d.execution_id WHERE d.status='pending' AND e.status<>'closed' AND d.created_at<now()-interval '30 seconds' ORDER BY d.created_at LIMIT 10",

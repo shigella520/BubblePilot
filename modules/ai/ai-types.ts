@@ -406,6 +406,8 @@ export interface AiToolCall {
 }
 
 export interface AiChatRequest {
+  /** Internal only: a trusted prepared attachment permits an empty final text. */
+  allowEmptyOutput?: boolean;
   messages: readonly AiChatMessage[];
   maxOutputTokens: number;
   temperature: number | null;
@@ -624,6 +626,7 @@ export interface AiRouteSuccess {
   /** Mode of the provider that produced this turn, including fallback. */
   toolSchemaMode?: AiToolSchemaMode;
   selectedMeme?: SelectedMeme | null;
+  generatedImage?: GeneratedImageRef | null;
   agentBudget?: AgentBudgetSnapshot;
   status: "succeeded";
   text: string;
@@ -651,8 +654,10 @@ export interface AiRouteFailure {
 export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 
 export interface AiRouteRequest {
+  allowEmptyOutput?: boolean;
   attachmentContext?: AttachmentContext;
   attachmentInput?: AttachmentRunInput;
+  imageReplyInput?: ImageReplyInput;
   runtimeTools?: RegisteredAgentTool[];
   idleDecision?: boolean;
   imageSession?: ChatImageSession | undefined;
@@ -736,3 +741,5 @@ export interface AiImageInputView extends AiImageInputRecordInput {
 export function normalizeAiBaseUrl(value: string): string {
   return value.replace(/\/+$/u, "");
 }
+import type { ImageReplyInput } from "../generated-images/image-session.js";
+import type { GeneratedImageRef } from "../generated-images/image-policy.js";

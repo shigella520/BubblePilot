@@ -27,12 +27,16 @@ services:
         required: false
     volumes:
       - bubblepilot-memes:/app/data/memes
+      - bubblepilot-generated-images:/app/data/generated-images
       - ${PLUGIN_DATA_DIR:-./data/plugins}:/app/data/plugins
     environment:
       ATTACHMENT_TEMP_PATH: ${ATTACHMENT_TEMP_PATH:-/tmp/bubblepilot-attachments}
       ATTACHMENT_TEMP_MAX_MIB: ${ATTACHMENT_TEMP_MAX_MIB:-256}
       PLUGIN_STORAGE_PATH: /app/data/plugins
       MEME_STORAGE_PATH: /app/data/memes
+      GENERATED_IMAGE_STORAGE_PATH: /app/data/generated-images
+      GENERATED_IMAGE_STORAGE_MAX_MIB: ${GENERATED_IMAGE_STORAGE_MAX_MIB:-1024}
+      GENERATED_IMAGE_RETENTION_DAYS: ${GENERATED_IMAGE_RETENTION_DAYS:-30}
       NODE_ENV: production
       APP_HOST: 0.0.0.0
       APP_PORT: 8080
@@ -96,6 +100,7 @@ services:
 
 volumes:
   bubblepilot-memes:
+  bubblepilot-generated-images:
   bubblepilot-postgres:
 
 configs:

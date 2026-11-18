@@ -166,3 +166,7 @@ correlationId
 引用新消息缺少部分标识时可以进行一次有界详情查询；失败返回未解析引用并由队列有限重试，不导致新消息自动化失败。更新详情可能比通知更新，以详情源时间为准；404／网络失败不是撤回证据。`dateEdited`、`dateRetracted`、`partCount` 与 `messageSummaryInfo[0].retractedParts` 综合判断。多部分精确映射未获目标环境验证时，返回 partial／unresolved 并隐藏无法确认的内容；引用仅对显式部分 `0` 或完整三段数字格式 `0:<数字>:<数字>` 的无附件文本目标展开（例如 `0:0:1`）；保留原始标识，不把后两段解释成正文裁剪范围。非零部分、格式不完整或带额外字符的标识保留未解析状态。禁止按附件顺序猜部分标识。
 
 部署需订阅 `new-message` 与 `updated-message`。本地虚构数据验证与实际 macOS／BlueBubbles 联调分开记录，不假定部署网关与调研的上游提交完全一致。
+
+## 生成 PNG 回复
+
+生成图片复用 `/api/v1/message/attachment` multipart 适配器：当前聊天、持久化 tempGuid、程序文件名 `chart.png` 和真实 PNG 字节，method 仍为 apple-script。首版不支持引用式图片回复。图文按文字确认后发送图片；5xx、超时或回执缺失保持 unknown，不因重新运行节点而重复发送。回执 GUID 继续使用原 Bot 归属和 webhook 对齐逻辑。真实 iMessage 接收效果待获授权的部署联调，不以本地假网关通过替代。

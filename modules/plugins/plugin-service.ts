@@ -508,6 +508,27 @@ export class PluginService {
       await Promise.all(rows.rows.map((r) => this.get(r.id))),
     );
   }
+  async imageExportTargets() {
+    const rows = await this.pool.query<{ id: string }>(
+      "SELECT id FROM plugins WHERE enabled=true ORDER BY name,id",
+    );
+    return imageExportTargets(
+      await Promise.all(rows.rows.map((r) => this.get(r.id))),
+    );
+  }
+  async assertImageExportAvailable(ids: string[], config: ImageReply) {
+    const plugins = await Promise.all(ids.map((id) => this.get(id)));
+    assertImageExportBinding(plugins, config);
+    const p = plugins.find((p) => p.id === config.pluginId)!;
+    const client = new PluginMcp(this.trustedHosts);
+    try {
+      await client.connect(p.config.connections[config.server]!);
+      if (client.imageExportVersion() !== 1)
+        pluginError("IMAGE_EXPORT_UNSUPPORTED");
+    } finally {
+      await client.close();
+    }
+  }
   async assertAttachmentAvailable(ids: string[], config: AttachmentHandling) {
     const plugins = await Promise.all(ids.map((id) => this.get(id)));
     assertAttachmentBinding(plugins, config);
@@ -594,3 +615,8 @@ export class PluginService {
     }
   }
 }
+import {
+  imageExportTargets,
+  assertImageExportBinding,
+} from "./plugin-image-exports.js";
+import type { ImageReply } from "../generated-images/image-policy.js";

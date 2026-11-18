@@ -88,5 +88,10 @@ COPY plugins/opensandbox/runtime/requirements.lock /opt/bubblepilot/requirements
 RUN pip install --no-cache-dir --require-hashes --only-binary=:all: -r /opt/bubblepilot/requirements.lock \
     && pip check && pip freeze --all > /opt/bubblepilot/python-packages.txt
 COPY plugins/opensandbox/runtime/capabilities.json /opt/bubblepilot/capabilities.json
+ADD --checksum=sha256:3c1d52850a78bc4ed0e9d05605b53ad21bb5313184f14bf72515d29cb98cda10 https://github.com/linebender/resvg/releases/download/v0.45.1/resvg-linux-x86_64.tar.gz /tmp/resvg.tar.gz
+RUN test "$(dpkg --print-architecture)" = amd64 && tar -xzf /tmp/resvg.tar.gz -C /usr/local/bin && rm /tmp/resvg.tar.gz && resvg --version
+ADD --checksum=sha256:2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b https://raw.githubusercontent.com/notofonts/noto-cjk/Serif2.003/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf /usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf
+COPY plugins/opensandbox/runtime/licenses/ /opt/bubblepilot/licenses/
+COPY --chmod=0555 plugins/opensandbox/runtime/render-svg.py /usr/local/bin/bp-render-svg
 WORKDIR /workspace
 CMD ["sleep", "infinity"]

@@ -22,6 +22,7 @@ import multipart from "@fastify/multipart";
 import { registerPluginRoutes } from "../modules/plugins/plugin-routes.js";
 import type { PluginService } from "../modules/plugins/plugin-service.js";
 import type { MemeDeliveryService } from "../modules/memes/meme-delivery-service.js";
+import type { GeneratedImageDelivery } from "../modules/generated-images/image-delivery.js";
 import { registerMemeRoutes } from "../modules/memes/meme-routes.js";
 import type { MemeService } from "../modules/memes/meme-service.js";
 import {
@@ -375,6 +376,7 @@ export interface ApplicationOptions {
   memes?: MemeService;
   plugins?: PluginService;
   memeDelivery?: MemeDeliveryService;
+  imageDelivery?: GeneratedImageDelivery;
   botIdentity?: BotIdentityService;
   memory?: MemoryService;
   logger?: boolean;
@@ -698,6 +700,7 @@ export function buildApplication(
     options.memory?.start();
     options.memes?.start();
     options.memeDelivery?.start();
+    options.imageDelivery?.start();
     options.messageRetention?.start();
     options.imageSummary?.worker.start();
   });
@@ -1353,6 +1356,45 @@ export function buildApplication(
       requireAuditedAdmin,
     );
 
+  if (options.imageDelivery) {
+    const images = options.imageDelivery.store;
+    application.get(
+      "/api/v1/executions/:executionId/generated-images",
+      { preHandler: requireAdmin },
+      async (request) => {
+        const { executionId } = z
+          .object({ executionId: z.string().uuid() })
+          .parse(request.params);
+        return { data: await images.list(executionId) };
+      },
+    );
+    application.get(
+      "/api/v1/executions/:executionId/generated-images/:artifactId/content",
+      { preHandler: requireSensitive("generated-image.read", "execution") },
+      async (request, reply) => {
+        const { executionId, artifactId } = z
+          .object({
+            executionId: z.string().uuid(),
+            artifactId: z.string().uuid(),
+          })
+          .parse(request.params);
+        const result = await images
+          .read(artifactId, executionId)
+          .catch(() => null);
+        if (!result)
+          throw new ApplicationError(
+            "GENERATED_IMAGE_UNAVAILABLE",
+            "图片已过期或不可用。",
+            404,
+          );
+        return reply
+          .header("Cache-Control", "private, no-store")
+          .header("X-Content-Type-Options", "nosniff")
+          .type("image/png")
+          .send(result.bytes);
+      },
+    );
+  }
   if (options.memeDelivery) {
     const deliveries = options.memeDelivery;
     application.get(
@@ -3428,6 +3470,11 @@ export function buildApplication(
                 409,
               );
             await options.plugins.assertAvailable(node.config.pluginIds);
+            if (node.config.imageReply?.enabled)
+              await options.plugins.assertImageExportAvailable(
+                node.config.pluginIds,
+                node.config.imageReply,
+              );
             if (node.config.attachmentHandling?.enabled)
               await options.plugins.assertAttachmentAvailable(
                 node.config.pluginIds,
@@ -4281,6 +4328,7 @@ export function buildApplication(
     await options.memory?.stop();
     await options.imageSummary?.worker.stop();
     await options.memeDelivery?.stop();
+    await options.imageDelivery?.stop();
     await options.memes?.stop();
     await options.memes?.repository.close();
     await options.messageRetention?.stop();

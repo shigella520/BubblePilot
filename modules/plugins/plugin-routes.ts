@@ -127,6 +127,11 @@ export function registerPluginRoutes(
     { preHandler: admin },
     async () => ({ data: await service.attachmentTargets() }),
   );
+  app.get(
+    "/api/v1/plugins/image-export-targets",
+    { preHandler: admin },
+    async () => ({ data: await service.imageExportTargets() }),
+  );
   app.get("/api/v1/plugins/:id", { preHandler: admin }, async (r) => ({
     data: await service.detail(id(r)),
   }));

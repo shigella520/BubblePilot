@@ -15,6 +15,7 @@ import {
 } from "./runtime.js";
 import { randomUUID } from "node:crypto";
 import type { Backend, Handle } from "./backend.js";
+import { ImageExportError, imageExportPath } from "./image-export.js";
 
 export class ToolError extends Error {}
 export class SandboxPool {
@@ -158,6 +159,36 @@ export class SandboxSession {
     }
   }
   private handle: Handle | undefined;
+  async exportImage(path: string, signal: AbortSignal) {
+    this.check();
+    if (!imageExportPath.safeParse(path).success)
+      throw new ToolError("image_path_denied");
+    if (!this.handle) throw new ToolError("prepare_sandbox_required");
+    if (!this.handle.exportImage)
+      throw new ToolError("image_export_unsupported");
+    this.busy = true;
+    const combined = AbortSignal.any([
+      signal,
+      this.abort.signal,
+      AbortSignal.timeout(30_000),
+    ]);
+    try {
+      combined.throwIfAborted();
+      const data = await this.handle.exportImage(path, combined);
+      combined.throwIfAborted();
+      return data;
+    } catch (error) {
+      if (!(error instanceof ImageExportError) || combined.aborted)
+        this.invalidate();
+      throw new ToolError(
+        error instanceof ImageExportError
+          ? error.message
+          : "image_export_failed",
+      );
+    } finally {
+      this.busy = false;
+    }
+  }
   private runtime: RuntimeInfo = { id: "unknown" };
   private creating = false;
   private claimed = false;
