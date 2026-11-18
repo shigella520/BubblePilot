@@ -1,3 +1,4 @@
+import type { PreparedImageInput } from "./native-image-input.js";
 import type { AttachmentContext } from "../attachments/attachment-catalogue.js";
 import type { AttachmentRunInput } from "../attachments/attachment-session.js";
 import type { RegisteredAgentTool } from "./agent-tool-registry.js";
@@ -655,6 +656,7 @@ export interface AiRouteRequest {
   runtimeTools?: RegisteredAgentTool[];
   idleDecision?: boolean;
   imageSession?: ChatImageSession | undefined;
+  preparedImageInput?: PreparedImageInput | undefined;
   allowMemes?: boolean;
   pluginIds?: string[];
   executionId: string | null;

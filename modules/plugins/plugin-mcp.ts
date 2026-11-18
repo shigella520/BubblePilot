@@ -354,14 +354,6 @@ export class PluginMcp {
     )
       pluginError("MCP_OUTPUT_INVALID", 502);
     const content = result.content;
-    if (
-      !Array.isArray(content) ||
-      content.some(
-        (c: unknown) =>
-          !c || typeof c !== "object" || !("type" in c) || c.type !== "text",
-      )
-    )
-      pluginError("UNSUPPORTED_RESULT");
     return {
       responseBytes: metrics.responseBytes,
       status: result.isError ? "error" : "success",

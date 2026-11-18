@@ -1053,10 +1053,9 @@ onMounted(async () => {
           <span class="state-badge">全局配置</span>
         </div>
         <p class="panel-description">
-          启用后，所有 AI
-          对话会自动携带当前消息图片、链接卡片主图和最近历史图片。图片由
-          BubblePilot 安全下载后通过 Provider
-          原生多模态协议发送；失败时降级为文本回复。
+          启用后，AI
+          对话可按下方来源设置携带聊天图片，也可接收已授权工具返回的图片。
+          两类图片共用总数量和体积额度；工具图片需要支持视觉的模型，失败时明确说明，不能静默去图后声称已看图。
         </p>
         <form
           v-if="imageInputSettings"

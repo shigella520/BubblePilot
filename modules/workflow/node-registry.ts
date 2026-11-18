@@ -1266,6 +1266,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
         executionId: context.executionId,
         nodeId: node.id,
         routeId: node.config.providerRouteId,
+        preparedImageInput: preparedImages,
         imageSession: preparedImages
           ? this.imageInput?.createSession({
               executionId: context.executionId,

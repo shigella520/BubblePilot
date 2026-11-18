@@ -1,12 +1,14 @@
+import type { ToolMedia } from "./tool-image-session.js";
 import { canonicalJson } from "../../app/canonical-json.js";
-import type { AiImageContentPart } from "./ai-types.js";
 import type { AgentToolContext } from "./agent-budget.js";
 import type { AiToolDefinition } from "./ai-types.js";
 export interface MultimodalToolResult {
   text: string;
+  media?: ToolMedia;
   diagnostics?: Record<string, unknown>;
-  /** Commit only after the complete text fits and the operation is still live. */
-  commit?: () => AiImageContentPart | null;
+  /** Non-media side effects; invoked only after the complete text fits. */
+  validateCommit?: () => Promise<void>;
+  commitResult?: () => void;
 }
 export interface RegisteredAgentTool {
   definition: AiToolDefinition;

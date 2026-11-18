@@ -101,6 +101,7 @@ export class PluginResultStore {
   prepare(
     result: {
       status: string;
+      images?: Array<Record<string, unknown>>;
       content: Array<{ type: string; text?: string }>;
       structuredContent?: unknown;
       errorCode?: string;
@@ -155,6 +156,7 @@ export class PluginResultStore {
         status: result.status,
         ...(result.errorCode ? { errorCode: result.errorCode } : {}),
         delivery: "partial",
+        ...(result.images?.length ? { images: result.images } : {}),
         result_ref: ref,
         source,
         totalCharacters: total,

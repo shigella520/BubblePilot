@@ -160,7 +160,10 @@ describe.runIf(url)("plugin lifecycle and isolated runtime", () => {
       const skillId = session.catalogue()[0]!.id;
       const result = await load.execute(JSON.stringify({ id: skillId }), ctx);
       expect(typeof result).toBe("object");
-      if (typeof result !== "string") result.commit?.();
+      if (typeof result !== "string") {
+        await result.validateCommit?.();
+        result.commitResult?.();
+      }
       expect(
         await registry
           .get("read_plugin_reference")!

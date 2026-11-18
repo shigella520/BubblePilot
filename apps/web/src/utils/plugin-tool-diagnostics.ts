@@ -107,3 +107,56 @@ export function pluginDeliveryLabel(details: Details) {
     return `找到 ${details.matchCount} 处字面匹配`;
   return "结果已完整交付";
 }
+
+export function pluginImageRows(
+  details: Details,
+  attempts: Array<{
+    status: string;
+    diagnostics?: {
+      imageInputs?: {
+        dispatched: boolean;
+        images: Array<{ imageInputId: string }>;
+      } | null;
+    } | null;
+  }> = [],
+) {
+  if (!Array.isArray(details?.images)) return [];
+  return details.images.map((value, index) => {
+    const image = record(value);
+    const id = typeof image.imageInputId === "string" ? image.imageInputId : "";
+    const sent = attempts.filter(
+      (attempt) =>
+        attempt.diagnostics?.imageInputs?.dispatched &&
+        attempt.diagnostics.imageInputs.images.some(
+          (item) => item.imageInputId === id,
+        ),
+    );
+    const state =
+      image.status === "omitted"
+        ? `未提供图片：${typeof image.reason === "string" ? image.reason : "unknown"}`
+        : sent.some((attempt) => attempt.status === "succeeded")
+          ? "已携图请求成功（不代表识别正确）"
+          : sent.length
+            ? "已发起携图请求；结果请查看对应调用"
+            : image.status === "committed" ||
+                image.status === "already-in-context"
+              ? "已纳入运行上下文；未记录实际发送"
+              : "图片已准备，未提交";
+    return {
+      key: `${id}-${index}`,
+      id,
+      anchorId: image.status === "committed" ? id : "",
+      block:
+        typeof image.block_index === "number"
+          ? image.block_index + 1
+          : index + 1,
+      state,
+      dimensions:
+        typeof image.width === "number" && typeof image.height === "number"
+          ? `${image.width} × ${image.height}`
+          : null,
+      bytes: typeof image.bytes === "number" ? image.bytes : null,
+      firstFrameOnly: image.firstFrameOnly === true,
+    };
+  });
+}

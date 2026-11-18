@@ -1,3 +1,5 @@
+import { prepareToolImages, type ToolMedia } from "../ai/tool-image-session.js";
+import type { RunImageSession } from "../ai/run-image-session.js";
 import { compareTools, toolContractHash } from "./plugin-tool-sync.js";
 import type { AttachmentHandling } from "../attachments/attachment-policy.js";
 import { assertAttachmentBinding } from "./plugin-attachments.js";
@@ -214,7 +216,11 @@ export class PluginSession {
       },
     };
   }
-  register(registry: AgentToolRegistry) {
+  register(
+    registry: AgentToolRegistry,
+    visual?: RunImageSession,
+    capable: () => Promise<boolean> = () => Promise.resolve(false),
+  ) {
     const register = (
       name: string,
       description: string,
@@ -226,6 +232,8 @@ export class PluginSession {
         text: string;
         metadata: Record<string, unknown>;
         commit?: () => null;
+        media?: ToolMedia;
+        authorize?: () => Promise<void>;
       }>,
       metadata: Record<string, unknown> = {},
     ) =>
@@ -268,7 +276,17 @@ export class PluginSession {
                     }
                   : {}),
               },
-              ...(result.commit ? { commit: result.commit } : {}),
+              ...(result.media ? { media: result.media } : {}),
+              validateCommit: async () => {
+                await this.guard?.();
+                await result.authorize?.();
+              },
+              commitResult: () => {
+                ctx.signal.throwIfAborted();
+                if (this.closed) pluginError("SESSION_INVALIDATED");
+                if (Date.now() >= ctx.deadline) pluginError("MCP_TIMEOUT");
+                result.commit?.();
+              },
             };
           } catch (e) {
             const code = ctx.signal.aborted
@@ -477,8 +495,31 @@ export class PluginSession {
             ctx.signal.throwIfAborted();
             if (Date.now() >= ctx.deadline) pluginError("MCP_TIMEOUT");
             const { responseBytes, ...payload } = result;
+            const media = await prepareToolImages(
+              payload.content,
+              result.status === "error",
+              visual,
+              capable,
+              {
+                toolCallId: ctx.toolCallId ?? "",
+                tool: tool.definition.name,
+                server: tool.server,
+                pluginId: p.id,
+              },
+              ctx,
+            );
+            const normalized = normalizeMcpResult({
+              ...payload,
+              content: media.content,
+            });
             const prepared = this.results.prepare(
-              normalizeMcpResult(payload),
+              {
+                ...normalized,
+                ...(media.images.length ? { images: media.images } : {}),
+                ...(media.partial && result.status !== "error"
+                  ? { status: "partial" }
+                  : {}),
+              },
               {
                 pluginId: p.id,
                 pluginName: p.name,
@@ -490,12 +531,19 @@ export class PluginSession {
                 ...(result.errorCode ? { errorCode: result.errorCode } : {}),
               },
               () => this.check(p, undefined, tool),
-              ctx.maxOutputCharacters,
+              ctx.maxOutputCharacters -
+                media.media.parts.reduce(
+                  (n, part) => n + part.label.length,
+                  media.media.parts.length ? 256 : 0,
+                ),
             );
             return {
               ...prepared,
+              media: media.media,
+              authorize: () => this.check(p, undefined, tool),
               metadata: {
                 ...prepared.metadata,
+                ...(media.images.length ? { images: media.images } : {}),
                 // Serialized validated payload bytes, not transport/SSE framing.
                 responseBytes,
                 responsePayloadBytes: Buffer.byteLength(

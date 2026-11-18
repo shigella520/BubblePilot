@@ -194,7 +194,8 @@ describe("runtime chat image access", () => {
     const result = await f.invoke(JSON.stringify({ image_ref: f.ref }));
     expect(parseResult(result.text).status).toBe("loaded");
     expect(f.session.snapshot().count.used).toBe(0);
-    expect(result.commit!()).not.toBeNull();
+    result.media!.commit();
+    result.media!.commit();
     await f.session.flushAudit();
     expect(f.session.snapshot()).toMatchObject({
       count: { used: 1 },
@@ -227,7 +228,7 @@ describe("runtime chat image access", () => {
     });
     const result = await f.invoke(JSON.stringify({ image_ref: f.ref }));
     expect(parseResult(result.text).status).toBe("loaded");
-    result.commit!();
+    result.media!.commit();
     expect(await f.session.validate()).toBe(true);
     const reused = await f.invoke(JSON.stringify({ image_ref: f.ref }));
     expect(parseResult(reused.text).status).toBe("already-loaded");
@@ -262,7 +263,7 @@ describe("runtime chat image access", () => {
       },
     ]);
     const result = await f.invoke('{"image_ref":"I-history"}');
-    result.commit!();
+    result.media!.commit();
     expect(f.resolve).toHaveBeenCalledWith(
       expect.anything(),
       "fictional-old",
@@ -297,7 +298,7 @@ describe("runtime chat image access", () => {
     f.authorized.mockResolvedValueOnce(false);
     const output = await f.invoke(JSON.stringify({ image_ref: f.ref }));
     expect(parseResult(output.text).reason).toBe("source-unavailable");
-    expect(output.commit).toBeUndefined();
+    expect(output.media).toBeUndefined();
     expect(f.session.snapshot().count.used).toBe(0);
   });
   it("does not submit an image if text or byte budgets cannot fit", async () => {
@@ -305,7 +306,7 @@ describe("runtime chat image access", () => {
     f.context.maxOutputCharacters = 10;
     const output = await f.invoke(JSON.stringify({ image_ref: f.ref }));
     expect(parseResult(output.text).reason).toBe("tool-output");
-    expect(output.commit).toBeUndefined();
+    expect(output.media).toBeUndefined();
     const g = fixture({ maxTotalBytes: 1 });
     expect(
       parseResult((await g.invoke(JSON.stringify({ image_ref: g.ref }))).text)
