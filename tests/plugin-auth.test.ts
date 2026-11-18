@@ -45,6 +45,9 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
   };
   const authRepository = new InMemoryAuthRepository();
 
+  const configure = vi
+    .fn()
+    .mockResolvedValue({ config: { autoSyncTools: true } });
   const mutate = vi.fn().mockResolvedValue({ enabled: true });
   const stage = vi.fn().mockResolvedValue({
     id: "fictional-import",
@@ -56,6 +59,7 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
     .fn()
     .mockResolvedValue({ catalogueCharacters: 64000, version: 2 });
   const plugins = {
+    configure,
     updateRuntimeSettings,
     runtimeSettings: () =>
       Promise.resolve({ catalogueCharacters: 64000, version: 1 }),
@@ -146,6 +150,21 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
     };
     expect((await app.inject(request)).statusCode).toBe(403);
     expect(mutate).not.toHaveBeenCalled();
+    const syncRequest = {
+      method: "PUT" as const,
+      url: "/api/v1/plugins/11111111-1111-4111-8111-111111111111/config",
+      headers,
+      payload: {
+        expectedVersion: 1,
+        connections: {},
+        approved: [],
+        disabledTools: [],
+        disabledSkills: [],
+        autoSyncTools: true,
+      },
+    };
+    expect((await app.inject(syncRequest)).statusCode).toBe(403);
+    expect(configure).not.toHaveBeenCalled();
     const importRequest = {
       method: "POST" as const,
       url: "/api/v1/plugins/imports",
@@ -166,6 +185,29 @@ it("plugin management enforces admin, sensitive grant, and audit", async () => {
     ).toBe(200);
     expect((await app.inject(request)).statusCode).toBe(200);
     expect(mutate).toHaveBeenCalledOnce();
+    expect((await app.inject(syncRequest)).statusCode).toBe(200);
+    expect(configure).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      1,
+      {},
+      [],
+      [],
+      [],
+      true,
+    );
+    expect(
+      (
+        await app.inject({
+          ...syncRequest,
+          payload: { ...syncRequest.payload, autoSyncTools: "true" },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      authRepository.auditEvents.some(
+        (e) => e.action === "plugin.configure" && e.outcome === "succeeded",
+      ),
+    ).toBe(true);
     expect((await app.inject(settingsRequest)).statusCode).toBe(200);
     expect(updateRuntimeSettings).toHaveBeenCalledOnce();
     expect(

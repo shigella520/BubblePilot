@@ -175,6 +175,7 @@ export function registerPluginRoutes(
           approved: z.array(z.string()),
           disabledSkills: z.array(z.string()),
           disabledTools: z.array(z.string()),
+          autoSyncTools: z.boolean().optional(),
         })
         .strict()
         .parse(r.body);
@@ -186,6 +187,7 @@ export function registerPluginRoutes(
           b.approved,
           b.disabledSkills,
           b.disabledTools,
+          b.autoSyncTools,
         ),
       };
     },

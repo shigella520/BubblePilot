@@ -3586,7 +3586,27 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object }
+            schema:
+              type: object
+              required:
+                [
+                  expectedVersion,
+                  connections,
+                  approved,
+                  disabledSkills,
+                  disabledTools,
+                ]
+              additionalProperties: false
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                connections:
+                  { type: object, additionalProperties: { type: object } }
+                approved: { type: array, items: { type: string } }
+                disabledSkills: { type: array, items: { type: string } }
+                disabledTools: { type: array, items: { type: string } }
+                autoSyncTools:
+                  type: boolean
+                  description: Opt in to hourly compatible updates for already approved tools; absent retains the saved setting (legacy default false). Does not authorize new tools, addresses, or credentials.
       responses:
         "200":
           description: Operation result in data envelope

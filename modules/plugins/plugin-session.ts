@@ -1,3 +1,4 @@
+import { compareTools, toolContractHash } from "./plugin-tool-sync.js";
 import type { AttachmentHandling } from "../attachments/attachment-policy.js";
 import { assertAttachmentBinding } from "./plugin-attachments.js";
 import {
@@ -29,6 +30,7 @@ import {
 } from "./plugin-types.js";
 export class PluginSession {
   private closed = false;
+  private readonly reviewBlocked = new Set<string>();
   private readonly results = new PluginResultStore();
   private readonly clients = new Map<string, PluginMcp>();
   private readonly loaded = new Set<string>();
@@ -85,11 +87,15 @@ export class PluginSession {
         !current.config.tools.some(
           (t) =>
             t.server === tool.server &&
-            t.definition.name === tool.definition.name,
+            t.definition.name === tool.definition.name &&
+            compareTools(tool, t).kind !== "review",
         ) ||
         pinned.config.disabledTools.includes(key) ||
         !pinned.config.tools.some(
-          (t) => t.server === tool.server && t.hash === tool.hash,
+          (t) =>
+            t.server === tool.server &&
+            t.definition.name === tool.definition.name &&
+            compareTools(tool, t).kind !== "review",
         ) ||
         digest(current.config.connections[tool.server]) !==
           digest(p.config.connections[tool.server]) ||
@@ -113,16 +119,53 @@ export class PluginSession {
       this.clients.set(key, client);
       await client.connect(p.config.connections[tool.server]!, signal);
     }
-    const tools = await client.discover(tool.server, signal);
-    if (!tools.some((t) => t.hash === tool.hash)) {
-      await this.service.markToolReview(
-        p.id,
-        p.revision,
-        `${tool.server}/${tool.definition.name}`,
-      );
+    const toolKey = `${p.id}:${tool.server}/${tool.definition.name}`;
+    if (this.reviewBlocked.has(toolKey))
       pluginError("TOOL_REVIEW_REQUIRED", 409);
+    const current = await this.service.get(p.id);
+    const tools = await client.discover(tool.server, signal);
+    const remote = tools.find(
+      (t) =>
+        t.server === tool.server && t.definition.name === tool.definition.name,
+    );
+    const comparison = compareTools(tool, remote);
+    if (
+      comparison.kind === "unchanged" ||
+      (comparison.kind === "format" && !current.config.autoSyncTools)
+    ) {
+      await this.check(p, undefined, tool);
+      return client;
     }
-    return client;
+    if (current.config.autoSyncTools) {
+      await this.service.syncTools(p.id, "call", {
+        plugin: current,
+        server: tool.server,
+        tools,
+      });
+      const saved = await this.service.get(p.id);
+      const approved = saved.config.tools.find(
+        (t) =>
+          t.server === tool.server &&
+          t.definition.name === tool.definition.name,
+      );
+      if (
+        (comparison.kind === "compatible" || comparison.kind === "format") &&
+        remote &&
+        approved &&
+        toolContractHash(approved) === toolContractHash(remote)
+      ) {
+        await this.check(p, undefined, tool);
+        return client;
+      }
+    }
+    this.reviewBlocked.add(toolKey);
+    await this.service.markToolReview(
+      p.id,
+      p.revision,
+      `${tool.server}/${tool.definition.name}`,
+      current.version,
+    );
+    pluginError("TOOL_REVIEW_REQUIRED", 409);
   }
   attachmentChannel(config: AttachmentHandling) {
     assertAttachmentBinding(this.plugins, config);
@@ -392,7 +435,18 @@ export class PluginSession {
         if (
           p.config.disabledTools.includes(
             `${tool.server}/${tool.definition.name}`,
-          )
+          ) ||
+          (p.pendingReview?.includes(
+            `${tool.server}/${tool.definition.name}`,
+          ) &&
+            p.toolSyncHistory?.some((record) =>
+              record.changes.some(
+                (change) =>
+                  change.tool === `${tool.server}/${tool.definition.name}` &&
+                  change.kind === "review" &&
+                  change.before === toolContractHash(tool),
+              ),
+            ))
         )
           continue;
         const callTimeoutMs = connectionCallTimeoutMs(

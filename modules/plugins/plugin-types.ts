@@ -1,3 +1,4 @@
+import type { ToolSyncRecord } from "./plugin-tool-sync.js";
 import { z } from "zod";
 import { ApplicationError } from "../../app/errors.js";
 import type { AiToolDefinition } from "../ai/ai-types.js";
@@ -72,6 +73,7 @@ export function connectionCallTimeoutMs(connection?: Connection) {
   return (connection?.callTimeoutSeconds ?? 45) * 1000;
 }
 export interface PluginConfiguration {
+  autoSyncTools?: boolean;
   connections: Record<string, Connection>;
   tools: ApprovedTool[];
   disabledSkills: string[];
@@ -85,6 +87,9 @@ export interface InstalledPlugin {
   revision: string;
   package: PluginPackage;
   config: PluginConfiguration;
+  pendingReview?: string[];
+  toolSyncLastCheck?: string | null;
+  toolSyncHistory?: ToolSyncRecord[];
 }
 export const importSchema = z
   .object({
