@@ -314,3 +314,32 @@ it("passes diagnostics through the runtime settings gateway for both send paths"
     timeoutMs: 12_000,
   });
 });
+
+it.each([
+  [
+    "示例结果.xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ],
+  ["report.pdf", "application/pdf"],
+  ["results.zip", "application/zip"],
+  ["result.txt", "text/plain"],
+])(
+  "sends %s using the original filename, MIME and bytes",
+  async (filename, mimeType) => {
+    const bytes = Buffer.from("fictional attachment bytes");
+    const { gateway } = setup(async (_url, init) => {
+      const form = init?.body as FormData;
+      expect(form.get("name")).toBe(filename);
+      const file = form.get("attachment") as File;
+      expect(file.name).toBe(filename);
+      expect(file.type).toBe(mimeType);
+      expect(Buffer.from(await file.arrayBuffer())).toEqual(bytes);
+      return new Response(
+        JSON.stringify({ data: { guid: "fictional-confirmed" } }),
+      );
+    });
+    expect(
+      await gateway.sendAttachment({ ...command, filename, mimeType, bytes }),
+    ).toMatchObject({ status: "confirmed" });
+  },
+);

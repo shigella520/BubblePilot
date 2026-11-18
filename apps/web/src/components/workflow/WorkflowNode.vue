@@ -80,7 +80,9 @@ function branchClass(name: string): string {
           :position="Position.Left"
         />
         <span>{{ port.label }}</span
-        ><em>{{ port.type }}</em>
+        ><em>{{
+          port.type === "generatedImage" ? "attachment" : port.type
+        }}</em>
       </div>
       <div
         v-for="port in data.block.outputs"
@@ -88,7 +90,9 @@ function branchClass(name: string): string {
         class="workflow-port-row workflow-port-row-output"
       >
         <span>{{ port.label }}</span
-        ><em>{{ port.type }}</em>
+        ><em>{{
+          port.type === "generatedImage" ? "attachment" : port.type
+        }}</em>
         <Handle
           :id="`output:${port.name}`"
           class="workflow-handle data-output"

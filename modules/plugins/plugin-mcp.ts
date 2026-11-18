@@ -2,6 +2,8 @@ import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import {
   imageExportProtocol,
+  fileExportProtocol,
+  generatedFileLimits,
   generatedImageLimits,
   GeneratedImageError,
 } from "../generated-images/image-policy.js";
@@ -103,15 +105,26 @@ export class PluginMcp {
       this.client.getServerCapabilities()?.experimental?.[imageExportProtocol];
     return value && "version" in value && value.version === 1 ? 1 : null;
   }
-  async exportImage(path: string, signal: AbortSignal): Promise<Buffer> {
+  fileExportVersion() {
+    const value =
+      this.client.getServerCapabilities()?.experimental?.[fileExportProtocol];
+    return value && "version" in value && value.version === 1 ? 1 : null;
+  }
+  async exportImage(
+    path: string,
+    signal: AbortSignal,
+    file = false,
+  ): Promise<Buffer> {
     if (
-      this.imageExportVersion() !== 1 ||
+      (file ? this.fileExportVersion() : this.imageExportVersion()) !== 1 ||
       !this.transport?.sessionId ||
       !this.binaryFetch ||
       !this.connectionUrl
     )
       throw new GeneratedImageError("IMAGE_EXPORT_UNSUPPORTED");
-    const url = this.connectionUrl.replace(/\/$/u, "") + "/image-exports";
+    const url =
+      this.connectionUrl.replace(/\/$/u, "") +
+      (file ? "/file-exports" : "/image-exports");
     const headers = {
       ...this.authHeaders,
       "mcp-session-id": this.transport.sessionId,
@@ -162,7 +175,8 @@ export class PluginMcp {
     if (
       !Number.isSafeInteger(length) ||
       length < 1 ||
-      length > generatedImageLimits.bytes ||
+      length >
+        (file ? generatedFileLimits.bytes : generatedImageLimits.bytes) ||
       !expected ||
       !/^[a-f0-9]{64}$/.test(expected)
     ) {
@@ -389,6 +403,9 @@ export class PluginMcp {
             ? (1 as const)
             : undefined;
         tools.push({
+          ...(this.fileExportVersion() === 1 && tool.name === "prepare_sandbox"
+            ? { fileExportVersion: 1 as const }
+            : {}),
           ...(this.imageExportVersion() === 1 && tool.name === "prepare_sandbox"
             ? { imageExportVersion: 1 as const }
             : {}),

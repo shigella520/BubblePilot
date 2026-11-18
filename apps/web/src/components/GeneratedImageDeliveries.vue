@@ -4,8 +4,11 @@ import { apiRequest, downloadFile } from "../services/api";
 const props = defineProps<{ executionId: string; sensitiveActive: boolean }>();
 interface Item {
   id: string;
-  width: number;
-  height: number;
+  width: number | null;
+  height: number | null;
+  filename: string;
+  mimeType: string;
+  fileType: string;
   size: number;
   state: string;
   deliveryStatus: string | null;
@@ -37,7 +40,7 @@ watch(
       if (version === generation) items.value = result;
     } catch {
       if (version === generation)
-        error.value = "生成图片记录加载失败，请重新打开详情。";
+        error.value = "附件记录加载失败，请重新打开详情。";
     }
   },
   { immediate: true },
@@ -62,11 +65,20 @@ async function preview(item: Item) {
       `/api/v1/executions/${props.executionId}/generated-images/${item.id}/content`,
     );
     if (version !== previewGeneration || !props.sensitiveActive) return;
-    if (previews.value[item.id]) URL.revokeObjectURL(previews.value[item.id]);
-    previews.value[item.id] = URL.createObjectURL(blob);
+    if (item.mimeType.startsWith("image/")) {
+      if (previews.value[item.id]) URL.revokeObjectURL(previews.value[item.id]);
+      previews.value[item.id] = URL.createObjectURL(blob);
+    } else {
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = item.filename;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
   } catch {
     if (version === previewGeneration)
-      error.value = "图片已过期、不可用或需要重新解锁敏感操作。";
+      error.value = "附件已过期、不可用或需要重新解锁敏感操作。";
   } finally {
     if (version === previewGeneration) busy.value = null;
   }
@@ -85,13 +97,16 @@ const states: Record<string, string> = {
 </script>
 <template>
   <section v-if="items.length || error" class="generated-images">
-    <h4>生成图片回复</h4>
+    <h4>附件回复</h4>
     <p v-if="error" role="alert">{{ error }}</p>
     <article v-for="item in items" :key="item.id">
       <div class="generated-image-row">
         <span
-          >PNG · {{ item.width }} × {{ item.height }} ·
-          {{ Math.ceil(item.size / 1024) }} KiB</span
+          >{{ item.filename }} · {{ item.fileType.toUpperCase() }}
+          <template v-if="item.width && item.height">
+            · {{ item.width }} × {{ item.height }}</template
+          >
+          · {{ Math.ceil(item.size / 1024) }} KiB</span
         ><strong>{{
           states[item.deliveryStatus ?? item.state] ?? item.state
         }}</strong
@@ -101,7 +116,13 @@ const states: Record<string, string> = {
           :disabled="!sensitiveActive || busy !== null"
           @click="preview(item)"
         >
-          {{ busy === item.id ? "加载中…" : "预览" }}
+          {{
+            busy === item.id
+              ? "加载中…"
+              : item.mimeType.startsWith("image/")
+                ? "预览"
+                : "下载"
+          }}
         </button>
       </div>
       <p v-if="item.errorCode">{{ item.errorCode }}</p>
@@ -110,7 +131,7 @@ const states: Record<string, string> = {
           !sensitiveActive && (item.state === 'ready' || item.state === 'bound')
         "
       >
-        解锁敏感操作后可查看图片。
+        解锁敏感操作后可预览图片或下载文件。
       </p>
       <img
         v-if="previews[item.id]"
@@ -148,6 +169,14 @@ article {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .generated-image-row span {
+    flex: 1 0 100%;
+  }
+  .generated-image-row button {
+    margin-left: auto;
+  }
 }
 p {
   font-size: 13px;

@@ -9,10 +9,16 @@ paths:
   /api/v1/plugins/image-export-targets:
     get:
       operationId: listImageExportTargets
-      description: Approved sandbox services advertising image export v1; metadata only. Does not enable workflows or create sandboxes.
+      description: Approved sandbox services with PNG or file export v1; returns allowed fileTypes. Legacy path retained. Does not enable workflows or create sandboxes.
       security: [{ sessionAuth: [] }]
       responses:
-        "200": { description: List of pluginId, pluginName, server and version }
+        "200":
+          {
+            description: List of pluginId,
+            pluginName,
+            server,
+            version and fileTypes,
+          }
         "401": { $ref: "#/components/responses/Error" }
   /api/v1/executions/{executionId}/generated-images:
     parameters:
@@ -22,10 +28,18 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: listExecutionGeneratedImages
-      description: Metadata and independent image delivery status; never returns file bytes or storage paths.
+      description: Generated attachment metadata and independent delivery status; legacy path retained. Never returns file bytes or storage paths.
       security: [{ sessionAuth: [] }]
       responses:
-        "200": { description: Generated PNG metadata and expiry }
+        "200":
+          {
+            description: Attachment filename,
+            mimeType,
+            fileType,
+            nullable dimensions,
+            size,
+            delivery status and expiry,
+          }
         "401": { $ref: "#/components/responses/Error" }
   /api/v1/executions/{executionId}/generated-images/{artifactId}/content:
     parameters:
@@ -39,13 +53,13 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: readExecutionGeneratedImage
-      description: Requires sensitive unlock, audits access, and verifies execution ownership. Private no-store PNG; expired or deleted files return 404.
+      description: Requires sensitive unlock, audits access, and verifies execution ownership. Private no-store attachment with verified MIME and filename; expired or deleted files return 404.
       security: [{ sessionAuth: [] }]
       responses:
         "200":
-          description: Original PNG
+          description: Original validated attachment with Content-Disposition attachment and nosniff
           content:
-            image/png:
+            application/octet-stream:
               schema: { type: string, format: binary }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }

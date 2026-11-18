@@ -14,6 +14,8 @@ import { parseTriggerConditions } from "../modules/workflow/trigger-matcher.js";
 import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/webhook-adapter.js";
 import { newMessageWebhook } from "./fixtures/bluebubbles.js";
 import { Pool } from "pg";
+import { pluginZip } from "./support/plugin-zip.js";
+import { replyFileTypes } from "../modules/generated-images/image-policy.js";
 import type {
   SendAttachmentCommand,
   SendReplyCommand,
@@ -240,6 +242,158 @@ describe.runIf(!!url)("generated PNG persistence and delivery", () => {
       ).toBe("unknown");
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+  it("persists generic files with original names, sends bytes once, and reads legacy PNG keys", async () => {
+    const root = await mkdtemp(join(tmpdir(), "bp-artifacts-"));
+    const store = new GeneratedImageStore(pool, root);
+    const run = await execution();
+    const owner = {
+      ...run,
+      nodeId: "ai",
+      runId: randomUUID(),
+      pluginId: randomUUID(),
+      server: "fictional",
+    };
+    const send = vi
+      .fn<(command: SendAttachmentCommand) => Promise<DeliveryResult>>()
+      .mockResolvedValue({
+        status: "confirmed",
+        providerMessageId: "fictional-file",
+      });
+    const gateway = {
+      sendReply: vi.fn().mockResolvedValue({
+        status: "confirmed",
+        providerMessageId: "fictional-text",
+      }),
+      sendAttachment: send,
+    };
+    const delivery = new GeneratedImageDelivery(
+      pool,
+      store,
+      gateway,
+      new SettingsCipher("fictional-key-longer-than-thirty-two"),
+    );
+    try {
+      await store.init();
+      const fixtures = [
+        ["report.txt", Buffer.from("fictional result")],
+        ["report.md", Buffer.from("# fictional")],
+        ["report.csv", Buffer.from("name,count\nfictional,3\n")],
+        ["report.pdf", Buffer.from("%PDF-1.7\nfictional\n%%EOF")],
+        [
+          "report.xlsx",
+          pluginZip({
+            "[Content_Types].xml":
+              '<Types><Override ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>',
+            "xl/workbook.xml":
+              '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>',
+          }),
+        ],
+        ["report.zip", pluginZip({ "result.txt": "fictional" })],
+      ] as const;
+      for (const [filename, bytes] of fixtures) {
+        const asset = await store.save(
+          owner,
+          bytes,
+          new AbortController().signal,
+          { filename, allowedTypes: replyFileTypes },
+        );
+        expect(asset.filename).toBe(filename);
+        expect(asset.width).toBeNull();
+        const restored = await new GeneratedImageStore(pool, root).read(
+          asset.id,
+          run.executionId,
+        );
+        expect(restored.bytes).toEqual(bytes);
+        const input = {
+          ...run,
+          nodeId: filename,
+          text: "fictional result",
+          image: store.ref(asset),
+        };
+        await delivery.deliver(input, randomUUID());
+        const count = send.mock.calls.length;
+        await delivery.deliver(input, randomUUID());
+        expect(send).toHaveBeenCalledTimes(count);
+        expect(send.mock.calls.at(-1)?.[0]).toMatchObject({
+          filename,
+          mimeType: asset.mime_type,
+          bytes,
+        });
+      }
+      const png = await sharp({
+        create: { width: 20, height: 10, channels: 3, background: "red" },
+      })
+        .png()
+        .toBuffer();
+      const legacy = await store.save(owner, png, new AbortController().signal);
+      const oldKey = legacy.storage_key.replace(/\.file$/, ".png");
+      await writeFile(join(root, oldKey), png, { mode: 0o600 });
+      await pool.query(
+        "UPDATE generated_image_artifacts SET storage_key=$2 WHERE id=$1",
+        [legacy.id, oldKey],
+      );
+      expect((await store.read(legacy.id, run.executionId)).bytes).toEqual(png);
+      await pool.query(
+        "UPDATE generated_image_artifacts SET expires_at=now()-interval '1 second' WHERE execution_id=$1",
+        [run.executionId],
+      );
+      await store.cleanup();
+      await expect(store.read(legacy.id, run.executionId)).rejects.toThrow(
+        "GENERATED_IMAGE_UNAVAILABLE",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  it("migrates 0073 PNG rows without changing their identities or widening workflow permissions", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const schema = `artifact_migration_${randomUUID().replaceAll("-", "")}`;
+      await client.query(`CREATE SCHEMA ${schema}`);
+      await client.query(`SET LOCAL search_path TO ${schema}`);
+      await client.query(
+        "CREATE TABLE workflow_executions(id uuid PRIMARY KEY); CREATE TABLE outbound_deliveries(id uuid PRIMARY KEY,kind text NOT NULL CHECK(kind IN ('text','meme')))",
+      );
+      await client.query(
+        await readFile("migrations/0073_generated_image_replies.sql", "utf8"),
+      );
+      const id = randomUUID(),
+        executionId = randomUUID();
+      await client.query("INSERT INTO workflow_executions VALUES($1)", [
+        executionId,
+      ]);
+      await client.query(
+        "INSERT INTO generated_image_artifacts(id,execution_id,node_id,run_id,plugin_id,server,provider_chat_id,storage_key,sha256,size,width,height,state,expires_at) VALUES($1,$2,'ai',$3,$4,'fixture','chat','old.png',$5,10,20,10,'bound',now()+interval '1 day')",
+        [id, executionId, randomUUID(), randomUUID(), "a".repeat(64)],
+      );
+      await client.query(
+        await readFile(
+          "migrations/0074_generated_attachment_replies.sql",
+          "utf8",
+        ),
+      );
+      expect(
+        (
+          await client.query(
+            "SELECT id,filename,mime_type,file_type,width,height,storage_key FROM generated_image_artifacts WHERE id=$1",
+            [id],
+          )
+        ).rows[0],
+      ).toEqual({
+        id,
+        filename: "chart.png",
+        mime_type: "image/png",
+        file_type: "png",
+        width: 20,
+        height: 10,
+        storage_key: "old.png",
+      });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
     }
   });
 });

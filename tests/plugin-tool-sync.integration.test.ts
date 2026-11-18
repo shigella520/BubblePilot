@@ -156,7 +156,7 @@ describe.runIf(databaseUrl)("automatic approved tool synchronization", () => {
       .find((t) => t.name.startsWith("ext_"))!.name;
     return registry.get(name)!.execute(
       JSON.stringify({
-        arguments_json: JSON.stringify({ query: "library" }),
+        query: "library",
       }),
       {
         signal: AbortSignal.timeout(5000),

@@ -11,10 +11,11 @@ import {
 import { join, resolve } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import type { Pool } from "pg";
-import sharp from "sharp";
+import { validateReplyFile } from "./file-validation.js";
+export { validateGeneratedPng } from "./file-validation.js";
 import {
   GeneratedImageError,
-  generatedImageLimits,
+  type ReplyFileType,
   type GeneratedImageRef,
 } from "./image-policy.js";
 export interface ImageOwner {
@@ -34,44 +35,13 @@ export interface ImageArtifact {
   storage_key: string;
   sha256: string;
   size: number;
-  width: number;
-  height: number;
+  width: number | null;
+  height: number | null;
+  filename: string;
+  mime_type: string;
+  file_type: ReplyFileType;
   state: "ready" | "bound" | "deleting" | "deleted";
   expires_at: Date;
-}
-export async function validateGeneratedPng(bytes: Buffer) {
-  if (!bytes.length || bytes.length > generatedImageLimits.bytes)
-    throw new GeneratedImageError("IMAGE_TOO_LARGE");
-  try {
-    const image = sharp(bytes, {
-      limitInputPixels: generatedImageLimits.pixels,
-      failOn: "warning",
-    });
-    const metadata = await image.metadata();
-    if (metadata.format !== "png" || !metadata.width || !metadata.height)
-      throw new Error();
-    // APNG contains acTL even for one displayed frame. Reject the format rather than flattening it.
-    for (let offset = 8; offset + 12 <= bytes.length;) {
-      const length = bytes.readUInt32BE(offset);
-      if (length > bytes.length - offset - 12) throw new Error();
-      if (bytes.toString("ascii", offset + 4, offset + 8) === "acTL")
-        throw new GeneratedImageError("IMAGE_ANIMATED");
-      offset += length + 12;
-    }
-    if (Math.max(metadata.width, metadata.height) > generatedImageLimits.edge)
-      throw new GeneratedImageError("IMAGE_PIXELS_EXCEEDED");
-    await image.timeout({ seconds: 5 }).raw().toBuffer();
-    return {
-      width: metadata.width,
-      height: metadata.height,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      size: bytes.length,
-    };
-  } catch (error) {
-    throw error instanceof GeneratedImageError
-      ? error
-      : new GeneratedImageError("IMAGE_INVALID");
-  }
 }
 export class GeneratedImageStore {
   constructor(
@@ -104,7 +74,7 @@ export class GeneratedImageStore {
       throw new Error("Generated image storage must be private");
   }
   private file(key: string) {
-    if (!/^[a-f0-9-]{36}\.png(?:\.partial)?$/.test(key))
+    if (!/^[a-f0-9-]{36}\.(?:png|file)(?:\.partial)?$/.test(key))
       throw new GeneratedImageError("GENERATED_IMAGE_UNAVAILABLE");
     return join(this.root, key);
   }
@@ -112,11 +82,20 @@ export class GeneratedImageStore {
     owner: ImageOwner,
     bytes: Buffer,
     signal: AbortSignal,
+    options: { filename: string; allowedTypes: readonly ReplyFileType[] } = {
+      filename: "chart.png",
+      allowedTypes: ["png"],
+    },
   ): Promise<ImageArtifact> {
-    const image = await validateGeneratedPng(bytes);
+    const image = await validateReplyFile(
+      bytes,
+      options.filename,
+      options.allowedTypes,
+      signal,
+    );
     signal.throwIfAborted();
     const client = await this.pool.connect();
-    const key = `${randomUUID()}.png`;
+    const key = `${randomUUID()}.file`;
     let written = false,
       committed = false;
     try {
@@ -132,8 +111,8 @@ export class GeneratedImageStore {
         throw new GeneratedImageError("IMAGE_TRIGGER_NOT_AUTHORIZED");
       const old = (
         await client.query<ImageArtifact>(
-          "SELECT * FROM generated_image_artifacts WHERE run_id=$1 AND sha256=$2 AND state='ready' AND expires_at>now()",
-          [owner.runId, image.sha256],
+          "SELECT * FROM generated_image_artifacts WHERE run_id=$1 AND sha256=$2 AND filename=$3 AND file_type=$4 AND state='ready' AND expires_at>now()",
+          [owner.runId, image.sha256, image.filename, image.fileType],
         )
       ).rows[0];
       if (old) {
@@ -165,7 +144,7 @@ export class GeneratedImageStore {
         await dir.close();
       }
       const result = await client.query<ImageArtifact>(
-        `INSERT INTO generated_image_artifacts(id,execution_id,node_id,run_id,plugin_id,server,provider_chat_id,storage_key,sha256,size,width,height,state,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'ready',now()+$13*interval '1 day') RETURNING *`,
+        `INSERT INTO generated_image_artifacts(id,execution_id,node_id,run_id,plugin_id,server,provider_chat_id,storage_key,sha256,size,width,height,state,expires_at,filename,mime_type,file_type) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'ready',now()+$13*interval '1 day',$14,$15,$16) RETURNING *`,
         [
           randomUUID(),
           owner.executionId,
@@ -180,6 +159,9 @@ export class GeneratedImageStore {
           image.width,
           image.height,
           this.retentionDays,
+          image.filename,
+          image.mimeType,
+          image.fileType,
         ],
       );
       signal.throwIfAborted();
@@ -282,7 +264,7 @@ export class GeneratedImageStore {
     }
     await this.removeDeleted();
     for (const name of await readdir(this.root)) {
-      if (!/^[a-f0-9-]{36}\.png(?:\.partial)?$/.test(name)) continue;
+      if (!/^[a-f0-9-]{36}\.(?:png|file)(?:\.partial)?$/.test(name)) continue;
       const info = await lstat(this.file(name));
       if (!info.isFile() || Date.now() - info.mtimeMs < 3600_000) continue;
       const exists = await this.pool.query(
@@ -298,7 +280,7 @@ export class GeneratedImageStore {
   async list(executionId: string) {
     return (
       await this.pool.query(
-        `SELECT a.id,a.width,a.height,a.size,a.sha256,a.state,a.expires_at AS "expiresAt",a.created_at AS "createdAt",d.status AS "deliveryStatus",d.error_code AS "errorCode",d.error_summary AS "errorSummary",d.id AS "deliveryId",d.retryable,d.closed_at AS "closedAt" FROM generated_image_artifacts a LEFT JOIN outbound_deliveries d ON d.generated_image_id=a.id WHERE a.execution_id=$1 ORDER BY a.created_at`,
+        `SELECT a.id,a.filename,a.mime_type AS "mimeType",a.file_type AS "fileType",a.width,a.height,a.size,a.sha256,a.state,a.expires_at AS "expiresAt",a.created_at AS "createdAt",d.status AS "deliveryStatus",d.error_code AS "errorCode",d.error_summary AS "errorSummary",d.id AS "deliveryId",d.retryable,d.closed_at AS "closedAt" FROM generated_image_artifacts a LEFT JOIN outbound_deliveries d ON d.generated_image_id=a.id WHERE a.execution_id=$1 ORDER BY a.created_at`,
         [executionId],
       )
     ).rows as Record<string, unknown>[];

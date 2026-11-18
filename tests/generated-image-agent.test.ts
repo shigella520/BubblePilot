@@ -17,19 +17,36 @@ import type {
   ImageArtifact,
 } from "../modules/generated-images/image-store.js";
 afterEach(() => vi.restoreAllMocks());
-it.each([
-  ["chat-completions", "strict"],
-  ["chat-completions", "compatible"],
-  ["responses", "strict"],
-  ["responses", "compatible"],
-] as const)(
-  "completes a PNG-only reply with three tool calls using %s / %s",
-  async (apiKind, toolSchemaMode) => {
+it.each(
+  (
+    [
+      ["chat-completions", "strict", false],
+      ["chat-completions", "compatible", false],
+      ["responses", "strict", false],
+      ["responses", "compatible", false],
+      ["chat-completions", "strict", true],
+      ["chat-completions", "compatible", true],
+      ["responses", "strict", true],
+      ["responses", "compatible", true],
+    ] as const
+  ).flatMap(([apiKind, mode, fallback]) =>
+    (["png", "txt"] as const).map(
+      (format) => [apiKind, mode, fallback, format] as const,
+    ),
+  ),
+)(
+  "completes an attachment reply using %s / %s, fallback=%s, file=%s",
+  async (apiKind, initialMode, withFallback, fileFormat) => {
+    const toolSchemaMode = withFallback
+      ? initialMode === "strict"
+        ? "compatible"
+        : "strict"
+      : initialMode;
     const repo = new InMemoryAiRepository();
     const provider = await repo.createProvider({
       name: "Fictional",
       apiKind,
-      toolSchemaMode,
+      toolSchemaMode: initialMode,
       baseUrl: "https://example.test/v1",
       model: "fictional",
       secretRef: "FIXTURE_KEY",
@@ -49,35 +66,80 @@ it.each([
       imageInput: "unknown",
       checkedAt: new Date().toISOString(),
     });
+    const providerIds = [provider.value.id];
+    if (withFallback) {
+      const fallback = await repo.createProvider({
+        name: "Fictional fallback",
+        apiKind,
+        toolSchemaMode,
+        baseUrl: "https://example.test/v1",
+        model: "fictional-fallback",
+        secretRef: "FIXTURE_KEY",
+        parameters: {},
+        requestTimeoutMs: 5000,
+        enabled: true,
+        capabilities: {
+          functionCalling: true,
+          hostedWebSearch: false,
+          imageInput: false,
+        },
+      });
+      if (fallback.status !== "ok") throw new Error("fixture");
+      await repo.updateProviderCapabilityProbe(fallback.value.id, {
+        functionCalling: "verified",
+        hostedWebSearch: "unknown",
+        imageInput: "unknown",
+        checkedAt: new Date().toISOString(),
+      });
+      providerIds.push(fallback.value.id);
+    }
     const route = await repo.createRoute({
       name: "Fictional",
-      providerIds: [provider.value.id],
-      fallbackEnabled: false,
+      providerIds,
+      fallbackEnabled: withFallback,
       retryPolicy: { maxRounds: 1, initialDelayMs: 0 },
       degradePolicy: { failureThreshold: 3, cooldownMs: 60000 },
       enabled: true,
     });
     if (route.status !== "ok") throw new Error("fixture");
-    const tools: ApprovedTool[] = ["prepare_sandbox", "run_command"].map(
-      (name) => ({
-        server: "fixture",
-        hash: name,
-        ...(name === "prepare_sandbox"
-          ? { imageExportVersion: 1 as const }
-          : {}),
-        definition: {
-          name,
-          description: name,
-          parameters: {
-            type: "object",
-            properties:
-              name === "run_command" ? { command: { type: "string" } } : {},
-            required: name === "run_command" ? ["command"] : [],
-            additionalProperties: false,
-          },
+    const tools: ApprovedTool[] = [
+      "prepare_sandbox",
+      "write_file",
+      "run_command",
+    ].map((name) => ({
+      server: "fixture",
+      hash: name,
+      ...(name === "prepare_sandbox"
+        ? { imageExportVersion: 1 as const, fileExportVersion: 1 as const }
+        : {}),
+      definition: {
+        name,
+        description: name,
+        parameters: {
+          type: "object",
+          properties:
+            name === "run_command"
+              ? {
+                  command: { type: "string" },
+                  timeout_seconds: {
+                    type: "integer",
+                    minimum: 1,
+                    maximum: 120,
+                  },
+                }
+              : name === "write_file"
+                ? { path: { type: "string" }, text: { type: "string" } }
+                : {},
+          required:
+            name === "run_command"
+              ? ["command"]
+              : name === "write_file"
+                ? ["path", "text"]
+                : [],
+          additionalProperties: false,
         },
-      }),
-    );
+      },
+    }));
     const plugin: InstalledPlugin = {
       id: randomUUID(),
       name: "Fictional",
@@ -111,7 +173,7 @@ it.each([
     vi.spyOn(PluginMcp.prototype, "connect").mockResolvedValue();
     vi.spyOn(PluginMcp.prototype, "discover").mockResolvedValue(tools);
     vi.spyOn(PluginMcp.prototype, "close").mockResolvedValue();
-    vi.spyOn(PluginMcp.prototype, "call").mockResolvedValue({
+    const remoteCall = vi.spyOn(PluginMcp.prototype, "call").mockResolvedValue({
       status: "success",
       responseBytes: 100,
       content: [{ type: "text", text: '{"status":"completed"}' }],
@@ -124,8 +186,11 @@ it.each([
         id: randomUUID(),
         execution_id: executionId,
         sha256: "b".repeat(64),
-        width: 600,
-        height: 400,
+        width: fileFormat === "png" ? 600 : null,
+        height: fileFormat === "png" ? 400 : null,
+        filename: `result.${fileFormat}`,
+        mime_type: fileFormat === "png" ? "image/png" : "text/plain",
+        file_type: fileFormat,
         size: 1000,
       } as ImageArtifact;
     const discard = vi.fn().mockResolvedValue(undefined);
@@ -138,28 +203,82 @@ it.each([
       }),
       discard,
     } as unknown as GeneratedImageStore;
-    const actions = tools.map((tool) => ({
-      name: `ext_${digest([plugin.id, tool.server, tool.definition.name]).slice(0, 24)}`,
-      args: {
-        arguments_json: JSON.stringify(
+    const drawing =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120">\n<text x="10" y="20">Fictional chart</text>\n</svg>';
+    const writePath =
+      fileFormat === "png" ? "/workspace/chart.svg" : "/workspace/analyze.py";
+    const text =
+      fileFormat === "png"
+        ? drawing
+        : 'from pathlib import Path\nPath("/workspace/result.txt").write_text("fictional total: 3")';
+    const command =
+      fileFormat === "png"
+        ? "bp-render-svg /workspace/chart.svg /workspace/chart.png"
+        : "python /workspace/analyze.py";
+    const outputPath =
+      fileFormat === "png" ? "/workspace/chart.png" : "/workspace/result.txt";
+    const actions: Array<{ name: string; args: Record<string, unknown> }> =
+      tools.map((tool) => ({
+        name: `ext_${digest([plugin.id, tool.server, tool.definition.name]).slice(0, 24)}`,
+        args:
           tool.definition.name === "run_command"
-            ? { command: "python draw_and_render.py" }
-            : {},
-        ),
-      },
-    }));
+            ? {
+                command,
+                ...(toolSchemaMode === "strict"
+                  ? { timeout_seconds: null }
+                  : {}),
+              }
+            : tool.definition.name === "write_file"
+              ? { path: writePath, text }
+              : {},
+      }));
     actions.push({
-      name: "prepare_chat_image",
-      args: { path: "/workspace/chart.png" },
-    } as unknown as (typeof actions)[number]);
+      name: "prepare_chat_attachment",
+      args: { path: outputPath },
+    });
     let calls = 0;
+    let failedPrimary = 0;
     const fetcher: typeof fetch = (_url, init) => {
       const body = JSON.parse(
         typeof init?.body === "string" ? init.body : "null",
       ) as {
+        model: string;
+        tools: Array<{
+          name?: string;
+          parameters?: Record<string, unknown>;
+          function?: { name: string; parameters: Record<string, unknown> };
+        }>;
         messages?: Record<string, unknown>[];
         input?: Record<string, unknown>[];
       };
+      for (const wire of body.tools) {
+        const definition = wire.function ?? wire;
+        if (definition.name?.startsWith("ext_")) {
+          expect(definition.parameters?.properties).not.toHaveProperty(
+            "arguments_json",
+          );
+          if (
+            Object.hasOwn(
+              definition.parameters?.properties ?? {},
+              "timeout_seconds",
+            )
+          ) {
+            const mode =
+              body.model === "fictional" ? initialMode : toolSchemaMode;
+            expect(definition.parameters?.required).toEqual(
+              mode === "strict" ? ["command", "timeout_seconds"] : ["command"],
+            );
+          }
+        }
+      }
+      if (withFallback && body.model === "fictional") {
+        failedPrimary++;
+        return Promise.resolve(
+          new Response('{"error":{"message":"Fictional temporary failure"}}', {
+            status: 503,
+          }),
+        );
+      }
       const messages = body.messages ?? body.input!;
       expect(JSON.stringify(messages)).not.toContain("data:image/");
       expect(JSON.stringify(messages)).not.toContain("fixture-binary");
@@ -168,7 +287,7 @@ it.each([
         const outputs = messages.filter(
           (m) => m.role === "tool" || m.type === "function_call_output",
         );
-        expect(outputs).toHaveLength(3);
+        expect(outputs).toHaveLength(4);
         expect(JSON.stringify(outputs)).toContain("pending_reply_node");
       }
       return Promise.resolve(
@@ -264,7 +383,12 @@ it.each([
       webSearch: "disabled",
       pluginIds: [plugin.id],
       imageReplyInput: {
-        config: { enabled: true, pluginId: plugin.id, server: "fixture" },
+        config: {
+          enabled: true,
+          pluginId: plugin.id,
+          server: "fixture",
+          allowedTypes: [fileFormat],
+        },
         executionId,
         nodeId: "ai",
         chatId: "fictional-chat",
@@ -274,9 +398,18 @@ it.each([
     if (result.status !== "succeeded") throw new Error(result.code);
     expect(result.text).toBe("");
     expect(result.generatedImage?.id).toBe(artifact.id);
-    expect(result.agentBudget).toMatchObject({ toolCalls: 3, modelTurns: 4 });
-    expect(calls).toBe(4);
+    expect(result.agentBudget).toMatchObject({ toolCalls: 4, modelTurns: 5 });
+    expect(calls).toBe(5);
+    expect(failedPrimary > 0).toBe(withFallback);
+    expect(remoteCall.mock.calls[1]?.[1]).toEqual({
+      path: writePath,
+      text,
+    });
+    expect(remoteCall.mock.calls[2]?.[1]).toEqual({
+      command,
+    });
     expect(exportImage).toHaveBeenCalledOnce();
+    expect(exportImage.mock.calls[0]?.[2]).toBe(fileFormat !== "png");
     expect(discard).toHaveBeenCalledWith(expect.any(String), artifact.id);
   },
 );

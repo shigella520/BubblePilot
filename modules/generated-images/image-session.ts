@@ -1,8 +1,13 @@
+import { describeReplyFile } from "./file-validation.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { PluginSession } from "../plugins/plugin-session.js";
 import type { AgentToolRegistry } from "../ai/agent-tool-registry.js";
-import { GeneratedImageError, type ImageReply } from "./image-policy.js";
+import {
+  GeneratedImageError,
+  type ImageReply,
+  allowedReplyFileTypes,
+} from "./image-policy.js";
 import type { GeneratedImageStore, ImageArtifact } from "./image-store.js";
 export interface ImageReplyInput {
   config: ImageReply;
@@ -10,7 +15,7 @@ export interface ImageReplyInput {
   nodeId: string;
   chatId: string;
 }
-export const imageReplyGuidance = `When the current user asks for a drawing, generate a PNG in the bound sandbox. Prefer ONE run_command containing a Python script that writes native SVG, calls bp-render-svg, and checks its success, dimensions and size. Use the preinstalled Noto Sans CJK SC font. Do not use HTML foreignObject, external SVG resources or install dependencies. view_image is optional for checking complex layouts; only claim visual inspection if a real preview was supplied. Reserve one tool call and sufficient time for prepare_chat_image after all edits. It safely stages one PNG for the current chat; it does NOT send immediately. Its prepared result becomes a reply attachment only after this run succeeds. Do not output paths, internal refs, invented links or claim confirmed delivery. If another preparation attempt fails the previous selection is cleared. Generated images and memes cannot be selected together. Search, import, render, view and prepare all share the existing tool budget. On failure use the explicit error; never silently send an old draft. No arbitrary file return: only prepare_chat_image PNG output is supported.`;
+export const imageReplyGuidance = `When the user asks for a file deliverable, use the bound sandbox to create or process it, then prepare ONE final file for the current chat. Textual conclusions do not require an attachment. For scripts or complex SVG, prefer write_file followed by a SHORT run_command; for simple text, an existing processed file or an authorized download, use the shortest appropriate path. Avoid nested long shell heredocs. For drawings, use native SVG and bp-render-svg with preinstalled Noto Sans CJK SC; do not use HTML foreignObject, external SVG resources or install dependencies. view_image is optional and only for supported images. Check processing success, file type and size. Use only the types declared by prepare_chat_attachment; never rename an unsupported file to bypass the limit. Reserve one tool call and time for prepare_chat_attachment after all edits. It stages one file, not an immediate send; the successful Reply node sends optional text plus the attachment. Do not output host paths, internal refs or invented download links, or claim confirmed delivery. A failed new preparation clears the previous selection. Memes and prepared attachments cannot be selected together. All tools share the existing budget; do not retry unknown remote outcomes or send an old draft.`;
 const argsSchema = z
   .object({
     path: z
@@ -54,9 +59,8 @@ export class GeneratedImageSession {
   register(registry: AgentToolRegistry) {
     registry.register({
       definition: {
-        name: "prepare_chat_image",
-        description:
-          "Prepare one final PNG from this run's /workspace for reply to the current chat. Does not send immediately. Call after rendering and optional visual checks. A new attempt clears the previous selection; only a successful preparation selects an image.",
+        name: "prepare_chat_attachment",
+        description: `Prepare one final file from this run's /workspace for reply to the current chat. Allowed types: ${allowedReplyFileTypes(this.input.config).join(", ")}. Images: at most 8 MiB; other files: at most 20 MiB. Does not send immediately. Check the result first. A new attempt clears the previous selection; only success selects the attachment.`,
         parameters: {
           type: "object",
           properties: {
@@ -65,7 +69,7 @@ export class GeneratedImageSession {
               minLength: 1,
               maxLength: 4096,
               description:
-                "Absolute PNG path in this run's /workspace, e.g. /workspace/chart.png.",
+                "Absolute file path in this run's /workspace, e.g. /workspace/report.xlsx. Its basename becomes the attachment filename; use an allowed extension matching the actual format.",
             },
           },
           required: ["path"],
@@ -95,6 +99,10 @@ export class GeneratedImageSession {
           const parsed = argsSchema.safeParse(JSON.parse(json));
           if (!parsed.success)
             throw new GeneratedImageError("IMAGE_PATH_DENIED");
+          const descriptor = describeReplyFile(
+            parsed.data.path,
+            allowedReplyFileTypes(this.input.config),
+          );
           const started = Date.now();
           const bytes = await this.channel.export(parsed.data.path, signal);
           const exported = Date.now();
@@ -107,14 +115,19 @@ export class GeneratedImageSession {
             },
             bytes,
             signal,
+            {
+              filename: descriptor.filename,
+              allowedTypes: allowedReplyFileTypes(this.input.config),
+            },
           );
           signal.throwIfAborted();
           await this.validate();
           return {
             text: JSON.stringify({
               status: "prepared",
-              image_ref: "generated-image-1",
-              mime_type: "image/png",
+              attachment_ref: "generated-attachment-1",
+              filename: artifact.filename,
+              mime_type: artifact.mime_type,
               width: artifact.width,
               height: artifact.height,
               bytes: artifact.size,
@@ -150,10 +163,10 @@ export class GeneratedImageSession {
           return JSON.stringify({
             status: "failed",
             code,
-            message: "The PNG was not selected for delivery.",
+            message: "The file was not selected for delivery.",
             retryable: false,
             guidance:
-              "Check the file path, PNG validity, size and remaining budget. Create the sandbox first if required. Do not claim the image was sent or reuse an older draft.",
+              "Check the file path, allowed type, actual format, size and remaining budget. Create the sandbox first if required. Do not claim the attachment was sent or reuse an older draft.",
           });
         } finally {
           this.busy = false;

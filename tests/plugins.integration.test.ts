@@ -183,7 +183,7 @@ describe.runIf(url)("plugin lifecycle and isolated runtime", () => {
       expect(
         await registry.get(tool.name)!.execute(
           JSON.stringify({
-            arguments_json: JSON.stringify({ query: "library" }),
+            query: "library",
           }),
           ctx,
         ),
@@ -193,7 +193,7 @@ describe.runIf(url)("plugin lifecycle and isolated runtime", () => {
       expect(
         await registry.get(tool.name)!.execute(
           JSON.stringify({
-            arguments_json: JSON.stringify({ query: "library" }),
+            query: "library",
           }),
           ctx,
         ),

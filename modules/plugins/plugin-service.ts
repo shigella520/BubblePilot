@@ -523,7 +523,12 @@ export class PluginService {
     const client = new PluginMcp(this.trustedHosts);
     try {
       await client.connect(p.config.connections[config.server]!);
-      if (client.imageExportVersion() !== 1)
+      if (
+        needsFileExport(config)
+          ? client.fileExportVersion() !== 1
+          : client.imageExportVersion() !== 1 &&
+            client.fileExportVersion() !== 1
+      )
         pluginError("IMAGE_EXPORT_UNSUPPORTED");
     } finally {
       await client.close();
@@ -619,4 +624,7 @@ import {
   imageExportTargets,
   assertImageExportBinding,
 } from "./plugin-image-exports.js";
-import type { ImageReply } from "../generated-images/image-policy.js";
+import {
+  type ImageReply,
+  needsFileExport,
+} from "../generated-images/image-policy.js";

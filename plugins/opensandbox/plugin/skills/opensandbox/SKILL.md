@@ -15,9 +15,9 @@ description: 在需要 Python 计算、临时文本处理或命令验证时，�
 
 8. HTTP 请求可以使用管理员配置的代理；普通 ping 和 DNS 查询不走 HTTP 代理，ping 还依赖内核权限。网络诊断只访问用户授权目标，不为诊断扩大权限。
 9. 沙箱不会自动收到聊天附件或历史图片。管理员开启附件处理后，先看当前附件清单；历史文件用 `query_chat_messages` 的附件、文件名、类型与时间筛选，必要时 `read_chat_excerpt` 展开。仅使用本轮返回的 attachment_ref 调用 `import_chat_attachment`，不猜测 ID、地址或路径。导入可分阶段进行，已经创建的沙箱继续复用；重复成功导入不覆盖你修改的文件。导入返回的 runtime（或 prepare_sandbox 的 runtime）是预装能力依据，未知时不假定库存在。没有附件导入工具时，只能处理明确写入的数据或用户授权下载的公开资料。Excel 仅支持 xlsx，不执行宏；PDF 仅提取已有文本，不做 OCR；图片处理不是视觉识别；需视觉分析时使用已授权的 `view_image`。
-10. 结果默认以文字返回。只有应用明确提供 `prepare_chat_image` 时，才可准备一张 PNG 供回复节点发送；生成文件本身不等于已发送。Excel、PDF 等其他文件不回传，沙箱任务结束即清理，不承诺后续下载。数据量应保持小规模，先检查下载和解压规模，不自动运行下载内容。
+10. 结果可用文字解释；用户需要文件产物且应用提供 `prepare_chat_attachment` 时，可选择本次 `/workspace` 内的一个最终文件，允许类型以工具说明为准（可能仅允许 PNG）。可生成图片、图表、PDF、表格、文本或ZIP，不以改扩展名绕过限制。图片最多8 MiB、其他文件最多20 MiB；PNG/JPEG之外的文档不做视觉预览。生成文件本身不等于已发送，BP会校验、保存并由回复节点发送；不要返回沙箱路径或虚构下载链接。任务结束沙箱会清理。下载与解压先检查规模，不自动运行下载内容。
 
-12. 绘图时优先在一次 `run_command` 中写原生 SVG、调用 `bp-render-svg /workspace/chart.svg /workspace/chart.png --width 2400` 并检查成功。运行镜像预装 resvg 和 Noto Sans CJK SC；以 runtime 清单为准。不要使用 HTML foreignObject、外部 CSS/图片/字体或运行中安装依赖。可选 `view_image` 检查复杂排版；最终 PNG 通过 `prepare_chat_image` 准备，预览不替代原图。为准备步骤留出一次工具调用和时间，不循环修改到预算耗尽。
+12. 绘图时优先用 `write_file` 将原生 SVG 或 Python 绘图脚本保存到 `/workspace`，确认写入成功后，再用一条短 `run_command` 调用 `bp-render-svg /workspace/chart.svg /workspace/chart.png --width 2400` 或执行已保存脚本，并检查成功、尺寸和大小。避免在 Shell heredoc 或多层引号里内嵌长篇 SVG/Python。写文件和执行命令分别计入工具调用次数；未授权 `write_file` 时，只对能够可靠编码且预算允许的简单任务使用紧凑命令，否则说明限制。运行镜像预装 resvg 和 Noto Sans CJK SC；以 runtime 清单为准。不要使用 HTML foreignObject、外部 CSS/图片/字体或运行中安装依赖。可选 `view_image` 检查复杂排版；最终产物通过 `prepare_chat_attachment` 准备，预览不替代原图。为准备步骤留出一次工具调用和时间，不循环修改到预算耗尽。
 
 项目运行镜像不预装 curl、wget、git、gawk 或 dig。HTTP 请求和下载使用 Python httpx，文本处理使用 Python、grep 或 sed；基本域名解析可使用 Python socket（不经过 HTTP 代理），不具备 dig 的完整 DNS 诊断能力。不要为补齐这些工具临时安装软件。
 

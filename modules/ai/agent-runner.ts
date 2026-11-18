@@ -275,7 +275,7 @@ export class AgentRunner {
             ? {
                 status: "failed",
                 code: "REPLY_MEDIA_CONFLICT",
-                summary: "不能在同一条回复中同时选择表情和生成图片。",
+                summary: "不能在同一条回复中同时选择表情和文件附件。",
                 retryable: false,
                 attemptCount: result.attemptCount,
               }

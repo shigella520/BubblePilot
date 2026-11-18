@@ -1487,7 +1487,7 @@ class ReplyNodeHandler extends BaseNodeHandler {
       )
         throw new WorkflowExecutionError(
           "REPLY_MEDIA_CONFLICT",
-          "生成图片与表情或引用回复配置冲突。",
+          "回复附件与表情或引用回复配置冲突。",
           false,
         );
       const image = z

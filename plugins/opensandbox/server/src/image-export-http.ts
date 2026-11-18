@@ -8,7 +8,10 @@ export class ImageExports {
     string,
     { path: string; expires: number }
   >();
-  constructor(private readonly session: SandboxSession) {}
+  constructor(
+    private readonly session: SandboxSession,
+    private readonly file = false,
+  ) {}
   async handle(req: IncomingMessage, res: ServerResponse) {
     const send = (status: number, error: unknown) =>
       res
@@ -36,7 +39,7 @@ export class ImageExports {
     try {
       for (const [key, value] of this.tickets)
         if (value.expires <= Date.now()) this.tickets.delete(key);
-      if (req.url === "/mcp/image-exports/tickets") {
+      if (req.url?.endsWith("/tickets")) {
         const chunks: Buffer[] = [];
         let size = 0;
         for await (const chunk of req) {
@@ -67,11 +70,15 @@ export class ImageExports {
         return;
       }
       this.tickets.delete(token);
-      const data = await this.session.exportImage(ticket.path, signal);
+      const data = await this.session.exportImage(
+        ticket.path,
+        signal,
+        this.file,
+      );
       signal.throwIfAborted();
       res
         .writeHead(200, {
-          "content-type": "image/png",
+          "content-type": this.file ? "application/octet-stream" : "image/png",
           "content-length": data.length,
           "x-content-sha256": createHash("sha256").update(data).digest("hex"),
           "cache-control": "no-store",

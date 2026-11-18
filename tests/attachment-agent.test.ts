@@ -307,11 +307,7 @@ it.each([
               id: "calculate",
               name: `ext_${digest([plugin.id, "sandbox", "run_command"]).slice(0, 24)}`,
               arguments: JSON.stringify({
-                arguments_json: JSON.stringify({
-                  command: visible
-                    ? "python read_pdf.py"
-                    : "python analysis.py",
-                }),
+                command: visible ? "python read_pdf.py" : "python analysis.py",
               }),
             };
           } else

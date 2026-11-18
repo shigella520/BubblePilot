@@ -156,9 +156,7 @@ describe.each(["responses", "chat-completions"] as const)(
                           name: r.tools!.find((t) => t.name.startsWith("ext_"))!
                             .name,
                           arguments: JSON.stringify({
-                            arguments_json: JSON.stringify({
-                              query: large ? "large" : "library",
-                            }),
+                            query: large ? "large" : "library",
                           }),
                         },
                       ],

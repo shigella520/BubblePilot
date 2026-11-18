@@ -91,13 +91,20 @@ describe("generated image reply boundaries", () => {
     } as AgentToolContext;
     const call = () =>
       registry
-        .get("prepare_chat_image")!
+        .get("prepare_chat_attachment")!
         .execute(JSON.stringify({ path: "/workspace/chart.png" }), ctx);
     const first = (await call()) as MultimodalToolResult;
     expect(session.selection()).toBeNull();
     await first.validateCommit?.();
     first.commitResult?.();
     expect(session.selection()?.id).toBe(artifact.id);
+    expect(
+      await registry
+        .get("prepare_chat_attachment")!
+        .execute(JSON.stringify({ path: "/workspace/report.xlsx" }), ctx),
+    ).toContain("FILE_TYPE_NOT_AUTHORIZED");
+    expect(channel.export).toHaveBeenCalledTimes(1);
+    expect(session.selection()).toBeNull();
     channel.export.mockRejectedValueOnce(
       new GeneratedImageError("IMAGE_NOT_FOUND"),
     );

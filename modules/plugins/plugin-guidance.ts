@@ -18,7 +18,7 @@ export function pluginErrorGuidance(code: string) {
       contentAvailable: false,
       retryInThisAnswer: true,
       nextAction:
-        "The tool arguments were rejected before execution. Correct the reported fields using the tool schema. For MCP arguments_json, provide a JSON object and omit unused optional fields unless that schema explicitly accepts null. Do not repeat unchanged arguments.",
+        "The tool arguments were rejected before execution. Correct the reported fields using the tool schema. Use the fields declared by this tool. Only tools explicitly declaring arguments_json require a JSON-encoded object string; invalid_json_object means that string must be a complete JSON object with correctly escaped quotes and newlines. Inside that string, omit unused optional fields unless the original schema explicitly accepts null. Do not repeat unchanged arguments.",
     };
   const reasons: Record<string, string> = {
     PLUGIN_REFERENCE_UNAVAILABLE:

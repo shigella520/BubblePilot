@@ -270,9 +270,10 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
       },
       {
         name: "generatedImage",
-        label: "生成图片",
+        label: "回复附件",
         type: "generatedImage",
-        description: "已安全保存的可选 PNG，与本节点文字一起连接一个发送节点。",
+        description:
+          "已校验并保存的可选附件，与本节点文字一起连接一个发送节点。",
       },
       {
         name: "text",
@@ -376,9 +377,9 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
       },
       {
         name: "generatedImage",
-        label: "生成图片",
+        label: "回复附件",
         type: "generatedImage",
-        description: "连接同一 AI 节点的生成图片输出；支持图片单独回复。",
+        description: "连接同一 AI 节点的回复附件输出；支持附件单独回复。",
       },
       {
         name: "text",

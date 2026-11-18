@@ -159,7 +159,7 @@ export class SandboxSession {
     }
   }
   private handle: Handle | undefined;
-  async exportImage(path: string, signal: AbortSignal) {
+  async exportImage(path: string, signal: AbortSignal, file = false) {
     this.check();
     if (!imageExportPath.safeParse(path).success)
       throw new ToolError("image_path_denied");
@@ -174,7 +174,7 @@ export class SandboxSession {
     ]);
     try {
       combined.throwIfAborted();
-      const data = await this.handle.exportImage(path, combined);
+      const data = await this.handle.exportImage(path, combined, file);
       combined.throwIfAborted();
       return data;
     } catch (error) {

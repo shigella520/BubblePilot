@@ -1,6 +1,10 @@
 import { imageCommand, imageReply } from "./images.js";
 import { ImageExports } from "./image-export-http.js";
-import { imageExportProtocol } from "./image-export.js";
+import {
+  imageExportProtocol,
+  fileExportProtocol,
+  fileExportMaxBytes,
+} from "./image-export.js";
 import type { CommandTimeouts } from "./config.js";
 import type { ServerResponse } from "node:http";
 import { AttachmentTransfers } from "./attachment-http.js";
@@ -234,6 +238,7 @@ export function createMcpHttp(
       sandbox: SandboxSession;
       attachments: AttachmentTransfers;
       images: ImageExports;
+      files: ImageExports;
       responses: Set<ServerResponse>;
     }
   >();
@@ -248,7 +253,11 @@ export function createMcpHttp(
         "/mcp/image-exports",
         "/mcp/image-exports/tickets",
       ].includes(req.url ?? "");
-      if (req.url !== "/mcp" && !attachmentRoute && !imageRoute) {
+      const fileRoute = [
+        "/mcp/file-exports",
+        "/mcp/file-exports/tickets",
+      ].includes(req.url ?? "");
+      if (req.url !== "/mcp" && !attachmentRoute && !imageRoute && !fileRoute) {
         res.writeHead(404).end();
         return;
       }
@@ -274,12 +283,14 @@ export function createMcpHttp(
         res.writeHead(404).end();
         return;
       }
-      if (attachmentRoute || imageRoute) {
+      if (attachmentRoute || imageRoute || fileRoute) {
         if (!pair) {
           res.writeHead(403).end();
           return;
         }
-        await (imageRoute ? pair.images : pair.attachments).handle(req, res);
+        await (
+          fileRoute ? pair.files : imageRoute ? pair.images : pair.attachments
+        ).handle(req, res);
         return;
       }
       const parsed = req.method === "POST" ? await body(req) : undefined;
@@ -296,11 +307,15 @@ export function createMcpHttp(
         const server = new McpServer(
           {
             name: "bubblepilot-opensandbox",
-            version: "0.3.0",
+            version: "0.4.0",
           },
           {
             capabilities: {
               experimental: {
+                [fileExportProtocol]: {
+                  version: 1,
+                  fileBytes: fileExportMaxBytes,
+                },
                 [imageExportProtocol]: {
                   version: 1,
                   fileBytes: 8 * 1024 * 1024,
@@ -317,6 +332,7 @@ export function createMcpHttp(
         );
         const attachments = new AttachmentTransfers(sandbox);
         const images = new ImageExports(sandbox);
+        const files = new ImageExports(sandbox, true);
         register(server, sandbox, pool.commandTimeouts);
         const responses = new Set<ServerResponse>();
         const transport = new StreamableHTTPServerTransport({
@@ -328,12 +344,21 @@ export function createMcpHttp(
               sandbox,
               attachments,
               images,
+              files,
               responses,
             });
           },
         });
         await server.connect(transport as Transport);
-        pair = { server, transport, sandbox, attachments, images, responses };
+        pair = {
+          server,
+          transport,
+          sandbox,
+          attachments,
+          images,
+          files,
+          responses,
+        };
       }
       if (req.method === "DELETE") {
         pair.sandbox.invalidate();

@@ -1384,13 +1384,17 @@ export function buildApplication(
         if (!result)
           throw new ApplicationError(
             "GENERATED_IMAGE_UNAVAILABLE",
-            "图片已过期或不可用。",
+            "附件已过期或不可用。",
             404,
           );
         return reply
           .header("Cache-Control", "private, no-store")
           .header("X-Content-Type-Options", "nosniff")
-          .type("image/png")
+          .header(
+            "Content-Disposition",
+            `attachment; filename="download.${result.row.file_type === "jpeg" ? "jpg" : result.row.file_type}"; filename*=UTF-8''${encodeURIComponent(result.row.filename)}`,
+          )
+          .type(result.row.mime_type)
           .send(result.bytes);
       },
     );

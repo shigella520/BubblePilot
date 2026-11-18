@@ -19,7 +19,7 @@ const required: Record<string, string[]> = {
   select_meme: ["id"],
   web_search: ["query"],
   capability_probe: ["acknowledgement"],
-  fictional_mcp: ["arguments_json"],
+  fictional_mcp: [],
   load_plugin_skill: ["id"],
   read_plugin_reference: ["id"],
   read_tool_result: ["result_ref"],

@@ -1,4 +1,8 @@
-import type { ImageReply } from "../generated-images/image-policy.js";
+import {
+  type ImageReply,
+  replyFileTypes,
+  allowedReplyFileTypes,
+} from "../generated-images/image-policy.js";
 import { pluginError, type InstalledPlugin } from "./plugin-types.js";
 export function imageExportTargets(plugins: readonly InstalledPlugin[]) {
   return plugins
@@ -13,7 +17,7 @@ export function imageExportTargets(plugins: readonly InstalledPlugin[]) {
         return tools.some(
           (t) =>
             t.definition.name === "prepare_sandbox" &&
-            t.imageExportVersion === 1,
+            (t.imageExportVersion === 1 || t.fileExportVersion === 1),
         ) && tools.some((t) => t.definition.name === "run_command")
           ? [
               {
@@ -21,6 +25,13 @@ export function imageExportTargets(plugins: readonly InstalledPlugin[]) {
                 pluginName: p.name,
                 server,
                 version: 1 as const,
+                fileTypes: tools.some(
+                  (t) =>
+                    t.definition.name === "prepare_sandbox" &&
+                    t.fileExportVersion === 1,
+                )
+                  ? [...replyFileTypes]
+                  : ["png"],
               },
             ]
           : [];
@@ -33,7 +44,12 @@ export function assertImageExportBinding(
 ) {
   if (
     !imageExportTargets(plugins).some(
-      (t) => t.pluginId === config.pluginId && t.server === config.server,
+      (t) =>
+        t.pluginId === config.pluginId &&
+        t.server === config.server &&
+        allowedReplyFileTypes(config).every((type) =>
+          t.fileTypes.includes(type),
+        ),
     )
   )
     pluginError("IMAGE_EXPORT_TARGET_UNAVAILABLE", 409);

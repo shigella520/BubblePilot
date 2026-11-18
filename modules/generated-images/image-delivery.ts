@@ -154,7 +154,7 @@ export class GeneratedImageDelivery {
       return {
         status: "failed",
         code: part.error_code ?? "IMAGE_SEND_FAILED",
-        summary: part.error_summary ?? "Image reply failed.",
+        summary: part.error_summary ?? "Attachment reply failed.",
         retryable: !!part.retryable && !part.closed_at,
       };
     return {
@@ -236,7 +236,7 @@ export class GeneratedImageDelivery {
           replyToProviderMessageId: null,
         });
       } else {
-        const { bytes } = await this.store.read(
+        const { bytes, row } = await this.store.read(
           plan.artifact_id,
           part.execution_id,
         );
@@ -249,8 +249,8 @@ export class GeneratedImageDelivery {
           providerTempGuid: part.provider_temp_guid,
           idempotencyKey: part.idempotency_key,
           correlationId,
-          filename: "chart.png",
-          mimeType: "image/png",
+          filename: row.filename,
+          mimeType: row.mime_type,
           bytes,
         });
       }
@@ -259,7 +259,7 @@ export class GeneratedImageDelivery {
         ? {
             status: "unknown",
             code: "IMAGE_DELIVERY_RESULT_UNKNOWN",
-            summary: "The image reply receipt could not be confirmed.",
+            summary: "The attachment reply receipt could not be confirmed.",
           }
         : {
             status: "failed",
@@ -267,7 +267,7 @@ export class GeneratedImageDelivery {
               error instanceof GeneratedImageError
                 ? error.code
                 : "GENERATED_IMAGE_UNAVAILABLE",
-            summary: "The image reply could not be prepared for sending.",
+            summary: "The attachment reply could not be prepared for sending.",
             retryable: false,
           };
     }
@@ -313,7 +313,7 @@ export class GeneratedImageDelivery {
   }
   async recover() {
     await this.pool.query(
-      `UPDATE outbound_deliveries SET status='unknown',retryable=false,error_code='IMAGE_SEND_INTERRUPTED',error_summary='Interrupted image reply requires verification.',updated_at=now(),send_lease_until=NULL WHERE status='sending' AND send_lease_until<now() AND id IN (SELECT image_delivery_id FROM outbound_reply_plans UNION SELECT text_delivery_id FROM outbound_reply_plans)`,
+      `UPDATE outbound_deliveries SET status='unknown',retryable=false,error_code='IMAGE_SEND_INTERRUPTED',error_summary='Interrupted attachment reply requires verification.',updated_at=now(),send_lease_until=NULL WHERE status='sending' AND send_lease_until<now() AND id IN (SELECT image_delivery_id FROM outbound_reply_plans UNION SELECT text_delivery_id FROM outbound_reply_plans)`,
     );
     await this.store.cleanup();
     const pending = await this.pool.query<{ id: string }>(

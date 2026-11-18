@@ -16,6 +16,8 @@ import {
   ImageExportError,
   imageExportErrors,
   readImageResponse,
+  fileExportMaxBytes,
+  imageExportMaxBytes,
 } from "./image-export.js";
 
 export interface CommandResult {
@@ -28,7 +30,11 @@ export interface CommandResult {
 }
 export interface Handle {
   id: string;
-  exportImage?(path: string, signal: AbortSignal): Promise<Buffer>;
+  exportImage?(
+    path: string,
+    signal: AbortSignal,
+    file?: boolean,
+  ): Promise<Buffer>;
   run(
     command: string,
     signal: AbortSignal,
@@ -144,7 +150,7 @@ export function sdkBackend(config: Config, apiKey: string): Backend {
       });
       return {
         id: sandbox.id,
-        async exportImage(path, signal) {
+        async exportImage(path, signal, file = false) {
           const abort = new AbortController();
           const combined = AbortSignal.any([signal, abort.signal]);
           const port = 47832;
@@ -162,7 +168,7 @@ export function sdkBackend(config: Config, apiKey: string): Backend {
             let seen = false,
               count = 0;
             for await (const event of sandbox.commands.runStream(
-              imageExportCommand({ path, port, token, seconds: 30 }),
+              imageExportCommand({ path, port, token, seconds: 30, file }),
               { background: false, timeoutSeconds: 30 },
               combined,
             )) {
@@ -203,7 +209,11 @@ export function sdkBackend(config: Config, apiKey: string): Backend {
                 "X-Transfer-Token": token,
               },
             });
-            const data = await readImageResponse(response, combined);
+            const data = await readImageResponse(
+              response,
+              combined,
+              file ? fileExportMaxBytes : imageExportMaxBytes,
+            );
             await command;
             combined.throwIfAborted();
             return data;

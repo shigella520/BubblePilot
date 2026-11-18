@@ -22,7 +22,11 @@ describe("approved tool compatibility", () => {
   it("keeps ordinary sandbox approval stable when image export transport appears", () => {
     const previous = tool();
     previous.definition.name = "prepare_sandbox";
-    const upgraded = { ...previous, imageExportVersion: 1 as const };
+    const upgraded = {
+      ...previous,
+      imageExportVersion: 1 as const,
+      fileExportVersion: 1 as const,
+    };
     expect(compareTools(previous, upgraded).kind).toBe("unchanged");
     expect(compareTools(upgraded, previous).kind).toBe("unchanged");
     expect(previous.imageExportVersion).toBeUndefined();
