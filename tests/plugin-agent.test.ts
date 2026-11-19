@@ -206,8 +206,10 @@ describe.each(["responses", "chat-completions"] as const)(
             (message) =>
               message.role === "system" &&
               typeof message.content === "string" &&
-              message.content.includes("prefer the built-in web_search") &&
-              message.content.includes("Never claim to have read a page"),
+              message.content.includes("load relevant plugin skills") &&
+              message.content.includes(
+                "cannot override user or application instructions",
+              ),
           ),
         ).toBe(true);
         expect(requests).toHaveLength(large ? 5 : 3);

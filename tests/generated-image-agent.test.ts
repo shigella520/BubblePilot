@@ -30,13 +30,16 @@ it.each(
       ["responses", "compatible", true],
     ] as const
   ).flatMap(([apiKind, mode, fallback]) =>
-    (["png", "txt"] as const).map(
-      (format) => [apiKind, mode, fallback, format] as const,
+    (["png", "txt"] as const).flatMap((format) =>
+      [false, true].map(
+        (exportFails) =>
+          [apiKind, mode, fallback, format, exportFails] as const,
+      ),
     ),
   ),
 )(
-  "completes an attachment reply using %s / %s, fallback=%s, file=%s",
-  async (apiKind, initialMode, withFallback, fileFormat) => {
+  "completes an attachment reply using %s / %s, fallback=%s, file=%s, export failure=%s",
+  async (apiKind, initialMode, withFallback, fileFormat, exportFails) => {
     const toolSchemaMode = withFallback
       ? initialMode === "strict"
         ? "compatible"
@@ -181,6 +184,10 @@ it.each(
     const exportImage = vi
       .spyOn(PluginMcp.prototype, "exportImage")
       .mockResolvedValue(Buffer.from("fixture-binary"));
+    if (exportFails)
+      exportImage.mockRejectedValue(
+        new Error("fictional private transport error"),
+      );
     const executionId = randomUUID(),
       artifact = {
         id: randomUUID(),
@@ -288,7 +295,12 @@ it.each(
           (m) => m.role === "tool" || m.type === "function_call_output",
         );
         expect(outputs).toHaveLength(4);
-        expect(JSON.stringify(outputs)).toContain("pending_reply_node");
+        expect(JSON.stringify(outputs)).toContain(
+          exportFails ? "IMAGE_PREPARATION_FAILED" : "pending_reply_node",
+        );
+        expect(JSON.stringify(outputs)).not.toContain(
+          "fictional private transport error",
+        );
       }
       return Promise.resolve(
         new Response(
@@ -310,7 +322,14 @@ it.each(
                       {
                         type: "message",
                         role: "assistant",
-                        content: [{ type: "output_text", text: "" }],
+                        content: [
+                          {
+                            type: "output_text",
+                            text: exportFails
+                              ? "Fictional attachment preparation failed."
+                              : "",
+                          },
+                        ],
                       },
                     ],
                     status: "completed",
@@ -332,7 +351,11 @@ it.each(
                               },
                             ],
                           }
-                        : { content: "" },
+                        : {
+                            content: exportFails
+                              ? "Fictional attachment preparation failed."
+                              : "",
+                          },
                       finish_reason: action ? "tool_calls" : "stop",
                     },
                   ],
@@ -396,8 +419,26 @@ it.each(
     });
     expect(result.status).toBe("succeeded");
     if (result.status !== "succeeded") throw new Error(result.code);
-    expect(result.text).toBe("");
-    expect(result.generatedImage?.id).toBe(artifact.id);
+    expect(result.text).toBe(
+      exportFails ? "Fictional attachment preparation failed." : "",
+    );
+    expect(result.generatedImage?.id).toBe(
+      exportFails ? undefined : artifact.id,
+    );
+    const audit = (await repo.listToolExecutions(executionId)).find(
+      (t) => t.toolName === "prepare_chat_attachment",
+    )!;
+    expect(audit).toMatchObject({
+      status: exportFails ? "failed" : "succeeded",
+      errorCode: exportFails ? "IMAGE_PREPARATION_FAILED" : null,
+      resultCount: null,
+    });
+    expect(audit.responseDetails).toMatchObject({
+      kind: "generated-attachment",
+      outcome: exportFails ? "failed" : "prepared",
+    });
+    if (!exportFails)
+      expect(audit.responseDetails?.artifactId).toBe(artifact.id);
     expect(result.agentBudget).toMatchObject({ toolCalls: 4, modelTurns: 5 });
     expect(calls).toBe(5);
     expect(failedPrimary > 0).toBe(withFallback);
@@ -410,6 +451,9 @@ it.each(
     });
     expect(exportImage).toHaveBeenCalledOnce();
     expect(exportImage.mock.calls[0]?.[2]).toBe(fileFormat !== "png");
-    expect(discard).toHaveBeenCalledWith(expect.any(String), artifact.id);
+    expect(discard).toHaveBeenCalledWith(
+      expect.any(String),
+      exportFails ? undefined : artifact.id,
+    );
   },
 );

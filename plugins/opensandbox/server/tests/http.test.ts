@@ -69,6 +69,32 @@ it("authenticates, discovers without allocation, separates sessions and revokes 
         })
       ).structuredContent,
     ).toMatchObject({ exitCode: 0, stdout: "4" });
+    run.mockResolvedValueOnce({
+      status: "command_failed",
+      exitCode: 1,
+      stdout: '{"status":"failed","code":"svg_path_denied"}',
+      stderr: "",
+      durationMs: 1,
+      truncated: false,
+    });
+    const failed = await a.client.callTool({
+      name: "run_command",
+      arguments: { command: "fictional wrong path" },
+    });
+    expect(failed.isError).toBe(true);
+    expect(failed.structuredContent).toMatchObject({
+      status: "command_failed",
+      exitCode: 1,
+      sessionUsable: true,
+    });
+    expect(
+      (
+        await a.client.callTool({
+          name: "run_command",
+          arguments: { command: "fictional corrected path" },
+        })
+      ).isError,
+    ).toBe(false);
     const data = Buffer.from("fictional").toString("base64");
     run.mockResolvedValueOnce({
       status: "completed",

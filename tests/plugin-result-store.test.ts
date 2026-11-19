@@ -27,6 +27,40 @@ const context = () =>
   });
 
 describe("run-local MCP results", () => {
+  it("preserves failed operation guidance and safe diagnostics even when output is split", () => {
+    const store = new PluginResultStore();
+    const prepared = store.prepare(
+      {
+        status: "error",
+        errorCode: "PLUGIN_COMMAND_FAILED",
+        retryInThisAnswer: true,
+        nextAction:
+          "Inspect the error before a safe correction; do not replay side effects.",
+        content: [{ type: "text", text: "fictional output\n".repeat(3000) }],
+      },
+      {
+        ...source,
+        resultStatus: "error",
+        errorCode: "PLUGIN_COMMAND_FAILED",
+        remoteStatus: "command_failed",
+        exitCode: 1,
+        failureReason: "svg_path_denied",
+      },
+      async () => {},
+      2000,
+    );
+    expect(JSON.parse(prepared.text)).toMatchObject({
+      status: "error",
+      retryInThisAnswer: true,
+      delivery: "partial",
+    });
+    expect(prepared.metadata).toMatchObject({
+      remoteStatus: "command_failed",
+      exitCode: 1,
+      failureReason: "svg_path_denied",
+    });
+    expect(prepared.metadata).not.toHaveProperty("stdout");
+  });
   it("deduplicates only equal parsed JSON, preserving other blocks and original payload", () => {
     const input = {
       content: [

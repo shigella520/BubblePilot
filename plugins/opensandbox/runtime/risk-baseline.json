@@ -7,7 +7,7 @@
     "Dockerfile": "6bdc3d8a56c029104dee365fb41fa6c4d24c31912e21d839b37e4f57a45ae126",
     "requirements.lock": "3b37527aef3e9860ad0445951aa79f4605fa84667bfcf0687f66c2a9ae41243b",
     "capabilities.json": "e84f17e083e801f1fb3fe5efa7bb1c503894ac3f210b9a2e03de55cf23de4a80",
-    "render-svg.py": "0311f15178122009554b3e3efd2261dd14e3baa8258905ca9eeb3df27fe20ba8"
+    "render-svg.py": "fac0b486a4e3254d731356017d5a5354252f23d9446a2059dd0b9dd8f6476e55"
   },
   "entries": [
     {

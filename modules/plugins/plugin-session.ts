@@ -19,7 +19,10 @@ import {
   PluginArgumentsError,
   validateMcpArguments,
 } from "./plugin-schema.js";
-import { pluginErrorGuidance } from "./plugin-guidance.js";
+import {
+  pluginErrorGuidance,
+  pluginFailureDetails,
+} from "./plugin-guidance.js";
 import type {
   AgentToolRegistry,
   MultimodalToolResult,
@@ -574,6 +577,9 @@ export class PluginSession {
                 tool: tool.definition.name,
                 parentToolCallId: ctx.toolCallId,
                 resultStatus: result.status,
+                ...(result.status === "error"
+                  ? pluginFailureDetails(result.structuredContent)
+                  : {}),
                 ...(result.errorCode ? { errorCode: result.errorCode } : {}),
               },
               () => this.check(p, undefined, tool),

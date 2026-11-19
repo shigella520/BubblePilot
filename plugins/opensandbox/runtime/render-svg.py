@@ -125,12 +125,13 @@ def render(source, destination, width=None):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Render native SVG to PNG in /workspace. No HTML or external resources.')
-    parser.add_argument('source'); parser.add_argument('destination'); parser.add_argument('--width', type=int)
+    parser = argparse.ArgumentParser(description='Render native SVG to PNG. Both paths must be absolute paths below /workspace. No HTML or external resources.', epilog='Example: bp-render-svg /workspace/chart.svg /workspace/chart.png --width 2400')
+    parser.add_argument('source', help='Absolute /workspace/... SVG path'); parser.add_argument('destination', help='Absolute /workspace/... PNG path'); parser.add_argument('--width', type=int)
     args = parser.parse_args()
     try:
         print(json.dumps(render(args.source, args.destination, args.width)))
     except Exception as error:
         code = str(error) if isinstance(error, ValueError) and str(error).startswith(('svg_', 'png_')) else 'svg_render_failed'
-        print(json.dumps({'status': 'failed', 'code': code, 'guidance': 'Use native SVG shapes/text, no HTML or external resources, and stay within size and time limits.'}))
+        guidance = ('Both source and destination must be absolute Linux paths below /workspace, without .., dot segments or backslashes. Example: bp-render-svg /workspace/chart.svg /workspace/chart.png' if code == 'svg_path_denied' else 'Use native SVG shapes/text, no HTML or external resources, and stay within size and time limits.')
+        print(json.dumps({'status': 'failed', 'code': code, 'guidance': guidance}))
         raise SystemExit(1)

@@ -24,7 +24,8 @@ import {
   attachmentGuidance,
   type AttachmentSession,
 } from "../attachments/attachment-session.js";
-import { pluginWebGuidance } from "../plugins/plugin-guidance.js";
+import { safeBuiltinFailureCode } from "./tool-failure-code.js";
+import { pluginGuidance } from "../plugins/plugin-guidance.js";
 import { PluginSession } from "../plugins/plugin-session.js";
 import type { PluginService } from "../plugins/plugin-service.js";
 import { restoreToolArguments } from "./tool-schema.js";
@@ -418,7 +419,7 @@ export class AgentRunner {
       request = {
         ...request,
         messages: [
-          { role: "system", content: pluginWebGuidance },
+          { role: "system", content: pluginGuidance },
           ...request.messages,
         ],
       };
@@ -764,6 +765,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         const isPlugin = registered?.diagnostics === "plugin";
         const isTask = registered?.metadata?.capability === "scheduled-task";
         const isMemory = registered?.diagnostics === "metadata-only";
+        const isGenerated = call.name === "prepare_chat_attachment";
         const isHistory =
           isMemory && memoryTools.some((tool) => tool.name === call.name);
         const isMeme =
@@ -830,7 +832,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                 if (Date.now() >= context.deadline)
                   throw new AgentToolTimeout();
                 if (typeof output === "string") return output;
-                if (isHistory && output.diagnostics)
+                if ((isHistory || isGenerated) && output.diagnostics)
                   responseDetails = output.diagnostics;
                 if (isPlugin) {
                   responseDetails = output.diagnostics ?? null;
@@ -912,6 +914,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
             }
             const payload = JSON.parse(content) as {
               status?: string;
+              code?: string;
               errorCode?: string;
               task?: { id?: string; status?: string; version?: number };
               reason?: string;
@@ -920,12 +923,13 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
               count?: number;
               results?: unknown[];
             };
-            resultCount = isPlugin
-              ? null
-              : (payload.evidence?.length ??
-                payload.results?.length ??
-                payload.groups?.length ??
-                (payload.count === undefined ? 0 : 1));
+            resultCount =
+              isPlugin || isGenerated
+                ? null
+                : (payload.evidence?.length ??
+                  payload.results?.length ??
+                  payload.groups?.length ??
+                  (payload.count === undefined ? 0 : 1));
             if (!isMemory && query)
               searched ||= (payload.results?.length ?? 0) > 0;
             if (payload.status === "unavailable")
@@ -933,18 +937,28 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                 ? (errorCode ?? "PLUGIN_UNAVAILABLE")
                 : isMeme
                   ? "MEME_TOOL_UNAVAILABLE"
-                  : isMemory
+                  : isHistory
                     ? "MEMORY_RETRIEVAL_UNAVAILABLE"
-                    : "AI_AGENT_TOOL_UNAVAILABLE";
+                    : safeBuiltinFailureCode(
+                        payload.errorCode ?? payload.code,
+                        "AI_AGENT_TOOL_UNAVAILABLE",
+                      );
             if (payload.status === "invalid-arguments")
               errorCode = "AI_AGENT_INVALID_TOOL_ARGUMENTS";
-            if (isMemory)
+            if (isMemory) {
+              if (["failed", "error"].includes(payload.status ?? ""))
+                errorCode ??= safeBuiltinFailureCode(
+                  payload.errorCode ?? payload.code,
+                );
               responseDetails = {
                 ...(responseDetails ?? {}),
-                outcome: "completed",
+                outcome: errorCode ? "failed" : "completed",
                 metadataOnly: true,
-                sourceRefs: memory?.references?.() ?? [],
+                ...(isHistory
+                  ? { sourceRefs: memory?.references?.() ?? [] }
+                  : {}),
               };
+            }
             if (isTask) {
               if (payload.status === "failed")
                 errorCode = payload.errorCode ?? "TASK_OPERATION_FAILED";
@@ -969,9 +983,13 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                     ? "MEME_TOOL_UNAVAILABLE"
                     : isPlugin
                       ? "PLUGIN_EXECUTION_FAILED"
-                      : isMemory
-                        ? "MEMORY_RETRIEVAL_UNAVAILABLE"
-                        : "AI_WEB_SEARCH_FAILED";
+                      : isGenerated
+                        ? "IMAGE_PREPARATION_FAILED"
+                        : isHistory
+                          ? "MEMORY_RETRIEVAL_UNAVAILABLE"
+                          : isMemory
+                            ? "AI_AGENT_TOOL_FAILED"
+                            : "AI_WEB_SEARCH_FAILED";
             if (error instanceof WebSearchToolError) {
               requestDetails = error.requestDetails ?? requestDetails;
               responseDetails = error.responseDetails;
@@ -1033,6 +1051,31 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
             : errorCode?.startsWith("AI_AGENT_")
               ? errorCode
               : "AI_IMAGE_UNAVAILABLE";
+        }
+        if (isGenerated) {
+          const payload = JSON.parse(content) as {
+            status?: string;
+            code?: string;
+          };
+          if (!errorCode && payload.status !== "prepared")
+            errorCode = safeBuiltinFailureCode(
+              payload.code,
+              "IMAGE_PREPARATION_FAILED",
+            );
+          requestDetails = {
+            ...(requestDetails ?? {}),
+            kind: "generated-attachment",
+            version: 1,
+          };
+          responseDetails = {
+            ...(responseDetails ?? {}),
+            kind: "generated-attachment",
+            version: 1,
+            outcome: skipped ? "skipped" : errorCode ? "failed" : "prepared",
+            errorCode,
+            metadataOnly: true,
+          };
+          resultCount = null;
         }
         if (isMeme) {
           const details = memeDiagnostics(

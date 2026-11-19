@@ -228,9 +228,82 @@ describe("AgentRunner", () => {
         toolSchemaMode: mode,
         providerId: backup.value.id,
       });
+      expect(repository.toolExecutions[0]).toMatchObject({
+        status: mode === "compatible" ? "failed" : "succeeded",
+        errorCode: mode === "compatible" ? "AI_AGENT_TOOL_FAILED" : null,
+        responseDetails: {
+          outcome: mode === "compatible" ? "failed" : "completed",
+        },
+      });
       expect(execute).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("retains budget-skip evidence when attachment preparation was never executed", async () => {
+    const { repository, request } = await setup();
+    const execute = vi.fn(async () => {
+      await Promise.resolve();
+      return JSON.stringify({ status: "prepared" });
+    });
+    const client: AiClient = {
+      call: async (_provider, req) => {
+        await Promise.resolve();
+        return req.messages.some((m) => m.role === "tool")
+          ? { status: "succeeded", text: "Fictional result", durationMs: 1 }
+          : {
+              status: "succeeded",
+              text: "",
+              durationMs: 1,
+              toolCalls: ["first", "skipped"].map((id) => ({
+                id,
+                name: "prepare_chat_attachment",
+                arguments: "{}",
+              })),
+            };
+      },
+    };
+    const routing = new AiRoutingService(
+      repository,
+      client,
+      new EnvironmentSecretResolver({ FICTIONAL_KEY: "fixture" }),
+      true,
+    );
+    await new AgentRunner(routing, undefined, repository, undefined, {
+      maxToolCalls: 1,
+      maxToolOutputCharacters: 24000,
+      maxToolDurationMs: 60000,
+    }).run({
+      ...request,
+      webSearch: "disabled",
+      runtimeTools: [
+        {
+          definition: {
+            name: "prepare_chat_attachment",
+            description: "Fictional preparation",
+            parameters: {
+              type: "object",
+              properties: {},
+              additionalProperties: false,
+            },
+          },
+          execute,
+          diagnostics: "metadata-only",
+        },
+      ],
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(repository.toolExecutions[1]).toMatchObject({
+      status: "failed",
+      durationMs: 0,
+      errorCode: "AI_AGENT_TOOL_LIMIT_REACHED",
+      requestDetails: {
+        kind: "generated-attachment",
+        skipped: true,
+        reason: "tool_limit",
+      },
+      responseDetails: { kind: "generated-attachment", outcome: "skipped" },
+    });
+  });
 
   it.each(["responses", "chat-completions"] as const)(
     "pairs paginated count results on the %s wire without fetching message bodies",

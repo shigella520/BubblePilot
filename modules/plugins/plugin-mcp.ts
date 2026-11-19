@@ -17,7 +17,7 @@ import {
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
-  pluginFailureGuidance,
+  pluginResultFailureGuidance,
   pluginResultErrorCode,
 } from "./plugin-guidance.js";
 import {
@@ -485,7 +485,7 @@ export class PluginMcp {
       ...(result.isError
         ? {
             errorCode: pluginResultErrorCode(result.structuredContent),
-            ...pluginFailureGuidance,
+            ...pluginResultFailureGuidance(result.structuredContent),
           }
         : {}),
       ...(result.structuredContent

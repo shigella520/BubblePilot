@@ -64,6 +64,9 @@ interface Source {
   parentToolCallId?: string | undefined;
   resultStatus: string;
   errorCode?: string;
+  remoteStatus?: string;
+  exitCode?: number;
+  failureReason?: string;
 }
 interface Entry {
   text: string;
@@ -105,6 +108,8 @@ export class PluginResultStore {
       content: Array<{ type: string; text?: string }>;
       structuredContent?: unknown;
       errorCode?: string;
+      retryInThisAnswer?: boolean;
+      nextAction?: string;
     },
     source: Source,
     authorize: () => Promise<void>,
@@ -155,6 +160,12 @@ export class PluginResultStore {
       return {
         status: result.status,
         ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+        ...(result.status === "error"
+          ? {
+              retryInThisAnswer: result.retryInThisAnswer ?? false,
+              nextAction: result.nextAction,
+            }
+          : {}),
         delivery: "partial",
         ...(result.images?.length ? { images: result.images } : {}),
         result_ref: ref,

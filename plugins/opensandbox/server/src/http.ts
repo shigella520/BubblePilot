@@ -26,6 +26,9 @@ import { fileCommand } from "./files.js";
 const path = z
   .string()
   .max(4096)
+  .describe(
+    "Absolute Linux file path below /workspace, e.g. /workspace/data.txt; use the exact sandbox_path for imported attachments. No Windows or host paths.",
+  )
   .refine(
     (value) =>
       value.startsWith("/workspace/") &&
@@ -52,7 +55,16 @@ function register(
     try {
       const value = await action();
       return reply(
-        value,
+        {
+          ...value,
+          sessionUsable: !session.ended,
+          ...(value.status === "command_failed"
+            ? {
+                guidance:
+                  "The command exited with a nonzero status. Inspect stdout/stderr and correct the cause before a safe follow-up in this same sandbox. Earlier steps may have changed files; do not blindly replay side effects.",
+              }
+            : {}),
+        },
         !["created", "reused", "completed", "read", "written"].includes(
           String(value.status),
         ),
@@ -62,6 +74,7 @@ function register(
         {
           status:
             error instanceof ToolError ? error.message : "operation_failed",
+          sessionUsable: !session.ended,
         },
         true,
       );
@@ -71,7 +84,7 @@ function register(
     "prepare_sandbox",
     {
       description:
-        "Create this run's temporary Python workspace. Call once before command/file tools; repeated calls reuse it. Busy means no capacity. Never assume files survive session expiry.",
+        "Create this run's temporary Linux Python workspace at /workspace. Use absolute /workspace/... file paths, never Windows paths or host paths. Use imported files at the exact sandbox_path returned by import_chat_attachment. Call once before command/file tools; repeated calls reuse it. Busy means no capacity. Never assume files survive session expiry.",
       inputSchema: {},
       annotations: {
         readOnlyHint: false,
@@ -85,7 +98,7 @@ function register(
     "run_command",
     {
       description:
-        "Run a foreground shell command inside this run's sandbox. No host mounts. Nonzero exit is failure. Unknown/cancelled results must not be replayed. Output cap 1 MiB; redirect large output into /workspace files and read portions.",
+        "Run a foreground shell command in this run's Linux sandbox, working directory /workspace. Use absolute /workspace/... paths for files and script arguments: a program may reject relative paths even in this working directory. No Windows paths or host mounts. Confirmed nonzero exit is command_failed; inspect the cause before a safe correction. Unknown/cancelled results must not be replayed. Output cap 1 MiB; redirect large output into /workspace files and read portions.",
       inputSchema: {
         command: z.string().min(1).max(32768),
         timeout_seconds: z
@@ -307,7 +320,7 @@ export function createMcpHttp(
         const server = new McpServer(
           {
             name: "bubblepilot-opensandbox",
-            version: "0.4.0",
+            version: "0.4.1",
           },
           {
             capabilities: {

@@ -28,9 +28,9 @@ Python 提供 pip/venv；短任务优先预装工具，不临时安装依赖。�
 - PDF 只提取文本层，无 OCR；Pillow 处理像素，不提供视觉识别。
 - 无浏览器、Node/Java/Go、编译器、后台任务和 Notebook 服务。
 - 不自动获得聊天附件或历史图片；只能处理明确写入或授权下载的数据。
-- 默认不回传文件；显式授权图片回复时，应用可在清理前导出单张 PNG。Excel/PDF 等仍不提供通用下载。
+- 文件回传须由工作流显式授权，并通过 prepare_chat_attachment 校验后投递；允许类型以该工具声明为准，不提供任意下载接口。
 - 普通 ping/DNS 不走 HTTP 代理，ping 可因内核权限失败，不因此扩大容器权限。
-- 单并发、512 MiB、600 秒 TTL 与现有工具预算保持不变；不能承诺处理任意大小文件。
+- 并发、内存、TTL 与本轮工具预算由管理员配置；不能承诺处理任意大小文件。
 
 ## 依赖、发布与回退
 
@@ -60,3 +60,7 @@ Kerberos 运行库使用签名已核验、SHA-256 固定的 MIT 1.22.3，替换 
 镜像固定 resvg 0.45.1 和 Noto Sans CJK SC 字体，SHA-256 固定于 Dockerfile，许可保留在 `/opt/bubblepilot/licenses`。`bp-render-svg /workspace/chart.svg /workspace/chart.png --width 2400` 只处理原生 SVG 子集，不读取外部资源，不执行脚本/HTML。输入1 MiB、输出8 MiB/1600万像素/单边8192、渲染10秒上限；中文长标签须显式换行，字体未覆盖的字符或 emoji 不保证显示完整，可通过 `view_image` 检查。
 
 新增 `drawing-smoke.py` 纳入 `verify.sh`，在无网络、512 MiB 条件下检查中文、透明度、尺寸和拒绝非法资源。绘图不自动授予发送权限；最终发送合同由 BP 的图片回复配置和准备工具控制。
+
+## 路径错误说明更新
+
+render-svg.py 仅改进命令帮助与 svg_path_denied 的反馈，要求输入和输出均使用 /workspace/ 下绝对路径，不接受 Windows 路径、相对路径、链接或越界路径。drawing-smoke.py 覆盖失败后修正并生成 PNG；不增加依赖、不放宽 SVG 资源限制。风险基线仅更新该脚本的源码哈希，原 CVE 集合、包版本和有效期不变。

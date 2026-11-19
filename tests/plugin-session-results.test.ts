@@ -96,6 +96,36 @@ function fixture(
 }
 afterEach(() => vi.restoreAllMocks());
 describe("MCP large-result session lifecycle", () => {
+  it("keeps safe command diagnostics in audit while raw command output stays in model results", async () => {
+    const f = fixture();
+    f.call.mockResolvedValueOnce({
+      status: "error",
+      responseBytes: 300,
+      errorCode: "PLUGIN_COMMAND_FAILED",
+      content: [],
+      structuredContent: {
+        status: "command_failed",
+        exitCode: 1,
+        stdout:
+          '{"status":"failed","code":"svg_path_denied","private":"fictional hidden"}',
+        stderr: "fictional private stderr",
+      },
+    });
+    const result = (await f.ext.execute("{}", f.ctx)) as MultimodalToolResult;
+    expect(result.diagnostics).toMatchObject({
+      outcome: "error",
+      errorCode: "PLUGIN_COMMAND_FAILED",
+      remoteStatus: "command_failed",
+      exitCode: 1,
+      failureReason: "svg_path_denied",
+    });
+    expect(JSON.stringify(result.diagnostics)).not.toContain(
+      "fictional hidden",
+    );
+    expect(JSON.stringify(result.diagnostics)).not.toContain("private stderr");
+    expect(result.text).toContain("fictional hidden");
+    await f.session.close();
+  });
   it("passes long multiline file contents unchanged and rejects the old envelope", async () => {
     const f = fixture(undefined, {
       type: "object",

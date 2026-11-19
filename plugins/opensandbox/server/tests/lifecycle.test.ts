@@ -2,6 +2,39 @@ import { expect, it, vi } from "vitest";
 import { fixture } from "./support.js";
 import type { Handle } from "../src/backend.js";
 const signal = () => new AbortController().signal;
+it("keeps a confirmed command failure usable for correction but invalidates unknown results", async () => {
+  const { pool, run } = fixture();
+  const session = pool.newSession();
+  await session.prepare(signal());
+  run.mockResolvedValueOnce({
+    status: "command_failed",
+    exitCode: 1,
+    stdout: '{"code":"svg_path_denied"}',
+    stderr: "",
+    durationMs: 1,
+    truncated: false,
+  });
+  expect(
+    await session.run("fictional rejected path", 10, signal()),
+  ).toMatchObject({ status: "command_failed" });
+  expect(session.ended).toBe(false);
+  expect(
+    await session.run("fictional corrected path", 10, signal()),
+  ).toMatchObject({ status: "completed" });
+  run.mockResolvedValueOnce({
+    status: "result_unknown",
+    exitCode: null,
+    stdout: "",
+    stderr: "",
+    durationMs: 1,
+    truncated: false,
+  });
+  await session.run("fictional unknown operation", 10, signal());
+  expect(session.ended).toBe(true);
+  await expect(session.run("do not replay", 10, signal())).rejects.toThrow(
+    "invalidated",
+  );
+});
 it("creates lazily, isolates runs, reuses once, and counts cleaning slots", async () => {
   const { pool, backend } = fixture();
   const a = pool.newSession(),

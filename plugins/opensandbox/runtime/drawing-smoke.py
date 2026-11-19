@@ -34,3 +34,15 @@ for invalid in [
 result = subprocess.run(['bp-render-svg', '/workspace/linked.svg', '/workspace/out.png'], capture_output=True)
 assert result.returncode != 0
 print('SVG drawing: Chinese PNG, transparency, size and unsupported-resource checks passed')
+
+# Path errors are explicit, correctable failures and never relax filesystem bounds.
+help_result = subprocess.run(['bp-render-svg', '--help'], capture_output=True, text=True)
+assert 'absolute' in help_result.stdout and '/workspace/chart.svg' in help_result.stdout
+for source in ['chart.svg', '/workspace/../chart.svg', 'C:/workspace/chart.svg']:
+    result = subprocess.run(['bp-render-svg', source, '/workspace/corrected.png'], capture_output=True, text=True)
+    assert result.returncode == 1
+    error = json.loads(result.stdout)
+    assert error['code'] == 'svg_path_denied' and 'absolute Linux paths' in error['guidance']
+subprocess.run(['bp-render-svg', '/workspace/chart.svg', '/workspace/corrected.png'], check=True, capture_output=True)
+assert Path('/workspace/corrected.png').is_file()
+print('SVG rejected path -> correction -> PNG passed')

@@ -30,6 +30,40 @@ it("requires completion and preserves nonzero command failure", async () => {
     await collectOutput(events([{ type: "execution_complete" }])),
   ).toMatchObject({ status: "completed", exitCode: 0 });
 });
+it("accepts execd terminal CommandExecError at clean EOF, never arbitrary errors or truncated transport", async () => {
+  const failure = {
+    type: "error",
+    error: { ename: "CommandExecError", evalue: "1" },
+  };
+  expect(
+    await collectOutput(
+      events([{ type: "stdout", text: '{"code":"svg_path_denied"}' }, failure]),
+    ),
+  ).toMatchObject({ status: "command_failed", exitCode: 1 });
+  for (const error of [
+    { evalue: "1" },
+    { ename: "OtherError", evalue: "2" },
+    { ename: "CommandExecError", evalue: "-1" },
+    { ename: "CommandExecError", evalue: "0" },
+    { ename: "CommandExecError", evalue: "unknown" },
+  ])
+    expect(
+      await collectOutput(events([{ type: "error", error }])),
+    ).toMatchObject({ status: "result_unknown" });
+  expect(
+    await collectOutput(
+      events([
+        { type: "error", error: { ename: "OtherError" } },
+        { type: "execution_complete" },
+      ]),
+    ),
+  ).toMatchObject({ status: "result_unknown" });
+  async function* broken() {
+    yield await Promise.resolve(failure);
+    throw new Error("transport broke");
+  }
+  await expect(collectOutput(broken())).rejects.toThrow("transport broke");
+});
 
 it("separates per-stream log records without doubling existing line endings", async () => {
   const result = await collectOutput(

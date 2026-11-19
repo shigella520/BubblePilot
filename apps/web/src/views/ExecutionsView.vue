@@ -4,6 +4,7 @@ import {
   pluginDeliveryLabel,
   pluginImageRows,
   pluginToolErrorLabel,
+  pluginCommandErrorLabel,
 } from "../utils/plugin-tool-diagnostics";
 import ExecutionTimingSummary from "../components/ExecutionTimingSummary.vue";
 import type { ExecutionTiming } from "../utils/execution-timing";
@@ -2263,11 +2264,15 @@ function contextSnapshotValue(
                   </p>
                   <p
                     v-if="
-                      item.requestDetails?.kind === 'plugin' &&
+                      (item.requestDetails?.kind === 'plugin' ||
+                        item.requestDetails?.kind === 'generated-attachment') &&
                       pluginToolErrorLabel(item.errorCode)
                     "
                   >
                     {{ pluginToolErrorLabel(item.errorCode) }}
+                  </p>
+                  <p v-if="pluginCommandErrorLabel(item.responseDetails)">
+                    {{ pluginCommandErrorLabel(item.responseDetails) }}
                   </p>
                   <div
                     v-if="item.requestDetails?.kind === 'plugin'"

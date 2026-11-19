@@ -68,7 +68,8 @@ export async function collectOutput(
     stderr = "",
     bytes = 0,
     complete = false,
-    failed = false;
+    failed = false,
+    knownCommandFailure = false;
   let exitCode: number | null = null;
   for await (const event of events) {
     if (event.type === "stdout" || event.type === "stderr") {
@@ -97,12 +98,23 @@ export async function collectOutput(
     }
     if (event.type === "error") {
       failed = true;
+      exitCode = null;
       const raw = event.error?.exit_code ?? event.error?.evalue;
       if (
         (typeof raw === "number" && Number.isInteger(raw)) ||
         (typeof raw === "string" && /^-?\d+$/.test(raw))
       )
         exitCode = Number(raw);
+      // Execd v1.1.0 foreground failures emit CommandExecError after Wait(),
+      // then EOF without execution_complete. Do not infer this from stdout or
+      // arbitrary errors. Drain the stream so a later transport failure still
+      // rejects; cancellation/timeout remain enforced by SandboxSession.
+      knownCommandFailure =
+        event.error?.ename === "CommandExecError" &&
+        Number.isSafeInteger(exitCode) &&
+        exitCode !== null &&
+        exitCode > 0 &&
+        exitCode <= 255;
     }
     if (event.type === "execution_complete") {
       complete = true;
@@ -111,11 +123,16 @@ export async function collectOutput(
   }
   if (complete && !failed) exitCode = 0;
   return {
-    status: complete
-      ? exitCode === 0
+    status:
+      complete && !failed
         ? "completed"
-        : "command_failed"
-      : "result_unknown",
+        : (complete || knownCommandFailure) &&
+            exitCode !== null &&
+            Number.isSafeInteger(exitCode) &&
+            exitCode > 0 &&
+            exitCode <= 255
+          ? "command_failed"
+          : "result_unknown",
     exitCode,
     stdout,
     stderr,
