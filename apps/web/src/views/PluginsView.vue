@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PluginOverviewCard from "../components/PluginOverviewCard.vue";
+import type { PluginListItem } from "../utils/plugin-overview";
 import ToggleSwitch from "../components/ToggleSwitch.vue";
 import AdminFormDialog from "../components/AdminFormDialog.vue";
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
@@ -83,18 +85,7 @@ interface ImportTask {
   error_code?: string;
   source?: { url?: string; ref?: string; directory?: string; sha?: string };
 }
-const items = ref<
-    Array<{
-      id: string;
-      name: string;
-      enabled: boolean;
-      version: number;
-      package_version: string;
-      metadata: { skills: number; servers: number };
-      source: { type?: string; url?: string };
-      pending_review?: string[];
-    }>
-  >([]),
+const items = ref<PluginListItem[]>([]),
   busy = ref(false),
   error = ref(""),
   showImport = ref(false),
@@ -439,22 +430,13 @@ async function remove() {
       <span v-if="busy">正在处理，请稍候…</span>
     </div>
     <div class="plugin-grid">
-      <button
+      <PluginOverviewCard
         v-for="item in items"
         :key="item.id"
-        class="plugin-card"
+        :item="item"
         :disabled="busy"
-        @click="open(item.id)"
-      >
-        <Boxes /><strong>{{ item.name }}</strong
-        ><span
-          >{{ item.package_version }} ·
-          {{ item.enabled ? "已启用" : "未启用" }}</span
-        >
-        <span v-if="item.pending_review?.length"
-          >工具定义变化，待复核：{{ item.pending_review.join("、") }}</span
-        >
-      </button>
+        @open="open"
+      />
     </div>
     <p v-if="!items.length && !busy">
       还没有安装插件。导入后检查能力、配置服务，再授权给 AI 节点。
@@ -758,22 +740,14 @@ async function remove() {
 }
 .plugin-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 16px;
 }
-.plugin-card,
 .plugin-panel {
   border: 1px solid var(--border-color, #dce2ea);
   border-radius: 16px;
   background: var(--surface, #fff);
   padding: 22px;
-}
-.plugin-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-  text-align: left;
 }
 .plugin-panel {
   margin-top: 20px;

@@ -146,6 +146,96 @@ describe.runIf(url)("plugin lifecycle and isolated runtime", () => {
     expect(row?.pending_review).toEqual(["test/lookup"]);
     expect((await service.get(pluginId)).version).toBe(before.version);
   });
+  it("summarizes configured abilities and only current active workflow references without exposing credentials", async () => {
+    const original = await service.get(pluginId);
+    const workflows: string[] = [];
+    const tool = original.config.tools[0]!;
+    const skill = original.package.skills[0]!;
+    try {
+      await service.mutate(pluginId, original.version, {
+        config: {
+          ...original.config,
+          disabledTools: [`${tool.server}/${tool.definition.name}`],
+          disabledSkills: [skill.id, skill.id],
+          autoSyncTools: true,
+          connections: {
+            test: {
+              ...original.config.connections.test!,
+              secret: "fictional-private-secret",
+            },
+          },
+        },
+      });
+      for (const scenario of [
+        "active",
+        "inactive",
+        "deleted",
+        "historical",
+        "text-only",
+      ]) {
+        const id = randomUUID(),
+          current = randomUUID();
+        workflows.push(id);
+        await service.pool.query(
+          "INSERT INTO workflows(id,name,status,deleted_at) VALUES($1,$2,$3,$4)",
+          [
+            id,
+            `Fictional ${id}`,
+            scenario === "inactive" ? "inactive" : "active",
+            scenario === "deleted" ? new Date() : null,
+          ],
+        );
+        const node = { type: "ai-chat", config: { pluginIds: [pluginId] } };
+        const definition = {
+          nodes:
+            scenario === "historical" || scenario === "text-only"
+              ? [{ type: "ai-chat", config: { promptTemplate: pluginId } }]
+              : [node, node],
+        };
+        await service.pool.query(
+          "INSERT INTO workflow_versions(id,workflow_id,version,status,definition) VALUES($1,$2,1,'published',$3)",
+          [current, id, JSON.stringify(definition)],
+        );
+        await service.pool.query(
+          "UPDATE workflows SET published_version_id=$2 WHERE id=$1",
+          [id, current],
+        );
+        await service.pool.query(
+          "INSERT INTO workflow_versions(id,workflow_id,version,status,definition) VALUES($1,$2,2,'draft',$3)",
+          [randomUUID(), id, JSON.stringify({ nodes: [node] })],
+        );
+      }
+      const row = (await service.list()).find((p) => p.id === pluginId)!;
+      expect(row.summary).toMatchObject({
+        toolsEnabled: original.config.tools.length - 1,
+        toolsApproved: original.config.tools.length,
+        skillsEnabled: 0,
+        skillsTotal: 1,
+        servers: 1,
+        activeWorkflows: 1,
+        autoSyncTools: true,
+        lastCheckAt: null,
+        lastSyncStatus: null,
+      });
+      expect(row.metadata.description).toBe("Fictional test");
+      expect(row).not.toHaveProperty("encrypted_config");
+      expect(row).not.toHaveProperty("config");
+      expect(JSON.stringify(row)).not.toContain("fictional-private-secret");
+      expect(JSON.stringify(row)).not.toContain(mock.url);
+    } finally {
+      for (const id of workflows) {
+        await service.pool.query(
+          "UPDATE workflows SET published_version_id=NULL WHERE id=$1",
+          [id],
+        );
+        await service.pool.query("DELETE FROM workflows WHERE id=$1", [id]);
+      }
+      const current = await service.get(pluginId);
+      await service.mutate(pluginId, current.version, {
+        config: original.config,
+      });
+    }
+  });
   it("loads skill and references, executes MCP and enforces authorization", async () => {
     const session = await PluginSession.create(service, [pluginId]);
     try {

@@ -3434,8 +3434,8 @@ paths:
   /api/v1/plugins:
     get:
       operationId: getApiVPlugins
-      summary: Declarative plugin get
-      description: Administrator authentication required; mutations and connection tests also require sensitive verification. See plugin contract in doc/接口与配置契约.md.
+      summary: List installed plugins with configuration overview
+      description: Administrator authentication required; mutations and connection tests also require sensitive verification. Includes description metadata and safe summary counts for enabled tools, skills, declared servers, current active workflow references, and last tool synchronization state. Counts are configuration data, not live health. No connection credentials are returned. See plugin contract in doc/接口与配置契约.md.
       responses:
         "200":
           description: Operation result in data envelope
