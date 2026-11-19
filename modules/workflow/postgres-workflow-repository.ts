@@ -93,6 +93,7 @@ interface TriggerRow {
 }
 
 interface ExecutionRow {
+  source_message_id: string | null;
   message_match_source: MessageMatchSource | null;
   trigger_event: BackgroundWorkflowEvent | null;
   bot_identity: BotIdentity | null;
@@ -207,6 +208,7 @@ const triggerSelect = `SELECT
 
 const executionSelect = `SELECT
   e.id, e.trigger_event, e.bot_identity, e.startup_closure, e.message_match_source, e.provider, e.external_event_id,
+  source_message.id AS source_message_id,
   source_message.provider_message_id AS source_provider_message_id,
   source_chat.provider_chat_id, source_chat.display_name AS chat_display_name,
   e.trigger_id,
@@ -285,6 +287,7 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
       ? null
       : Number(row.cached_prompt_tokens ?? 0);
   return {
+    sourceMessageId: row.source_message_id,
     messageMatchSource: row.message_match_source,
     triggerEvent: row.trigger_event,
     startupClosure: row.startup_closure ?? null,

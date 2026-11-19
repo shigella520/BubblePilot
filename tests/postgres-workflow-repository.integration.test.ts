@@ -353,7 +353,7 @@ describe.runIf(testDatabaseUrl !== undefined)(
       if (normalized.kind !== "message") {
         return;
       }
-      await archive.ingestMessage(normalized.envelope, true);
+      const ingested = await archive.ingestMessage(normalized.envelope, true);
 
       const gateway = new ConfirmingReplyGateway();
       const engine = new WorkflowEngine(
@@ -364,6 +364,20 @@ describe.runIf(testDatabaseUrl !== undefined)(
       const duplicate = await engine.handleMessage(normalized.envelope);
       const detail = await repository.getExecution(first.executionIds[0] ?? "");
 
+      expect(detail?.sourceMessageId).toBe(ingested.messageId);
+      const legacy = new Client({ connectionString: connection });
+      await legacy.connect();
+      try {
+        await legacy.query(
+          "UPDATE workflow_executions SET source_message_id=NULL WHERE id=$1",
+          [detail!.id],
+        );
+        expect(
+          (await repository.getExecution(detail!.id))?.sourceMessageId,
+        ).toBe(ingested.messageId);
+      } finally {
+        await legacy.end();
+      }
       expect(first.executionIds).toHaveLength(1);
       expect(duplicate.executionIds).toEqual(first.executionIds);
       expect(gateway.commands).toHaveLength(1);

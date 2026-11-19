@@ -76,6 +76,7 @@ export interface StartupExecutionClosure {
 }
 
 export interface WorkflowExecutionRecord {
+  sourceMessageId?: string | null;
   timing?: ExecutionTiming;
   messageMatchSource?: MessageMatchSource | null;
   startupClosure?: StartupExecutionClosure | null;

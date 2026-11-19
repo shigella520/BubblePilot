@@ -3979,6 +3979,62 @@ export function buildApplication(
     );
 
     application.get(
+      "/api/v1/executions/:executionId/source-message",
+      {
+        preHandler: requireSensitive(
+          "message.content.view",
+          "workflow-execution",
+        ),
+      },
+      async (request, reply) => {
+        reply.header("Cache-Control", "private, no-store");
+        const { executionId } = executionParametersSchema.parse(request.params);
+        const execution = await workflowRepository.getExecution(executionId);
+        if (!execution) {
+          throw new ApplicationError(
+            "EXECUTION_NOT_FOUND",
+            "执行记录不存在。",
+            404,
+          );
+        }
+        const archived =
+          !execution.triggerEvent && execution.sourceMessageId
+            ? await repository.findMessage(execution.sourceMessageId)
+            : null;
+        if (!archived || archived.contentRedactedAt !== null) {
+          throw new ApplicationError(
+            "EXECUTION_SOURCE_UNAVAILABLE",
+            "触发消息不可用：可能未关联、已清理或所属聊天已停用；调度执行没有入站触发消息。",
+            404,
+          );
+        }
+        // A slow archive read must not outlive the sensitive authorization.
+        await requireSensitive(
+          "message.content.view",
+          "workflow-execution",
+        )(request);
+        return {
+          data: {
+            messageId: archived.id,
+            sentAt: archived.sentAt,
+            senderId: archived.senderId,
+            body: archived.body,
+            retractedBody: archived.retractedBody ?? null,
+            revisionState: archived.revisionState ?? "active",
+            editedAt: archived.editedAt ?? null,
+            attachments: archived.attachments.map(
+              ({ fileName, mimeType, sizeBytes }) => ({
+                fileName,
+                mimeType,
+                sizeBytes,
+              }),
+            ),
+          },
+        };
+      },
+    );
+
+    application.get(
       "/api/v1/executions/:executionId/image-inputs/:imageInputId/source",
       {
         preHandler: requireSensitive(

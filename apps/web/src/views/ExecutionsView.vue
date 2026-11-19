@@ -6,6 +6,7 @@ import {
   pluginToolErrorLabel,
   pluginCommandErrorLabel,
 } from "../utils/plugin-tool-diagnostics";
+import ExecutionTriggerMessage from "../components/ExecutionTriggerMessage.vue";
 import ExecutionTimingSummary from "../components/ExecutionTimingSummary.vue";
 import type { ExecutionTiming } from "../utils/execution-timing";
 import ExecutionImageResult from "../components/ExecutionImageResult.vue";
@@ -112,6 +113,7 @@ function imageToolLabel(details: Record<string, unknown> | null) {
   return `图片未加载：${reasons[reason] ?? reason}`;
 }
 interface Execution {
+  sourceMessageId?: string | null;
   timing?: ExecutionTiming;
   startedAt?: string | null;
   messageMatchSource?: "ordinary" | "reply" | null;
@@ -1546,6 +1548,15 @@ function contextSnapshotValue(
           </div>
         </header>
         <div class="execution-detail-body">
+          <ExecutionTriggerMessage
+            :key="detail.id"
+            :execution-id="detail.id"
+            :source-message-id="detail.sourceMessageId"
+            :scheduled="Boolean(detail.triggerEvent)"
+            :chat-name="
+              detail.chatDisplayName ?? detail.providerChatId ?? '未知聊天'
+            "
+          />
           <ExecutionTimingSummary :timing="detail.timing" />
           <section class="context-snapshot-card">
             <h3>本次 Bot 角色</h3>

@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import type { ExecutionDetail } from "../modules/workflow/workflow-repository.js";
+import type { ArchivedMessage } from "../modules/archive/archive-repository.js";
 import { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
 import { InMemoryAgentSettingsRepository } from "./support/in-memory-agent-settings-repository.js";
 import type { FastifyInstance } from "fastify";
@@ -64,6 +67,7 @@ describe("Web admin authentication", () => {
   let authRepository: InMemoryAuthRepository;
   let archiveRepository: InMemoryArchiveRepository;
   let aiRepository: InMemoryAiRepository;
+  let workflowRepository: InMemoryWorkflowRepository;
   let taskService: TaskService;
   let taskChange: Mock<TaskService["change"]>;
 
@@ -108,7 +112,7 @@ describe("Web admin authentication", () => {
     const secrets = new EnvironmentSecretResolver({
       PREVIEW_AI_KEY: "fictional-server-secret",
     });
-    const workflowRepository = new InMemoryWorkflowRepository();
+    workflowRepository = new InMemoryWorkflowRepository();
     const workflowEngine: MessageAutomation = {
       handleMessage: () =>
         Promise.resolve({
@@ -176,6 +180,147 @@ describe("Web admin authentication", () => {
 
   afterEach(async () => {
     await application.close();
+  });
+
+  it("reveals only the bound trigger message with step-up, auditing and expiry recheck", async () => {
+    const executionId = randomUUID(),
+      messageId = randomUUID();
+    const execution = {
+      id: executionId,
+      sourceMessageId: messageId,
+      status: "running",
+      triggerEvent: null,
+    } as ExecutionDetail;
+    const getExecution = vi
+      .spyOn(workflowRepository, "getExecution")
+      .mockResolvedValue(execution);
+    const archived: ArchivedMessage = {
+      providerMessageId: "fictional-provider-message",
+      contentType: "mixed",
+      isFromMe: false,
+      linkPreview: { status: "not-requested", errorCode: null, items: [] },
+      linkPreviewDiagnostics: [],
+      linkPreviewFetchedAt: null,
+      createdAt: "2026-01-01T00:00:00Z",
+      id: messageId,
+      body: "Fictional current request",
+      retractedBody: "Fictional withdrawn part",
+      revisionState: "partial",
+      editedAt: "2026-01-01T01:00:00Z",
+      sentAt: "2026-01-01T00:00:00Z",
+      senderId: "fictional-sender",
+      contentRedactedAt: null,
+      attachments: [
+        {
+          fileName: "fictional.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 100,
+          providerAttachmentId: "private-provider-id",
+        },
+      ],
+    };
+    const read = vi
+      .spyOn(archiveRepository, "findMessage")
+      .mockResolvedValue(archived);
+    const path = `/api/v1/executions/${executionId}/source-message`;
+    expect(
+      (await application.inject({ method: "GET", url: path })).statusCode,
+    ).toBe(401);
+    const login = await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/session",
+      payload: { password: loginPassword },
+    });
+    const headers = {
+      cookie: login.cookies.map((c) => `${c.name}=${c.value}`).join("; "),
+      origin: "http://localhost",
+    };
+    const detail = await application.inject({
+      method: "GET",
+      url: `/api/v1/executions/${executionId}`,
+      headers,
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.body).not.toContain(archived.body);
+    expect(
+      (await application.inject({ method: "GET", url: path, headers }))
+        .statusCode,
+    ).toBe(403);
+    expect(read).not.toHaveBeenCalled();
+    await application.inject({
+      method: "POST",
+      url: "/api/v1/auth/sensitive",
+      headers,
+      payload: { password: sensitivePassword },
+    });
+    const result = await application.inject({
+      method: "GET",
+      url: `${path}?messageId=${randomUUID()}`,
+      headers,
+    });
+    expect(result.statusCode).toBe(200);
+    expect(result.headers["cache-control"]).toContain("no-store");
+    expect(result.json<{ data: unknown }>().data).toMatchObject({
+      messageId,
+      body: archived.body,
+      revisionState: "partial",
+      retractedBody: archived.retractedBody,
+      editedAt: archived.editedAt,
+    });
+    expect(result.body).not.toContain("private-provider-id");
+    expect(read).toHaveBeenLastCalledWith(messageId);
+    expect(authRepository.auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: "message.content.view",
+        targetId: executionId,
+        outcome: "succeeded",
+      }),
+    );
+
+    read.mockResolvedValueOnce({
+      ...archived,
+      contentRedactedAt: new Date().toISOString(),
+    });
+    expect(
+      (await application.inject({ method: "GET", url: path, headers }))
+        .statusCode,
+    ).toBe(404);
+    read.mockResolvedValueOnce(null); // Deleted or disabled chat, as enforced by the archive repository.
+    expect(
+      (await application.inject({ method: "GET", url: path, headers }))
+        .statusCode,
+    ).toBe(404);
+    getExecution.mockResolvedValueOnce(null);
+    expect(
+      (await application.inject({ method: "GET", url: path, headers }))
+        .statusCode,
+    ).toBe(404);
+    for (const unavailable of [
+      { ...execution, sourceMessageId: null },
+      {
+        ...execution,
+        triggerEvent: { schemaVersion: "chat-idle-v1" },
+      } as ExecutionDetail,
+    ]) {
+      getExecution.mockResolvedValueOnce(unavailable);
+      read.mockClear();
+      expect(
+        (await application.inject({ method: "GET", url: path, headers }))
+          .statusCode,
+      ).toBe(404);
+      expect(read).not.toHaveBeenCalled();
+    }
+    read.mockImplementationOnce(() => {
+      authRepository.grants.clear();
+      return Promise.resolve(archived);
+    });
+    const expired = await application.inject({
+      method: "GET",
+      url: path,
+      headers,
+    });
+    expect(expired.statusCode).toBe(403);
+    expect(expired.body).not.toContain(archived.body);
   });
 
   it("protects scheduled task changes and request snapshots with step-up", async () => {

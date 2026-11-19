@@ -466,6 +466,23 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /api/v1/executions/{executionId}/source-message:
+    get:
+      operationId: viewExecutionSourceMessage
+      description: 管理员且敏感解锁后读取执行绑定的触发消息；读取当前归档版本，不是触发时快照。已清理、停用聊天、调度执行或无关联时不可读取。审计 message.content.view，响应 private, no-store。
+      security:
+        - sessionAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ExecutionId"
+      responses:
+        "200":
+          description: 当前归档消息的 ID、时间、发送者、正文、撤回留存正文、修订状态和附件元数据；不含下载地址或供应商原始事件。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/image-inputs/{imageInputId}/source:
     get:
       operationId: viewExecutionImageSource

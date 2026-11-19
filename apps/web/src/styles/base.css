@@ -2839,6 +2839,19 @@ legend {
   overscroll-behavior: contain;
   padding: 22px 24px 28px;
 }
+.execution-detail-body > * + * {
+  margin-top: 16px;
+}
+.execution-detail-body > *,
+.execution-detail-body .trace-columns > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.execution-detail-body pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .execution-detail-body .trace-columns {
   margin-top: 22px;
 }
