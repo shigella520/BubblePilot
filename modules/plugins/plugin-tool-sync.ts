@@ -20,6 +20,10 @@ function contract(tool: ApprovedTool) {
       description: tool.definition.description.trim(),
     },
     ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+    // Image export is an independently bound transport capability, not a change
+    // to prepare_sandbox's ordinary tool contract. Its addition must not revoke
+    // previously approved command/attachment access. Runtime export checks both
+    // saved binding and the live server capability separately.
     ...(tool.attachmentTransferVersion
       ? { attachmentTransferVersion: tool.attachmentTransferVersion }
       : {}),

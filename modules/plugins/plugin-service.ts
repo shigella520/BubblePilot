@@ -27,6 +27,27 @@ import {
   type InstalledPlugin,
   type Connection,
 } from "./plugin-types.js";
+interface PluginListRow {
+  id: string;
+  name: string;
+  enabled: boolean;
+  version: number;
+  revision: string;
+  created_at: Date;
+  updated_at: Date;
+  package_version: string;
+  source: Record<string, unknown>;
+  metadata: {
+    description: string;
+    skills: number;
+    servers: number;
+    toolSyncLastCheck?: string;
+    toolSyncHistory?: ToolSyncRecord[];
+  };
+  pending_review: string[] | null;
+  encrypted_config: string;
+  active_workflow_count: number;
+}
 export class PluginService {
   readonly pool: Pool;
   private readonly jobs = new Set<Promise<void>>();
@@ -171,10 +192,50 @@ export class PluginService {
     return parsePluginPackage(staged.files, directory);
   }
   async list() {
-    const r = await this.pool.query(
-      "SELECT p.*,v.package_version,v.metadata,v.source,v.metadata->'pendingReview' AS pending_review FROM plugins p JOIN plugin_versions v ON v.plugin_id=p.id AND v.hash=p.revision ORDER BY p.name",
+    const r = await this.pool.query<PluginListRow>(
+      `SELECT p.*,v.package_version,v.metadata,v.source,v.encrypted_config,
+        v.metadata->'pendingReview' AS pending_review,
+        (SELECT count(*)::int FROM workflows w
+         JOIN workflow_versions wv ON wv.id=w.published_version_id
+         WHERE w.status='active' AND w.deleted_at IS NULL AND EXISTS (
+           SELECT 1 FROM jsonb_array_elements(wv.definition->'nodes') node
+           WHERE node->>'type'='ai-chat'
+             AND (node->'config'->'pluginIds') @> jsonb_build_array(p.id::text)
+         )) AS active_workflow_count
+       FROM plugins p JOIN plugin_versions v ON v.plugin_id=p.id AND v.hash=p.revision
+       ORDER BY p.name`,
     );
-    return r.rows as Record<string, unknown>[];
+    return r.rows.map((row) => {
+      // Only computed counts leave the server; never return decrypted connections
+      // or the encrypted configuration in the list response.
+      const { encrypted_config, active_workflow_count, ...item } = row;
+      const config = JSON.parse(
+        this.cipher.decrypt(encrypted_config),
+      ) as PluginConfiguration;
+      const metadata = item.metadata;
+      return {
+        ...item,
+        summary: {
+          toolsEnabled: config.tools.filter(
+            (tool) =>
+              !config.disabledTools.includes(
+                `${tool.server}/${tool.definition.name}`,
+              ),
+          ).length,
+          toolsApproved: config.tools.length,
+          skillsEnabled: Math.max(
+            0,
+            metadata.skills - new Set(config.disabledSkills).size,
+          ),
+          skillsTotal: metadata.skills,
+          servers: metadata.servers,
+          activeWorkflows: active_workflow_count,
+          autoSyncTools: config.autoSyncTools ?? false,
+          lastCheckAt: metadata.toolSyncLastCheck ?? null,
+          lastSyncStatus: metadata.toolSyncHistory?.[0]?.status ?? null,
+        },
+      };
+    });
   }
   async get(id: string, revision?: string): Promise<InstalledPlugin> {
     const r = await this.pool.query(
@@ -508,6 +569,32 @@ export class PluginService {
       await Promise.all(rows.rows.map((r) => this.get(r.id))),
     );
   }
+  async imageExportTargets() {
+    const rows = await this.pool.query<{ id: string }>(
+      "SELECT id FROM plugins WHERE enabled=true ORDER BY name,id",
+    );
+    return imageExportTargets(
+      await Promise.all(rows.rows.map((r) => this.get(r.id))),
+    );
+  }
+  async assertImageExportAvailable(ids: string[], config: ImageReply) {
+    const plugins = await Promise.all(ids.map((id) => this.get(id)));
+    assertImageExportBinding(plugins, config);
+    const p = plugins.find((p) => p.id === config.pluginId)!;
+    const client = new PluginMcp(this.trustedHosts);
+    try {
+      await client.connect(p.config.connections[config.server]!);
+      if (
+        needsFileExport(config)
+          ? client.fileExportVersion() !== 1
+          : client.imageExportVersion() !== 1 &&
+            client.fileExportVersion() !== 1
+      )
+        pluginError("IMAGE_EXPORT_UNSUPPORTED");
+    } finally {
+      await client.close();
+    }
+  }
   async assertAttachmentAvailable(ids: string[], config: AttachmentHandling) {
     const plugins = await Promise.all(ids.map((id) => this.get(id)));
     assertAttachmentBinding(plugins, config);
@@ -594,3 +681,11 @@ export class PluginService {
     }
   }
 }
+import {
+  imageExportTargets,
+  assertImageExportBinding,
+} from "./plugin-image-exports.js";
+import {
+  type ImageReply,
+  needsFileExport,
+} from "../generated-images/image-policy.js";

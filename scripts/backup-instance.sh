@@ -14,8 +14,8 @@ trap resume EXIT
 trap 'exit 130' INT TERM
 docker compose stop app
 docker compose exec -T postgres sh -c 'pg_dump --exclude-table-data=public.scheduled_task_restore_guard -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$BACKUP_SET/database.dump"
-docker compose run --rm --no-deps -T --entrypoint tar app -C /app/data -cf - memes plugins > "$BACKUP_SET/data.tar"
-docker compose run --rm --no-deps -T --entrypoint sh app -c 'cd /app/data && find memes plugins -type f -exec sha256sum {} \;' > "$BACKUP_SET/files.sha256"
+docker compose run --rm --no-deps -T --entrypoint sh app -c 'cd /app/data && set -- memes plugins; if [ -d generated-images ]; then set -- "$@" generated-images; fi; tar -cf - "$@"' > "$BACKUP_SET/data.tar"
+docker compose run --rm --no-deps -T --entrypoint sh app -c 'cd /app/data && set -- memes plugins; if [ -d generated-images ]; then set -- "$@" generated-images; fi; find "$@" -type f -exec sha256sum {} \;' > "$BACKUP_SET/files.sha256"
 [ -s "$BACKUP_SET/database.dump" ] && [ -s "$BACKUP_SET/data.tar" ]
 (cd "$BACKUP_SET" && if command -v sha256sum >/dev/null 2>&1; then sha256sum database.dump data.tar files.sha256; else shasum -a 256 database.dump data.tar files.sha256; fi) > "$BACKUP_SET/SHA256SUMS"
 printf '%s\n' 'Restore database.dump and data.tar together with the original SETTINGS_ENCRYPTION_KEY. Verify files.sha256 in /app/data before starting the app.' > "$BACKUP_SET/RESTORE.txt"

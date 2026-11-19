@@ -119,7 +119,7 @@ it.each(["chat-completions", "responses"] as const)(
           .map((t) => t.function?.name ?? t.name!)
           .find((name) => name.startsWith("ext_"))!;
         const argumentsJson = JSON.stringify({
-          arguments_json: JSON.stringify({ path: "/workspace/chart.png" }),
+          path: "/workspace/chart.png",
         });
         const toolCalls = ["first", "second"].map((id) => ({
           id,

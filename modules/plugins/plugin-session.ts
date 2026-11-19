@@ -1,4 +1,9 @@
 import { prepareToolImages, type ToolMedia } from "../ai/tool-image-session.js";
+import { assertImageExportBinding } from "./plugin-image-exports.js";
+import {
+  type ImageReply,
+  needsFileExport,
+} from "../generated-images/image-policy.js";
 import type { RunImageSession } from "../ai/run-image-session.js";
 import { compareTools, toolContractHash } from "./plugin-tool-sync.js";
 import type { AttachmentHandling } from "../attachments/attachment-policy.js";
@@ -9,12 +14,15 @@ import {
   normalizeMcpResult,
 } from "./plugin-result-store.js";
 import {
-  mcpModelDefinition,
+  mcpModelContract,
   decodeMcpArguments,
   PluginArgumentsError,
   validateMcpArguments,
 } from "./plugin-schema.js";
-import { pluginErrorGuidance } from "./plugin-guidance.js";
+import {
+  pluginErrorGuidance,
+  pluginFailureDetails,
+} from "./plugin-guidance.js";
 import type {
   AgentToolRegistry,
   MultimodalToolResult,
@@ -213,6 +221,43 @@ export class PluginSession {
           await this.close();
           throw error;
         }
+      },
+    };
+  }
+  imageExportChannel(config: ImageReply) {
+    assertImageExportBinding(this.plugins, config);
+    const p = this.plugins.find((p) => p.id === config.pluginId)!;
+    const tools = p.config.tools.filter(
+      (t) =>
+        t.server === config.server &&
+        ["prepare_sandbox", "run_command"].includes(t.definition.name),
+    );
+    const prepare = tools.find((t) => t.definition.name === "prepare_sandbox")!;
+    const check = async () => {
+      for (const tool of tools) await this.check(p, undefined, tool);
+      // Both current and pinned approval must retain the export capability.
+      for (const revision of [undefined, p.revision]) {
+        assertImageExportBinding(
+          [await this.service.get(p.id, revision)],
+          config,
+        );
+      }
+    };
+    return {
+      check,
+      export: async (path: string, signal: AbortSignal) => {
+        await check();
+        await this.guard?.();
+        const client = await this.clientFor(p, prepare, signal);
+        const data = await client.exportImage(
+          path,
+          signal,
+          needsFileExport(config) || prepare.imageExportVersion !== 1,
+        );
+        await check();
+        await this.guard?.();
+        signal.throwIfAborted();
+        return data;
       },
     };
   }
@@ -471,12 +516,16 @@ export class PluginSession {
           p.config.connections[tool.server],
         );
         const name = `ext_${digest([p.id, tool.server, tool.definition.name]).slice(0, 24)}`;
+        const modelContract = mcpModelContract(tool.definition);
         register(
           name,
           `${p.name}: ${tool.definition.description}`,
-          mcpModelDefinition(tool.definition).parameters,
+          modelContract.definition.parameters,
           async (args, ctx) => {
-            const mcpArgs = decodeMcpArguments(args);
+            const mcpArgs =
+              modelContract.argumentEncoding === "json-string"
+                ? decodeMcpArguments(args)
+                : args;
             await this.check(p, undefined, tool);
             // Reject invalid original arguments before connecting or discovering
             // a remote MCP service; retain its approved contract verbatim.
@@ -528,6 +577,9 @@ export class PluginSession {
                 tool: tool.definition.name,
                 parentToolCallId: ctx.toolCallId,
                 resultStatus: result.status,
+                ...(result.status === "error"
+                  ? pluginFailureDetails(result.structuredContent)
+                  : {}),
                 ...(result.errorCode ? { errorCode: result.errorCode } : {}),
               },
               () => this.check(p, undefined, tool),

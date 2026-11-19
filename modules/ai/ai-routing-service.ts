@@ -502,6 +502,7 @@ export class AiRoutingService {
           });
         let result: AiCallResult = await this.client.call(candidate.provider, {
           messages: request.messages,
+          ...(request.allowEmptyOutput ? { allowEmptyOutput: true } : {}),
           maxOutputTokens: request.maxOutputTokens,
           temperature: request.temperature,
           ...(request.executionId === null

@@ -1,4 +1,5 @@
 import { attachmentHandlingSchema } from "../attachments/attachment-policy.js";
+import { imageReplySchema } from "../generated-images/image-policy.js";
 import { scheduledTriggerSchema } from "../scheduled-tasks/task-policy.js";
 import { idleTriggerSchema } from "./idle-policy.js";
 import { validateIdlePaths } from "./idle-workflow-validation.js";
@@ -143,6 +144,7 @@ const aiChatNodeSchema = z.object({
       temperature: z.number().min(0).max(2).nullable().default(null),
       allowMemes: z.boolean().optional(),
       attachmentHandling: attachmentHandlingSchema.optional(),
+      imageReply: imageReplySchema.optional(),
       pluginIds: z.array(z.string().uuid()).max(10).optional(),
       webSearch: z.enum(["disabled", "auto", "required"]).optional(), // required is a legacy alias of auto; see normalizeWebSearchPolicy.
       webSearchSources: z.enum(["full", "compact", "hidden"]).default("full"),
@@ -167,6 +169,21 @@ const aiChatNodeSchema = z.object({
     .refine((config) => !config.allowMemes || config.outputFormat === "text", {
       message: "Memes require text output",
     })
+    .refine(
+      (config) =>
+        !config.imageReply?.enabled ||
+        (config.outputFormat === "text" &&
+          !!config.pluginIds?.includes(config.imageReply.pluginId) &&
+          (!config.attachmentHandling?.enabled ||
+            (config.attachmentHandling.pluginId ===
+              config.imageReply.pluginId &&
+              config.attachmentHandling.server === config.imageReply.server))),
+      {
+        message:
+          "Image reply requires text output, an approved plugin and the same sandbox as attachment handling",
+        path: ["imageReply"],
+      },
+    )
     .refine(
       (config) =>
         config.targetOutputCharacters === undefined ||
@@ -413,6 +430,38 @@ function validateSemantics(definition: WorkflowDefinition): void {
       )
         throw new Error(
           "Meme reply must bind text and meme from the same enabled text AI node, without native reply.",
+        );
+    }
+    if (node.type === "ai-chat" && node.config.imageReply?.enabled) {
+      const consumers = definition.nodes.filter(
+        (n) =>
+          n.type === "reply" &&
+          n.inputs?.generatedImage?.kind === "output" &&
+          n.inputs.generatedImage.blockId === node.id &&
+          n.inputs.generatedImage.port === "generatedImage",
+      );
+      if (consumers.length !== 1)
+        throw new Error(
+          "Image reply requires exactly one connected Reply node.",
+        );
+    }
+    if (node.type === "reply" && node.inputs?.generatedImage) {
+      const image = node.inputs.generatedImage,
+        text = node.inputs.text;
+      const source =
+        image.kind === "output" ? nodes.get(image.blockId) : undefined;
+      if (
+        image.kind !== "output" ||
+        image.port !== "generatedImage" ||
+        source?.type !== "ai-chat" ||
+        !source.config.imageReply?.enabled ||
+        node.config.replyToSourceMessage ||
+        text?.kind !== "output" ||
+        text.port !== "text" ||
+        text.blockId !== source.id
+      )
+        throw new Error(
+          "Image reply must bind text and image from the same enabled AI node without native reply.",
         );
     }
     for (const [inputName, reference] of Object.entries(node.inputs ?? {})) {

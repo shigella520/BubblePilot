@@ -26,7 +26,9 @@
     "ps",
     "sqlite3",
     "python",
-    "pip"
+    "pip",
+    "resvg",
+    "bp-render-svg"
   ],
   "pythonModules": [
     "numpy",
@@ -40,7 +42,7 @@
   ],
   "limits": [
     "single-task-files",
-    "text-results-only",
+    "png-reply-requires-explicit-image-reply-authorization",
     "no-ocr",
     "no-browser",
     "no-automatic-chat-attachments",

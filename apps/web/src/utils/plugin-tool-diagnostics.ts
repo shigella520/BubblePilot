@@ -76,6 +76,16 @@ export function pluginToolErrorLabel(code: string | null) {
     ATTACHMENT_SESSION_INVALIDATED: "本次任务的附件会话已失效",
 
     PLUGIN_REMOTE_TOOL_ERROR: "MCP 服务返回工具执行失败；未记录具体原因",
+    PLUGIN_COMMAND_FAILED: "命令已退出但执行失败；请检查退出码和具体原因",
+    PLUGIN_COMMAND_OUTPUT_LIMIT: "命令输出超过限制，本次沙箱已失效",
+    PLUGIN_MCP_CANCELLED: "MCP 请求已取消，不能自动重放未知操作",
+    PLUGIN_COMMAND_RESULT_UNKNOWN: "命令结果未知，本次沙箱已失效，不能自动重放",
+    PLUGIN_SESSION_INVALIDATED: "本次沙箱会话已失效或过期",
+    IMAGE_PREPARATION_FAILED: "附件准备失败，未选中可发送文件",
+    IMAGE_SESSION_UNAVAILABLE: "附件准备会话不可用，未选中可发送文件",
+    IMAGE_ARGUMENTS_INVALID: "附件路径参数无效",
+    IMAGE_PATH_DENIED: "附件路径必须是 /workspace/ 下的绝对路径",
+    IMAGE_EXPORT_TIMEOUT: "附件导出超时或已取消，未选中可发送文件",
     PLUGIN_REMOTE_AUTH_DENIED: "MCP 服务拒绝认证，请检查凭据",
     PLUGIN_QUOTA_EXHAUSTED: "服务额度已耗尽",
     PLUGIN_BILLING_REQUIRED: "服务要求付费或补充额度",
@@ -90,6 +100,32 @@ export function pluginToolErrorLabel(code: string | null) {
     PLUGIN_MCP_PROTOCOL_ERROR: "MCP 协议错误",
   };
   return code ? (labels[code] ?? null) : null;
+}
+
+export function pluginCommandErrorLabel(details: Details) {
+  const labels: Record<string, string> = {
+    svg_path_denied: "渲染路径必须是 /workspace/ 下的绝对路径",
+    svg_namespace_required: "SVG 缺少正确的命名空间",
+    svg_not_regular: "SVG 输入不是普通文件",
+    svg_entities_unsupported: "SVG 不允许实体声明",
+    svg_element_unsupported: "SVG 包含不支持的元素",
+    svg_attribute_unsupported: "SVG 包含不支持的属性",
+    svg_external_resource_denied: "SVG 不允许外部资源",
+    svg_source_too_large: "SVG 源文件过大",
+    svg_dimensions_invalid: "SVG 尺寸无效",
+    svg_dimensions_exceeded: "SVG 尺寸超过限制",
+    svg_complexity_exceeded: "SVG 复杂度超过限制",
+    svg_render_failed: "SVG 渲染失败",
+    png_too_large: "渲染生成的 PNG 文件超过大小限制",
+    png_dimensions_invalid: "渲染生成的 PNG 尺寸无效",
+  };
+  const reason =
+    typeof details?.failureReason === "string"
+      ? labels[details.failureReason]
+      : null;
+  const exit =
+    typeof details?.exitCode === "number" ? `退出码 ${details.exitCode}` : null;
+  return [exit, reason].filter(Boolean).join(" · ");
 }
 
 export function pluginDeliveryLabel(details: Details) {

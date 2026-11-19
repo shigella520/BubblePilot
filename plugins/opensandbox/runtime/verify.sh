@@ -6,6 +6,10 @@ docker run --rm --platform linux/amd64 --network none --memory 512m --cpus 1 \
   --cap-drop ALL --security-opt no-new-privileges \
   --mount "type=bind,src=$root/plugins/opensandbox/runtime/smoke.py,dst=/tmp/smoke.py,readonly" \
   "$image" python /tmp/smoke.py
+docker run --rm --platform linux/amd64 --network none --memory 512m --cpus 1 \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --mount "type=bind,src=$root/plugins/opensandbox/runtime/drawing-smoke.py,dst=/tmp/drawing-smoke.py,readonly" \
+  "$image" python -I /tmp/drawing-smoke.py
 # Prove storage survives commands in one container, but is absent in a new one.
 id=$(docker run -d --platform linux/amd64 --network none --memory 512m --cap-drop ALL --security-opt no-new-privileges "$image" sleep 60)
 trap 'docker rm -f "$id" >/dev/null 2>&1 || true' EXIT HUP INT TERM

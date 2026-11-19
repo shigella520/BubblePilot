@@ -4,6 +4,8 @@ import { ManagedMessageDetailClient } from "../modules/integrations/bluebubbles/
 import { createPostgresPool } from "../modules/shared/postgres-pool.js";
 import { AttachmentService } from "../modules/attachments/attachment-service.js";
 import { AttachmentStore } from "../modules/attachments/attachment-store.js";
+import { GeneratedImageStore } from "../modules/generated-images/image-store.js";
+import { GeneratedImageDelivery } from "../modules/generated-images/image-delivery.js";
 import { TaskService } from "../modules/scheduled-tasks/task-service.js";
 import { TaskScheduler } from "../modules/scheduled-tasks/task-scheduler.js";
 import { DEFAULT_CONTEXT_SETTINGS } from "../modules/workflow/context-settings-types.js";
@@ -235,6 +237,20 @@ const attachmentService = new AttachmentService(
   blueBubblesSettings,
   attachmentStore,
 );
+const generatedImages = new GeneratedImageStore(
+  memoryService.repository.pool,
+  config.generatedImageStoragePath ?? "./data/generated-images",
+  (config.generatedImageStorageMaxMiB ?? 1024) * 1024 * 1024,
+  config.generatedImageRetentionDays ?? 30,
+);
+await generatedImages.init([
+  config.pluginStoragePath ?? "./data/plugins",
+  config.memeStoragePath ?? "./data/memes",
+  config.attachmentTempPath ?? "/tmp/bubblepilot-attachments",
+  "./apps/web/dist",
+  "./dist",
+  "./public",
+]);
 const aiAgent = new AgentRunner(
   aiRouting,
   webSearchTool,
@@ -246,6 +262,7 @@ const aiAgent = new AgentRunner(
   memeRepository,
   plugins,
   attachmentService,
+  generatedImages,
 );
 const imageSummaryRepository = new PostgresImageSummaryRepository(
   config.databaseUrl,
@@ -305,6 +322,12 @@ const memeDelivery = new MemeDeliveryService(
   replyGateway,
   new SettingsCipher(config.settingsEncryptionKey),
 );
+const imageDelivery = new GeneratedImageDelivery(
+  memoryService.repository.pool,
+  generatedImages,
+  replyGateway,
+  new SettingsCipher(config.settingsEncryptionKey),
+);
 const tasks = new TaskService(
   memoryService.repository.pool,
   workflowRepository,
@@ -317,6 +340,7 @@ const workflowEngine = new WorkflowEngine(
     aiAgent,
     tasks,
     memeDelivery,
+    imageDelivery,
     imageInput: nativeImageInput,
     conversationContext,
     contextSettings,
@@ -362,6 +386,7 @@ const application = buildApplication(config, repository, {
   memes: memeService,
   plugins,
   memeDelivery,
+  imageDelivery,
   memory: memoryService,
   botIdentity,
   ai: {

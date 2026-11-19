@@ -4,6 +4,11 @@ import Ajv2020 from "ajv/dist/2020.js";
 import type { ValidateFunction } from "ajv";
 import type { jsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/types.js";
 import type { AiToolDefinition } from "../ai/ai-types.js";
+import {
+  compatibleToolParameters,
+  strictToolParameters,
+  ToolSchemaError,
+} from "../ai/tool-schema.js";
 import { ApplicationError } from "../../app/errors.js";
 import { pluginError } from "./plugin-types.js";
 
@@ -115,8 +120,37 @@ export const mcpSchemaValidator: jsonSchemaValidator = {
   },
 };
 
-/** MCP JSON Schema is not the model's strict-schema subset. Preserve it verbatim. */
+export interface McpModelContract {
+  definition: AiToolDefinition;
+  argumentEncoding: "direct" | "json-string";
+}
+
+/** Choose once per registered tool, independent of Provider fallback or argument contents. */
+export function mcpModelContract(tool: AiToolDefinition): McpModelContract {
+  try {
+    // Keep optional fields optional here; each Provider applies its own wire mode.
+    // Close declared objects so malformed/legacy envelopes cannot reach MCP as extras.
+    const parameters = compatibleToolParameters(tool);
+    strictToolParameters({ ...tool, parameters });
+    return {
+      definition: { ...tool, parameters },
+      argumentEncoding: "direct",
+    };
+  } catch (error) {
+    if (!(error instanceof ToolSchemaError)) throw error;
+    return {
+      definition: envelopedMcpDefinition(tool),
+      argumentEncoding: "json-string",
+    };
+  }
+}
+
 export function mcpModelDefinition(tool: AiToolDefinition): AiToolDefinition {
+  return mcpModelContract(tool).definition;
+}
+
+/** Preserve complex MCP contracts that the model Schema adapter cannot represent. */
+function envelopedMcpDefinition(tool: AiToolDefinition): AiToolDefinition {
   return {
     name: tool.name,
     description: tool.description,
@@ -147,6 +181,8 @@ export function decodeMcpArguments(
       pluginError("INVALID_TOOL_ARGUMENTS");
     return value as Record<string, unknown>;
   } catch {
-    return pluginError("INVALID_TOOL_ARGUMENTS");
+    throw new PluginArgumentsError([
+      { field: "arguments_json", code: "invalid_json_object" },
+    ]);
   }
 }

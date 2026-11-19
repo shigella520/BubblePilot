@@ -49,6 +49,8 @@ export interface PluginPackage {
   hash: string;
 }
 export interface ApprovedTool {
+  imageExportVersion?: 1;
+  fileExportVersion?: 1;
   attachmentTransferVersion?: 1;
   outputSchema?: Record<string, unknown>;
   server: string;

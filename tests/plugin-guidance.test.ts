@@ -2,8 +2,87 @@ import { describe, it, expect } from "vitest";
 import {
   pluginErrorGuidance,
   pluginResultErrorCode,
+  pluginFailureDetails,
+  pluginResultFailureGuidance,
+  pluginGuidance,
 } from "../modules/plugins/plugin-guidance.js";
 describe("plugin failure classification", () => {
+  it("allows bounded preview corrections only with an explicitly usable session", () => {
+    for (const status of [
+      "preview_too_large",
+      "image_too_large",
+      "invalid_image",
+      "image_unavailable_or_invalid",
+    ]) {
+      expect(
+        pluginResultFailureGuidance({ status, sessionUsable: true })
+          .retryInThisAnswer,
+      ).toBe(true);
+      expect(
+        pluginResultFailureGuidance({ status, sessionUsable: false })
+          .retryInThisAnswer,
+      ).toBe(false);
+      expect(pluginResultFailureGuidance({ status }).retryInThisAnswer).toBe(
+        false,
+      );
+    }
+    for (const status of [
+      "image_dependency_unavailable",
+      "image_preview_failed",
+      "result_unknown",
+      "command_timeout_session_invalidated_do_not_replay",
+    ])
+      expect(
+        pluginResultFailureGuidance({ status, sessionUsable: true })
+          .retryInThisAnswer,
+      ).toBe(false);
+    for (const code of ["png_too_large", "png_dimensions_invalid"])
+      expect(
+        pluginFailureDetails({
+          status: "command_failed",
+          exitCode: 1,
+          stdout: JSON.stringify({ status: "failed", code }),
+        }),
+      ).toMatchObject({ failureReason: code });
+  });
+  it("reports safe command failure evidence without exposing output and offers only safe corrections", () => {
+    const result = {
+      status: "command_failed",
+      exitCode: 1,
+      sessionUsable: true,
+      stdout:
+        '{"status":"failed","code":"svg_path_denied","private":"fictional secret"}',
+      stderr: "private error",
+    };
+    expect(pluginResultErrorCode(result)).toBe("PLUGIN_COMMAND_FAILED");
+    expect(pluginFailureDetails(result)).toEqual({
+      remoteStatus: "command_failed",
+      exitCode: 1,
+      failureReason: "svg_path_denied",
+    });
+    expect(
+      pluginFailureDetails({
+        ...result,
+        stdout: '{"status":"failed","code":"private"}',
+      }),
+    ).not.toHaveProperty("failureReason");
+    expect(pluginResultFailureGuidance(result)).toMatchObject({
+      retryInThisAnswer: true,
+    });
+    expect(
+      pluginResultFailureGuidance({ ...result, sessionUsable: false }),
+    ).toMatchObject({ retryInThisAnswer: false });
+    expect(
+      pluginResultFailureGuidance({
+        status: "result_unknown",
+        sessionUsable: true,
+      }),
+    ).toMatchObject({ retryInThisAnswer: false });
+    expect(pluginGuidance).not.toContain("web_search");
+    expect(
+      pluginErrorGuidance("PLUGIN_MCP_TRANSPORT_ERROR").nextAction,
+    ).not.toContain("web search");
+  });
   it("only recognizes explicit structured quota and rate codes", () => {
     expect(
       pluginResultErrorCode({ error: { code: "INSUFFICIENT_CREDITS" } }),

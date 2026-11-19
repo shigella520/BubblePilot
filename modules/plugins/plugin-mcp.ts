@@ -1,4 +1,12 @@
 import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  imageExportProtocol,
+  fileExportProtocol,
+  generatedFileLimits,
+  generatedImageLimits,
+  GeneratedImageError,
+} from "../generated-images/image-policy.js";
 import { attachmentProtocol } from "../attachments/attachment-policy.js";
 import { boundedClose } from "./bounded-close.js";
 import type { TrustedHostsProvider } from "../shared/network-settings.js";
@@ -9,7 +17,7 @@ import {
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
-  pluginFailureGuidance,
+  pluginResultFailureGuidance,
   pluginResultErrorCode,
 } from "./plugin-guidance.js";
 import {
@@ -92,6 +100,116 @@ export class PluginMcp {
   private binaryFetch?: typeof fetch;
   private connectionUrl?: string;
   private authHeaders: Record<string, string> = {};
+  imageExportVersion() {
+    const value =
+      this.client.getServerCapabilities()?.experimental?.[imageExportProtocol];
+    return value && "version" in value && value.version === 1 ? 1 : null;
+  }
+  fileExportVersion() {
+    const value =
+      this.client.getServerCapabilities()?.experimental?.[fileExportProtocol];
+    return value && "version" in value && value.version === 1 ? 1 : null;
+  }
+  async exportImage(
+    path: string,
+    signal: AbortSignal,
+    file = false,
+  ): Promise<Buffer> {
+    if (
+      (file ? this.fileExportVersion() : this.imageExportVersion()) !== 1 ||
+      !this.transport?.sessionId ||
+      !this.binaryFetch ||
+      !this.connectionUrl
+    )
+      throw new GeneratedImageError("IMAGE_EXPORT_UNSUPPORTED");
+    const url =
+      this.connectionUrl.replace(/\/$/u, "") +
+      (file ? "/file-exports" : "/image-exports");
+    const headers = {
+      ...this.authHeaders,
+      "mcp-session-id": this.transport.sessionId,
+    };
+    const failure = async (response: Response) => {
+      const data = (await response.json().catch(() => null)) as {
+        error?: unknown;
+      } | null;
+      const codes = new Set([
+        "image_path_denied",
+        "image_not_found",
+        "image_not_regular",
+        "image_too_large",
+        "image_invalid",
+        "image_animated",
+        "image_pixels_exceeded",
+        "image_changed",
+        "prepare_sandbox_required",
+        "sandbox_busy",
+      ]);
+      throw new GeneratedImageError(
+        typeof data?.error === "string" && codes.has(data.error)
+          ? data.error.toUpperCase()
+          : "IMAGE_EXPORT_FAILED",
+      );
+    };
+    const ticketResponse = await this.binaryFetch(url + "/tickets", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ path }),
+      signal,
+    });
+    if (!ticketResponse.ok) await failure(ticketResponse);
+    const ticket = (await ticketResponse.json()) as { token?: unknown };
+    if (
+      typeof ticket.token !== "string" ||
+      !/^[a-f0-9]{64}$/.test(ticket.token)
+    )
+      throw new GeneratedImageError("IMAGE_EXPORT_FAILED");
+    const response = await this.binaryFetch(url, {
+      method: "POST",
+      headers: { ...headers, "x-bp-transfer-token": ticket.token },
+      signal,
+    });
+    if (!response.ok) await failure(response);
+    const length = Number(response.headers.get("content-length"));
+    const expected = response.headers.get("x-content-sha256");
+    if (
+      !Number.isSafeInteger(length) ||
+      length < 1 ||
+      length >
+        (file ? generatedFileLimits.bytes : generatedImageLimits.bytes) ||
+      !expected ||
+      !/^[a-f0-9]{64}$/.test(expected)
+    ) {
+      await response.body?.cancel();
+      throw new GeneratedImageError("IMAGE_EXPORT_FAILED");
+    }
+    const reader = (
+      response.body as ReadableStream<Uint8Array> | null
+    )?.getReader();
+    if (!reader) throw new GeneratedImageError("IMAGE_EXPORT_FAILED");
+    const chunks: Uint8Array[] = [];
+    let count = 0;
+    try {
+      for (;;) {
+        signal.throwIfAborted();
+        const part = await reader.read();
+        if (part.done) break;
+        count += part.value.length;
+        if (count > length) throw new GeneratedImageError("IMAGE_TOO_LARGE");
+        chunks.push(part.value);
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+    const bytes = Buffer.concat(chunks);
+    if (
+      count !== length ||
+      createHash("sha256").update(bytes).digest("hex") !== expected
+    )
+      throw new GeneratedImageError("IMAGE_HASH_MISMATCH");
+    signal.throwIfAborted();
+    return bytes;
+  }
   attachmentVersion() {
     const capability =
       this.client.getServerCapabilities()?.experimental?.[attachmentProtocol];
@@ -285,6 +403,12 @@ export class PluginMcp {
             ? (1 as const)
             : undefined;
         tools.push({
+          ...(this.fileExportVersion() === 1 && tool.name === "prepare_sandbox"
+            ? { fileExportVersion: 1 as const }
+            : {}),
+          ...(this.imageExportVersion() === 1 && tool.name === "prepare_sandbox"
+            ? { imageExportVersion: 1 as const }
+            : {}),
           ...(attachmentTransferVersion ? { attachmentTransferVersion } : {}),
           server,
           definition,
@@ -361,7 +485,7 @@ export class PluginMcp {
       ...(result.isError
         ? {
             errorCode: pluginResultErrorCode(result.structuredContent),
-            ...pluginFailureGuidance,
+            ...pluginResultFailureGuidance(result.structuredContent),
           }
         : {}),
       ...(result.structuredContent

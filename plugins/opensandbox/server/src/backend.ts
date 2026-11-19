@@ -11,6 +11,14 @@ import {
   SandboxManager,
 } from "@alibaba-group/opensandbox";
 import type { Config } from "./config.js";
+import {
+  imageExportCommand,
+  ImageExportError,
+  imageExportErrors,
+  readImageResponse,
+  fileExportMaxBytes,
+  imageExportMaxBytes,
+} from "./image-export.js";
 
 export interface CommandResult {
   status: string;
@@ -22,6 +30,11 @@ export interface CommandResult {
 }
 export interface Handle {
   id: string;
+  exportImage?(
+    path: string,
+    signal: AbortSignal,
+    file?: boolean,
+  ): Promise<Buffer>;
   run(
     command: string,
     signal: AbortSignal,
@@ -55,7 +68,8 @@ export async function collectOutput(
     stderr = "",
     bytes = 0,
     complete = false,
-    failed = false;
+    failed = false,
+    knownCommandFailure = false;
   let exitCode: number | null = null;
   for await (const event of events) {
     if (event.type === "stdout" || event.type === "stderr") {
@@ -84,12 +98,23 @@ export async function collectOutput(
     }
     if (event.type === "error") {
       failed = true;
+      exitCode = null;
       const raw = event.error?.exit_code ?? event.error?.evalue;
       if (
         (typeof raw === "number" && Number.isInteger(raw)) ||
         (typeof raw === "string" && /^-?\d+$/.test(raw))
       )
         exitCode = Number(raw);
+      // Execd v1.1.0 foreground failures emit CommandExecError after Wait(),
+      // then EOF without execution_complete. Do not infer this from stdout or
+      // arbitrary errors. Drain the stream so a later transport failure still
+      // rejects; cancellation/timeout remain enforced by SandboxSession.
+      knownCommandFailure =
+        event.error?.ename === "CommandExecError" &&
+        Number.isSafeInteger(exitCode) &&
+        exitCode !== null &&
+        exitCode > 0 &&
+        exitCode <= 255;
     }
     if (event.type === "execution_complete") {
       complete = true;
@@ -98,11 +123,16 @@ export async function collectOutput(
   }
   if (complete && !failed) exitCode = 0;
   return {
-    status: complete
-      ? exitCode === 0
+    status:
+      complete && !failed
         ? "completed"
-        : "command_failed"
-      : "result_unknown",
+        : (complete || knownCommandFailure) &&
+            exitCode !== null &&
+            Number.isSafeInteger(exitCode) &&
+            exitCode > 0 &&
+            exitCode <= 255
+          ? "command_failed"
+          : "result_unknown",
     exitCode,
     stdout,
     stderr,
@@ -137,6 +167,79 @@ export function sdkBackend(config: Config, apiKey: string): Backend {
       });
       return {
         id: sandbox.id,
+        async exportImage(path, signal, file = false) {
+          const abort = new AbortController();
+          const combined = AbortSignal.any([signal, abort.signal]);
+          const port = 47832;
+          const token = randomBytes(32).toString("hex");
+          let ready!: () => void;
+          let reject!: (error: unknown) => void;
+          const readiness = new Promise<void>((resolve, fail) => {
+            ready = resolve;
+            reject = fail;
+          });
+          const cancelled = () =>
+            reject(new ImageExportError("image_export_failed"));
+          combined.addEventListener("abort", cancelled, { once: true });
+          const command = (async () => {
+            let seen = false,
+              count = 0;
+            for await (const event of sandbox.commands.runStream(
+              imageExportCommand({ path, port, token, seconds: 30, file }),
+              { background: false, timeoutSeconds: 30 },
+              combined,
+            )) {
+              count += Buffer.byteLength(event.text ?? "");
+              if (count > 8192)
+                throw new ImageExportError("image_export_failed");
+              const code = event.text?.trim().replace(/^IMAGE_ERROR:/, "");
+              if (code && imageExportErrors.has(code))
+                throw new ImageExportError(code);
+              if (
+                event.type === "stdout" &&
+                event.text?.includes("IMAGE_READY")
+              ) {
+                seen = true;
+                ready();
+              }
+              if (event.type === "error")
+                throw new ImageExportError("image_export_failed");
+            }
+            if (!seen) throw new ImageExportError("image_export_failed");
+          })();
+          void command.catch(reject);
+          try {
+            combined.throwIfAborted();
+            await readiness;
+            const endpoint = await sandbox.getEndpoint(port);
+            const url = new URL(
+              `${connectionConfig.protocol}://${endpoint.endpoint}`,
+            );
+            if (url.origin !== new URL(config.OPENSANDBOX_URL).origin)
+              throw new ImageExportError("image_export_failed");
+            const response = await fetch(url, {
+              signal: combined,
+              redirect: "error",
+              headers: {
+                ...connectionConfig.headers,
+                ...endpoint.headers,
+                "X-Transfer-Token": token,
+              },
+            });
+            const data = await readImageResponse(
+              response,
+              combined,
+              file ? fileExportMaxBytes : imageExportMaxBytes,
+            );
+            await command;
+            combined.throwIfAborted();
+            return data;
+          } finally {
+            abort.abort();
+            combined.removeEventListener("abort", cancelled);
+            await command.catch(() => undefined);
+          }
+        },
         async run(command, signal, seconds) {
           return collectOutput(
             sandbox.commands.runStream(

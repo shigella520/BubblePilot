@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   compileMcpSchema,
   mcpModelDefinition,
+  mcpModelContract,
   decodeMcpArguments,
   mcpSchemaValidator,
   validateMcpArguments,
@@ -9,10 +10,74 @@ import {
 } from "../modules/plugins/plugin-schema.js";
 import {
   strictToolParameters,
+  compatibleToolParameters,
   restoreToolArguments,
 } from "../modules/ai/tool-schema.js";
 
 describe("MCP contracts remain independent of model strict schemas", () => {
+  it("uses real fields for ordinary tools while preserving optional null semantics", () => {
+    const tool = {
+      name: "run_command",
+      description: "Fictional command tool",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string", minLength: 1, maxLength: 32768 },
+          timeout_seconds: {
+            type: "integer",
+            minimum: 1,
+            maximum: 120,
+            default: 60,
+          },
+          label: { type: ["string", "null"] },
+        },
+        required: ["command"],
+        $schema: "http://json-schema.org/draft-07/schema#",
+      },
+    };
+    const original = structuredClone(tool);
+    const contract = mcpModelContract(tool);
+    expect(contract.argumentEncoding).toBe("direct");
+    expect(
+      Object.keys(contract.definition.parameters.properties as object),
+    ).toEqual(["command", "timeout_seconds", "label"]);
+    const command = 'python - <<\'PY\'\nprint("fictional \\"chart\\"")\nPY';
+    const strict = { command, timeout_seconds: null, label: null };
+    expect(
+      compileMcpSchema(strictToolParameters(contract.definition))(strict),
+    ).toBe(true);
+    const restored: unknown = JSON.parse(
+      restoreToolArguments(
+        contract.definition.parameters,
+        JSON.stringify(strict),
+      ),
+    );
+    expect(restored).toEqual({ command, label: null });
+    expect(() => validateMcpArguments(tool.parameters, restored)).not.toThrow();
+    const compatible = compatibleToolParameters(contract.definition);
+    expect(compileMcpSchema(compatible)({ command })).toBe(true);
+    expect(
+      compileMcpSchema(compatible)({ command, timeout_seconds: null }),
+    ).toBe(false);
+    expect(tool).toEqual(original);
+  });
+  it("does not confuse a real arguments_json field with the compatibility envelope", () => {
+    const contract = mcpModelContract({
+      name: "fictional_text",
+      description: "Fictional",
+      parameters: {
+        type: "object",
+        properties: { arguments_json: { type: "string" } },
+        required: ["arguments_json"],
+      },
+    });
+    expect(contract.argumentEncoding).toBe("direct");
+    expect(
+      compileMcpSchema(contract.definition.parameters)({
+        arguments_json: "plain text",
+      }),
+    ).toBe(true);
+  });
   const schema = {
     type: "object",
     properties: {
@@ -34,7 +99,9 @@ describe("MCP contracts remain independent of model strict schemas", () => {
     };
     const original = structuredClone(definition);
     const wire = mcpModelDefinition(definition);
+    expect(mcpModelContract(definition).argumentEncoding).toBe("json-string");
     expect(() => strictToolParameters(wire)).not.toThrow();
+    expect(() => compatibleToolParameters(wire)).not.toThrow();
     const input = { schema: { price: 12 }, optional: null };
     const normalized = restoreToolArguments(
       wire.parameters,

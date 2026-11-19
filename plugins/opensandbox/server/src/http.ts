@@ -1,4 +1,10 @@
 import { imageCommand, imageReply } from "./images.js";
+import { ImageExports } from "./image-export-http.js";
+import {
+  imageExportProtocol,
+  fileExportProtocol,
+  fileExportMaxBytes,
+} from "./image-export.js";
 import type { CommandTimeouts } from "./config.js";
 import type { ServerResponse } from "node:http";
 import { AttachmentTransfers } from "./attachment-http.js";
@@ -20,6 +26,9 @@ import { fileCommand } from "./files.js";
 const path = z
   .string()
   .max(4096)
+  .describe(
+    "Absolute Linux file path below /workspace, e.g. /workspace/data.txt; use the exact sandbox_path for imported attachments. No Windows or host paths.",
+  )
   .refine(
     (value) =>
       value.startsWith("/workspace/") &&
@@ -46,7 +55,16 @@ function register(
     try {
       const value = await action();
       return reply(
-        value,
+        {
+          ...value,
+          sessionUsable: !session.ended,
+          ...(value.status === "command_failed"
+            ? {
+                guidance:
+                  "The command exited with a nonzero status. Inspect stdout/stderr and correct the cause before a safe follow-up in this same sandbox. Earlier steps may have changed files; do not blindly replay side effects.",
+              }
+            : {}),
+        },
         !["created", "reused", "completed", "read", "written"].includes(
           String(value.status),
         ),
@@ -56,6 +74,7 @@ function register(
         {
           status:
             error instanceof ToolError ? error.message : "operation_failed",
+          sessionUsable: !session.ended,
         },
         true,
       );
@@ -65,7 +84,7 @@ function register(
     "prepare_sandbox",
     {
       description:
-        "Create this run's temporary Python workspace. Call once before command/file tools; repeated calls reuse it. Busy means no capacity. Never assume files survive session expiry.",
+        "Create this run's temporary Linux Python workspace at /workspace. Use absolute /workspace/... file paths, never Windows paths or host paths. Use imported files at the exact sandbox_path returned by import_chat_attachment. Call once before command/file tools; repeated calls reuse it. Busy means no capacity. Never assume files survive session expiry.",
       inputSchema: {},
       annotations: {
         readOnlyHint: false,
@@ -79,7 +98,7 @@ function register(
     "run_command",
     {
       description:
-        "Run a foreground shell command inside this run's sandbox. No host mounts. Nonzero exit is failure. Unknown/cancelled results must not be replayed. Output cap 1 MiB; redirect large output into /workspace files and read portions.",
+        "Run a foreground shell command in this run's Linux sandbox, working directory /workspace. Use absolute /workspace/... paths for files and script arguments: a program may reject relative paths even in this working directory. No Windows paths or host mounts. Confirmed nonzero exit is command_failed; inspect the cause before a safe correction. Unknown/cancelled results must not be replayed. Output cap 1 MiB; redirect large output into /workspace files and read portions.",
       inputSchema: {
         command: z.string().min(1).max(32768),
         timeout_seconds: z
@@ -186,14 +205,22 @@ function register(
         if (result.status !== "completed")
           return reply(
             {
-              status: result.status,
+              ...result,
+              sessionUsable: !session.ended,
               guidance:
                 "The image was not supplied. Check sandbox state and remaining execution time.",
             },
             true,
           );
         extra.signal.throwIfAborted();
-        return imageReply(result.stdout);
+        const preview = imageReply(result.stdout);
+        return {
+          ...preview,
+          structuredContent: {
+            ...preview.structuredContent,
+            sessionUsable: !session.ended,
+          },
+        };
       } catch (error) {
         return reply(
           {
@@ -201,6 +228,7 @@ function register(
               error instanceof ToolError
                 ? error.message
                 : "image_preview_failed",
+            sessionUsable: !session.ended,
           },
           true,
         );
@@ -231,6 +259,8 @@ export function createMcpHttp(
       transport: StreamableHTTPServerTransport;
       sandbox: SandboxSession;
       attachments: AttachmentTransfers;
+      images: ImageExports;
+      files: ImageExports;
       responses: Set<ServerResponse>;
     }
   >();
@@ -241,7 +271,15 @@ export function createMcpHttp(
         "/mcp/attachments",
         "/mcp/attachments/tickets",
       ].includes(req.url ?? "");
-      if (req.url !== "/mcp" && !attachmentRoute) {
+      const imageRoute = [
+        "/mcp/image-exports",
+        "/mcp/image-exports/tickets",
+      ].includes(req.url ?? "");
+      const fileRoute = [
+        "/mcp/file-exports",
+        "/mcp/file-exports/tickets",
+      ].includes(req.url ?? "");
+      if (req.url !== "/mcp" && !attachmentRoute && !imageRoute && !fileRoute) {
         res.writeHead(404).end();
         return;
       }
@@ -267,12 +305,14 @@ export function createMcpHttp(
         res.writeHead(404).end();
         return;
       }
-      if (attachmentRoute) {
+      if (attachmentRoute || imageRoute || fileRoute) {
         if (!pair) {
           res.writeHead(403).end();
           return;
         }
-        await pair.attachments.handle(req, res);
+        await (
+          fileRoute ? pair.files : imageRoute ? pair.images : pair.attachments
+        ).handle(req, res);
         return;
       }
       const parsed = req.method === "POST" ? await body(req) : undefined;
@@ -289,11 +329,19 @@ export function createMcpHttp(
         const server = new McpServer(
           {
             name: "bubblepilot-opensandbox",
-            version: "0.2.0",
+            version: "0.4.1",
           },
           {
             capabilities: {
               experimental: {
+                [fileExportProtocol]: {
+                  version: 1,
+                  fileBytes: fileExportMaxBytes,
+                },
+                [imageExportProtocol]: {
+                  version: 1,
+                  fileBytes: 8 * 1024 * 1024,
+                },
                 [attachmentProtocol]: {
                   version: 1,
                   fileBytes: 20 * 1024 * 1024,
@@ -305,6 +353,8 @@ export function createMcpHttp(
           },
         );
         const attachments = new AttachmentTransfers(sandbox);
+        const images = new ImageExports(sandbox);
+        const files = new ImageExports(sandbox, true);
         register(server, sandbox, pool.commandTimeouts);
         const responses = new Set<ServerResponse>();
         const transport = new StreamableHTTPServerTransport({
@@ -315,12 +365,22 @@ export function createMcpHttp(
               transport,
               sandbox,
               attachments,
+              images,
+              files,
               responses,
             });
           },
         });
         await server.connect(transport as Transport);
-        pair = { server, transport, sandbox, attachments, responses };
+        pair = {
+          server,
+          transport,
+          sandbox,
+          attachments,
+          images,
+          files,
+          responses,
+        };
       }
       if (req.method === "DELETE") {
         pair.sandbox.invalidate();

@@ -63,7 +63,7 @@ function fixture(
   const connect = vi.spyOn(PluginMcp.prototype, "connect").mockResolvedValue();
   const discover = vi
     .spyOn(PluginMcp.prototype, "discover")
-    .mockResolvedValue([tool]);
+    .mockResolvedValue([p.config.tools[0]!]);
   vi.spyOn(PluginMcp.prototype, "close").mockResolvedValue();
   const call = vi.spyOn(PluginMcp.prototype, "call").mockResolvedValue({
     status: "success",
@@ -96,8 +96,120 @@ function fixture(
 }
 afterEach(() => vi.restoreAllMocks());
 describe("MCP large-result session lifecycle", () => {
-  it("returns actionable envelope errors before calling the remote tool", async () => {
+  it("keeps safe command diagnostics in audit while raw command output stays in model results", async () => {
     const f = fixture();
+    f.call.mockResolvedValueOnce({
+      status: "error",
+      responseBytes: 300,
+      errorCode: "PLUGIN_COMMAND_FAILED",
+      content: [],
+      structuredContent: {
+        status: "command_failed",
+        exitCode: 1,
+        stdout:
+          '{"status":"failed","code":"svg_path_denied","private":"fictional hidden"}',
+        stderr: "fictional private stderr",
+      },
+    });
+    const result = (await f.ext.execute("{}", f.ctx)) as MultimodalToolResult;
+    expect(result.diagnostics).toMatchObject({
+      outcome: "error",
+      errorCode: "PLUGIN_COMMAND_FAILED",
+      remoteStatus: "command_failed",
+      exitCode: 1,
+      failureReason: "svg_path_denied",
+    });
+    expect(JSON.stringify(result.diagnostics)).not.toContain(
+      "fictional hidden",
+    );
+    expect(JSON.stringify(result.diagnostics)).not.toContain("private stderr");
+    expect(result.text).toContain("fictional hidden");
+    await f.session.close();
+  });
+  it("passes long multiline file contents unchanged and rejects the old envelope", async () => {
+    const f = fixture(undefined, {
+      type: "object",
+      properties: { path: { type: "string" }, text: { type: "string" } },
+      required: ["path", "text"],
+    });
+    const args = {
+      path: "/workspace/draw.py",
+      text: String.raw`# Fictional drawing
+svg = '<svg width="240"><text>示例</text></svg>'
+print("quote: \"; slash: \\")
+`.repeat(80),
+    };
+    expect(f.ext.definition.parameters.properties).not.toHaveProperty(
+      "arguments_json",
+    );
+    const old = (await f.ext.execute(
+      JSON.stringify({ arguments_json: JSON.stringify(args) }),
+      f.ctx,
+    )) as MultimodalToolResult;
+    expect(JSON.parse(old.text)).toMatchObject({
+      code: "PLUGIN_INVALID_TOOL_ARGUMENTS",
+      retryInThisAnswer: true,
+    });
+    expect(f.connect).not.toHaveBeenCalled();
+    await f.ext.execute(JSON.stringify(args), f.ctx);
+    expect(f.call.mock.calls[0]?.[1]).toEqual(args);
+    await f.session.close();
+  });
+  it("preserves a direct tool field literally named arguments_json", async () => {
+    const f = fixture(undefined, {
+      type: "object",
+      properties: { arguments_json: { type: "string" } },
+      required: ["arguments_json"],
+    });
+    await f.ext.execute(JSON.stringify({ arguments_json: "not JSON" }), f.ctx);
+    expect(f.call.mock.calls[0]?.[1]).toEqual({ arguments_json: "not JSON" });
+    await f.session.close();
+  });
+  it("keeps complex arguments in an explicit envelope and reports malformed JSON safely", async () => {
+    const f = fixture(undefined, {
+      type: "object",
+      properties: {
+        schema: {
+          type: "object",
+          propertyNames: { type: "string" },
+          additionalProperties: true,
+        },
+      },
+      required: ["schema"],
+    });
+    const malformed = (await f.ext.execute(
+      JSON.stringify({
+        arguments_json: '{"schema":{"fictional-private-value":',
+      }),
+      f.ctx,
+    )) as MultimodalToolResult;
+    expect(JSON.parse(malformed.text)).toMatchObject({
+      code: "PLUGIN_INVALID_TOOL_ARGUMENTS",
+      issues: [{ field: "arguments_json", code: "invalid_json_object" }],
+      retryInThisAnswer: true,
+    });
+    expect(malformed.text).not.toContain("fictional-private-value");
+    expect(f.connect).not.toHaveBeenCalled();
+    const args = { schema: { arbitrary: { type: "string" } } };
+    await f.ext.execute(
+      JSON.stringify({ arguments_json: JSON.stringify(args) }),
+      f.ctx,
+    );
+    expect(f.call.mock.calls[0]?.[1]).toEqual(args);
+    await f.session.close();
+  });
+  it("returns actionable envelope errors before calling the remote tool", async () => {
+    const f = fixture(undefined, {
+      type: "object",
+      properties: {
+        schema: {
+          type: "object",
+          propertyNames: { type: "string" },
+          additionalProperties: true,
+        },
+      },
+      required: ["schema"],
+    });
     const output = (await f.ext.execute("{}", f.ctx)) as MultimodalToolResult;
     expect(JSON.parse(output.text)).toMatchObject({
       code: "PLUGIN_INVALID_TOOL_ARGUMENTS",
@@ -124,7 +236,7 @@ describe("MCP large-result session lifecycle", () => {
       additionalProperties: false,
     });
     const output = (await f.ext.execute(
-      JSON.stringify({ arguments_json: JSON.stringify({ timeout: null }) }),
+      JSON.stringify({ timeout: null }),
       f.ctx,
     )) as MultimodalToolResult;
     expect(JSON.parse(output.text)).toMatchObject({
@@ -139,10 +251,7 @@ describe("MCP large-result session lifecycle", () => {
   });
   it("checks authorization again on reads and caps the remote timeout", async () => {
     const f = fixture();
-    const output = (await f.ext.execute(
-      '{"arguments_json":"{}"}',
-      f.ctx,
-    )) as MultimodalToolResult;
+    const output = (await f.ext.execute("{}", f.ctx)) as MultimodalToolResult;
     expect(f.call.mock.calls[0]?.[3]).toBe(45000);
     expect(output.diagnostics).toMatchObject({
       delivery: "partial",
@@ -174,10 +283,7 @@ describe("MCP large-result session lifecycle", () => {
           content: [{ type: "text", text: "x".repeat(30000) }],
         };
       });
-      const output = (await f.ext.execute(
-        '{"arguments_json":"{}"}',
-        f.ctx,
-      )) as MultimodalToolResult;
+      const output = (await f.ext.execute("{}", f.ctx)) as MultimodalToolResult;
       expect(output.commitResult).toBeUndefined();
       expect(output.diagnostics?.outcome).toBe("error");
       expect(parsePayload(output.text).result_ref).toBeUndefined();
@@ -186,7 +292,7 @@ describe("MCP large-result session lifecycle", () => {
   });
   it("keeps insufficient character budget separate from timeout", async () => {
     const f = fixture();
-    const output = (await f.ext.execute('{"arguments_json":"{}"}', {
+    const output = (await f.ext.execute("{}", {
       ...f.ctx,
       maxOutputCharacters: 10,
     })) as MultimodalToolResult;
@@ -211,14 +317,11 @@ it("uses the service timeout, caps it by the remaining budget and reports it on 
   const f = fixture(150);
   try {
     f.ctx.deadline = Date.now() + 180000;
-    await f.ext.execute('{"arguments_json":"{}"}', f.ctx);
+    await f.ext.execute("{}", f.ctx);
     expect(f.call.mock.calls[0]?.[3]).toBe(150000);
     f.ctx.deadline = Date.now() + 1200;
     f.call.mockRejectedValueOnce(new Error("fictional transport failure"));
-    const failed = (await f.ext.execute(
-      '{"arguments_json":"{}"}',
-      f.ctx,
-    )) as MultimodalToolResult;
+    const failed = (await f.ext.execute("{}", f.ctx)) as MultimodalToolResult;
     expect(f.call.mock.calls[1]?.[3]).toBeGreaterThan(0);
     expect(f.call.mock.calls[1]?.[3]).toBeLessThanOrEqual(1200);
     expect(failed.diagnostics).toMatchObject({
@@ -226,7 +329,7 @@ it("uses the service timeout, caps it by the remaining budget and reports it on 
       callTimeoutMs: 150000,
     });
     f.ctx.deadline = Date.now() - 1;
-    await f.ext.execute('{"arguments_json":"{}"}', f.ctx);
+    await f.ext.execute("{}", f.ctx);
     expect(f.call).toHaveBeenCalledTimes(2);
   } finally {
     await f.session.close();

@@ -73,3 +73,11 @@ PR #58 的完整 CI 扫描发现 14 个新的 HIGH CVE、56 条包记录，来�
 完整 CI 扫描发现 [CVE-2026-126190](https://github.com/facelessuser/soupsieve/security/advisories/GHSA-mmhr-3c5m-f64f)：对不可信的深层嵌套 HTML 执行后代选择器可能长时间占用 CPU。将 Beautiful Soup 的间接依赖 Soup Sieve 从 3.0.4 升级到官方修复版 4.0，并使用 PyPI 版本元数据固定 wheel 与源码包哈希。Beautiful Soup 的现有依赖约束兼容该版本；镜像冒烟测试覆盖正常选择及公告中的深层未命中场景。
 
 4.0 的默认选择器启用修复缓存；显式使用上游 `NOCACHE` 选项仍会保留旧行为，不应对不可信内容使用该选项。仅同步锁文件源哈希，现有 Debian 风险例外、批准时间及有效期不变；新镜像须重新通过 512 MiB 冒烟和完整扫描。NAS 已有运行镜像不会因源码修复而自动更新。
+
+## 2026-11-18 SVG 绘图运行镜像复核
+
+发布运行 `44309035409` 的正式 amd64 镜像已通过构建和512 MiB冒烟；完整 Trivy 报告仍为既有8个 CVE、44条 HIGH 系统包记录，无新增、可修复或 CRITICAL 项，Python 包无 HIGH/CRITICAL。本次失败由 Dockerfile/能力清单源哈希未同步造成，不是放宽漏洞判断。
+
+新增 resvg 0.45.1、Noto Sans CJK SC 和受限 SVG helper，固定下载哈希并保留许可证；helper 拒绝外部资源/HTML/实体，执行仍受沙箱资源和超时约束。Trivy 当前报告包含 Debian 与 Python 扫描，不将其表述为已完整审计预编译 Rust 二进制的所有内部依赖；下载来源、版本/哈希与功能/安全边界回归作为补充证据。
+
+仅更新 Dockerfile、capabilities.json 源哈希，并将 render-svg.py 纳入源哈希保护。原 CVE/包/版本例外、批准时间、2026-11-22到期时间及阻断规则全部不变；实际待发布候选仍须重新通过扫描门禁。

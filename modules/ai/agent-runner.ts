@@ -1,5 +1,10 @@
 import { RunImageSession } from "./run-image-session.js";
 import {
+  GeneratedImageSession,
+  imageReplyGuidance,
+} from "../generated-images/image-session.js";
+import type { GeneratedImageStore } from "../generated-images/image-store.js";
+import {
   toolImageProtocol,
   toolImageSupplement,
 } from "./tool-image-session.js";
@@ -19,7 +24,8 @@ import {
   attachmentGuidance,
   type AttachmentSession,
 } from "../attachments/attachment-session.js";
-import { pluginWebGuidance } from "../plugins/plugin-guidance.js";
+import { safeBuiltinFailureCode } from "./tool-failure-code.js";
+import { pluginGuidance } from "../plugins/plugin-guidance.js";
 import { PluginSession } from "../plugins/plugin-session.js";
 import type { PluginService } from "../plugins/plugin-service.js";
 import { restoreToolArguments } from "./tool-schema.js";
@@ -187,6 +193,7 @@ export class AgentRunner {
     private readonly memes?: MemeRepository,
     private readonly plugins?: PluginService,
     private readonly attachments?: AttachmentService,
+    private readonly generatedImages?: GeneratedImageStore,
   ) {}
 
   async run(request: AiRouteRequest): Promise<AiRouteResult> {
@@ -214,6 +221,7 @@ export class AgentRunner {
     let result: AiRouteResult;
     let plugins: PluginSession | undefined;
     let attachments: AttachmentSession | undefined;
+    let generated: GeneratedImageSession | undefined;
     try {
       if (request.pluginIds?.length) {
         if (
@@ -237,14 +245,43 @@ export class AgentRunner {
           plugins,
         );
       }
+      if (request.imageReplyInput) {
+        if (
+          !plugins ||
+          !this.generatedImages ||
+          request.outputFormat !== "text" ||
+          request.idleDecision ||
+          request.imageReplyInput.executionId !== request.executionId
+        )
+          throw new Error("Image reply unavailable");
+        generated = new GeneratedImageSession(
+          request.imageReplyInput,
+          plugins,
+          this.generatedImages,
+        );
+      }
       result = await this.runWithBudget(
         request,
         budget,
         plugins,
         attachments,
         visual,
+        generated,
       );
       await attachments?.validate();
+      if (generated && result.status !== "failed") {
+        await generated.validate();
+        result =
+          result.selectedMeme && generated.selection()
+            ? {
+                status: "failed",
+                code: "REPLY_MEDIA_CONFLICT",
+                summary: "不能在同一条回复中同时选择表情和文件附件。",
+                retryable: false,
+                attemptCount: result.attemptCount,
+              }
+            : { ...result, generatedImage: generated.selection() };
+      }
     } catch {
       result = {
         status: "failed",
@@ -254,6 +291,7 @@ export class AgentRunner {
         attemptCount: 0,
       };
     }
+    await generated?.close(result.status !== "failed").catch(() => undefined);
     await attachments?.close().catch(() => undefined);
     await plugins?.close().catch(() => undefined);
     if (visual.settings) budget.snapshot.images = visual.snapshot();
@@ -274,6 +312,7 @@ export class AgentRunner {
     attachments?: AttachmentSession,
     visual = request.imageSession?.visual ??
       new RunImageSession(request.preparedImageInput),
+    generated?: GeneratedImageSession,
   ): Promise<AiRouteResult> {
     const policy = normalizeWebSearchPolicy(request.webSearch);
     const sourceDisplay = request.webSearchSources ?? "full";
@@ -301,6 +340,7 @@ export class AgentRunner {
       this.routing.supportsImageTools(request.routeId),
     );
     attachments?.register(registry);
+    generated?.register(registry);
     if (attachments && memory)
       memory.stageAttachmentCatalogue = () => attachments.stageCatalogue();
     const attachmentContext =
@@ -318,6 +358,16 @@ export class AgentRunner {
         ? request.messages.length
         : request.messages.findIndex((message) => message.role !== "system"));
     let commitCatalogue: (() => void) | undefined;
+    if (generated) {
+      request = {
+        ...request,
+        messages: [
+          { role: "system", content: imageReplyGuidance },
+          ...request.messages,
+        ],
+      };
+      configurationMessageCount += 1;
+    }
     if (
       attachmentContext &&
       (attachments ||
@@ -369,7 +419,7 @@ export class AgentRunner {
       request = {
         ...request,
         messages: [
-          { role: "system", content: pluginWebGuidance },
+          { role: "system", content: pluginGuidance },
           ...request.messages,
         ],
       };
@@ -584,6 +634,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         };
       const routeRequest: AiRouteRequest = {
         ...request,
+        allowEmptyOutput: !!generated?.selection(),
         ...(visual.hasToolImages ? { allowImageDegrade: false } : {}),
         // Runtime data stays outside system: gateways may hoist every system
         // message into a single systemInstruction regardless of its position.
@@ -657,7 +708,10 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
           const cleaned =
             rendered ??
             stripHistoricalCitationMarkers(answer, request.outputFormat);
-          if (cleaned === null || !cleaned.trim()) {
+          if (
+            cleaned === null ||
+            (!cleaned.trim() && !generated?.selection())
+          ) {
             if (budget.snapshot.citationHandling)
               budget.snapshot.citationHandling.finalAction = "failed";
             return {
@@ -711,6 +765,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
         const isPlugin = registered?.diagnostics === "plugin";
         const isTask = registered?.metadata?.capability === "scheduled-task";
         const isMemory = registered?.diagnostics === "metadata-only";
+        const isGenerated = call.name === "prepare_chat_attachment";
         const isHistory =
           isMemory && memoryTools.some((tool) => tool.name === call.name);
         const isMeme =
@@ -777,7 +832,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                 if (Date.now() >= context.deadline)
                   throw new AgentToolTimeout();
                 if (typeof output === "string") return output;
-                if (isHistory && output.diagnostics)
+                if ((isHistory || isGenerated) && output.diagnostics)
                   responseDetails = output.diagnostics;
                 if (isPlugin) {
                   responseDetails = output.diagnostics ?? null;
@@ -859,6 +914,7 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
             }
             const payload = JSON.parse(content) as {
               status?: string;
+              code?: string;
               errorCode?: string;
               task?: { id?: string; status?: string; version?: number };
               reason?: string;
@@ -867,12 +923,13 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
               count?: number;
               results?: unknown[];
             };
-            resultCount = isPlugin
-              ? null
-              : (payload.evidence?.length ??
-                payload.results?.length ??
-                payload.groups?.length ??
-                (payload.count === undefined ? 0 : 1));
+            resultCount =
+              isPlugin || isGenerated
+                ? null
+                : (payload.evidence?.length ??
+                  payload.results?.length ??
+                  payload.groups?.length ??
+                  (payload.count === undefined ? 0 : 1));
             if (!isMemory && query)
               searched ||= (payload.results?.length ?? 0) > 0;
             if (payload.status === "unavailable")
@@ -880,18 +937,28 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                 ? (errorCode ?? "PLUGIN_UNAVAILABLE")
                 : isMeme
                   ? "MEME_TOOL_UNAVAILABLE"
-                  : isMemory
+                  : isHistory
                     ? "MEMORY_RETRIEVAL_UNAVAILABLE"
-                    : "AI_AGENT_TOOL_UNAVAILABLE";
+                    : safeBuiltinFailureCode(
+                        payload.errorCode ?? payload.code,
+                        "AI_AGENT_TOOL_UNAVAILABLE",
+                      );
             if (payload.status === "invalid-arguments")
               errorCode = "AI_AGENT_INVALID_TOOL_ARGUMENTS";
-            if (isMemory)
+            if (isMemory) {
+              if (["failed", "error"].includes(payload.status ?? ""))
+                errorCode ??= safeBuiltinFailureCode(
+                  payload.errorCode ?? payload.code,
+                );
               responseDetails = {
                 ...(responseDetails ?? {}),
-                outcome: "completed",
+                outcome: errorCode ? "failed" : "completed",
                 metadataOnly: true,
-                sourceRefs: memory?.references?.() ?? [],
+                ...(isHistory
+                  ? { sourceRefs: memory?.references?.() ?? [] }
+                  : {}),
               };
+            }
             if (isTask) {
               if (payload.status === "failed")
                 errorCode = payload.errorCode ?? "TASK_OPERATION_FAILED";
@@ -916,9 +983,13 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
                     ? "MEME_TOOL_UNAVAILABLE"
                     : isPlugin
                       ? "PLUGIN_EXECUTION_FAILED"
-                      : isMemory
-                        ? "MEMORY_RETRIEVAL_UNAVAILABLE"
-                        : "AI_WEB_SEARCH_FAILED";
+                      : isGenerated
+                        ? "IMAGE_PREPARATION_FAILED"
+                        : isHistory
+                          ? "MEMORY_RETRIEVAL_UNAVAILABLE"
+                          : isMemory
+                            ? "AI_AGENT_TOOL_FAILED"
+                            : "AI_WEB_SEARCH_FAILED";
             if (error instanceof WebSearchToolError) {
               requestDetails = error.requestDetails ?? requestDetails;
               responseDetails = error.responseDetails;
@@ -980,6 +1051,31 @@ This run allows at most ${limits.maxToolCalls} tool calls, ${limits.maxToolOutpu
             : errorCode?.startsWith("AI_AGENT_")
               ? errorCode
               : "AI_IMAGE_UNAVAILABLE";
+        }
+        if (isGenerated) {
+          const payload = JSON.parse(content) as {
+            status?: string;
+            code?: string;
+          };
+          if (!errorCode && payload.status !== "prepared")
+            errorCode = safeBuiltinFailureCode(
+              payload.code,
+              "IMAGE_PREPARATION_FAILED",
+            );
+          requestDetails = {
+            ...(requestDetails ?? {}),
+            kind: "generated-attachment",
+            version: 1,
+          };
+          responseDetails = {
+            ...(responseDetails ?? {}),
+            kind: "generated-attachment",
+            version: 1,
+            outcome: skipped ? "skipped" : errorCode ? "failed" : "prepared",
+            errorCode,
+            metadataOnly: true,
+          };
+          resultCount = null;
         }
         if (isMeme) {
           const details = memeDiagnostics(

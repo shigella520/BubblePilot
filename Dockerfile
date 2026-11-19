@@ -27,7 +27,7 @@ COPY --from=build /app/apps/web/dist ./public
 COPY migrations ./migrations
 COPY scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
 RUN apk add --no-cache git
-RUN chmod 0555 ./scripts/docker-entrypoint.sh && mkdir -p /app/data/memes /app/data/plugins && chown -R node:node /app/data
+RUN chmod 0555 ./scripts/docker-entrypoint.sh && mkdir -p /app/data/memes /app/data/plugins /app/data/generated-images && chmod 0700 /app/data/generated-images && chown -R node:node /app/data
 
 USER node
 RUN node --input-type=module -e "await import('./dist/modules/plugins/plugin-service.js'); await import('./dist/modules/plugins/plugin-session.js');"

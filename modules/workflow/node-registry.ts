@@ -18,6 +18,7 @@ import {
 } from "../scheduled-tasks/task-policy.js";
 import { idleDecisionInstruction } from "./idle-defaults.js";
 import type { MemeDeliveryService } from "../memes/meme-delivery-service.js";
+import type { GeneratedImageDelivery } from "../generated-images/image-delivery.js";
 import { z } from "zod";
 import {
   maxReplyCharacters,
@@ -1291,6 +1292,21 @@ class AiChatNodeHandler extends BaseNodeHandler {
         outputFormat: idleDecision ? "json" : node.config.outputFormat,
         allowMemes: !scheduled && (node.config.allowMemes ?? false),
         pluginIds: scheduled ? [] : (node.config.pluginIds ?? []),
+        ...(node.config.imageReply?.enabled &&
+        !scheduled &&
+        !idleDecision &&
+        context.envelope.message &&
+        !context.envelope.message.isFromMe &&
+        !context.envelope.metadata.isReplay
+          ? {
+              imageReplyInput: {
+                config: node.config.imageReply,
+                executionId: context.executionId,
+                nodeId: node.id,
+                chatId: context.envelope.chat.providerChatId,
+              },
+            }
+          : {}),
         ...(node.config.attachmentHandling?.enabled &&
         context.envelope.message &&
         !context.envelope.message.isFromMe &&
@@ -1390,6 +1406,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
       outputSummary: {
         ...this.routing.outputSummary(result),
         selectedMeme: result.selectedMeme ?? null,
+        generatedImage: result.generatedImage ?? null,
         ...(result.agentBudget ? { agentBudget: result.agentBudget } : {}),
         outputVariable: node.config.outputVariable,
         imageInputCount: preparedImages?.selectedCount ?? 0,
@@ -1400,6 +1417,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
       outputs: {
         text: result.text,
         meme: result.selectedMeme ?? null,
+        generatedImage: result.generatedImage ?? null,
         ...(node.config.outputFormat === "json" ? { json: jsonOutput } : {}),
       },
     };
@@ -1428,6 +1446,7 @@ class ReplyNodeHandler extends BaseNodeHandler {
     private readonly repository: WorkflowRepository,
     private readonly gateway: ReplyGateway,
     private readonly memeDelivery?: MemeDeliveryService,
+    private readonly imageDelivery?: GeneratedImageDelivery,
   ) {
     super();
   }
@@ -1458,6 +1477,73 @@ class ReplyNodeHandler extends BaseNodeHandler {
           completionStatus: "skipped",
           outputSummary: { reason },
         };
+    }
+    const generated = resolveInput(node, "generatedImage", context);
+    if (generated !== undefined && generated !== null) {
+      if (
+        !this.imageDelivery ||
+        node.config.replyToSourceMessage ||
+        resolveInput(node, "meme", context)
+      )
+        throw new WorkflowExecutionError(
+          "REPLY_MEDIA_CONFLICT",
+          "回复附件与表情或引用回复配置冲突。",
+          false,
+        );
+      const image = z
+        .object({
+          id: z.string().uuid(),
+          sha256: z.string().regex(/^[a-f0-9]{64}$/),
+          executionId: z.string().uuid(),
+        })
+        .strict()
+        .parse(generated);
+      const input = resolveInput(node, "text", context);
+      const text = renderTemplate(
+        input === undefined ? node.config.text : contextText(input),
+        context,
+      );
+      if (text.length > maxReplyCharacters)
+        throw new WorkflowExecutionError(
+          "REPLY_TOO_LONG",
+          "Reply exceeds the safety limit.",
+          false,
+        );
+      const sent = await this.imageDelivery.deliver(
+        {
+          executionId: context.executionId,
+          nodeId: node.id,
+          chatId: context.envelope.chat.providerChatId,
+          text,
+          image,
+        },
+        context.correlationId,
+      );
+      const failed =
+        sent.text && sent.text.status !== "confirmed" ? sent.text : sent.image;
+      const summary = {
+        planId: sent.planId,
+        textDeliveryId: sent.textDeliveryId,
+        imageDeliveryId: sent.imageDeliveryId,
+        textStatus: sent.text?.status ?? null,
+        imageStatus: sent.image?.status ?? null,
+        generatedImage: image,
+      };
+      if (!failed || failed.status !== "confirmed")
+        throw new WorkflowExecutionError(
+          failed?.code ?? "IMAGE_DELIVERY_NOT_SENT",
+          failed?.summary ?? "图片尚未发送。",
+          failed?.status === "failed" && failed.retryable,
+          failed?.status === "unknown",
+          undefined,
+          summary,
+        );
+      return {
+        status: "succeeded",
+        nextNodeId: node.onSuccess,
+        outputSummary: summary,
+        outputs: { delivery: summary },
+      };
     }
     const inputText = resolveInput(node, "text", context);
     const text = renderReplyTemplate(
@@ -1698,6 +1784,7 @@ export function createDefaultNodeRegistry(
     aiAgent?: AgentRunner;
     tasks?: TaskService;
     memeDelivery?: MemeDeliveryService;
+    imageDelivery?: GeneratedImageDelivery;
     imageInput?: NativeImageInputService;
     conversationContext?: ConversationContextService;
     imageSummaries?: ImageSummaryRepository;
@@ -1728,7 +1815,12 @@ export function createDefaultNodeRegistry(
     );
   }
   registry.register(
-    new ReplyNodeHandler(repository, gateway, capabilities?.memeDelivery),
+    new ReplyNodeHandler(
+      repository,
+      gateway,
+      capabilities?.memeDelivery,
+      capabilities?.imageDelivery,
+    ),
   );
   registry.register(new EndNodeHandler());
   return registry;

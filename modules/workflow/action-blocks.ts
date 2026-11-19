@@ -1,7 +1,14 @@
 export type ActionBlockCategory =
   "control" | "data" | "context" | "ai" | "message" | "observe";
 export type ActionValueType =
-  "string" | "number" | "boolean" | "json" | "messages" | "delivery" | "meme";
+  | "string"
+  | "number"
+  | "boolean"
+  | "json"
+  | "messages"
+  | "delivery"
+  | "meme"
+  | "generatedImage";
 
 export interface ActionPortDefinition {
   name: string;
@@ -262,6 +269,13 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         description: "模型选择的可选表情，必须与本节点文字一起连接发送节点。",
       },
       {
+        name: "generatedImage",
+        label: "回复附件",
+        type: "generatedImage",
+        description:
+          "已校验并保存的可选附件，与本节点文字一起连接一个发送节点。",
+      },
+      {
         name: "text",
         label: "文本输出",
         type: "string",
@@ -360,6 +374,12 @@ export const actionBlockDefinitions: readonly ActionBlockDefinition[] = [
         label: "可选表情",
         type: "meme",
         description: "连接同一 AI 节点的已选表情输出。",
+      },
+      {
+        name: "generatedImage",
+        label: "回复附件",
+        type: "generatedImage",
+        description: "连接同一 AI 节点的回复附件输出；支持附件单独回复。",
       },
       {
         name: "text",

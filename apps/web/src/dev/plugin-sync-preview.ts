@@ -17,7 +17,22 @@ const plugin = {
   version: 2,
   revision: "fictional-revision",
   package_version: "1.0.0",
-  metadata: { skills: 0, servers: 1 },
+  metadata: {
+    description: "检索公开网页与资料，将网页内容整理成可引用的上下文。",
+    skills: 0,
+    servers: 1,
+  },
+  summary: {
+    toolsEnabled: 1,
+    toolsApproved: 1,
+    skillsEnabled: 0,
+    skillsTotal: 0,
+    servers: 1,
+    activeWorkflows: 2,
+    autoSyncTools: false,
+    lastCheckAt: "2026-11-18T05:00:00Z",
+    lastSyncStatus: "review",
+  },
   source: { type: "zip" },
   package: { name: "示例网页插件", version: "1.0.0", skills: [], servers: [] },
   config: {
@@ -58,6 +73,96 @@ const plugin = {
     },
   ],
 };
+const cardPreview = new URLSearchParams(location.search).has("cards");
+const samples = [
+  {
+    ...plugin,
+    id: "fictional-sandbox",
+    name: "示例沙箱工具",
+    metadata: {
+      description: "执行代码、分析聊天附件，绘制图片并将处理结果作为文件回复。",
+      skills: 1,
+      servers: 1,
+    },
+    pending_review: [],
+    summary: {
+      ...plugin.summary,
+      toolsEnabled: 5,
+      toolsApproved: 5,
+      skillsEnabled: 1,
+      skillsTotal: 1,
+      autoSyncTools: true,
+      lastSyncStatus: "unchanged",
+    },
+  },
+  plugin,
+  {
+    ...plugin,
+    id: "fictional-long",
+    name: "fictional-research-and-document-processing-with-an-extremely-long-plugin-name",
+    metadata: {
+      description: "这是用于布局验证的长简介。".repeat(20),
+      skills: 3,
+      servers: 2,
+    },
+    pending_review: ["fictional/" + "long-tool-name".repeat(30), "demo/other"],
+    summary: {
+      ...plugin.summary,
+      toolsEnabled: 100,
+      toolsApproved: 100,
+      skillsEnabled: 2,
+      skillsTotal: 3,
+      servers: 2,
+      autoSyncTools: true,
+      activeWorkflows: 12,
+      lastSyncStatus: "failed",
+    },
+  },
+  {
+    ...plugin,
+    id: "fictional-disabled",
+    name: "示例文件整理",
+    enabled: false,
+    metadata: { description: "整理资料并生成摘要。", skills: 1, servers: 1 },
+    pending_review: [],
+    summary: {
+      ...plugin.summary,
+      toolsEnabled: 0,
+      skillsEnabled: 1,
+      skillsTotal: 1,
+      activeWorkflows: 0,
+      autoSyncTools: true,
+      lastCheckAt: null,
+      lastSyncStatus: null,
+    },
+  },
+  {
+    ...plugin,
+    id: "fictional-skill",
+    name: "示例写作指引",
+    metadata: { description: "", skills: 2, servers: 0 },
+    pending_review: [],
+    summary: {
+      ...plugin.summary,
+      toolsEnabled: 0,
+      toolsApproved: 0,
+      skillsEnabled: 2,
+      skillsTotal: 2,
+      servers: 0,
+      activeWorkflows: 0,
+      lastCheckAt: null,
+      lastSyncStatus: null,
+    },
+  },
+  {
+    ...plugin,
+    id: "fictional-legacy",
+    name: "统计暂未提供的插件",
+    pending_review: [],
+    summary: undefined,
+  },
+];
+const listed = cardPreview ? samples : [plugin];
 window.fetch = (input, init) => {
   const path = new URL(
     typeof input === "string"
@@ -74,9 +179,18 @@ window.fetch = (input, init) => {
       expiresAt: new Date(Date.now() + 3600000).toISOString(),
       sensitiveUntil: new Date(Date.now() + 3600000).toISOString(),
     };
-  else if (path === "/api/v1/plugins") data = [plugin];
-  else if (path === `/api/v1/plugins/${plugin.id}`) data = plugin;
-  else if (
+  else if (path === "/api/v1/plugins") data = listed;
+  else if (listed.some((p) => path === `/api/v1/plugins/${p.id}`)) {
+    const selected = listed.find((p) => path === `/api/v1/plugins/${p.id}`)!;
+    data = {
+      ...selected,
+      package: {
+        ...plugin.package,
+        name: selected.name,
+        description: selected.metadata.description,
+      },
+    };
+  } else if (
     path === `/api/v1/plugins/${plugin.id}/config` &&
     init?.method === "PUT"
   ) {
