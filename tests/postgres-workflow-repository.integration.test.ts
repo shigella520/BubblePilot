@@ -86,6 +86,121 @@ describe.runIf(testDatabaseUrl !== undefined)(
       }
     });
 
+    it("aggregates timing by execution without multiplying traces or counting AI nodes twice", async () => {
+      const db = new Client({ connectionString: connection });
+      await db.connect();
+      const workflow = randomUUID(),
+        version = randomUUID(),
+        trigger = randomUUID(),
+        provider = randomUUID(),
+        route = randomUUID();
+      const id = randomUUID(),
+        empty = randomUUID();
+      try {
+        await db.query(
+          "INSERT INTO workflows(id,name,status) VALUES($1,$2,'active')",
+          [workflow, `Fictional timing ${workflow}`],
+        );
+        await db.query(
+          "INSERT INTO workflow_versions(id,workflow_id,version,status,definition) VALUES($1,$2,1,'published','{\"nodes\":[]}'::jsonb)",
+          [version, workflow],
+        );
+        await db.query(
+          "INSERT INTO bot_triggers(id,name,workflow_version_id,conditions,include_from_me,enabled) VALUES($1,'Fictional timing',$2,'{}',false,true)",
+          [trigger, version],
+        );
+        await db.query(
+          "INSERT INTO ai_providers(id,name,api_kind,base_url,model,secret_ref,request_timeout_ms,sort_order) VALUES($1,$2,'chat-completions','https://fictional.example.test','fictional','fictional',1000,1)",
+          [provider, `Fictional ${provider}`],
+        );
+        await db.query(
+          "INSERT INTO ai_provider_routes(id,name) VALUES($1,$2)",
+          [route, `Fictional ${route}`],
+        );
+        for (const execution of [id, empty])
+          await db.query(
+            "INSERT INTO workflow_executions(id,provider,external_event_id,trigger_id,workflow_version_id,correlation_id,status,started_at,completed_at) VALUES($1::uuid,'fictional',$1::text,$2,$3,$4,'succeeded','2026-01-01T00:00:00Z','2026-01-01T00:00:10Z')",
+            [execution, trigger, version, randomUUID()],
+          );
+        for (const [sequence, duration, status] of [
+          [1, 2000, "failed"],
+          [2, 3000, "succeeded"],
+        ] as const)
+          await db.query(
+            "INSERT INTO ai_provider_attempts(id,execution_id,node_id,route_id,route_version,provider_id,provider_name,provider_version,model,round,sequence,status,selection_health_state,health_state,duration_ms) VALUES($1,$2,'ai',$3,1,$4,'fictional',1,'fictional',1,$5,$6,'healthy','healthy',$7)",
+            [randomUUID(), id, route, provider, sequence, status, duration],
+          );
+        for (const duration of [700, 800])
+          await db.query(
+            "INSERT INTO ai_tool_executions(id,execution_id,node_id,provider_id,tool_call_id,tool_name,status,duration_ms,query_hash) VALUES($1::uuid,$2,'ai',$3,$1::text,'fictional_tool','succeeded',$4,$5)",
+            [randomUUID(), id, provider, duration, "a".repeat(64)],
+          );
+        for (const [type, duration] of [
+          ["ai-chat", 9000],
+          ["reply", 300],
+          ["load-context", 100],
+          ["log", null],
+        ] as const)
+          await db.query(
+            "INSERT INTO node_executions(id,execution_id,node_id,node_type,node_version,attempt,status,duration_ms) VALUES($1,$2,$3,$3,1,1,$4,$5)",
+            [
+              randomUUID(),
+              id,
+              type,
+              duration === null ? "running" : "succeeded",
+              duration,
+            ],
+          );
+        const detail = await repository.getExecution(id);
+        expect(detail?.timing).toMatchObject({
+          totalMs: 10000,
+          categories: {
+            model: { durationMs: 5000, count: 2, recordedCount: 2 },
+            tools: { durationMs: 1500, count: 2, recordedCount: 2 },
+            delivery: { durationMs: 300, count: 1, recordedCount: 1 },
+            otherNodes: { durationMs: 100, count: 2, recordedCount: 1 },
+          },
+        });
+        const page = await repository.listExecutions({
+          limit: 100,
+          cursor: null,
+        });
+        expect(page.find((x) => x.id === id)?.timing?.categories).toEqual(
+          detail?.timing?.categories,
+        );
+        expect(
+          page.find((x) => x.id === empty)?.timing?.categories.model,
+        ).toEqual({ durationMs: null, count: 0, recordedCount: 0 });
+        await db.query(
+          `UPDATE workflow_executions SET status='closed',startup_closure='{"closedAt":"2026-01-01T00:00:10Z"}' WHERE id=$1`,
+          [empty],
+        );
+        await db.query(
+          "INSERT INTO node_executions(id,execution_id,node_id,node_type,node_version,attempt,status,duration_ms,completed_at,error_code) VALUES($1,$2,'reply','reply',1,1,'failed',86400000,'2026-01-01T00:00:10Z','FICTIONAL_OLD_ERROR')",
+          [randomUUID(), empty],
+        );
+        const closed = await repository.getExecution(empty);
+        expect(closed?.timing).toMatchObject({
+          totalMs: null,
+          unavailableReason: "closed",
+          categories: {
+            delivery: { durationMs: null, count: 1, recordedCount: 0 },
+          },
+        });
+      } finally {
+        await db.query(
+          "DELETE FROM workflow_executions WHERE id=ANY($1::uuid[])",
+          [[id, empty]],
+        );
+        await db.query("DELETE FROM bot_triggers WHERE id=$1", [trigger]);
+        await db.query("DELETE FROM workflow_versions WHERE id=$1", [version]);
+        await db.query("DELETE FROM workflows WHERE id=$1", [workflow]);
+        await db.query("DELETE FROM ai_providers WHERE id=$1", [provider]);
+        await db.query("DELETE FROM ai_provider_routes WHERE id=$1", [route]);
+        await db.end();
+      }
+    });
+
     it("retains exported message and text bindings through import persistence and reload", async () => {
       const routeId = randomUUID();
       const catalog = {

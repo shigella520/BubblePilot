@@ -5,6 +5,8 @@ import {
   pluginImageRows,
   pluginToolErrorLabel,
 } from "../utils/plugin-tool-diagnostics";
+import ExecutionTimingSummary from "../components/ExecutionTimingSummary.vue";
+import type { ExecutionTiming } from "../utils/execution-timing";
 import ExecutionImageResult from "../components/ExecutionImageResult.vue";
 import { memeToolLabel } from "../utils/meme-tool-diagnostics";
 import { memoryToolLabel } from "../utils/memory-tool-diagnostics";
@@ -109,6 +111,8 @@ function imageToolLabel(details: Record<string, unknown> | null) {
   return `图片未加载：${reasons[reason] ?? reason}`;
 }
 interface Execution {
+  timing?: ExecutionTiming;
+  startedAt?: string | null;
   messageMatchSource?: "ordinary" | "reply" | null;
   triggerEvent?: {
     schemaVersion: string;
@@ -1329,13 +1333,13 @@ function contextSnapshotValue(
           </div>
         </div>
         <div class="table-shell">
-          <table>
+          <table class="execution-list-table">
             <thead>
               <tr>
                 <th>工作流</th>
                 <th>聊天</th>
-                <th>状态</th>
                 <th>回复缓存命中</th>
+                <th>状态 / 耗时</th>
                 <th>时间</th>
                 <th></th>
               </tr>
@@ -1356,7 +1360,10 @@ function contextSnapshotValue(
                 <td>
                   <span v-if="item.triggerEvent" class="keyline"
                     >空闲主动交流</span
-                  ><strong>{{ item.workflowName }}</strong
+                  ><strong
+                    class="execution-list-name"
+                    :title="item.workflowName"
+                    >{{ item.workflowName }}</strong
                   ><span class="keyline"
                     >v{{ item.workflowVersion }} · {{ item.id }}</span
                   ><span v-if="item.recoveryAttempt" class="keyline"
@@ -1374,11 +1381,6 @@ function contextSnapshotValue(
                   >
                 </td>
                 <td>
-                  <span class="table-status" :class="item.status">{{
-                    item.status
-                  }}</span>
-                </td>
-                <td>
                   <span class="cache-rate-line">
                     <strong>{{ formatCacheRate(item.cacheHitRate) }}</strong>
                   </span>
@@ -1386,6 +1388,13 @@ function contextSnapshotValue(
                     >{{ formatTokenCount(item.cachedPromptTokens) }} /
                     {{ formatTokenCount(item.cacheEligiblePromptTokens) }}</span
                   >
+                </td>
+                <td>
+                  <ExecutionTimingSummary
+                    :timing="item.timing"
+                    :status="item.status"
+                    compact
+                  />
                 </td>
                 <td>{{ new Date(item.createdAt).toLocaleString() }}</td>
                 <td>
@@ -1491,7 +1500,10 @@ function contextSnapshotValue(
         <header class="execution-detail-header">
           <div class="execution-detail-heading">
             <p class="card-kicker">{{ detail.correlationId }}</p>
-            <h2 id="execution-detail-title">
+            <h2
+              id="execution-detail-title"
+              :title="`${detail.workflowName} · v${detail.workflowVersion}`"
+            >
               {{ detail.workflowName }} · v{{ detail.workflowVersion }}
             </h2>
             <p v-if="detail.retryOfExecutionId" class="keyline">
@@ -1533,6 +1545,7 @@ function contextSnapshotValue(
           </div>
         </header>
         <div class="execution-detail-body">
+          <ExecutionTimingSummary :timing="detail.timing" />
           <section class="context-snapshot-card">
             <h3>本次 Bot 角色</h3>
             <p v-if="detail.botIdentity">

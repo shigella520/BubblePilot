@@ -3293,7 +3293,7 @@ paths:
             pattern: "^\\s*(created|running|retrying|succeeded|skipped|failed|dead-lettered|closed)(\\s*,\\s*(created|running|retrying|succeeded|skipped|failed|dead-lettered|closed))*\\s*$"
       responses:
         "200":
-          description: 按创建时间倒序分页返回工作流执行列表；每项包含匹配聊天名称/ID和回复缓存统计。图片摘要等后台操作不计入回复缓存统计。无可统计的对话回复请求或 Provider 未返回缓存统计时命中率为 null。
+          description: 按创建时间倒序分页返回工作流执行列表；每项包含匹配聊天名称/ID、回复缓存统计和只读 timing 耗时概览。timing 区分实际总历时与模型/工具/回复/其他节点累计时间，缺失返回 null，运行值截至 observedAt，关闭记录不计算总历时；分项不能相加为总耗时。图片摘要等后台操作不计入回复缓存统计。无可统计的对话回复请求或 Provider 未返回缓存统计时命中率为 null。
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}:
@@ -3311,7 +3311,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: 可选 startupClosure（runId/reasonCode/reason/previousStatus/closedAt）说明启动自动关闭；未知投递仍待核实。可选 messageMatchSource 为 ordinary、reply 或 null，分别表示原条件、回复 Bot 消息或未记录。执行、节点尝试、含用途和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；接口不返回完整 Prompt、聊天正文、AI 输出、Secret、原图或原始响应体。表情工具可选 version=1、kind=meme 诊断描述候选数量、截断、选择或受控失败；select_meme 的 resultCount 为 null，选择成功不代表已发送。旧诊断缺失不反推结果。
+          description: timing 耗时口径与列表一致。可选 startupClosure（runId/reasonCode/reason/previousStatus/closedAt）说明启动自动关闭；未知投递仍待核实。可选 messageMatchSource 为 ordinary、reply 或 null，分别表示原条件、回复 Bot 消息或未记录。执行、节点尝试、含用途和脱敏请求诊断（请求/响应哈希、请求 ID、HTTP 状态、大小/字符计数、finish_reason、Token/缓存计数）的 AI Provider Attempt 及出站发送完整轨迹；接口不返回完整 Prompt、聊天正文、AI 输出、Secret、原图或原始响应体。表情工具可选 version=1、kind=meme 诊断描述候选数量、截断、选择或受控失败；select_meme 的 resultCount 为 null，选择成功不代表已发送。旧诊断缺失不反推结果。
         "404":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}/ai-attempts/{attemptId}/raw-request:

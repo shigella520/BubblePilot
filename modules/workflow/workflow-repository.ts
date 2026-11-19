@@ -1,3 +1,4 @@
+import type { ExecutionTiming } from "./execution-timing.js";
 import type {
   BackgroundWorkflowEvent,
   WorkflowEvent,
@@ -75,6 +76,7 @@ export interface StartupExecutionClosure {
 }
 
 export interface WorkflowExecutionRecord {
+  timing?: ExecutionTiming;
   messageMatchSource?: MessageMatchSource | null;
   startupClosure?: StartupExecutionClosure | null;
   triggerEvent?: BackgroundWorkflowEvent | null;

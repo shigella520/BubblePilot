@@ -1,4 +1,9 @@
 import { backgroundMetadata } from "./workflow-event.js";
+import {
+  executionTiming,
+  type ExecutionTiming,
+  type ExecutionTimingCategory,
+} from "./execution-timing.js";
 import type {
   BackgroundWorkflowEvent,
   WorkflowEvent,
@@ -1451,7 +1456,64 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         options.attention ?? null,
       ],
     );
-    return result.rows.map(executionRecord);
+    const records = result.rows.map(executionRecord);
+    const timings = await this.loadExecutionTimings(records);
+    return records.map((record) => ({
+      ...record,
+      timing: timings.get(record.id)!,
+    }));
+  }
+
+  private async loadExecutionTimings(
+    records: readonly WorkflowExecutionRecord[],
+  ) {
+    const timings = new Map<string, ExecutionTiming>();
+    if (!records.length) return timings;
+    const observedAt = new Date();
+    // Aggregate only this page's executions, without multiplying rows by joining
+    // provider attempts, tool calls, and nodes together. No raw payloads are read.
+    const result = await this.pool.query<{
+      execution_id: string;
+      category: ExecutionTimingCategory;
+      duration_ms: string | null;
+      count: number;
+      recorded_count: number;
+    }>(
+      `SELECT execution_id, category, SUM(duration_ms)::text AS duration_ms,
+        COUNT(*)::int AS count, COUNT(duration_ms)::int AS recorded_count
+       FROM (
+         SELECT execution_id, 'model' AS category, duration_ms
+         FROM ai_provider_attempts WHERE execution_id=ANY($1::uuid[])
+         UNION ALL
+         SELECT execution_id, 'tools' AS category, duration_ms
+         FROM ai_tool_executions WHERE execution_id=ANY($1::uuid[])
+         UNION ALL
+         SELECT execution_id,
+           CASE WHEN node_type='reply' THEN 'delivery' ELSE 'otherNodes' END AS category,
+           CASE WHEN status<>'running' AND duration_ms>=0
+             AND error_code IS DISTINCT FROM 'WORKFLOW_PROCESS_INTERRUPTED'
+             AND NOT EXISTS (
+               SELECT 1 FROM workflow_executions closed
+               WHERE closed.id=n.execution_id AND closed.startup_closure IS NOT NULL
+                 AND n.completed_at=(closed.startup_closure->>'closedAt')::timestamptz
+             ) THEN duration_ms END AS duration_ms
+         FROM node_executions n WHERE execution_id=ANY($1::uuid[]) AND node_type<>'ai-chat'
+       ) trace GROUP BY execution_id,category`,
+      [records.map((record) => record.id)],
+    );
+    for (const record of records) {
+      const categories: Partial<ExecutionTiming["categories"]> = {};
+      for (const row of result.rows.filter(
+        (row) => row.execution_id === record.id,
+      ))
+        categories[row.category] = {
+          durationMs: row.duration_ms === null ? null : Number(row.duration_ms),
+          count: row.count,
+          recordedCount: row.recorded_count,
+        };
+      timings.set(record.id, executionTiming(record, categories, observedAt));
+    }
+    return timings;
   }
 
   async listExecutionsForMessages(
@@ -1504,10 +1566,13 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       ),
     ]);
     const row = execution.rows[0];
+    const record = row === undefined ? null : executionRecord(row);
+    const timings = await this.loadExecutionTimings(record ? [record] : []);
     return row === undefined
       ? null
       : {
-          ...executionRecord(row),
+          ...record!,
+          timing: timings.get(row.id)!,
           nodes: nodes.rows.map(nodeExecutionRecord),
           deliveries: deliveries.rows.map(deliveryRecord),
         };
