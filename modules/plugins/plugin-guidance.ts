@@ -146,6 +146,8 @@ export function pluginFailureDetails(value: unknown): {
           "svg_dimensions_exceeded",
           "svg_complexity_exceeded",
           "svg_render_failed",
+          "png_too_large",
+          "png_dimensions_invalid",
         ].includes(output.code ?? "")
       )
         details.failureReason = output.code;
@@ -161,6 +163,25 @@ export function pluginResultFailureGuidance(value: unknown) {
     value && typeof value === "object"
       ? (value as Record<string, unknown>)
       : {};
+  if (
+    v.sessionUsable === true &&
+    [
+      "path_outside_workspace",
+      "regular_file_required",
+      "image_too_large",
+      "unsupported_image_type",
+      "image_pixel_limit",
+      "preview_too_large",
+      "invalid_image",
+      "image_unavailable_or_invalid",
+    ].includes(String(v.status))
+  )
+    return {
+      contentAvailable: false,
+      retryInThisAnswer: true,
+      nextAction:
+        "No image was supplied. The sandbox remains usable. Check the path and format, or crop/resize an oversized image, then request a corrected preview only if needed and within budget. Do not repeat unchanged arguments or claim to have viewed the failed preview.",
+    };
   if (v.status === "command_failed" && v.sessionUsable === true)
     return {
       contentAvailable: false,

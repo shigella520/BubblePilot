@@ -96,6 +96,33 @@ it("authenticates, discovers without allocation, separates sessions and revokes 
       ).isError,
     ).toBe(false);
     const data = Buffer.from("fictional").toString("base64");
+    for (const failure of [
+      {
+        status: "completed" as const,
+        exitCode: 0,
+        stdout: '{"status":"preview_too_large"}',
+      },
+      { status: "command_failed" as const, exitCode: 1, stdout: "" },
+    ]) {
+      run.mockResolvedValueOnce({
+        ...failure,
+        stderr: "",
+        durationMs: 1,
+        truncated: false,
+      });
+      const rejected = await a.client.callTool({
+        name: "view_image",
+        arguments: { path: "/workspace/chart.png" },
+      });
+      expect(rejected.isError).toBe(true);
+      expect(rejected.structuredContent).toMatchObject({
+        status:
+          failure.status === "completed"
+            ? "preview_too_large"
+            : "command_failed",
+        sessionUsable: true,
+      });
+    }
     run.mockResolvedValueOnce({
       status: "completed",
       exitCode: 0,
@@ -122,6 +149,7 @@ it("authenticates, discovers without allocation, separates sessions and revokes 
       arguments: { path: "/workspace/chart.png" },
     });
     expect(viewed.isError).toBe(false);
+    expect(viewed.structuredContent).toMatchObject({ sessionUsable: true });
     expect(viewed.content).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: "image", mimeType: "image/png", data }),

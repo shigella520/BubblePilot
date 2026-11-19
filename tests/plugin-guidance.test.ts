@@ -7,6 +7,44 @@ import {
   pluginGuidance,
 } from "../modules/plugins/plugin-guidance.js";
 describe("plugin failure classification", () => {
+  it("allows bounded preview corrections only with an explicitly usable session", () => {
+    for (const status of [
+      "preview_too_large",
+      "image_too_large",
+      "invalid_image",
+      "image_unavailable_or_invalid",
+    ]) {
+      expect(
+        pluginResultFailureGuidance({ status, sessionUsable: true })
+          .retryInThisAnswer,
+      ).toBe(true);
+      expect(
+        pluginResultFailureGuidance({ status, sessionUsable: false })
+          .retryInThisAnswer,
+      ).toBe(false);
+      expect(pluginResultFailureGuidance({ status }).retryInThisAnswer).toBe(
+        false,
+      );
+    }
+    for (const status of [
+      "image_dependency_unavailable",
+      "image_preview_failed",
+      "result_unknown",
+      "command_timeout_session_invalidated_do_not_replay",
+    ])
+      expect(
+        pluginResultFailureGuidance({ status, sessionUsable: true })
+          .retryInThisAnswer,
+      ).toBe(false);
+    for (const code of ["png_too_large", "png_dimensions_invalid"])
+      expect(
+        pluginFailureDetails({
+          status: "command_failed",
+          exitCode: 1,
+          stdout: JSON.stringify({ status: "failed", code }),
+        }),
+      ).toMatchObject({ failureReason: code });
+  });
   it("reports safe command failure evidence without exposing output and offers only safe corrections", () => {
     const result = {
       status: "command_failed",

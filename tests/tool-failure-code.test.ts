@@ -26,4 +26,10 @@ it("retains structured built-in codes without allowing arbitrary messages into a
     pluginCommandErrorLabel({ exitCode: 1, failureReason: "svg_path_denied" }),
   ).toBe("退出码 1 · 渲染路径必须是 /workspace/ 下的绝对路径");
   expect(pluginCommandErrorLabel({ failureReason: "private stdout" })).toBe("");
+  expect(pluginCommandErrorLabel({ failureReason: "png_too_large" })).toContain(
+    "大小限制",
+  );
+  expect(
+    pluginCommandErrorLabel({ failureReason: "png_dimensions_invalid" }),
+  ).toContain("尺寸无效");
 });

@@ -205,14 +205,22 @@ function register(
         if (result.status !== "completed")
           return reply(
             {
-              status: result.status,
+              ...result,
+              sessionUsable: !session.ended,
               guidance:
                 "The image was not supplied. Check sandbox state and remaining execution time.",
             },
             true,
           );
         extra.signal.throwIfAborted();
-        return imageReply(result.stdout);
+        const preview = imageReply(result.stdout);
+        return {
+          ...preview,
+          structuredContent: {
+            ...preview.structuredContent,
+            sessionUsable: !session.ended,
+          },
+        };
       } catch (error) {
         return reply(
           {
@@ -220,6 +228,7 @@ function register(
               error instanceof ToolError
                 ? error.message
                 : "image_preview_failed",
+            sessionUsable: !session.ended,
           },
           true,
         );

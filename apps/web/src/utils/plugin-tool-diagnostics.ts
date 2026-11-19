@@ -116,6 +116,8 @@ export function pluginCommandErrorLabel(details: Details) {
     svg_dimensions_exceeded: "SVG 尺寸超过限制",
     svg_complexity_exceeded: "SVG 复杂度超过限制",
     svg_render_failed: "SVG 渲染失败",
+    png_too_large: "渲染生成的 PNG 文件超过大小限制",
+    png_dimensions_invalid: "渲染生成的 PNG 尺寸无效",
   };
   const reason =
     typeof details?.failureReason === "string"
