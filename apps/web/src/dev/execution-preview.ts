@@ -1,7 +1,8 @@
 // Fictional preview only: every API request is intercepted, no messages are sent.
 import { createApp, h } from "vue";
 import { createPinia } from "pinia";
-import { createMemoryHistory, createRouter } from "vue-router";
+import { createWebHashHistory, createRouter } from "vue-router";
+import { pageScrollPosition } from "../utils/scroll-policy";
 import ExecutionsView from "../views/ExecutionsView.vue";
 import { useSessionStore } from "../stores/session";
 import { executionTiming } from "../../../../modules/workflow/execution-timing.js";
@@ -20,6 +21,50 @@ const previewSession = () => ({
     : null,
 });
 const stamp = (ms: number) => new Date(now.getTime() - ms).toISOString();
+const fixtureFetch = window.fetch.bind(window);
+const gifFixture = new URL(
+  "./fixtures/fictional-animation.gif",
+  import.meta.url,
+).href;
+const attachmentItems = [
+  {
+    id: "fictional-gif",
+    filename: "虚构动画预览.gif",
+    fileType: "gif",
+    mimeType: "image/gif",
+    width: 160,
+    height: 96,
+    size: 3346,
+    state: "bound",
+    deliveryStatus: "confirmed",
+    errorCode: null,
+  },
+  {
+    id: "fictional-long",
+    filename: "示例数据汇总与分析_".repeat(12) + ".xlsx",
+    fileType: "xlsx",
+    mimeType:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    width: null,
+    height: null,
+    size: 25000,
+    state: "bound",
+    deliveryStatus: "unknown",
+    errorCode: null,
+  },
+  {
+    id: "fictional-deleted",
+    filename: "已清理的虚构统计图.png",
+    fileType: "png",
+    mimeType: "image/png",
+    width: 1800,
+    height: 1286,
+    size: 303104,
+    state: "deleted",
+    deliveryStatus: null,
+    errorCode: null,
+  },
+];
 const records = [
   "succeeded",
   "running",
@@ -127,7 +172,16 @@ window.fetch = (input) => {
         },
       ],
     };
-  else if (path.endsWith("/generated-images")) data = [];
+  else if (path.endsWith("/generated-images/fictional-gif/content"))
+    return fixtureFetch(gifFixture);
+  else if (path.endsWith("/generated-images/fictional-long/content"))
+    return Promise.resolve(
+      new Response("fictional download fixture", {
+        headers: { "content-type": "application/octet-stream" },
+      }),
+    );
+  else if (path.endsWith("/generated-images"))
+    data = previewOptions.has("attachments") ? attachmentItems : [];
   else if (path.startsWith("/api/v1/executions/"))
     data = records.find((r) => path.endsWith(r.id));
   else if (path === "/api/v1/ai/usage")
@@ -159,10 +213,15 @@ window.fetch = (input) => {
 };
 const pinia = createPinia();
 const router = createRouter({
-  history: createMemoryHistory(),
-  routes: [{ path: "/", component: ExecutionsView }],
+  history: createWebHashHistory(),
+  scrollBehavior: pageScrollPosition,
+  routes: [
+    { path: "/executions", component: ExecutionsView },
+    { path: "/", redirect: "/executions" },
+  ],
 });
-await router.push("/");
+await router.push(location.hash.slice(1) || "/executions");
+await router.isReady();
 await useSessionStore(pinia).restore();
 createApp({
   render: () => h("main", { class: "app-shell" }, [h(ExecutionsView)]),

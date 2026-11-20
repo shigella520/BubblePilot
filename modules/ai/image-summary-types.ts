@@ -12,6 +12,9 @@ export type ImageSummaryStatus =
 
 export interface MessageImageSummary {
   operationId?: string;
+  resultOrigin?: "model" | "cache" | "legacy" | null;
+  reusedAt?: string | null;
+  providerAttemptCount?: number;
   attachmentRef: string;
   sourceType: ImageSummarySourceType;
   sourceKeyHash: string;
@@ -48,10 +51,15 @@ export type ImageSummaryJob = ImageSummarySource & {
   attemptCount: number;
 };
 
-export interface ImageSummaryCompletion {
+export interface ImageSummaryContentInput {
   jobId: string;
   leaseOwner: string;
   imageContentHash: string;
+  strategyFingerprint: string;
+}
+
+export interface ImageSummaryCompletion extends ImageSummaryContentInput {
+  contentLeaseToken: string;
   summary: string;
   providerId: string;
   providerName: string;

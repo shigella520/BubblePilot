@@ -9,6 +9,7 @@ import {
 } from "vue";
 
 import { useRoute, useRouter } from "vue-router";
+import { sectionIndexAtScroll } from "../utils/scroll-policy";
 
 export function useSectionNavigation(props: {
   items: { id: string; label: string; icon: Component }[];
@@ -81,10 +82,12 @@ export function useSectionNavigation(props: {
       return;
     }
     const position = Math.max(0, window.scrollY);
-    let index = 0;
-    for (let i = 1; i < sections.length; i++) {
-      if (maxScroll > 0 && position >= sections[i].top) index = i;
-    }
+    const index = sectionIndexAtScroll(
+      sections,
+      position,
+      maxScroll,
+      trackedAnchor,
+    );
     const current = sections[index];
     const next = sections[index + 1] ?? current;
     const distance = next.top - current.top;

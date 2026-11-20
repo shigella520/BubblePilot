@@ -468,6 +468,18 @@ export class AiRoutingService {
           }
           selectionHealthState = claimed.state;
         }
+        if (
+          request.beforeProviderCall &&
+          !(await request.beforeProviderCall())
+        ) {
+          return complete({
+            status: "failed",
+            code: "AI_BACKGROUND_LEASE_LOST",
+            summary: "Background operation no longer owns its lease.",
+            retryable: false,
+            attemptCount,
+          });
+        }
         sequence += 1;
         attemptCount += 1;
         candidateDecisions.push({

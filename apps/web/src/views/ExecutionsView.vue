@@ -809,13 +809,22 @@ async function copyRawResponse(attemptId: string) {
     messageIsError.value = true;
   }
 }
+async function anchorExecutionEntry() {
+  // Explicit section links win; query-only links should return to the list when
+  // the detail closes. SectionNavigation owns scrolling and async re-anchoring.
+  if (!route.hash)
+    await router.replace({ query: route.query, hash: "#executions" });
+}
 async function loadSelected() {
   await load(true);
-  if (recoveryOnly.value || unknownOnly.value) {
-    await nextTick();
-    document.getElementById("executions")?.scrollIntoView({ block: "start" });
-  }
   const executionId = route.query.executionId;
+  if (
+    recoveryOnly.value ||
+    unknownOnly.value ||
+    typeof executionId === "string"
+  ) {
+    await anchorExecutionEntry();
+  }
   if (typeof executionId === "string") await inspect(executionId);
 }
 async function closeRecoveryQueue() {
@@ -887,14 +896,16 @@ watch(
     clearDetail();
     executionPager.clear();
     await changePage(executionPager.first);
-    await nextTick();
-    document.getElementById("executions")?.scrollIntoView({ block: "start" });
+    await anchorExecutionEntry();
   },
 );
 watch(
   () => route.query.executionId,
-  (executionId) => {
-    if (typeof executionId === "string") void inspect(executionId);
+  async (executionId) => {
+    if (typeof executionId === "string") {
+      await anchorExecutionEntry();
+      await inspect(executionId);
+    }
   },
 );
 watch(
@@ -1093,10 +1104,10 @@ function contextSnapshotValue(
       <SectionNavigation
         :items="[
           { id: 'ai-usage', label: 'AI 用量与缓存', icon: ChartColumn },
-          { id: 'memory-jobs', label: '历史索引', icon: FileClock },
+          { id: 'executions', label: '执行记录', icon: FileClock },
           { id: 'idle-conversations', label: '空闲主动交流', icon: FileClock },
           { id: 'scheduled-tasks', label: '定时任务', icon: FileClock },
-          { id: 'executions', label: '执行记录', icon: FileClock },
+          { id: 'memory-jobs', label: '历史索引', icon: FileClock },
           { id: 'audit', label: '审计事件', icon: ShieldCheck },
         ]"
       />
@@ -1275,9 +1286,6 @@ function contextSnapshotValue(
           正在加载 AI 用量统计…
         </div>
       </section>
-      <MemoryPanel id="memory-jobs" mode="jobs" embedded />
-      <IdleAuditPanel id="idle-conversations" />
-      <ScheduledTasksPanel id="scheduled-tasks" />
       <section id="executions" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -1426,6 +1434,9 @@ function contextSnapshotValue(
           @next="changePage(executionPager.next)"
         />
       </section>
+      <IdleAuditPanel id="idle-conversations" />
+      <ScheduledTasksPanel id="scheduled-tasks" />
+      <MemoryPanel id="memory-jobs" mode="jobs" embedded />
       <section id="audit" class="admin-panel">
         <div class="panel-head">
           <div>

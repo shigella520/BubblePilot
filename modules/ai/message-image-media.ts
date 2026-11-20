@@ -20,6 +20,9 @@ export type MessageImageMediaSource = {
 
 export type MessageImageMediaView = {
   operationId: string | null;
+  resultOrigin: "model" | "cache" | "legacy" | null;
+  reusedAt: string | null;
+  providerAttemptCount: number;
   attachmentRef: string;
   sourceType: ImageSummarySource["sourceType"];
   label: string;
@@ -101,6 +104,12 @@ export function messageImageMediaViews(
     );
     return {
       operationId: summary?.operationId ?? null,
+      resultOrigin:
+        summary?.status === "succeeded"
+          ? (summary.resultOrigin ?? "legacy")
+          : null,
+      reusedAt: summary?.reusedAt ?? null,
+      providerAttemptCount: summary?.providerAttemptCount ?? 0,
       attachmentRef: item.source.attachmentRef,
       sourceType: item.source.sourceType,
       label: item.label,

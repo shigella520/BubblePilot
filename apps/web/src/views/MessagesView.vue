@@ -238,6 +238,9 @@ interface MessageMediaDetail {
     declaredMimeType: string | null;
     sizeBytes: number | null;
     summaryStatus: ImageSummaryStatus;
+    resultOrigin?: "model" | "cache" | "legacy" | null;
+    reusedAt?: string | null;
+    providerAttemptCount?: number;
     summary: string | null;
     providerName: string | null;
     model: string | null;
@@ -1743,7 +1746,16 @@ onBeforeUnmount(() =>
                   {{ formatMediaBytes(item.sizeBytes) }}
                 </p>
                 <div v-if="item.summary" class="message-media-summary">
-                  <span>AI 摘要</span>
+                  <span
+                    >AI 摘要 ·
+                    {{
+                      item.resultOrigin === "cache"
+                        ? "缓存复用"
+                        : item.resultOrigin === "model"
+                          ? "模型生成"
+                          : "历史记录"
+                    }}</span
+                  >
                   <p>{{ item.summary }}</p>
                 </div>
                 <p v-else class="message-media-status-copy">
@@ -1751,11 +1763,21 @@ onBeforeUnmount(() =>
                 </p>
                 <dl class="message-media-diagnostics">
                   <div>
-                    <dt>Provider</dt>
+                    <dt>
+                      {{
+                        item.resultOrigin === "cache"
+                          ? "原摘要 Provider"
+                          : "Provider"
+                      }}
+                    </dt>
                     <dd>{{ item.providerName || "—" }}</dd>
                   </div>
                   <div>
-                    <dt>模型</dt>
+                    <dt>
+                      {{
+                        item.resultOrigin === "cache" ? "原摘要模型" : "模型"
+                      }}
+                    </dt>
                     <dd>{{ item.model || "—" }}</dd>
                   </div>
                   <div>
@@ -1767,8 +1789,26 @@ onBeforeUnmount(() =>
                     </dd>
                   </div>
                   <div>
-                    <dt>尝试</dt>
-                    <dd>{{ item.attemptCount || "—" }}</dd>
+                    <dt>任务尝试</dt>
+                    <dd>{{ item.attemptCount }}</dd>
+                  </div>
+                  <div>
+                    <dt>模型调用次数</dt>
+                    <dd>{{ item.providerAttemptCount ?? "—" }}</dd>
+                  </div>
+                  <div v-if="item.generatedAt">
+                    <dt>
+                      {{
+                        item.resultOrigin === "cache"
+                          ? "原始生成时间"
+                          : "生成时间"
+                      }}
+                    </dt>
+                    <dd>{{ new Date(item.generatedAt).toLocaleString() }}</dd>
+                  </div>
+                  <div v-if="item.reusedAt">
+                    <dt>复用时间</dt>
+                    <dd>{{ new Date(item.reusedAt).toLocaleString() }}</dd>
                   </div>
                 </dl>
                 <div
@@ -1800,7 +1840,13 @@ onBeforeUnmount(() =>
                   </article>
                 </div>
                 <p v-else class="message-media-status-copy">
-                  历史任务未记录路由决策，不使用当前配置反推。
+                  {{
+                    item.resultOrigin === "cache"
+                      ? "本次摘要来自同聊天图片的缓存复用。"
+                      : item.resultOrigin === "model"
+                        ? "当前任务暂无路由记录。"
+                        : "历史任务未记录路由决策，不使用当前配置反推。"
+                  }}
                 </p>
                 <code v-if="item.errorCode" class="message-media-error">{{
                   item.errorCode

@@ -147,6 +147,57 @@ describe.runIf(!!url)("archive-only message revisions", () => {
       ).rows[0]?.n,
     ).toBe("0");
   });
+  it("clears image reuse provenance and content leases when a message is revised", async () => {
+    const f = await fixture();
+    const summaryId = randomUUID();
+    const token = randomUUID();
+    const chatId = (
+      await db.query<Record<string, unknown>>(
+        "SELECT chat_id FROM messages WHERE id=$1",
+        [f.id],
+      )
+    ).rows[0]!.chat_id;
+    await db.query<Record<string, unknown>>(
+      `INSERT INTO message_image_summaries(id,message_id,source_type,source_key,attachment_ref,status,
+      summary,image_content_hash,strategy_fingerprint,result_origin,reused_from_id,reused_at,content_lease_token)
+      VALUES($1,$2,'attachment','fictional','fictional-ref','succeeded','虚构摘要','sha256:fixture','sha256:policy','cache',$1,now(),$3)`,
+      [summaryId, f.id, token],
+    );
+    await db.query<Record<string, unknown>>(
+      `INSERT INTO image_summary_content_leases(chat_id,image_content_hash,strategy_fingerprint,job_id,token,expires_at)
+      VALUES($1,'sha256:fixture','sha256:policy',$2,$3,now()+interval '10 minutes')`,
+      [chatId, summaryId, token],
+    );
+    f.set(1788000001000);
+    await f.notify(1788000001000);
+    await service.tick();
+    const row = (
+      await db.query<Record<string, unknown>>(
+        `SELECT status,summary,image_content_hash,strategy_fingerprint,result_origin,reused_from_id,reused_at,content_lease_token
+      FROM message_image_summaries WHERE id=$1`,
+        [summaryId],
+      )
+    ).rows[0]!;
+    expect(row).toEqual({
+      status: "unavailable",
+      summary: null,
+      image_content_hash: null,
+      strategy_fingerprint: null,
+      result_origin: null,
+      reused_from_id: null,
+      reused_at: null,
+      content_lease_token: null,
+    });
+    expect(
+      (
+        await db.query<Record<string, unknown>>(
+          "SELECT count(*) FROM image_summary_content_leases WHERE job_id=$1",
+          [summaryId],
+        )
+      ).rows[0]!.count,
+    ).toBe("0");
+  });
+
   it("retains only the last archived pre-withdrawal text for administrators, clears it on retention", async () => {
     const f = await fixture();
     f.set(1788000001000, { text: "编辑后的虚构留存正文" });

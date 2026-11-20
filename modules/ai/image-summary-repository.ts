@@ -1,5 +1,6 @@
 import type {
   ImageSummaryCompletion,
+  ImageSummaryContentInput,
   ImageSummaryJob,
   ImageSummarySource,
   ImageSummaryStatus,
@@ -17,6 +18,27 @@ export interface ImageSummaryRepository {
     jobId: string;
     leaseOwner: string;
     leaseMs: number;
+  }): Promise<boolean>;
+  reuse(
+    input: ImageSummaryContentInput & {
+      durationMs: number;
+      contentLeaseToken?: string;
+    },
+  ): Promise<boolean>;
+  acquireContentLease(
+    input: ImageSummaryContentInput,
+  ): Promise<
+    | { status: "acquired"; token: string }
+    | { status: "waiting" }
+    | { status: "invalid" }
+  >;
+  releaseContentLease(input: { jobId: string; token: string }): Promise<void>;
+  canGenerate(
+    input: ImageSummaryContentInput & { contentLeaseToken: string },
+  ): Promise<boolean>;
+  deferForContent(input: {
+    jobId: string;
+    leaseOwner: string;
   }): Promise<boolean>;
   complete(input: ImageSummaryCompletion): Promise<boolean>;
   fail(input: {

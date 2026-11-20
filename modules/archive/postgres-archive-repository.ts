@@ -1063,7 +1063,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
                  AND m.sent_at <= j.sent_to
                  AND m.created_at <= j.snapshot_at
              )
-           ORDER BY m.created_at, m.id
+           ORDER BY m.id
            LIMIT $3
            FOR UPDATE OF m SKIP LOCKED
          )
@@ -1087,10 +1087,17 @@ export class PostgresArchiveRepository implements ArchiveRepository {
           `UPDATE message_image_summaries
            SET status = 'redacted', source_key = 'redacted:' || id::text,
                summary = NULL, image_content_hash = NULL,
+               strategy_fingerprint = NULL, result_origin = NULL, reused_from_id = NULL, reused_at = NULL, content_lease_token = NULL,
                provider_id = NULL, provider_name = NULL, model = NULL,
                error_code = 'IMAGE_SUMMARY_REDACTED_BY_RETENTION',
                lease_owner = NULL, lease_expires_at = NULL, updated_at = NOW()
            WHERE message_id = ANY($1::uuid[])`,
+          [messageIds],
+        );
+        await client.query(
+          `DELETE FROM image_summary_content_leases WHERE job_id IN (
+            SELECT id FROM message_image_summaries WHERE message_id=ANY($1::uuid[])
+          )`,
           [messageIds],
         );
         await client.query(

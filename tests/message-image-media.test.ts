@@ -101,11 +101,42 @@ describe("message image media", () => {
       summaryStatus: "succeeded",
       summary: "一张虚构的蓝色界面截图。",
       providerName: "Vision provider",
+      resultOrigin: "legacy",
+      providerAttemptCount: 0,
+      reusedAt: null,
     });
     expect(views[1]).toMatchObject({
       sourceType: "link-preview",
       summaryStatus: "not-created",
       summary: null,
+    });
+  });
+  it("exposes cached provenance without importing source attempts and keeps zero calls", () => {
+    const sources = messageImageMediaSources(message);
+    const source = sources[0]!.source;
+    const cached: MessageImageSummary = {
+      attachmentRef: source.attachmentRef,
+      sourceType: source.sourceType,
+      sourceKeyHash: sha256(source.sourceKey),
+      status: "succeeded",
+      summary: "虚构缓存摘要",
+      providerName: "Original provider",
+      model: "fictional",
+      contractVersion: "image-summary-v1",
+      attemptCount: 1,
+      providerAttemptCount: 0,
+      resultOrigin: "cache",
+      imageContentHash: "sha256:fixture",
+      errorCode: null,
+      durationMs: 3,
+      generatedAt: "2026-08-17T00:00:02.000Z",
+      reusedAt: "2026-08-18T00:00:02.000Z",
+    };
+    expect(messageImageMediaViews(sources, [cached])[0]).toMatchObject({
+      resultOrigin: "cache",
+      providerAttemptCount: 0,
+      generatedAt: cached.generatedAt,
+      reusedAt: cached.reusedAt,
     });
   });
 });

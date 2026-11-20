@@ -112,8 +112,20 @@ describe.runIf(testDatabaseUrl !== undefined)(
       });
       expect(provider.status).toBe("ok");
       if (provider.status !== "ok") return;
+      const content = {
+        jobId: second.id,
+        leaseOwner: "worker-b",
+        imageContentHash: "sha256:fictional-image-content",
+        strategyFingerprint: "sha256:fictional-strategy",
+      };
+      const lease = await repository.acquireContentLease(content);
+      expect(lease.status).toBe("acquired");
+      if (lease.status !== "acquired")
+        throw new Error("Expected content lease");
       await expect(
         repository.complete({
+          strategyFingerprint: content.strategyFingerprint,
+          contentLeaseToken: lease.token,
           jobId: second.id,
           leaseOwner: "worker-b",
           imageContentHash: "sha256:fictional-image-content",

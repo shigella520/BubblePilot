@@ -7,6 +7,7 @@ import { OpenAiCompatibleClient } from "../modules/ai/openai-compatible-client.j
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import type { AiApiKind } from "../modules/ai/ai-types.js";
 import {
+  imageSummaryStrategyFingerprint,
   ImageSummaryService,
   ImageSummaryWorker,
 } from "../modules/ai/image-summary-service.js";
@@ -31,6 +32,13 @@ import {
 } from "./fixtures/bluebubbles.js";
 
 class MemorySummaryRepository implements ImageSummaryRepository {
+  reuse = vi.fn().mockResolvedValue(false);
+  acquireContentLease = vi
+    .fn()
+    .mockResolvedValue({ status: "acquired", token: "fictional-lease" });
+  releaseContentLease = vi.fn().mockResolvedValue(undefined);
+  canGenerate = vi.fn().mockResolvedValue(true);
+  deferForContent = vi.fn().mockResolvedValue(true);
   readonly sources = new Map<string, ImageSummarySource>();
   readonly completions: ImageSummaryCompletion[] = [];
   readonly failures: Array<{ status: string; errorCode: string }> = [];
@@ -239,8 +247,9 @@ async function imageAffinityFixture(
     );
   });
   const routing = new AiRoutingService(aiRepository, client, secrets);
+  const summaryRepository = new MemorySummaryRepository();
   const service = new ImageSummaryService(
-    new MemorySummaryRepository(),
+    summaryRepository,
     aiRepository,
     routing,
     {
@@ -256,7 +265,7 @@ async function imageAffinityFixture(
       }),
     } as unknown as NativeImageInputService,
   );
-  return { service, providers, requests };
+  return { service, providers, requests, summaryRepository };
 }
 
 describe.each(["chat-completions", "responses"] as const)(
@@ -328,6 +337,22 @@ describe.each(["chat-completions", "responses"] as const)(
         }
       }
       expect(ids[0]).not.toBe(ids[1]);
+    });
+
+    it("stops fallback calls after content ownership is lost", async () => {
+      const { service, requests, summaryRepository } =
+        await imageAffinityFixture(apiKind, {
+          fallback: true,
+          responseStatus: () => 503,
+        });
+      summaryRepository.canGenerate
+        .mockResolvedValueOnce(true)
+        .mockResolvedValue(false);
+      expect(await service.process(imageJob, "worker-a")).toBe(false);
+      expect(requests).toHaveLength(1);
+      expect(summaryRepository.completions).toHaveLength(0);
+      expect(summaryRepository.failures).toHaveLength(0);
+      expect(summaryRepository.releaseContentLease).toHaveBeenCalledTimes(1);
     });
 
     it("does not automatically send a session when affinity is disabled", async () => {
@@ -405,6 +430,81 @@ describe("image summary background processing", () => {
     ]);
   });
 
+  it("reuses before route selection and rechecks after acquiring content ownership", async () => {
+    for (const afterAcquisition of [false, true]) {
+      const repository = new MemorySummaryRepository();
+      if (afterAcquisition)
+        repository.reuse.mockResolvedValueOnce(false).mockResolvedValue(true);
+      else repository.reuse.mockResolvedValue(true);
+      const routes = imageRouteRepository();
+      const listRoutes = vi.spyOn(routes, "listRoutes");
+      const execute = vi.fn();
+      const loadForSummary = vi.fn().mockResolvedValue({
+        status: "succeeded",
+        contentHash: "sha256:fixture",
+        part: {
+          type: "image",
+          detail: "high",
+          dataUrl: "data:image/png;base64,ZmFrZQ==",
+        },
+      });
+      const service = new ImageSummaryService(
+        repository,
+        routes,
+        { execute } as unknown as AiRoutingService,
+        { loadForSummary } as unknown as NativeImageInputService,
+      );
+      expect(await service.process(imageJob, "worker-a")).toBe(true);
+      expect(loadForSummary).toHaveBeenCalledTimes(1);
+      expect(listRoutes).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+      expect(repository.releaseContentLease).toHaveBeenCalledTimes(
+        afterAcquisition ? 1 : 0,
+      );
+    }
+  });
+
+  it("does not reuse unreadable bytes or commit a result after lease renewal failed", async () => {
+    const repository = new MemorySummaryRepository();
+    repository.reuse.mockResolvedValue(true);
+    const execute = vi.fn();
+    const loadForSummary = vi.fn().mockResolvedValue({
+      status: "failed",
+      retryable: false,
+      errorCode: "AI_IMAGE_FETCH_FAILED",
+    });
+    const service = new ImageSummaryService(
+      repository,
+      imageRouteRepository(),
+      { execute } as unknown as AiRoutingService,
+      { loadForSummary } as unknown as NativeImageInputService,
+    );
+    expect(await service.process(imageJob, "worker-a")).toBe(false);
+    expect(repository.reuse).not.toHaveBeenCalled();
+    loadForSummary.mockResolvedValue({
+      status: "succeeded",
+      contentHash: "sha256:fixture",
+      part: { type: "image", detail: "high" },
+    });
+    expect(await service.process(imageJob, "worker-a", () => false)).toBe(
+      false,
+    );
+    expect(repository.reuse).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("fingerprints the actual generation policy and picture detail", () => {
+    expect(imageSummaryStrategyFingerprint("high")).toBe(
+      imageSummaryStrategyFingerprint("high"),
+    );
+    expect(imageSummaryStrategyFingerprint("low")).not.toBe(
+      imageSummaryStrategyFingerprint("high"),
+    );
+    expect(imageSummaryStrategyFingerprint()).toBe(
+      imageSummaryStrategyFingerprint("auto"),
+    );
+  });
+
   it("retries a temporarily unavailable image route before failing permanently", async () => {
     const repository = new MemorySummaryRepository();
     const service = new ImageSummaryService(
@@ -414,7 +514,17 @@ describe("image summary background processing", () => {
         getRouteSnapshot: () => Promise.resolve(null),
       },
       { execute: vi.fn() } as unknown as AiRoutingService,
-      { loadForSummary: vi.fn() } as unknown as NativeImageInputService,
+      {
+        loadForSummary: vi.fn().mockResolvedValue({
+          status: "succeeded",
+          contentHash: "sha256:fictional-image",
+          part: {
+            type: "image",
+            detail: "high",
+            dataUrl: "data:image/png;base64,ZmFrZQ==",
+          },
+        }),
+      } as unknown as NativeImageInputService,
       3,
     );
 

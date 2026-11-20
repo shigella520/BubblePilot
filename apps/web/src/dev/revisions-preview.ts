@@ -19,7 +19,26 @@ const chat = {
   version: 1,
   updatedAt: new Date().toISOString(),
 };
+const imagePreview = new URLSearchParams(location.search).has("imageSummary");
 const messages = [
+  ...(imagePreview
+    ? [
+        {
+          id: "fictional-image-reuse",
+          body: "虚构图片摘要复用预览",
+          revisionState: "active",
+          attachments: [
+            {
+              providerAttachmentId: "fictional-image",
+              fileName: "fictional.png",
+              mimeType: "image/png",
+              sizeBytes: 2048,
+            },
+          ],
+          contentType: "mixed",
+        },
+      ]
+    : []),
   {
     id: "fictional-original",
     body: "明天上午十点在图书馆集合，记得带上笔记本。",
@@ -103,6 +122,35 @@ window.fetch = (input) => {
     data = matching.slice(offset, offset + limit);
     nextCursor =
       offset + limit < matching.length ? String(offset + limit) : null;
+  } else if (imagePreview && path.endsWith("/media")) {
+    data = {
+      messageId: "fictional-image-reuse",
+      contentRedactedAt: null,
+      items: ["cache", "model", "legacy"].map((origin, index) => ({
+        attachmentRef: `fictional-image-${index}`,
+        sourceType: "attachment",
+        label: "虚构图片",
+        fileName: `fictional-${origin}.png`,
+        declaredMimeType: "image/png",
+        sizeBytes: 2048,
+        summaryStatus: "succeeded",
+        summary: "一张虚构的蓝色方块图片。",
+        providerName: "Fictional vision",
+        model: "fictional-vision",
+        contractVersion: "image-summary-v1",
+        attemptCount: 1,
+        providerAttemptCount: origin === "cache" ? 0 : 1,
+        resultOrigin: origin,
+        errorCode: null,
+        durationMs: origin === "cache" ? 8 : 400,
+        generatedAt: "2026-11-19T04:00:00.000Z",
+        reusedAt: origin === "cache" ? "2026-11-20T04:00:00.000Z" : null,
+        imageContentHash: "sha256:fictional",
+        routeTraces: [],
+        previewUrl:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='100'%3E%3Crect width='160' height='100' fill='%23006cbe'/%3E%3C/svg%3E",
+      })),
+    };
   } else if (path.startsWith("/api/v1/messages/"))
     data = messages.find((m) => m.id === path.split("/").at(-1));
   return Promise.resolve(

@@ -2916,6 +2916,9 @@ legend {
   gap: 26px;
   margin-top: 22px;
 }
+.execution-detail-body #execution-outbound > .generated-images {
+  margin-bottom: 20px;
+}
 .trace-columns h3 {
   margin: 0 0 13px;
   font-size: 15px;

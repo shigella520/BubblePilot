@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount } from "vue";
+import { Download, Eye, LoaderCircle } from "@lucide/vue";
 import { apiRequest, downloadFile } from "../services/api";
 const props = defineProps<{ executionId: string; sensitiveActive: boolean }>();
 interface Item {
@@ -83,6 +84,15 @@ async function preview(item: Item) {
     if (version === previewGeneration) busy.value = null;
   }
 }
+const statusTones: Record<string, string> = {
+  confirmed: "success",
+  failed: "danger",
+  unknown: "warning",
+  pending: "warning",
+  sending: "published",
+  bound: "published",
+  ready: "ready",
+};
 const states: Record<string, string> = {
   ready: "已准备，未投递",
   bound: "已登记投递",
@@ -101,29 +111,54 @@ const states: Record<string, string> = {
     <p v-if="error" role="alert">{{ error }}</p>
     <article v-for="item in items" :key="item.id">
       <div class="generated-image-row">
-        <span
-          >{{ item.filename }} · {{ item.fileType.toUpperCase() }}
-          <template v-if="item.width && item.height">
-            · {{ item.width }} × {{ item.height }}</template
+        <div class="generated-image-info">
+          <strong class="generated-image-filename">{{ item.filename }}</strong>
+          <p class="generated-image-meta">
+            {{ item.fileType.toUpperCase() }}
+            <template v-if="item.width && item.height">
+              · {{ item.width }} × {{ item.height }}</template
+            >
+            · {{ Math.ceil(item.size / 1024) }} KiB
+          </p>
+        </div>
+        <div class="generated-image-actions">
+          <span
+            class="table-status"
+            :class="statusTones[item.deliveryStatus ?? item.state]"
           >
-          · {{ Math.ceil(item.size / 1024) }} KiB</span
-        ><strong>{{
-          states[item.deliveryStatus ?? item.state] ?? item.state
-        }}</strong
-        ><button
-          v-if="item.state === 'ready' || item.state === 'bound'"
-          type="button"
-          :disabled="!sensitiveActive || busy !== null"
-          @click="preview(item)"
-        >
-          {{
-            busy === item.id
-              ? "加载中…"
-              : item.mimeType.startsWith("image/")
-                ? "预览"
-                : "下载"
-          }}
-        </button>
+            {{ states[item.deliveryStatus ?? item.state] ?? item.state }}
+          </span>
+          <button
+            v-if="item.state === 'ready' || item.state === 'bound'"
+            type="button"
+            class="button secondary tiny"
+            :disabled="!sensitiveActive || busy !== null"
+            :aria-busy="busy === item.id"
+            :aria-label="`${item.mimeType.startsWith('image/') ? '预览' : '下载'} ${item.filename}`"
+            :title="sensitiveActive ? undefined : '请先解锁敏感操作'"
+            @click="preview(item)"
+          >
+            <LoaderCircle
+              v-if="busy === item.id"
+              :size="14"
+              class="button-spinner"
+              aria-hidden="true"
+            />
+            <Eye
+              v-else-if="item.mimeType.startsWith('image/')"
+              :size="14"
+              aria-hidden="true"
+            />
+            <Download v-else :size="14" aria-hidden="true" />
+            {{
+              busy === item.id
+                ? "加载中…"
+                : item.mimeType.startsWith("image/")
+                  ? "预览"
+                  : "下载"
+            }}
+          </button>
+        </div>
       </div>
       <p v-if="item.errorCode">{{ item.errorCode }}</p>
       <p
@@ -152,7 +187,8 @@ p {
   margin: 0;
 }
 article {
-  border: 1px solid var(--bubblepilot-border, #dbe3ec);
+  border: 1px solid var(--bubblepilot-line);
+  background: rgba(255, 255, 255, 0.65);
   border-radius: 12px;
   padding: 12px;
   display: grid;
@@ -165,21 +201,45 @@ article {
   gap: 12px;
   flex-wrap: wrap;
 }
-.generated-image-row span {
-  flex: 1;
+.generated-image-info {
+  flex: 1 1 200px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.generated-image-filename {
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.generated-image-meta {
+  margin-top: 3px;
+  color: var(--bubblepilot-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.generated-image-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
+.generated-image-actions .button {
+  flex-shrink: 0;
+}
 @media (max-width: 600px) {
-  .generated-image-row span {
-    flex: 1 0 100%;
+  .generated-image-info {
+    flex-basis: 100%;
   }
-  .generated-image-row button {
-    margin-left: auto;
+  .generated-image-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 }
+
 p {
-  font-size: 13px;
+  color: var(--bubblepilot-muted);
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 img {

@@ -654,6 +654,8 @@ export interface AiRouteFailure {
 export type AiRouteResult = AiRouteSuccess | AiRouteFailure;
 
 export interface AiRouteRequest {
+  /** Internal ownership guard, checked before every provider call, including fallback/retry. */
+  beforeProviderCall?: () => Promise<boolean>;
   allowEmptyOutput?: boolean;
   attachmentContext?: AttachmentContext;
   attachmentInput?: AttachmentRunInput;

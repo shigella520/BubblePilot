@@ -2127,7 +2127,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: 图片媒体和摘要诊断；摘要正文只通过该敏感消息查看接口返回。
+          description: 图片媒体和摘要诊断；摘要正文只通过该敏感消息查看接口返回。resultOrigin 为 model/cache/legacy/null，reusedAt 为可空 ISO 时间，providerAttemptCount 为当前任务真实模型调用次数（含失败、重试与降级，缓存命中不产生调用）。generatedAt 保留原摘要生成时间；缓存来源任务的调用轨迹不复制到当前任务。
         "401":
           $ref: "#/components/responses/Error"
         "403":

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 import { sha256 } from "../../app/canonical-json.js";
 import {
@@ -12,6 +12,7 @@ import { createPostgresPool } from "../shared/postgres-pool.js";
 import type { ImageSummaryRepository } from "./image-summary-repository.js";
 import type {
   ImageSummaryCompletion,
+  ImageSummaryContentInput,
   ImageSummaryJob,
   ImageSummarySource,
   ImageSummaryStatus,
@@ -20,6 +21,12 @@ import type {
 
 interface SummaryRow {
   id: string;
+  chat_id: string;
+  content_lease_token: string | null;
+  lease_expires_at: Date;
+  result_origin: "model" | "cache" | null;
+  reused_at: Date | null;
+  provider_attempt_count: string;
   message_id: string;
   provider_message_id: string;
   source_type: "attachment" | "link-preview";
@@ -95,6 +102,10 @@ function sourceFor(row: SummaryRow): ImageSummarySource | null {
 function summaryView(row: SummaryRow): MessageImageSummary {
   return {
     operationId: row.id,
+    resultOrigin:
+      row.status === "succeeded" ? (row.result_origin ?? "legacy") : null,
+    reusedAt: row.reused_at?.toISOString() ?? null,
+    providerAttemptCount: Number(row.provider_attempt_count ?? 0),
     attachmentRef: row.attachment_ref,
     sourceType: row.source_type,
     sourceKeyHash: sha256(row.source_key),
@@ -116,7 +127,9 @@ const summarySelect = `SELECT summary.id, summary.message_id,
   summary.attachment_ref, summary.image_content_hash, summary.summary,
   summary.status, summary.provider_name, summary.model,
   summary.contract_version, summary.attempt_count, summary.error_code,
-  summary.duration_ms, summary.generated_at,
+  summary.duration_ms, summary.generated_at, summary.result_origin, summary.reused_at,
+  (SELECT count(*) FROM ai_provider_attempts a
+   WHERE a.background_operation_id=summary.id AND a.purpose='image-summary') provider_attempt_count,
   message.attachments, message.link_previews
 FROM message_image_summaries summary
 INNER JOIN messages message ON message.id = summary.message_id`;
@@ -154,24 +167,35 @@ export class PostgresImageSummaryRepository implements ImageSummaryRepository {
     leaseMs: number;
     maxAttempts: number;
   }): Promise<ImageSummaryJob | null> {
+    // Separate autocommit cleanup avoids locking leases before message rows.
+    await this.pool.query(
+      "DELETE FROM image_summary_content_leases WHERE expires_at <= clock_timestamp()",
+    );
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       await client.query(
-        `UPDATE message_image_summaries
+        `WITH expired AS MATERIALIZED (
+           SELECT s.id FROM message_image_summaries s JOIN messages m ON m.id=s.message_id
+           WHERE s.status='processing' AND s.lease_expires_at<=clock_timestamp()
+           ORDER BY m.id,s.id LIMIT 100 FOR UPDATE OF m SKIP LOCKED
+         ) UPDATE message_image_summaries s
          SET status = CASE WHEN attempt_count >= $1 THEN 'failed' ELSE 'pending' END,
-             error_code = 'IMAGE_SUMMARY_LEASE_EXPIRED', lease_owner = NULL,
-             lease_expires_at = NULL, next_attempt_at = NOW(), updated_at = NOW()
-         WHERE status = 'processing' AND lease_expires_at <= NOW()`,
+             error_code='IMAGE_SUMMARY_LEASE_EXPIRED',lease_owner=NULL,content_lease_token=NULL,
+             lease_expires_at=NULL,next_attempt_at=clock_timestamp(),updated_at=clock_timestamp()
+         FROM expired WHERE s.id=expired.id AND s.status='processing'
+           AND s.lease_expires_at<=clock_timestamp()`,
         [input.maxAttempts],
       );
+      await client.query("COMMIT");
+      await client.query("BEGIN");
       const result = await client.query<SummaryRow>(
         `WITH candidate AS (
-           SELECT id FROM message_image_summaries
-           WHERE status = 'pending' AND next_attempt_at <= NOW()
-             AND attempt_count < $3
-           ORDER BY next_attempt_at, created_at, id
-           LIMIT 1 FOR UPDATE SKIP LOCKED
+           SELECT s.id FROM message_image_summaries s JOIN messages m ON m.id=s.message_id
+           WHERE s.status = 'pending' AND s.next_attempt_at <= clock_timestamp()
+             AND s.attempt_count < $3
+           ORDER BY s.next_attempt_at, s.created_at, s.id
+           LIMIT 1 FOR UPDATE OF m SKIP LOCKED
          ), claimed AS (
            UPDATE message_image_summaries summary
            SET status = 'processing', attempt_count = attempt_count + 1,
@@ -227,27 +251,231 @@ export class PostgresImageSummaryRepository implements ImageSummaryRepository {
     }
   }
 
-  async complete(input: ImageSummaryCompletion): Promise<boolean> {
-    const result = await this.pool.query(
-      `UPDATE message_image_summaries
-       SET status = 'succeeded', image_content_hash = $3, summary = $4,
-           provider_id = $5, provider_name = $6, model = $7,
-           duration_ms = $8, error_code = NULL, lease_owner = NULL,
-           lease_expires_at = NULL, generated_at = NOW(), updated_at = NOW()
-       WHERE id = $1 AND status = 'processing' AND lease_owner = $2
-         AND lease_expires_at > NOW()`,
+  /** All writes lock messages before summaries, matching revision/retention. */
+  private async withLockedJob<T>(
+    input: { jobId: string; leaseOwner: string },
+    unavailable: T,
+    action: (db: PoolClient, row: SummaryRow) => Promise<T>,
+    additionalMessageIds: readonly string[] = [],
+  ): Promise<T> {
+    const db = await this.pool.connect();
+    try {
+      await db.query("BEGIN");
+      await db.query(
+        `SELECT id FROM messages WHERE id IN (
+           SELECT message_id FROM message_image_summaries WHERE id=$1
+         ) OR id=ANY($2::uuid[]) ORDER BY id FOR UPDATE`,
+        [input.jobId, additionalMessageIds],
+      );
+      const found = await db.query<SummaryRow>(
+        `SELECT s.*,m.chat_id,m.attachments,m.link_previews FROM message_image_summaries s
+         JOIN messages m ON m.id=s.message_id
+         WHERE s.id=$1 AND s.status='processing' AND s.lease_owner=$2
+           AND s.lease_expires_at>clock_timestamp() AND m.revision_number=0
+           AND m.revision_state='active' AND m.content_redacted_at IS NULL
+         FOR UPDATE OF s`,
+        [input.jobId, input.leaseOwner],
+      );
+      const row = found.rows[0];
+      const result =
+        row && sourceFor(row) !== null ? await action(db, row) : unavailable;
+      await db.query("COMMIT");
+      return result;
+    } catch (error) {
+      await db.query("ROLLBACK");
+      throw error;
+    } finally {
+      db.release();
+    }
+  }
+
+  private async ownsContent(
+    db: PoolClient,
+    row: SummaryRow,
+    input: ImageSummaryContentInput & { contentLeaseToken: string },
+  ): Promise<boolean> {
+    if (row.content_lease_token !== input.contentLeaseToken) return false;
+    const result = await db.query(
+      `SELECT 1 FROM image_summary_content_leases
+       WHERE chat_id=$1 AND image_content_hash=$2 AND strategy_fingerprint=$3
+         AND job_id=$4 AND token=$5 AND expires_at>clock_timestamp() FOR UPDATE`,
       [
-        input.jobId,
-        input.leaseOwner,
+        row.chat_id,
         input.imageContentHash,
-        input.summary,
-        input.providerId,
-        input.providerName,
-        input.model,
-        input.durationMs,
+        input.strategyFingerprint,
+        input.jobId,
+        input.contentLeaseToken,
       ],
     );
-    return (result.rowCount ?? 0) === 1;
+    return result.rowCount === 1;
+  }
+
+  async reuse(
+    input: ImageSummaryContentInput & {
+      durationMs: number;
+      contentLeaseToken?: string;
+    },
+  ): Promise<boolean> {
+    const candidate = await this.pool.query<{ id: string; message_id: string }>(
+      `SELECT s.id,s.message_id FROM message_image_summaries s
+       JOIN messages m ON m.id=s.message_id
+       JOIN message_image_summaries target ON target.id=$1
+       JOIN messages target_message ON target_message.id=target.message_id
+       WHERE m.chat_id=target_message.chat_id AND s.id<>target.id
+         AND s.image_content_hash=$2 AND s.strategy_fingerprint=$3
+         AND s.status='succeeded' AND length(s.summary)>0
+         AND m.revision_number=0 AND m.revision_state='active' AND m.content_redacted_at IS NULL
+       ORDER BY s.generated_at DESC,s.id LIMIT 1`,
+      [input.jobId, input.imageContentHash, input.strategyFingerprint],
+    );
+    const source = candidate.rows[0];
+    if (!source) return false;
+    return this.withLockedJob(
+      input,
+      false,
+      async (db, row) => {
+        if (
+          input.contentLeaseToken !== undefined &&
+          !(await this.ownsContent(db, row, {
+            ...input,
+            contentLeaseToken: input.contentLeaseToken,
+          }))
+        )
+          return false;
+        // Source and target messages are locked in UUID order before either summary.
+        const result = await db.query(
+          `UPDATE message_image_summaries target
+         SET status='succeeded',image_content_hash=source.image_content_hash,
+             strategy_fingerprint=source.strategy_fingerprint,summary=source.summary,
+             provider_id=source.provider_id,provider_name=source.provider_name,model=source.model,
+             contract_version=source.contract_version,generated_at=source.generated_at,
+             result_origin='cache',reused_from_id=source.id,reused_at=clock_timestamp(),
+             duration_ms=$5,error_code=NULL,lease_owner=NULL,lease_expires_at=NULL,
+             content_lease_token=NULL,updated_at=clock_timestamp()
+         FROM message_image_summaries source JOIN messages m ON m.id=source.message_id
+         WHERE target.id=$1 AND source.id=$2 AND m.chat_id=$6
+           AND source.status='succeeded' AND length(source.summary)>0
+           AND source.image_content_hash=$3 AND source.strategy_fingerprint=$4
+           AND m.revision_number=0 AND m.revision_state='active' AND m.content_redacted_at IS NULL
+           AND target.lease_expires_at>clock_timestamp()`,
+          [
+            input.jobId,
+            source.id,
+            input.imageContentHash,
+            input.strategyFingerprint,
+            input.durationMs,
+            row.chat_id,
+          ],
+        );
+        return result.rowCount === 1;
+      },
+      [source.message_id],
+    );
+  }
+
+  async acquireContentLease(
+    input: ImageSummaryContentInput,
+  ): Promise<
+    | { status: "acquired"; token: string }
+    | { status: "waiting" }
+    | { status: "invalid" }
+  > {
+    return this.withLockedJob<
+      | { status: "acquired"; token: string }
+      | { status: "waiting" }
+      | { status: "invalid" }
+    >(input, { status: "invalid" }, async (db, row) => {
+      const token = randomUUID();
+      const acquired = await db.query(
+        `INSERT INTO image_summary_content_leases(chat_id,image_content_hash,strategy_fingerprint,job_id,token,expires_at)
+         VALUES($1,$2,$3,$4,$5,$6)
+         ON CONFLICT(chat_id,image_content_hash,strategy_fingerprint) DO UPDATE
+         SET job_id=EXCLUDED.job_id,token=EXCLUDED.token,expires_at=EXCLUDED.expires_at
+         WHERE image_summary_content_leases.expires_at<=clock_timestamp()
+         RETURNING token`,
+        [
+          row.chat_id,
+          input.imageContentHash,
+          input.strategyFingerprint,
+          input.jobId,
+          token,
+          row.lease_expires_at,
+        ],
+      );
+      await db.query(
+        `UPDATE message_image_summaries SET image_content_hash=$2,
+         content_lease_token=$3,updated_at=clock_timestamp() WHERE id=$1`,
+        [
+          input.jobId,
+          input.imageContentHash,
+          acquired.rowCount === 1 ? token : null,
+        ],
+      );
+      return acquired.rowCount === 1
+        ? { status: "acquired", token }
+        : { status: "waiting" };
+    });
+  }
+
+  async releaseContentLease(input: {
+    jobId: string;
+    token: string;
+  }): Promise<void> {
+    await this.pool.query(
+      "DELETE FROM image_summary_content_leases WHERE job_id=$1 AND token=$2",
+      [input.jobId, input.token],
+    );
+  }
+
+  async canGenerate(
+    input: ImageSummaryContentInput & { contentLeaseToken: string },
+  ): Promise<boolean> {
+    return this.withLockedJob(input, false, (db, row) =>
+      this.ownsContent(db, row, input),
+    );
+  }
+
+  async deferForContent(input: {
+    jobId: string;
+    leaseOwner: string;
+  }): Promise<boolean> {
+    return this.withLockedJob(input, false, async (db) => {
+      const result = await db.query(
+        `UPDATE message_image_summaries SET status='pending',attempt_count=GREATEST(0,attempt_count-1),
+         content_wait_count=content_wait_count+1,next_attempt_at=clock_timestamp()+interval '5 seconds',
+         lease_owner=NULL,lease_expires_at=NULL,content_lease_token=NULL,error_code=NULL,updated_at=clock_timestamp()
+         WHERE id=$1`,
+        [input.jobId],
+      );
+      return result.rowCount === 1;
+    });
+  }
+
+  async complete(input: ImageSummaryCompletion): Promise<boolean> {
+    return this.withLockedJob(input, false, async (db, row) => {
+      if (!(await this.ownsContent(db, row, input))) return false;
+      const result = await db.query(
+        `UPDATE message_image_summaries
+         SET status='succeeded',image_content_hash=$3,summary=$4,
+             provider_id=$5,provider_name=$6,model=$7,duration_ms=$8,
+             strategy_fingerprint=$9,result_origin='model',reused_from_id=NULL,reused_at=NULL,
+             error_code=NULL,lease_owner=NULL,lease_expires_at=NULL,content_lease_token=NULL,
+             generated_at=clock_timestamp(),updated_at=clock_timestamp()
+         WHERE id=$1 AND lease_owner=$2 AND lease_expires_at>clock_timestamp()`,
+        [
+          input.jobId,
+          input.leaseOwner,
+          input.imageContentHash,
+          input.summary,
+          input.providerId,
+          input.providerName,
+          input.model,
+          input.durationMs,
+          input.strategyFingerprint,
+        ],
+      );
+      return result.rowCount === 1;
+    });
   }
 
   async renewLease(input: {
@@ -255,15 +483,22 @@ export class PostgresImageSummaryRepository implements ImageSummaryRepository {
     leaseOwner: string;
     leaseMs: number;
   }): Promise<boolean> {
-    const result = await this.pool.query(
-      `UPDATE message_image_summaries
-       SET lease_expires_at = NOW() + ($3 * INTERVAL '1 millisecond'),
-           updated_at = NOW()
-       WHERE id = $1 AND status = 'processing' AND lease_owner = $2
-         AND lease_expires_at > NOW()`,
-      [input.jobId, input.leaseOwner, input.leaseMs],
-    );
-    return (result.rowCount ?? 0) === 1;
+    return this.withLockedJob(input, false, async (db, row) => {
+      if (row.content_lease_token !== null) {
+        const renewed = await db.query(
+          `UPDATE image_summary_content_leases SET expires_at=clock_timestamp()+($3*interval '1 millisecond')
+           WHERE job_id=$1 AND token=$2 AND expires_at>clock_timestamp()`,
+          [input.jobId, row.content_lease_token, input.leaseMs],
+        );
+        if (renewed.rowCount !== 1) return false;
+      }
+      await db.query(
+        `UPDATE message_image_summaries SET lease_expires_at=clock_timestamp()+($2*interval '1 millisecond'),
+         updated_at=clock_timestamp() WHERE id=$1`,
+        [input.jobId, input.leaseMs],
+      );
+      return true;
+    });
   }
 
   async fail(input: {
@@ -274,22 +509,22 @@ export class PostgresImageSummaryRepository implements ImageSummaryRepository {
     durationMs: number;
     nextAttemptAt: Date;
   }): Promise<boolean> {
-    const result = await this.pool.query(
-      `UPDATE message_image_summaries
-       SET status = $3, error_code = $4, duration_ms = $5,
-           next_attempt_at = $6, lease_owner = NULL, lease_expires_at = NULL,
-           updated_at = NOW()
-       WHERE id = $1 AND status = 'processing' AND lease_owner = $2`,
-      [
-        input.jobId,
-        input.leaseOwner,
-        input.status,
-        input.errorCode,
-        input.durationMs,
-        input.nextAttemptAt,
-      ],
-    );
-    return (result.rowCount ?? 0) === 1;
+    return this.withLockedJob(input, false, async (db) => {
+      const result = await db.query(
+        `UPDATE message_image_summaries SET status=$3,error_code=$4,duration_ms=$5,
+         next_attempt_at=$6,lease_owner=NULL,lease_expires_at=NULL,content_lease_token=NULL,updated_at=clock_timestamp()
+         WHERE id=$1 AND lease_owner=$2`,
+        [
+          input.jobId,
+          input.leaseOwner,
+          input.status,
+          input.errorCode,
+          input.durationMs,
+          input.nextAttemptAt,
+        ],
+      );
+      return result.rowCount === 1;
+    });
   }
 
   async listForMessageIds(
@@ -334,7 +569,7 @@ export class PostgresImageSummaryRepository implements ImageSummaryRepository {
     const result = await this.pool.query<{ ready: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM schema_migrations
-         WHERE name = '0033_message_image_summaries.sql'
+         WHERE name = '0076_image_summary_reuse.sql'
        ) AS ready`,
     );
     return result.rows[0]?.ready === true;
