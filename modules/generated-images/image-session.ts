@@ -7,6 +7,7 @@ import {
   GeneratedImageError,
   type ImageReply,
   allowedReplyFileTypes,
+  generatedGifLimits,
 } from "./image-policy.js";
 import type { GeneratedImageStore, ImageArtifact } from "./image-store.js";
 export interface ImageReplyInput {
@@ -15,7 +16,7 @@ export interface ImageReplyInput {
   nodeId: string;
   chatId: string;
 }
-export const imageReplyGuidance = `When the user asks for a file deliverable, use the bound sandbox to create or process it, then prepare ONE final file for the current chat. Textual conclusions do not require an attachment. view_image is optional and only for supported images. Check processing success, file type and size. Use only the types declared by prepare_chat_attachment; never rename an unsupported file to bypass the limit. Reserve one tool call and time for prepare_chat_attachment after all edits. It stages one file, not an immediate send; the successful Reply node sends optional text plus the attachment. Do not output host paths, internal refs or invented download links, or claim confirmed delivery. A failed new preparation clears the previous selection. Memes and prepared attachments cannot be selected together. All tools share the existing budget; do not retry unknown remote outcomes or send an old draft.`;
+export const imageReplyGuidance = `When the user asks for a file deliverable, use the bound sandbox to create or process it, then prepare ONE final file for the current chat. Textual conclusions do not require an attachment. view_image is optional and only for supported images; its static first-frame preview cannot verify an entire animation. Check processing success, file type and size. Use only the types declared by prepare_chat_attachment; never rename an unsupported file to bypass the limit. Reserve one tool call and time for prepare_chat_attachment after all edits. It stages one file, not an immediate send; the successful Reply node sends optional text plus the attachment. Do not output host paths, internal refs or invented download links, or claim confirmed delivery. A failed new preparation clears the previous selection. Memes and prepared attachments cannot be selected together. All tools share the existing budget; do not retry unknown remote outcomes or send an old draft.`;
 const argsSchema = z
   .object({
     path: z
@@ -60,7 +61,7 @@ export class GeneratedImageSession {
     registry.register({
       definition: {
         name: "prepare_chat_attachment",
-        description: `Prepare one final file from this run's /workspace for reply to the current chat. Allowed types: ${allowedReplyFileTypes(this.input.config).join(", ")}. Images: at most 8 MiB; other files: at most 20 MiB. Does not send immediately. Check the result first. A new attempt clears the previous selection; only success selects the attachment.`,
+        description: `Prepare one final file from this run's /workspace for reply to the current chat. Allowed types: ${allowedReplyFileTypes(this.input.config).join(", ")}. Images: at most 8 MiB; other files: at most 20 MiB.${allowedReplyFileTypes(this.input.config).includes("gif") ? ` GIF animation is preserved: at most ${generatedGifLimits.frames} frames, ${generatedGifLimits.totalPixels} total canvas pixels across all frames, 16 million pixels per frame and 8192 pixels per edge. Prepare the .gif directly; ZIP is not required.` : ""} Does not send immediately. Check the result first. A new attempt clears the previous selection; only success selects the attachment.`,
         parameters: {
           type: "object",
           properties: {

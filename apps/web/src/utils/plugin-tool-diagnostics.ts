@@ -83,6 +83,13 @@ export function pluginToolErrorLabel(code: string | null) {
     PLUGIN_SESSION_INVALIDATED: "本次沙箱会话已失效或过期",
     IMAGE_PREPARATION_FAILED: "附件准备失败，未选中可发送文件",
     IMAGE_SESSION_UNAVAILABLE: "附件准备会话不可用，未选中可发送文件",
+    IMAGE_ANIMATION_LIMIT:
+      "GIF 超过 200 帧或累计 6400 万像素，请减少帧数或尺寸",
+    IMAGE_INVALID: "图片损坏或无法完整解码",
+    IMAGE_PIXELS_EXCEEDED: "图片尺寸或像素数超过限制",
+    IMAGE_TOO_LARGE: "图片超过 8 MiB 限制",
+    FILE_TYPE_NOT_AUTHORIZED: "工作流未允许回复此文件类型",
+    FILE_TYPE_MISMATCH: "文件内容与扩展名不符",
     IMAGE_ARGUMENTS_INVALID: "附件路径参数无效",
     IMAGE_PATH_DENIED: "附件路径必须是 /workspace/ 下的绝对路径",
     IMAGE_EXPORT_TIMEOUT: "附件导出超时或已取消，未选中可发送文件",

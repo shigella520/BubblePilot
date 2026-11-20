@@ -4,6 +4,7 @@ export const fileExportProtocol = "io.bubblepilot/file-export";
 export const replyFileTypes = [
   "png",
   "jpeg",
+  "gif",
   "pdf",
   "xlsx",
   "csv",
@@ -21,6 +22,10 @@ export const generatedImageLimits = {
   bytes: 8 * 1024 * 1024,
   pixels: 16_000_000,
   edge: 8192,
+} as const;
+export const generatedGifLimits = {
+  frames: 200,
+  totalPixels: 64_000_000,
 } as const;
 export const imageReplySchema = z
   .object({

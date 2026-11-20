@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { basename, extname } from "node:path";
 import { crc32 } from "node:zlib";
 import sharp from "sharp";
+import { validateGeneratedGif } from "./gif-validation.js";
 import yauzl from "yauzl";
 import { load } from "cheerio";
 import {
@@ -48,6 +49,7 @@ export async function validateGeneratedPng(bytes: Buffer) {
 const mimeTypes: Record<ReplyFileType, string> = {
   png: "image/png",
   jpeg: "image/jpeg",
+  gif: "image/gif",
   pdf: "application/pdf",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   csv: "text/csv",
@@ -279,6 +281,8 @@ export async function validateReplyFile(
     } catch {
       throw new GeneratedImageError("FILE_TYPE_MISMATCH");
     }
+  } else if (fileType === "gif") {
+    ({ width, height } = await validateGeneratedGif(bytes, signal));
   } else if (fileType === "pdf") {
     if (
       !/^%PDF-\d\.\d/.test(bytes.subarray(0, 8).toString("ascii")) ||

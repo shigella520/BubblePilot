@@ -15,6 +15,7 @@ import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/w
 import { newMessageWebhook } from "./fixtures/bluebubbles.js";
 import { Pool } from "pg";
 import { pluginZip } from "./support/plugin-zip.js";
+import { animatedGif } from "./support/animated-gif.js";
 import { replyFileTypes } from "../modules/generated-images/image-policy.js";
 import type {
   SendAttachmentCommand,
@@ -277,6 +278,7 @@ describe.runIf(!!url)("generated PNG persistence and delivery", () => {
     try {
       await store.init();
       const fixtures = [
+        ["动画.gif", await animatedGif()],
         ["report.txt", Buffer.from("fictional result")],
         ["report.md", Buffer.from("# fictional")],
         ["report.csv", Buffer.from("name,count\nfictional,3\n")],
@@ -300,7 +302,32 @@ describe.runIf(!!url)("generated PNG persistence and delivery", () => {
           { filename, allowedTypes: replyFileTypes },
         );
         expect(asset.filename).toBe(filename);
-        expect(asset.width).toBeNull();
+        if (filename.endsWith(".gif")) {
+          expect(asset).toMatchObject({
+            width: 8,
+            height: 6,
+            mime_type: "image/gif",
+            file_type: "gif",
+          });
+          await expect(
+            pool.query(
+              "UPDATE generated_image_artifacts SET mime_type='image/png' WHERE id=$1",
+              [asset.id],
+            ),
+          ).rejects.toThrow();
+          await expect(
+            pool.query(
+              "UPDATE generated_image_artifacts SET width=NULL WHERE id=$1",
+              [asset.id],
+            ),
+          ).rejects.toThrow();
+          await expect(
+            pool.query(
+              "UPDATE generated_image_artifacts SET size=8388609 WHERE id=$1",
+              [asset.id],
+            ),
+          ).rejects.toThrow();
+        } else expect(asset.width).toBeNull();
         const restored = await new GeneratedImageStore(pool, root).read(
           asset.id,
           run.executionId,
@@ -347,7 +374,7 @@ describe.runIf(!!url)("generated PNG persistence and delivery", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
-  it("migrates 0073 PNG rows without changing their identities or widening workflow permissions", async () => {
+  it("migrates 0073 PNG rows through 0074 and 0075 without changing their identities", async () => {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -374,6 +401,9 @@ describe.runIf(!!url)("generated PNG persistence and delivery", () => {
           "migrations/0074_generated_attachment_replies.sql",
           "utf8",
         ),
+      );
+      await client.query(
+        await readFile("migrations/0075_generated_gif_replies.sql", "utf8"),
       );
       expect(
         (

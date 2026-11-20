@@ -30,7 +30,7 @@ it.each(
       ["responses", "compatible", true],
     ] as const
   ).flatMap(([apiKind, mode, fallback]) =>
-    (["png", "txt"] as const).flatMap((format) =>
+    (["png", "gif", "txt"] as const).flatMap((format) =>
       [false, true].map(
         (exportFails) =>
           [apiKind, mode, fallback, format, exportFails] as const,
@@ -193,10 +193,10 @@ it.each(
         id: randomUUID(),
         execution_id: executionId,
         sha256: "b".repeat(64),
-        width: fileFormat === "png" ? 600 : null,
-        height: fileFormat === "png" ? 400 : null,
+        width: fileFormat !== "txt" ? 600 : null,
+        height: fileFormat !== "txt" ? 400 : null,
         filename: `result.${fileFormat}`,
-        mime_type: fileFormat === "png" ? "image/png" : "text/plain",
+        mime_type: fileFormat !== "txt" ? `image/${fileFormat}` : "text/plain",
         file_type: fileFormat,
         size: 1000,
       } as ImageArtifact;
@@ -217,13 +217,17 @@ it.each(
     const text =
       fileFormat === "png"
         ? drawing
-        : 'from pathlib import Path\nPath("/workspace/result.txt").write_text("fictional total: 3")';
+        : fileFormat === "gif"
+          ? 'from PIL import Image\nframes=[Image.new("RGB",(8,6),c) for c in ("red","blue")]\nframes[0].save("/workspace/result.gif",save_all=True,append_images=frames[1:],duration=[80,120],loop=0)'
+          : 'from pathlib import Path\nPath("/workspace/result.txt").write_text("fictional total: 3")';
     const command =
       fileFormat === "png"
         ? "bp-render-svg /workspace/chart.svg /workspace/chart.png"
         : "python /workspace/analyze.py";
     const outputPath =
-      fileFormat === "png" ? "/workspace/chart.png" : "/workspace/result.txt";
+      fileFormat === "png"
+        ? "/workspace/chart.png"
+        : `/workspace/result.${fileFormat}`;
     const actions: Array<{ name: string; args: Record<string, unknown> }> =
       tools.map((tool) => ({
         name: `ext_${digest([plugin.id, tool.server, tool.definition.name]).slice(0, 24)}`,

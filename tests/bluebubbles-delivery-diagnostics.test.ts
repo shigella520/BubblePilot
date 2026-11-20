@@ -1,3 +1,4 @@
+import { animatedGif } from "./support/animated-gif.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BlueBubblesRestReplyGateway } from "../modules/integrations/bluebubbles/rest-reply-gateway.js";
 import type { DeliveryDiagnosticSink } from "../modules/integrations/bluebubbles/delivery-diagnostics.js";
@@ -323,10 +324,14 @@ it.each([
   ["report.pdf", "application/pdf"],
   ["results.zip", "application/zip"],
   ["result.txt", "text/plain"],
+  ["动画.gif", "image/gif"],
 ])(
   "sends %s using the original filename, MIME and bytes",
   async (filename, mimeType) => {
-    const bytes = Buffer.from("fictional attachment bytes");
+    const bytes =
+      mimeType === "image/gif"
+        ? await animatedGif()
+        : Buffer.from("fictional attachment bytes");
     const { gateway } = setup(async (_url, init) => {
       const form = init?.body as FormData;
       expect(form.get("name")).toBe(filename);

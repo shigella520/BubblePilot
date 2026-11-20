@@ -1044,13 +1044,14 @@
                           },
                           "allowedTypes": {
                             "minItems": 1,
-                            "maxItems": 8,
+                            "maxItems": 9,
                             "type": "array",
                             "items": {
                               "type": "string",
                               "enum": [
                                 "png",
                                 "jpeg",
+                                "gif",
                                 "pdf",
                                 "xlsx",
                                 "csv",

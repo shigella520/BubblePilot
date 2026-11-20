@@ -13,10 +13,31 @@ const config = ref<ImageReply>({
   enabled: true,
   pluginId,
   server: "sandbox",
-  allowedTypes: ["png", "pdf", "xlsx", "csv", "txt", "md", "zip", "jpeg"],
+  allowedTypes: [
+    "png",
+    "pdf",
+    "xlsx",
+    "csv",
+    "txt",
+    "md",
+    "zip",
+    "jpeg",
+    "gif",
+  ],
 });
 const unlocked = ref(false);
 const items = [
+  {
+    id: "gif",
+    filename: "虚构动画示例.gif",
+    fileType: "gif",
+    mimeType: "image/gif",
+    width: 160,
+    height: 96,
+    size: 3346,
+    state: "bound",
+    deliveryStatus: "confirmed",
+  },
   {
     id: "png",
     filename: "虚构统计图.png",
@@ -64,8 +85,16 @@ const items = [
     deliveryStatus: "unknown",
   },
 ];
-window.fetch = (url) =>
-  Promise.resolve(
+const fixtureFetch = window.fetch.bind(window);
+const gifFixture = new URL(
+  "./fixtures/fictional-animation.gif",
+  import.meta.url,
+).href;
+window.fetch = (url) => {
+  const path =
+    typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+  if (path.endsWith("/gif/content")) return fixtureFetch(gifFixture);
+  return Promise.resolve(
     new Response(
       JSON.stringify({
         data: (typeof url === "string"
@@ -88,6 +117,7 @@ window.fetch = (url) =>
       { headers: { "content-type": "application/json" } },
     ),
   );
+};
 createApp({
   render: () =>
     h("main", { style: "max-width:800px;margin:24px auto;padding:0 16px" }, [

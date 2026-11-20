@@ -22,6 +22,6 @@ it("imports only the declarative OpenSandbox subdirectory", () => {
   expect(result.name).toBe("bubblepilot-opensandbox");
   expect(result.skills).toHaveLength(1);
   expect(result.skills[0]?.references).toHaveLength(3);
-  expect(result.version).toBe("0.6.1");
+  expect(result.version).toBe("0.6.2");
   expect(result.servers).toHaveLength(1);
 });

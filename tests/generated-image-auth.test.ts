@@ -7,7 +7,7 @@ import { AuthService } from "../modules/auth/auth-service.js";
 import type { GeneratedImageDelivery } from "../modules/generated-images/image-delivery.js";
 import { InMemoryAuthRepository } from "./support/in-memory-auth-repository.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
-it.each(["png", "txt"])(
+it.each(["png", "gif", "txt"])(
   "protects %s contents with sensitive authorization and audits successful reads",
   async (format) => {
     const login = "fictional-login",
@@ -31,7 +31,7 @@ it.each(["png", "txt"])(
       row: {
         filename: `fictional.${format}`,
         file_type: format,
-        mime_type: format === "png" ? "image/png" : "text/plain",
+        mime_type: format === "txt" ? "text/plain" : `image/${format}`,
       },
     });
     const delivery = {
@@ -92,7 +92,7 @@ it.each(["png", "txt"])(
       expect(result.statusCode).toBe(200);
       expect(result.headers["content-disposition"]).toContain("attachment;");
       expect(result.headers["content-type"]).toContain(
-        format === "png" ? "image/png" : "text/plain",
+        format === "txt" ? "text/plain" : `image/${format}`,
       );
       expect(result.headers["cache-control"]).toContain("no-store");
       expect(result.headers["x-content-type-options"]).toBe("nosniff");

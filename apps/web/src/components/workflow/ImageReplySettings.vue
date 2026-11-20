@@ -54,6 +54,7 @@ const allowed = computed<ReplyFileType[]>(
 const labels: Record<ReplyFileType, string> = {
   png: "PNG 图片",
   jpeg: "JPEG 图片",
+  gif: "GIF 动图",
   pdf: "PDF 文档",
   xlsx: "Excel 表格",
   csv: "CSV 数据",
@@ -118,7 +119,7 @@ function choose(value: string) {
     </div>
     <p>
       允许将本次沙箱中的一个文件发到当前聊天，可配说明文字。图片最多 8
-      MiB，其他文件最多 20 MiB。
+      MiB，其他文件最多 20 MiB。GIF 保留动画，最多 200 帧、累计 6400 万像素。
     </p>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-else-if="loading">正在读取已批准的图片导出能力…</p>

@@ -24,6 +24,9 @@ it("keeps old workflow permission PNG-only and validates explicit file type choi
     server: "",
   });
   expect(allowedReplyFileTypes(old)).toEqual(["png"]);
+  expect(
+    imageReplySchema.parse({ ...old, allowedTypes: ["gif"] }).allowedTypes,
+  ).toEqual(["gif"]);
   for (const allowedTypes of [[], ["exe"], ["png", "png"]])
     expect(imageReplySchema.safeParse({ ...old, allowedTypes }).success).toBe(
       false,
@@ -200,7 +203,14 @@ it("requires separate saved file-export approval before broadening PNG-only work
   expect(() =>
     assertImageExportBinding([plugin], { ...config, allowedTypes: ["pdf"] }),
   ).toThrow("IMAGE_EXPORT_TARGET_UNAVAILABLE");
+  expect(() =>
+    assertImageExportBinding([plugin], { ...config, allowedTypes: ["gif"] }),
+  ).toThrow("IMAGE_EXPORT_TARGET_UNAVAILABLE");
   plugin.config.tools[0]!.fileExportVersion = 1;
+  expect(imageExportTargets([plugin])[0]?.fileTypes).toContain("gif");
+  expect(() =>
+    assertImageExportBinding([plugin], { ...config, allowedTypes: ["gif"] }),
+  ).not.toThrow();
   expect(() =>
     assertImageExportBinding([plugin], { ...config, allowedTypes: ["pdf"] }),
   ).not.toThrow();
