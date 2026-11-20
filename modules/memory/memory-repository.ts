@@ -2,6 +2,7 @@ import { executionPolicy } from "../ai/execution-policy.js";
 import {
   memoryMessage,
   messageColumns,
+  scopedMessageColumns,
   type MessageRow,
 } from "./archive-message.js";
 import { ChatQueryRepository } from "./chat-query-repository.js";
@@ -240,6 +241,12 @@ export class MemoryRepository {
     executionId: string,
     timeZone = "UTC",
   ): Promise<MemoryScope | null> {
+    const boundary = (
+      await this.pool.query<{ boundary: { upperIndex?: string } | null }>(
+        "SELECT freeze_execution_history($1) AS boundary",
+        [executionId],
+      )
+    ).rows[0]?.boundary;
     const row = (
       await this.pool.query<{ chat_id: string; message_index: string }>(
         "SELECT chat_id,message_index FROM messages WHERE provider=$1 AND provider_message_id=$2",
@@ -247,9 +254,15 @@ export class MemoryRepository {
       )
     ).rows[0];
     const scope = row
-      ? await this.scope(row.chat_id, Number(row.message_index), executionId)
+      ? await this.scope(
+          row.chat_id,
+          Number(boundary?.upperIndex ?? row.message_index),
+          executionId,
+        )
       : null;
-    return scope ? { ...scope, timeZone } : null;
+    return scope
+      ? { ...scope, timeZone, sentTimeBoundary: !!boundary?.upperIndex }
+      : null;
   }
   async allowed(scope: MemoryScope): Promise<boolean> {
     return (
@@ -305,8 +318,13 @@ export class MemoryRepository {
           AND (j.range_from IS NULL OR m.sent_at>=j.range_from) AND (j.range_to IS NULL OR m.sent_at<=j.range_to)
         )) failed FROM messages m
       LEFT JOIN memory_indexed_messages i ON i.message_id=m.id AND i.generation_id=$2
-      WHERE m.chat_id=$1 AND m.message_index<$3 AND m.content_redacted_at IS NULL`,
-        [scope.chatId, scope.generation.id, scope.upperIndex],
+      WHERE m.chat_id=$1 AND m.message_index<$3 AND m.content_redacted_at IS NULL AND execution_history_allows($4,m.id)`,
+        [
+          scope.chatId,
+          scope.generation.id,
+          scope.upperIndex,
+          scope.sentTimeBoundary ? scope.executionId : null,
+        ],
       )
     ).rows[0];
     const total = Number(row?.total ?? 0),
@@ -341,8 +359,8 @@ export class MemoryRepository {
     // Count readable rows, not index offsets: gaps and redacted rows do not consume a slot.
     const read = async (direction: "before" | "after", count: number) => {
       const rows = await this.pool.query<MessageRow>(
-        `SELECT ${messageColumns} FROM messages m WHERE m.chat_id=$1
-         AND m.message_index<$2 AND m.content_redacted_at IS NULL
+        `SELECT ${scopedMessageColumns("$5", "$2")} FROM messages m WHERE m.chat_id=$1
+         AND m.message_index<$2 AND m.content_redacted_at IS NULL AND execution_history_allows($5,m.id)
          AND m.message_index ${direction === "before" ? "<" : ">"} $3
          ORDER BY m.message_index ${direction === "before" ? "DESC" : "ASC"} LIMIT $4`,
         [
@@ -350,6 +368,7 @@ export class MemoryRepository {
           scope.upperIndex,
           direction === "before" ? first : last,
           count + 1,
+          scope.sentTimeBoundary ? scope.executionId : null,
         ],
       );
       return rows.rows.map(memoryMessage);
@@ -855,8 +874,14 @@ export class MemoryRepository {
       start_offset: number;
       end_offset: number;
     }>(
-      `SELECT m.message_index,s.source_hash,s.start_offset,s.end_offset FROM memory_chunks c JOIN memory_chunk_sources s ON s.chunk_id=c.id JOIN messages m ON m.id=s.message_id WHERE c.id=$1 AND c.chat_id=$2 AND c.generation_id=$3 AND c.valid AND c.bot_identity_revision=(SELECT bot_identity_revision FROM chats WHERE id=c.chat_id) AND NOT (SELECT bot_memory_rebuild_required FROM chats WHERE id=c.chat_id) AND c.through_index<$4 AND m.content_redacted_at IS NULL ORDER BY m.message_index,s.start_offset`,
-      [chunkId, scope.chatId, scope.generation.id, scope.upperIndex],
+      `SELECT m.message_index,s.source_hash,s.start_offset,s.end_offset FROM memory_chunks c JOIN memory_chunk_sources s ON s.chunk_id=c.id JOIN messages m ON m.id=s.message_id WHERE c.id=$1 AND c.chat_id=$2 AND c.generation_id=$3 AND c.valid AND c.bot_identity_revision=(SELECT bot_identity_revision FROM chats WHERE id=c.chat_id) AND NOT (SELECT bot_memory_rebuild_required FROM chats WHERE id=c.chat_id) AND c.through_index<$4 AND m.content_redacted_at IS NULL AND execution_history_allows($5,m.id) ORDER BY m.message_index,s.start_offset`,
+      [
+        chunkId,
+        scope.chatId,
+        scope.generation.id,
+        scope.upperIndex,
+        scope.sentTimeBoundary ? scope.executionId : null,
+      ],
     );
     const result: MemoryMessage[] = [];
     for (const row of rows.rows) {
@@ -868,6 +893,16 @@ export class MemoryRepository {
         )
       )[0];
       if (!message || message.hash !== row.source_hash) return [];
+      if (scope.sentTimeBoundary && message.replyTo) {
+        const preview = (
+          await this.pool.query<{ reply: MemoryMessage["replyTo"] }>(
+            "SELECT execution_reply_preview($1,$2,0,$3) AS reply",
+            [message.id, scope.executionId, scope.upperIndex],
+          )
+        ).rows[0]?.reply;
+        if (preview) message.replyTo = preview;
+        else delete message.replyTo;
+      }
       result.push({
         ...message,
         text: message.text.slice(row.start_offset, row.end_offset),
@@ -892,8 +927,8 @@ export class MemoryRepository {
     query: MemorySearch,
   ): Promise<MemoryMessage[]> {
     const rows = await this.pool.query<MessageRow>(
-      `SELECT ${messageColumns} FROM messages m
-      WHERE m.chat_id=$1 AND m.message_index<$2 AND m.content_redacted_at IS NULL
+      `SELECT ${scopedMessageColumns("$8", "$2")} FROM messages m
+      WHERE m.chat_id=$1 AND m.message_index<$2 AND m.content_redacted_at IS NULL AND execution_history_allows($8,m.id)
       AND NOT EXISTS(SELECT 1 FROM memory_indexed_messages i WHERE i.message_id=m.id AND i.generation_id=$3)
       AND ($4::timestamptz IS NULL OR m.sent_at >= $4) AND ($5::timestamptz IS NULL OR m.sent_at <= $5)
       AND ($6::text IS NULL OR m.sender_id=$6) AND ($7::uuid IS NULL OR EXISTS(SELECT 1 FROM message_bot_attributions a WHERE a.message_id=m.id AND a.workflow_id=$7)) ORDER BY m.message_index DESC LIMIT 100`,
@@ -905,6 +940,7 @@ export class MemoryRepository {
         query.to ?? null,
         query.senderId ?? null,
         query.botWorkflowId ?? null,
+        scope.sentTimeBoundary ? scope.executionId : null,
       ],
     );
     const tokens = keywordTokens(query.query);
@@ -933,7 +969,7 @@ export class MemoryRepository {
     const tokens = keywordTokens(query.query).slice(0, 40);
     if (!vector && !tokens.length) return [];
     const filter = `c.chat_id=$1 AND c.generation_id=$2 AND c.through_index<$3 AND c.valid AND c.bot_identity_revision=(SELECT bot_identity_revision FROM chats WHERE id=c.chat_id) AND NOT (SELECT bot_memory_rebuild_required FROM chats WHERE id=c.chat_id)
-      AND NOT EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN messages m ON m.id=s.message_id WHERE s.chunk_id=c.id AND (m.content_redacted_at IS NOT NULL OR ($4::timestamptz IS NOT NULL AND m.sent_at<$4) OR ($5::timestamptz IS NOT NULL AND m.sent_at>$5)))
+      AND NOT EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN messages m ON m.id=s.message_id WHERE s.chunk_id=c.id AND (m.content_redacted_at IS NOT NULL OR NOT execution_history_allows($9,m.id) OR ($4::timestamptz IS NOT NULL AND m.sent_at<$4) OR ($5::timestamptz IS NOT NULL AND m.sent_at>$5)))
       AND ($6::text IS NULL OR EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN messages m ON m.id=s.message_id WHERE s.chunk_id=c.id AND m.sender_id=$6)) AND ($8::uuid IS NULL OR EXISTS(SELECT 1 FROM memory_chunk_sources s JOIN message_bot_attributions a ON a.message_id=s.message_id WHERE s.chunk_id=c.id AND a.workflow_id=$8))`;
     return (
       await this.pool.query<Candidate>(
@@ -951,6 +987,7 @@ export class MemoryRepository {
             ? JSON.stringify(vector)
             : tokens.map((t) => `'${t.replaceAll("'", "''")}'`).join(" | "),
           query.botWorkflowId ?? null,
+          scope.sentTimeBoundary ? scope.executionId : null,
         ],
       )
     ).rows;

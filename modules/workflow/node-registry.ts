@@ -492,7 +492,8 @@ class LoadContextNodeHandler extends BaseNodeHandler {
             settings,
             settingsVersion: settings.version,
             contextSnapshot:
-              context.contextSnapshot?.contract === "raw-context-v1"
+              context.contextSnapshot?.contract === "raw-context-v1" ||
+              context.contextSnapshot?.contract === "raw-context-v2"
                 ? context.contextSnapshot
                 : null,
           })
@@ -1318,6 +1319,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
                   provider: context.envelope.provider,
                   providerChatId: context.envelope.chat.providerChatId,
                   triggerMessageId: context.envelope.message.providerMessageId,
+                  executionId: context.executionId,
                 },
                 current: attachmentContextMessage(current!),
                 history: node.config.includeLoadedContext

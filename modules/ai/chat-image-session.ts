@@ -83,6 +83,7 @@ export class ChatImageSession {
   ) {
     this.settings = structuredClone(input.prepared.settings!);
     this.scope = {
+      executionId: input.executionId,
       provider: input.envelope.provider,
       providerChatId: input.envelope.chat.providerChatId,
       triggerMessageId: input.envelope.message?.providerMessageId ?? null,

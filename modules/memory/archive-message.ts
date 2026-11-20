@@ -65,3 +65,14 @@ export function memoryMessage(row: MessageRow): MemoryMessage {
 }
 export const messageColumns = `m.revision_state,m.edited_at,message_reply_preview(m.id,0,m.message_index) AS reply_to,m.id,m.provider_message_id,m.message_index,m.sent_at,m.sender_id,m.is_from_me,bot_message_author(m.id) AS author,m.body,m.attachments,m.link_previews,
  (SELECT string_agg(s.summary,E'\n' ORDER BY s.id) FROM message_image_summaries s WHERE s.message_id=m.id AND s.status='succeeded') images`;
+
+/** Keep reply expansion inside the same run boundary as its source message. */
+export function scopedMessageColumns(
+  executionParameter: string,
+  upperParameter: string,
+) {
+  return messageColumns.replace(
+    "message_reply_preview(m.id,0,m.message_index)",
+    `execution_reply_preview(m.id,${executionParameter},0,${upperParameter})`,
+  );
+}

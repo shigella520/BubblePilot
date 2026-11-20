@@ -66,6 +66,7 @@ export interface MemoryScope {
   timeZone?: string;
   chatId: string;
   upperIndex: number;
+  sentTimeBoundary?: boolean;
   executionId: string | null;
   generation: Generation;
 }

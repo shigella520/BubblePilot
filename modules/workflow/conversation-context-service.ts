@@ -93,13 +93,17 @@ export function retainedWindowCount(
     : count - Math.floor((count - base) / buffer) * buffer;
 }
 export interface ConversationContextSnapshot {
-  contract: "raw-context-v1";
+  contract: "raw-context-v1" | "raw-context-v2";
   chatId: string;
   triggerMessageIndex: string;
   afterMessageIndex: string;
   settings: ContextRuntimeSettings;
   settingsVersion: number;
   compatibilityInitialized: boolean;
+  /** Frozen membership, metadata only. Content is still checked at read time. */
+  messageIds?: string[];
+  historyUpperIndex?: string;
+  historyBeforeSentAt?: string;
 }
 export interface ConversationContextTrigger {
   triggerMessageIndex: string;
@@ -399,8 +403,9 @@ export class ConversationContextService {
     input: ConversationContextLoadInput,
   ): Promise<ConversationContextResult> {
     // Store the fallback before reading evidence so subsequent retries keep its boundary.
-    const snapshot =
-      input.contextSnapshot?.contract === "raw-context-v1"
+    let snapshot =
+      input.contextSnapshot?.contract === "raw-context-v1" ||
+      input.contextSnapshot?.contract === "raw-context-v2"
         ? input.contextSnapshot
         : input.idleExecutionId
           ? await this.snapshotForIdle(input)
@@ -416,7 +421,78 @@ export class ConversationContextService {
             ).contextSnapshot;
     const db = await this.pool.connect();
     try {
-      await db.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      // Freeze once at the first read, not when the webhook creates its trigger.
+      // The short transaction also persists window membership before returning it.
+      await db.query("BEGIN");
+      if (input.executionId && !input.idleExecutionId) {
+        const boundary = (
+          await db.query<{
+            boundary: {
+              upperIndex?: string;
+              beforeSentAt?: string;
+              window?: ConversationContextSnapshot;
+            } | null;
+          }>("SELECT freeze_execution_history($1) AS boundary", [
+            input.executionId,
+          ])
+        ).rows[0]?.boundary;
+        if (boundary?.upperIndex) {
+          await db.query(
+            "SELECT id FROM workflow_executions WHERE id=$1 FOR UPDATE",
+            [input.executionId],
+          );
+          const saved = (
+            await db.query<{ window: ConversationContextSnapshot | null }>(
+              "SELECT history_boundary->'window' AS window FROM workflow_executions WHERE id=$1",
+              [input.executionId],
+            )
+          ).rows[0]?.window;
+          if (saved) snapshot = saved;
+          else {
+            // Preserve the existing buffered-window budget, but choose its members
+            // chronologically from the entire frozen range, including late arrivals.
+            const values = [
+              snapshot.chatId,
+              snapshot.triggerMessageIndex,
+              snapshot.settings.includeFromMe,
+              snapshot.afterMessageIndex,
+              input.executionId,
+            ];
+            const count = Number(
+              (
+                await db.query<{ n: string }>(
+                  `SELECT count(*)::text AS n FROM messages m JOIN chats c ON c.id=m.chat_id
+               WHERE m.chat_id=$1 AND m.message_index>$4 AND execution_history_allows($5,m.id)
+               AND $2::bigint IS NOT NULL AND ${this.eligible()}`,
+                  values,
+                )
+              ).rows[0]?.n ?? 0,
+            );
+            const keep = retainedWindowCount(
+              count,
+              snapshot.settings.baseMessageWindow,
+              snapshot.settings.redundancyMessageWindow,
+            );
+            const members = await db.query<{ id: string }>(
+              `SELECT m.id FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1
+               AND execution_history_allows($5,m.id) AND $2::bigint IS NOT NULL AND $4::bigint IS NOT NULL
+               AND ${this.eligible()} ORDER BY m.sent_at DESC,m.message_index DESC LIMIT $6`,
+              [...values, keep],
+            );
+            snapshot = {
+              ...snapshot,
+              contract: "raw-context-v2",
+              messageIds: members.rows.map((r) => r.id),
+              historyUpperIndex: boundary.upperIndex,
+              historyBeforeSentAt: boundary.beforeSentAt!,
+            };
+            await db.query(
+              "UPDATE workflow_executions SET history_boundary=jsonb_set(history_boundary,'{window}',$2::jsonb) WHERE id=$1",
+              [input.executionId, JSON.stringify(snapshot)],
+            );
+          }
+        }
+      }
       const authorized = input.idleExecutionId
         ? await db.query(
             `SELECT 1 FROM workflow_executions e JOIN chats c ON c.id=e.target_chat_id WHERE e.id=$1 AND c.id=$2 AND c.enabled AND c.deleted_at IS NULL AND COALESCE(e.trigger_event->'idle'->>'upperMessageIndex',e.trigger_event->'scheduled'->>'upperMessageIndex')=$3`,
@@ -444,11 +520,32 @@ export class ConversationContextService {
         snapshot.settings.includeFromMe,
         snapshot.afterMessageIndex,
       ];
-      const rows = await db.query<MessageRow>(
-        `SELECT m.revision_state,m.edited_at,message_reply_preview(m.id,$4,LEAST(m.message_index,$2)) AS reply_to,m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()} ORDER BY m.message_index`,
-        values,
-      );
-      const windowEvicted = await this.evictedRange(db, values);
+      const rows =
+        snapshot.contract === "raw-context-v2"
+          ? await db.query<MessageRow>(
+              `SELECT m.revision_state,m.edited_at,execution_reply_preview(m.id,$5,0,$6,true) AS reply_to,
+         m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,
+         m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code
+         FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.id=ANY($4::uuid[])
+         AND $2::bigint IS NOT NULL AND execution_history_allows($5,m.id) AND ${this.eligible()}
+         ORDER BY m.sent_at,m.message_index`,
+              [
+                snapshot.chatId,
+                snapshot.triggerMessageIndex,
+                snapshot.settings.includeFromMe,
+                snapshot.messageIds,
+                input.executionId,
+                snapshot.historyUpperIndex,
+              ],
+            )
+          : await db.query<MessageRow>(
+              `SELECT m.revision_state,m.edited_at,message_reply_preview(m.id,$4,LEAST(m.message_index,$2)) AS reply_to,m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()} ORDER BY m.message_index`,
+              values,
+            );
+      const windowEvicted =
+        snapshot.contract === "raw-context-v2"
+          ? await this.sentTimeEvictedRange(db, snapshot, input.executionId!)
+          : await this.evictedRange(db, values);
       await db.query("COMMIT");
       const raw = rows.rows.map(contextMessage);
       const images = await this.imageSummaries?.listForProviderMessageIds(
@@ -490,6 +587,43 @@ export class ConversationContextService {
       db.release();
     }
   }
+  private async sentTimeEvictedRange(
+    db: PoolClient,
+    snapshot: ConversationContextSnapshot,
+    executionId: string,
+  ): Promise<HistoryMessageRange | null> {
+    const row = (
+      await db.query<{
+        count: string;
+        first: string | null;
+        last: string | null;
+        earliest: Date | null;
+        latest: Date | null;
+      }>(
+        `SELECT count(*)::text AS count,min(m.message_index)::text AS first,max(m.message_index)::text AS last,
+       min(m.sent_at) AS earliest,max(m.sent_at) AS latest FROM messages m JOIN chats c ON c.id=m.chat_id
+       WHERE m.chat_id=$1 AND $2::bigint IS NOT NULL AND ${this.eligible()}
+       AND execution_history_allows($5,m.id) AND NOT(m.id=ANY($4::uuid[]))`,
+        [
+          snapshot.chatId,
+          snapshot.triggerMessageIndex,
+          snapshot.settings.includeFromMe,
+          snapshot.messageIds,
+          executionId,
+        ],
+      )
+    ).rows[0];
+    return row?.first && row.last && row.earliest && row.latest
+      ? {
+          count: Number(row.count),
+          firstMessageIndex: row.first,
+          lastMessageIndex: row.last,
+          earliestSentAt: row.earliest.toISOString(),
+          latestSentAt: row.latest.toISOString(),
+        }
+      : null;
+  }
+
   private async evictedRange(
     db: PoolClient,
     values: unknown[],

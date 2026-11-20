@@ -435,6 +435,7 @@ export class NativeImageInputService {
           this.sources &&
           !(await this.sources.resolve(
             {
+              executionId: input.executionId,
               provider: input.envelope.provider,
               providerChatId: input.envelope.chat.providerChatId,
               triggerMessageId:
@@ -502,6 +503,7 @@ export class NativeImageInputService {
             const attachmentIndex =
               Number(candidate.reference.split(":").at(-1)) - 1;
             const scope = {
+              executionId: input.executionId,
               provider: input.envelope.provider,
               providerChatId: input.envelope.chat.providerChatId,
               triggerMessageId:

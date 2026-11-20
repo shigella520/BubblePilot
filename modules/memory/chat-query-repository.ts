@@ -7,7 +7,7 @@ import type { MessageAuthor } from "../identity/bot-identity.js";
 import { AgentToolTimeout, type AgentToolContext } from "../ai/agent-budget.js";
 import type { Pool } from "pg";
 import {
-  messageColumns,
+  scopedMessageColumns,
   memoryMessage,
   type MessageRow,
 } from "./archive-message.js";
@@ -40,6 +40,10 @@ export function chatFilterSql(
     `m.message_index<${parameter(scope.upperIndex)}::bigint`,
     "m.content_redacted_at IS NULL",
   ];
+  if (scope.sentTimeBoundary)
+    predicates.push(
+      `execution_history_allows(${parameter(scope.executionId)}::uuid,m.id)`,
+    );
   if (query.botWorkflowId)
     predicates.push(
       `EXISTS(SELECT 1 FROM message_bot_attributions a WHERE a.message_id=m.id AND a.workflow_id=${parameter(query.botWorkflowId)}::uuid)`,
@@ -192,6 +196,10 @@ export class ChatQueryRepository {
     context?: AgentToolContext,
   ): Promise<ArchivePage<ArchiveQueryMessage>> {
     const filter = chatFilterSql(scope, query, timeZone);
+    const columns = scopedMessageColumns(
+      filter.parameter(scope.sentTimeBoundary ? scope.executionId : null),
+      filter.parameter(scope.upperIndex),
+    );
     const direction = query.order === "asc" ? "ASC" : "DESC";
     let where = filter.where;
 
@@ -200,7 +208,7 @@ export class ChatQueryRepository {
     if (after)
       where += ` AND (m.sent_at,m.message_index) ${query.order === "asc" ? ">" : "<"} (${filter.parameter(after.sentAt)}::timestamptz,${filter.parameter(after.index)}::bigint)`;
     const page = await this.page<QueryMessageRow>(
-      `SELECT ${messageColumns.replace("m.message_index,", "m.message_index::text AS message_index,")}, ${exactTime} AS sort_time FROM messages m WHERE ${where} ORDER BY m.sent_at ${direction},m.message_index ${direction} LIMIT ${filter.parameter(query.limit + 1)}`,
+      `SELECT ${columns.replace("m.message_index,", "m.message_index::text AS message_index,")}, ${exactTime} AS sort_time FROM messages m WHERE ${where} ORDER BY m.sent_at ${direction},m.message_index ${direction} LIMIT ${filter.parameter(query.limit + 1)}`,
       filter.values,
       context,
     );
@@ -352,6 +360,10 @@ export class ChatQueryRepository {
     if (!("pick" in query))
       return this.count(scope, query, timeZone, after, context);
     const f = chatFilterSql(scope, query, timeZone);
+    const columns = scopedMessageColumns(
+      f.parameter(scope.sentTimeBoundary ? scope.executionId : null),
+      f.parameter(scope.upperIndex),
+    );
     const bounds = query.groupBy === "day" ? dayBounds(query, timeZone) : null;
     const key =
       query.groupBy === "day"
@@ -377,7 +389,7 @@ export class ChatQueryRepository {
       `WITH filtered AS (SELECT m.id,m.sent_at,m.message_index,${key} AS group_key FROM messages m WHERE ${f.where} AND ${f.zone}::text IS NOT NULL), keys AS (${keys}), aggregated AS (${aggregated})
       SELECT k.group_key, ${query.groupBy === "sender" ? "CASE WHEN left(k.group_key,1)='1' THEN substr(k.group_key,2) ELSE NULL END" : "NULL::text"} AS group_sender,
       ${query.groupBy === "sender" ? "(SELECT bot_message_author(f.id) FROM filtered f WHERE f.group_key=k.group_key ORDER BY f.message_index LIMIT 1)" : "NULL::jsonb"} AS group_author,
-      ${extrema ? `NULL::text AS count,${messageColumns.replace("m.message_index,", "m.message_index::text AS message_index,")},${exactTime} AS sort_time` : "coalesce(a.count,'0') AS count"}
+      ${extrema ? `NULL::text AS count,${columns.replace("m.message_index,", "m.message_index::text AS message_index,")},${exactTime} AS sort_time` : "coalesce(a.count,'0') AS count"}
       FROM keys k LEFT JOIN aggregated a ON a.group_key=k.group_key ${extrema ? "LEFT JOIN messages m ON m.id=a.id" : ""}
       WHERE ${condition} ORDER BY k.group_key COLLATE "C" LIMIT ${f.parameter(query.groupBy === "none" ? 1 : query.limit + 1)}`,
       f.values,
