@@ -367,7 +367,8 @@ export interface ImageInputDiagnostic {
   contentHash: string;
   width: number | null;
   height: number | null;
-  processingVersion: "bluebubbles-compatible-original-false";
+  processingVersion:
+    "bluebubbles-compatible-original-false" | "bluebubbles-compatible-exif-v2";
 }
 export interface ImageRequestManifest {
   version: 1;

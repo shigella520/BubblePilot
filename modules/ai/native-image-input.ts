@@ -1,8 +1,11 @@
+import {
+  ImageInputError,
+  normalizeImageInput,
+  imageInputProcessingVersion,
+} from "./image-input-processing.js";
 import type { WorkflowEvent } from "../workflow/workflow-event.js";
 import type { ImageInputDiagnostic } from "./ai-types.js";
-import { executionPolicy } from "./execution-policy.js";
 import { randomUUID } from "node:crypto";
-import sharp from "sharp";
 import { ChatImageSession } from "./chat-image-session.js";
 import type { ChatImageSourceRepository } from "./chat-image-source.js";
 import { sha256 } from "../../app/canonical-json.js";
@@ -58,39 +61,6 @@ export interface PreparedImageInput {
   failedCount: number;
   skippedCount: number;
   totalBytes: number;
-}
-
-class ImageInputError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-  }
-}
-
-export function imageMime(body: Buffer): string | null {
-  if (
-    body.length >= 3 &&
-    body[0] === 0xff &&
-    body[1] === 0xd8 &&
-    body[2] === 0xff
-  )
-    return "image/jpeg";
-  if (
-    body.length >= 8 &&
-    body.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-  )
-    return "image/png";
-  if (
-    body.length >= 6 &&
-    ["GIF87a", "GIF89a"].includes(body.subarray(0, 6).toString("ascii"))
-  )
-    return "image/gif";
-  if (
-    body.length >= 12 &&
-    body.subarray(0, 4).toString("ascii") === "RIFF" &&
-    body.subarray(8, 12).toString("ascii") === "WEBP"
-  )
-    return "image/webp";
-  return null;
 }
 
 function hostName(value: string | null): string | null {
@@ -215,7 +185,11 @@ export class NativeImageInputService {
 
   async loadForSummary(
     source: ImageSummarySource,
-    options?: { settings: ImageInputRuntimeSettings; signal?: AbortSignal },
+    options?: {
+      settings: ImageInputRuntimeSettings;
+      signal?: AbortSignal;
+      processingVersion?: ImageInputDiagnostic["processingVersion"];
+    },
   ): Promise<
     | {
         status: "succeeded";
@@ -273,19 +247,18 @@ export class NativeImageInputService {
         );
         body = resource.body;
       }
-      const mimeType = imageMime(body);
-      if (mimeType === null)
-        throw new ImageInputError("AI_IMAGE_INVALID_CONTENT");
-      options?.signal?.throwIfAborted();
-      const metadata = await sharp(body, {
-        limitInputPixels: executionPolicy.image.maxInputPixels,
-        animated: false,
-      }).metadata();
-      options?.signal?.throwIfAborted();
+      const processed = await normalizeImageInput(
+        body,
+        settings.maxImageBytes,
+        options?.processingVersion,
+        options?.signal,
+      );
+      body = processed.body;
+      const mimeType = processed.mimeType;
       return {
         bytes: body.length,
-        width: metadata.width ?? null,
-        height: metadata.height ?? null,
+        width: processed.width,
+        height: processed.height,
         status: "succeeded",
         part: {
           type: "image",
@@ -324,7 +297,15 @@ export class NativeImageInputService {
   }
 
   async preview(diagnostic: ImageInputDiagnostic, sourceHash?: string) {
-    if (!this.sources || diagnostic.version !== 1) return null;
+    if (
+      !this.sources ||
+      diagnostic.version !== 1 ||
+      ![
+        "bluebubbles-compatible-original-false",
+        imageInputProcessingVersion,
+      ].includes(diagnostic.processingVersion)
+    )
+      return null;
     const source = await this.sources.resolve(
       diagnostic.scope,
       diagnostic.providerMessageId,
@@ -338,12 +319,18 @@ export class NativeImageInputService {
         sha256(source.attachment.providerAttachmentId) !== sourceHash)
     )
       return null;
-    const loaded = await this.loadForSummary({
-      sourceType: "attachment",
-      sourceKey: source.attachment.providerAttachmentId,
-      attachmentRef: diagnostic.imageRef,
-      attachment: source.attachment,
-    });
+    const loaded = await this.loadForSummary(
+      {
+        sourceType: "attachment",
+        sourceKey: source.attachment.providerAttachmentId,
+        attachmentRef: diagnostic.imageRef,
+        attachment: source.attachment,
+      },
+      {
+        settings: await this.settings.resolve(),
+        processingVersion: diagnostic.processingVersion,
+      },
+    );
     if (
       loaded.status !== "succeeded" ||
       loaded.contentHash !== diagnostic.contentHash
@@ -492,9 +479,12 @@ export class NativeImageInputService {
           );
           body = resource.body;
         }
-        actualMimeType = imageMime(body);
-        if (actualMimeType === null)
-          throw new ImageInputError("AI_IMAGE_INVALID_CONTENT");
+        const processed = await normalizeImageInput(
+          body,
+          settings.maxImageBytes,
+        );
+        body = processed.body;
+        actualMimeType = processed.mimeType;
         if (totalBytes + body.length > settings.maxTotalBytes) {
           skippedCount += 1;
           errorCode = "AI_IMAGE_TOTAL_BYTES_EXCEEDED";
@@ -524,10 +514,6 @@ export class NativeImageInputService {
                 candidate.attachment.providerAttachmentId
             )
               throw new ImageInputError("AI_IMAGE_SOURCE_UNAVAILABLE");
-            const metadata = await sharp(body, {
-              limitInputPixels: executionPolicy.image.maxInputPixels,
-              animated: false,
-            }).metadata();
             diagnostic = {
               version: 1,
               imageRef: candidate.reference,
@@ -540,9 +526,9 @@ export class NativeImageInputService {
               toolCallId: null,
               round: 1,
               contentHash: sha256(body.toString("base64")),
-              width: metadata.width ?? null,
-              height: metadata.height ?? null,
-              processingVersion: "bluebubbles-compatible-original-false",
+              width: processed.width,
+              height: processed.height,
+              processingVersion: imageInputProcessingVersion,
             };
           }
           totalBytes += body.length;

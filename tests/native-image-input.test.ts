@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { exifImage, tileValues } from "./support/exif-image.js";
+import * as openGraph from "../modules/integrations/bluebubbles/open-graph-client.js";
 
 import { ImageInputSettingsService } from "../modules/ai/image-input-settings-service.js";
 import type { ImageInputSettingsRepository } from "../modules/ai/image-input-settings-repository.js";
@@ -103,6 +105,60 @@ const envelope: MessageEnvelope = {
 };
 
 describe("NativeImageInputService", () => {
+  it("normalizes link covers for both chat input and summaries", async () => {
+    const body = await exifImage(3);
+    vi.spyOn(openGraph, "fetchPublicResource").mockResolvedValue({
+      url: new URL("https://fictional.example.test/cover.png"),
+      body,
+      status: 200,
+      headers: {},
+    });
+    const preview = {
+      source: "open-graph" as const,
+      url: "https://fictional.example.test",
+      originalUrl: null,
+      title: null,
+      summary: null,
+      siteName: null,
+      imageAvailable: true,
+      imageUrl: "https://fictional.example.test/cover.png",
+      imageSource: "open-graph" as const,
+      iconAvailable: false,
+    };
+    const service = new NativeImageInputService(
+      imageSettings({ maxImageBytes: 100_000, maxTotalBytes: 200_000 }),
+      blueBubbles(),
+    );
+    const event = structuredClone(envelope);
+    event.message.attachments = [];
+    event.message.linkPreview = {
+      status: "available",
+      errorCode: null,
+      items: [preview],
+    };
+    const prepared = await service.prepare({
+      executionId: "fictional-cover",
+      nodeId: "ai",
+      envelope: event,
+      history: [],
+      includeHistory: false,
+    });
+    const summary = await service.loadForSummary({
+      sourceType: "link-preview",
+      sourceKey: preview.imageUrl,
+      attachmentRef: "fictional-cover",
+      preview,
+    });
+    expect(summary.status).toBe("succeeded");
+    if (summary.status !== "succeeded") throw Error("fixture");
+    expect(prepared.parts[0]?.dataUrl).toBe(summary.part.dataUrl);
+    expect(
+      await tileValues(
+        Buffer.from(summary.part.dataUrl.split(",")[1]!, "base64"),
+      ),
+    ).toEqual([220, 180, 140, 100, 60, 20]);
+  });
+
   it("downloads current and recent history attachments into bounded native parts", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockImplementation(() =>
       Promise.resolve(
@@ -171,7 +227,7 @@ describe("NativeImageInputService", () => {
   });
 
   it("skips an image that would exceed the aggregate byte limit", async () => {
-    const largePng = Buffer.concat([png.subarray(0, 8), Buffer.alloc(1016)]);
+    const largePng = Buffer.concat([png, Buffer.alloc(1024 - png.length)]);
     const fetchImplementation = vi
       .fn<typeof fetch>()
       .mockImplementation(() =>

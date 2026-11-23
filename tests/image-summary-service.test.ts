@@ -494,6 +494,10 @@ describe("image summary background processing", () => {
   });
 
   it("fingerprints the actual generation policy and picture detail", () => {
+    // Pre-EXIF policy must not be reused even for unchanged, untagged bytes.
+    expect(imageSummaryStrategyFingerprint()).not.toBe(
+      "sha256:f7ce2eb7f690040970aaa56c9c569d86c0b29f7d69fd53f2e0bf3fe4b1bfffc3",
+    );
     expect(imageSummaryStrategyFingerprint("high")).toBe(
       imageSummaryStrategyFingerprint("high"),
     );

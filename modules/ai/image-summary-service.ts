@@ -1,3 +1,4 @@
+import { imageInputProcessingVersion } from "./image-input-processing.js";
 import {
   executionPolicy,
   generationLengthInstruction,
@@ -42,7 +43,7 @@ export function imageSummaryStrategyFingerprint(
     temperature: 0,
     outputFormat: "text",
     detail,
-    imageProcessingVersion: "validated-original-bytes-v1",
+    imageProcessingVersion: imageInputProcessingVersion,
     maxInputPixels: executionPolicy.image.maxInputPixels,
   });
 }

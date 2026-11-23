@@ -1,3 +1,4 @@
+import { imageInputProcessingVersion } from "./image-input-processing.js";
 import { RunImageSession } from "./run-image-session.js";
 import type { AiToolDefinition } from "./ai-types.js";
 import type { AiImageInputRecordInput } from "./ai-types.js";
@@ -443,7 +444,7 @@ export class ChatImageSession {
             contentHash: loaded.contentHash,
             width: loaded.width,
             height: loaded.height,
-            processingVersion: "bluebubbles-compatible-original-false",
+            processingVersion: imageInputProcessingVersion,
           };
           this.records.push({
             id: imageInputId,

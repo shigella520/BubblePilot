@@ -1,3 +1,7 @@
+import sharp from "sharp";
+import { sha256 } from "../app/canonical-json.js";
+import { exifImage, tileValues } from "./support/exif-image.js";
+import { imageInputProcessingVersion } from "../modules/ai/image-input-processing.js";
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { describe, expect, it, vi } from "vitest";
@@ -141,6 +145,77 @@ function fixture(overrides: Partial<ImageInputRuntimeSettings> = {}) {
   };
 }
 describe("runtime chat image access", () => {
+  it("shares oriented pixels, dimensions and hashes across automatic, summary and historical-tool paths", async () => {
+    const f = fixture();
+    const input = await exifImage(6, "jpeg");
+    f.fetcher.mockImplementation(() => Promise.resolve(new Response(input)));
+    const prepared = await f.loader.prepare({
+      ...f.input,
+      includeHistory: false,
+    });
+    const part = prepared.parts[0]!;
+    const bytes = Buffer.from(part.dataUrl.split(",")[1]!, "base64");
+    expect((await sharp(bytes).metadata()).orientation).toBeUndefined();
+    expect(await tileValues(bytes)).toEqual([140, 20, 180, 60, 220, 100]);
+    expect(prepared.totalBytes).toBe(bytes.length);
+    const record = (
+      await f.repository.listImageInputs(f.input.executionId)
+    )[0]!;
+    expect(record.diagnostics).toMatchObject({
+      width: 40,
+      height: 60,
+      processingVersion: imageInputProcessingVersion,
+      contentHash: sha256(bytes.toString("base64")),
+    });
+    const summary = await f.loader.loadForSummary({
+      sourceType: "attachment",
+      sourceKey: attachment.providerAttachmentId,
+      attachmentRef: "fictional",
+      attachment,
+    });
+    expect(summary.status).toBe("succeeded");
+    if (summary.status !== "succeeded") throw Error("fixture");
+    expect(summary.part.dataUrl).toBe(part.dataUrl);
+    expect(summary.contentHash).toBe(part.imageInput!.contentHash);
+    f.session.registerHistory([
+      {
+        image_ref: "fictional-history",
+        providerMessageId: envelope.message.providerMessageId,
+        attachmentIndex: 0,
+        attachmentId: attachment.providerAttachmentId,
+      },
+    ]);
+    const result = await f.invoke(
+      JSON.stringify({ image_ref: "fictional-history" }),
+    );
+    expect(result.media?.parts[0]?.dataUrl).toBe(part.dataUrl);
+    result.media!.commit();
+    await f.session.flushAudit();
+    expect(
+      (await f.repository.listImageInputs(f.input.executionId)).at(-1)
+        ?.diagnostics,
+    ).toMatchObject({
+      historical: true,
+      processingVersion: imageInputProcessingVersion,
+      contentHash: summary.contentHash,
+    });
+    expect(
+      (await f.loader.preview(record.diagnostics!, record.sourceHash))?.part
+        .dataUrl,
+    ).toBe(part.dataUrl);
+    const legacy = await f.loader.preview(
+      {
+        ...record.diagnostics!,
+        processingVersion: "bluebubbles-compatible-original-false",
+        contentHash: sha256(input.toString("base64")),
+      },
+      record.sourceHash,
+    );
+    expect(legacy?.part.dataUrl).toBe(
+      `data:image/jpeg;base64,${input.toString("base64")}`,
+    );
+  });
+
   it("explains invalid image references without attempting a fetch", async () => {
     const f = fixture();
     const result = await f.invoke('{"image_ref":""}');
