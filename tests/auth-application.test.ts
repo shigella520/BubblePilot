@@ -1092,6 +1092,7 @@ describe("Web admin authentication", () => {
       { baseMessageWindow: 0 },
       { redundancyMessageWindow: 51 },
       { characterLimit: 99 },
+      { characterLimit: 60_001 },
       { enabled: true },
     ]) {
       expect(
@@ -1121,6 +1122,28 @@ describe("Web admin authentication", () => {
         outcome: "failed",
       }),
     );
+    // Valid larger budgets reach the repository (this fixture rejects saves
+    // with a version conflict), rather than being rejected by API validation.
+    for (const settings of [
+      {
+        baseMessageWindow: 30,
+        redundancyMessageWindow: 20,
+        characterLimit: 40_000,
+      },
+      {
+        baseMessageWindow: 40,
+        redundancyMessageWindow: 30,
+        characterLimit: 60_000,
+      },
+    ]) {
+      const result = await application.inject({
+        method: "PUT",
+        url: "/api/v1/ai/context/settings",
+        headers,
+        payload: { ...payload, ...settings },
+      });
+      expect(result.statusCode).toBe(409);
+    }
     for (const path of [
       "/api/v1/ai/summary/settings",
       "/api/v1/conversation-compressions",

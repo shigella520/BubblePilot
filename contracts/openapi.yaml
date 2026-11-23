@@ -4495,7 +4495,7 @@ components:
         characterLimit:
           type: integer
           minimum: 100
-          maximum: 20000
+          maximum: 60000
         expectedVersion:
           type: integer
           minimum: 0

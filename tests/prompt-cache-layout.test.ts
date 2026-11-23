@@ -9,6 +9,7 @@ import {
 import { EnvironmentSecretResolver } from "../modules/ai/secret-resolver.js";
 import type { AiChatRequest, AiApiKind } from "../modules/ai/ai-types.js";
 import type { ContextMessage } from "../modules/archive/archive-repository.js";
+import type { ReplyPreview } from "../modules/archive/message-revision.js";
 import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/webhook-adapter.js";
 import { emptyLinkPreview } from "../modules/ingestion/link-preview.js";
 import { parsePluginPackage } from "../modules/plugins/plugin-package.js";
@@ -20,6 +21,7 @@ import {
   type NodeExecutionContext,
 } from "../modules/workflow/node-registry.js";
 import type { WorkflowNode } from "../modules/workflow/workflow-definition.js";
+import { fitContextMessages } from "../modules/workflow/conversation-context-service.js";
 import { newMessageWebhook } from "./fixtures/bluebubbles.js";
 import { InMemoryAiRepository } from "./support/in-memory-ai-repository.js";
 import { InMemoryArchiveRepository } from "./support/in-memory-archive-repository.js";
@@ -390,6 +392,203 @@ afterEach(() => vi.useRealTimers());
 describe.each(["chat-completions", "responses"] as const)(
   "cache-oriented request assembly: %s",
   (apiKind) => {
+    const quote: ReplyPreview = {
+      status: "available",
+      message_id: "fictional-quoted-bot",
+      sender_id: "fictional-bot",
+      text_preview: "A fictional earlier explanation.",
+      truncated: false,
+    };
+    const wireMessages = (payload: Record<string, unknown>) =>
+      JSON.stringify(payload[apiKind === "responses" ? "input" : "messages"]);
+
+    it.each([40_000, 60_000])(
+      "sends the larger %i-character history budget without an outer 20k trim",
+      async (limit) => {
+        const f = await setup(apiKind);
+        const candidates = Array.from({ length: 8 }, (_, i) =>
+          history(
+            `fictional-long-${i}`,
+            `虚构长消息${i}：` + "字".repeat(8_990),
+          ),
+        );
+        const selected = fitContextMessages(candidates, limit);
+        expect(selected).toHaveLength(limit === 40_000 ? 4 : 6);
+        expect(fitContextMessages(candidates, 20_000)).toHaveLength(2);
+        const ctx = context();
+        ctx.history = [...selected];
+        await f.run(ctx);
+        expect(f.payloads).toHaveLength(1);
+        const wire = wireMessages(f.payloads[0]!);
+        for (const m of selected) expect(wire).toContain(m.body);
+        expect(wire).not.toContain(candidates[0]!.body);
+      },
+    );
+
+    it.each<ReplyPreview>([
+      quote,
+      {
+        ...quote,
+        message_id: "fictional-other-target",
+        text_preview: "Another fictional quote.",
+      },
+      { status: "unavailable" },
+      { status: "unresolved" },
+    ])(
+      "keeps the entire preceding history when only the current reply changes: %j",
+      async (replyTo) => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date("2026-11-01T03:00:00Z"));
+        const f = await setup(apiKind);
+        const plain = context();
+        plain.history.push(
+          history("fictional-quoted-bot", quote.text_preview!, true),
+        );
+        await f.run(plain);
+        const reply = structuredClone(plain);
+        reply.envelope.message!.replyTo = replyTo;
+        await f.run(reply);
+        const [a, b] = f.requests;
+        const currentIndex = a!.messages.findIndex(
+          (m) =>
+            typeof m.content === "string" &&
+            m.content.startsWith("<current_message>"),
+        );
+        expect(currentIndex).toBeGreaterThan(firstHistory(a!));
+        expect(b!.messages.slice(0, currentIndex)).toEqual(
+          a!.messages.slice(0, currentIndex),
+        );
+        expect(b!.messages[currentIndex]!.content).toContain("<reply_to>");
+        const prefix = sharedPrefix(
+          wireMessages(f.payloads[0]!),
+          wireMessages(f.payloads[1]!),
+        );
+        for (const m of a!.messages.filter(
+          (m) => m.traceMessageId !== undefined,
+        ))
+          expect(prefix).toContain(JSON.stringify(m.content).slice(1, -1));
+        expect(prefix).toContain("<current_message>");
+        expect(gatewaySystem(f.payloads[1]!)).toBe(
+          gatewaySystem(f.payloads[0]!),
+        );
+        expect(f.payloads[1]!.tools).toEqual(f.payloads[0]!.tools);
+        expect(f.sessionIds[1]).toBe(f.sessionIds[0]);
+        expect(f.payloads[1]!.prompt_cache_key).toBe(
+          f.payloads[0]!.prompt_cache_key,
+        );
+        expect(f.repo.attempts[1]!.diagnostics!.requestTrace).toMatchObject({
+          configurationMatchesPrevious: true,
+          cacheKeyMatchesPrevious: true,
+          divergenceIndex: currentIndex,
+          divergenceRegion: "dynamic",
+          divergenceReason: "dynamic-input-changed",
+        });
+      },
+    );
+
+    it.each([false, true])(
+      "locates current-to-history rewriting for quoted=%s without invalidating older history",
+      async (quoted) => {
+        const f = await setup(apiKind);
+        const first = context(0);
+        if (quoted) first.envelope.message!.replyTo = quote;
+        await f.run(first);
+        const second = context(1);
+        const message = first.envelope.message!;
+        second.history = [
+          ...first.history,
+          {
+            ...history(message.providerMessageId, message.text ?? ""),
+            sentAt: message.sentAt,
+            ...(quoted ? { replyTo: quote } : {}),
+          },
+          history("fictional-answer", "虚构回答", true),
+        ];
+        second.envelope.message!.replyTo = quote;
+        await f.run(second);
+        const prefix = sharedPrefix(
+          wireMessages(f.payloads[0]!),
+          wireMessages(f.payloads[1]!),
+        );
+        expect(prefix).toContain("Stable fictional history");
+        // Even ordinary turns change current_message to chat_history. A prior
+        // whole request therefore is not an exact prefix of the next request.
+        expect(prefix).not.toContain("虚构问题 0");
+        const promoted = f.requests[1]!.messages.find(
+          (m) => m.traceMessageId === message.providerMessageId,
+        )!;
+        expect(promoted.content).toContain("<chat_history>");
+        expect(
+          typeof promoted.content === "string" &&
+            promoted.content.includes("<reply_to>"),
+        ).toBe(quoted);
+        expect(f.repo.attempts[1]!.diagnostics!.requestTrace).toMatchObject({
+          configurationMatchesPrevious: true,
+          cacheKeyMatchesPrevious: true,
+          previousRequestIsExactPrefix: false,
+        });
+        // A third turn keeps the now-historical quoted message byte-for-byte.
+        const third = context(2);
+        third.history = [
+          ...second.history,
+          history("fictional-next", "Fictional follow-up"),
+        ];
+        await f.run(third);
+        expect(
+          sharedPrefix(
+            wireMessages(f.payloads[1]!),
+            wireMessages(f.payloads[2]!),
+          ),
+        ).toContain(JSON.stringify(promoted.content).slice(1, -1));
+      },
+    );
+
+    it.each<ReplyPreview>([
+      { ...quote, text_preview: "A revised fictional explanation." },
+      { status: "retracted" },
+      { status: "unavailable" },
+    ])(
+      "breaks the prefix at a changed historical quote, preserving everything before it: %j",
+      async (updatedQuote) => {
+        const f = await setup(apiKind);
+        const first = context();
+        first.history.push({
+          ...history("fictional-historical-reply", "Fictional reply body"),
+          replyTo: quote,
+        });
+        first.history.push(
+          history("fictional-later", "Later fictional history"),
+        );
+        await f.run(first);
+        const second = structuredClone(first);
+        second.history[1]!.replyTo = updatedQuote;
+        await f.run(second);
+        const changedIndex = f.requests[0]!.messages.findIndex(
+          (m) => m.traceMessageId === "fictional-historical-reply",
+        );
+        expect(f.requests[1]!.messages.slice(0, changedIndex)).toEqual(
+          f.requests[0]!.messages.slice(0, changedIndex),
+        );
+        const prefix = sharedPrefix(
+          wireMessages(f.payloads[0]!),
+          wireMessages(f.payloads[1]!),
+        );
+        expect(prefix).toContain("Stable fictional history");
+        expect(prefix).toContain("Fictional reply body");
+        expect(prefix).not.toContain("Later fictional history");
+        expect(gatewaySystem(f.payloads[1]!)).toBe(
+          gatewaySystem(f.payloads[0]!),
+        );
+        expect(f.repo.attempts[1]!.diagnostics!.requestTrace).toMatchObject({
+          configurationMatchesPrevious: true,
+          cacheKeyMatchesPrevious: true,
+          divergenceIndex: changedIndex,
+          divergenceRegion: "history",
+          divergenceReason: "history-message-changed",
+        });
+      },
+    );
+
     it("preserves configuration and existing history across three daily chat turns on the wire", async () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       const f = await setup(apiKind);

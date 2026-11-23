@@ -24,7 +24,7 @@ export const contextSettingsUpdateSchema = z
   .object({
     includeFromMe: z.boolean().default(true),
     baseMessageWindow: z.number().int().min(1).max(50),
-    characterLimit: z.number().int().min(100).max(20_000),
+    characterLimit: z.number().int().min(100).max(60_000),
     redundancyMessageWindow: z.number().int().min(1).max(50),
     expectedVersion: z.number().int().min(0),
   })

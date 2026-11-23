@@ -72,5 +72,41 @@ describe.runIf(testDatabaseUrl !== undefined)(
         status: "conflict",
       });
     });
+
+    it("persists both larger budgets and enforces the database upper bound", async () => {
+      for (const [index, settings] of [
+        {
+          baseMessageWindow: 30,
+          redundancyMessageWindow: 20,
+          characterLimit: 40_000,
+        },
+        {
+          baseMessageWindow: 40,
+          redundancyMessageWindow: 30,
+          characterLimit: 60_000,
+        },
+      ].entries()) {
+        expect(
+          await repository.save({
+            ...settings,
+            includeFromMe: true,
+            expectedVersion: index,
+          }),
+        ).toMatchObject({
+          status: "ok",
+          value: { ...settings, version: index + 1 },
+        });
+        expect(await repository.find()).toMatchObject(settings);
+      }
+      await expect(
+        inspectionPool.query(
+          "UPDATE conversation_context_settings SET character_limit=60001 WHERE id=1",
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      expect(await repository.find()).toMatchObject({
+        characterLimit: 60_000,
+        version: 2,
+      });
+    });
   },
 );

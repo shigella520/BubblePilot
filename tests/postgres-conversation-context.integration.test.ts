@@ -66,6 +66,33 @@ describe.runIf(!!url)("raw context PostgreSQL windows", () => {
         }),
     };
   }
+  it("loads larger history budgets while retaining an earlier trigger's settings", async () => {
+    const f = await fixture(9);
+    await db.query(
+      "UPDATE messages SET body=$2 WHERE chat_id=(SELECT id FROM chats WHERE provider_chat_id=$1)",
+      [f.chatGuid, "虚构".repeat(4500)],
+    );
+    const older = await f.snapshot(8, {
+      ...settings,
+      baseMessageWindow: 10,
+      redundancyMessageWindow: 10,
+      characterLimit: 40_000,
+    });
+    const newer = await f.snapshot(
+      9,
+      {
+        ...settings,
+        baseMessageWindow: 10,
+        redundancyMessageWindow: 10,
+        characterLimit: 60_000,
+      },
+      2,
+    );
+    expect((await f.load(8, older)).messages).toHaveLength(4);
+    expect((await f.load(9, newer)).messages).toHaveLength(6);
+    expect((await f.load(8, older)).messages).toHaveLength(4);
+  });
+
   it("keeps withdrawal placeholders and edit metadata but never admin text or expired content", async () => {
     const f = await fixture(4);
     await db.query(

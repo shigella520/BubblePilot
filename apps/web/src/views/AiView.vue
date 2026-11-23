@@ -992,7 +992,7 @@ onMounted(async () => {
                 v-model.number="contextSettingsForm.characterLimit"
                 type="number"
                 min="100"
-                max="20000"
+                max="60000"
                 required
             /></label>
             <label
