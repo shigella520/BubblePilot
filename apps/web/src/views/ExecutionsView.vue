@@ -149,6 +149,7 @@ interface Execution {
   nextRetryAt: string | null;
   createdAt: string;
   completedAt: string | null;
+  calledModels?: string[];
   cachedPromptTokens: number | null;
   cacheEligiblePromptTokens: number;
   cacheHitRate: number | null;
@@ -1349,6 +1350,7 @@ function contextSnapshotValue(
               <tr>
                 <th>工作流</th>
                 <th>聊天</th>
+                <th>调用模型</th>
                 <th>回复缓存命中</th>
                 <th>状态 / 耗时</th>
                 <th>时间</th>
@@ -1357,7 +1359,7 @@ function contextSnapshotValue(
             </thead>
             <tbody>
               <tr v-if="!executions.length">
-                <td colspan="6" class="empty-cell">
+                <td colspan="7" class="empty-cell">
                   {{
                     unknownOnly
                       ? "暂无待处理未知发送"
@@ -1390,6 +1392,22 @@ function contextSnapshotValue(
                     class="keyline"
                     >{{ item.providerChatId }}</span
                   >
+                </td>
+                <td>
+                  <ul
+                    v-if="item.calledModels?.length"
+                    class="execution-model-list"
+                    aria-label="按首次调用排序的模型"
+                  >
+                    <li
+                      v-for="model in item.calledModels"
+                      :key="model"
+                      :title="model"
+                    >
+                      {{ model }}
+                    </li>
+                  </ul>
+                  <span v-else class="muted">—</span>
                 </td>
                 <td>
                   <span class="cache-rate-line">

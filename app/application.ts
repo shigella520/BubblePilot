@@ -3836,7 +3836,10 @@ export function buildApplication(
           cursor: decodeCursor(query.cursor),
         });
         return cursorPage(
-          executions.map(executionMetadata),
+          executions.map((execution) => ({
+            ...executionMetadata(execution),
+            calledModels: execution.calledModels ?? [],
+          })),
           query.limit,
           (execution) => ({
             timestamp: execution.createdAt,

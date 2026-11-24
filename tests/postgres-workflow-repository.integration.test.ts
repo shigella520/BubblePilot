@@ -171,6 +171,50 @@ describe.runIf(testDatabaseUrl !== undefined)(
         expect(
           page.find((x) => x.id === empty)?.timing?.categories.model,
         ).toEqual({ durationMs: null, count: 0, recordedCount: 0 });
+        expect(page.find((x) => x.id === id)?.calledModels).toEqual([
+          "fictional",
+        ]);
+        expect(page.find((x) => x.id === empty)?.calledModels).toEqual([]);
+        // Deliberately insert out of order: first use determines display order,
+        // even when it failed; provider snapshots do not split identical models.
+        for (const [sequence, model, createdAt, status, providerName] of [
+          [3, "fictional-a", "2025-01-02T00:00:00Z", "succeeded", "Provider A"],
+          [4, "fictional-z", "2025-01-01T00:00:00Z", "failed", "Provider A"],
+          [5, "fictional-z", "2025-01-03T00:00:00Z", "succeeded", "Provider B"],
+          [6, "fictional-b", "2025-01-02T00:00:00Z", "succeeded", "Provider B"],
+        ] as const)
+          await db.query(
+            `INSERT INTO ai_provider_attempts(id,execution_id,node_id,route_id,route_version,provider_id,provider_name,provider_version,model,round,sequence,status,selection_health_state,health_state,duration_ms,created_at)
+             VALUES($1,$2,'ai',$3,1,$4,$5,1,$6,1,$7,$8,'healthy','healthy',0,$9)`,
+            [
+              randomUUID(),
+              id,
+              route,
+              provider,
+              providerName,
+              model,
+              sequence,
+              status,
+              createdAt,
+            ],
+          );
+        await db.query(
+          "UPDATE ai_providers SET model='fictional-current-config' WHERE id=$1",
+          [provider],
+        );
+        const modelsPage = await repository.listExecutions({
+          limit: 100,
+          cursor: null,
+        });
+        expect(modelsPage.find((x) => x.id === id)?.calledModels).toEqual([
+          "fictional-z",
+          "fictional-a",
+          "fictional-b",
+          "fictional",
+        ]);
+        expect(modelsPage.find((x) => x.id === empty)?.calledModels).toEqual(
+          [],
+        );
         await db.query(
           `UPDATE workflow_executions SET status='closed',startup_closure='{"closedAt":"2026-01-01T00:00:10Z"}' WHERE id=$1`,
           [empty],

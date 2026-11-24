@@ -1460,11 +1460,39 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       ],
     );
     const records = result.rows.map(executionRecord);
-    const timings = await this.loadExecutionTimings(records);
+    const [timings, calledModels] = await Promise.all([
+      this.loadExecutionTimings(records),
+      this.loadCalledModels(records),
+    ]);
     return records.map((record) => ({
       ...record,
       timing: timings.get(record.id)!,
+      calledModels: calledModels.get(record.id) ?? [],
     }));
+  }
+
+  private async loadCalledModels(records: readonly WorkflowExecutionRecord[]) {
+    const models = new Map<string, string[]>();
+    if (!records.length) return models;
+    // Read snapshots from attempts, not mutable provider configuration. Include
+    // failed calls and deduplicate the same model across providers and retries.
+    const result = await this.pool.query<{
+      execution_id: string;
+      model: string;
+    }>(
+      `SELECT execution_id, model
+       FROM ai_provider_attempts
+       WHERE execution_id=ANY($1::uuid[]) AND BTRIM(model)<>''
+       GROUP BY execution_id, model
+       ORDER BY execution_id, MIN(created_at), model COLLATE "C"`,
+      [records.map((record) => record.id)],
+    );
+    for (const row of result.rows) {
+      const values = models.get(row.execution_id) ?? [];
+      values.push(row.model);
+      models.set(row.execution_id, values);
+    }
+    return models;
   }
 
   private async loadExecutionTimings(

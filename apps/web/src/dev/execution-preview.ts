@@ -97,6 +97,17 @@ const records = [
     cachedPromptTokens: null,
     cacheEligiblePromptTokens: 0,
     cacheHitRate: null,
+    calledModels:
+      index === 5
+        ? []
+        : index === 2
+          ? [
+              "fictional-very-long-model-name-for-wrapping-2026-11-preview",
+              "fictional-fallback",
+            ]
+          : index === 0
+            ? ["fictional-primary", "fictional-fallback"]
+            : ["fictional-primary"],
     contextSnapshot: null,
     startupClosure:
       status === "closed"

@@ -76,6 +76,8 @@ export interface StartupExecutionClosure {
 }
 
 export interface WorkflowExecutionRecord {
+  /** Distinct model snapshots, ordered by their first recorded attempt (list only). */
+  calledModels?: readonly string[];
   sourceMessageId?: string | null;
   timing?: ExecutionTiming;
   messageMatchSource?: MessageMatchSource | null;

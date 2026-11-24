@@ -592,6 +592,7 @@ describe("workflow application", () => {
       cachedPromptTokens: null,
       cacheEligiblePromptTokens: 0,
       cacheHitRate: null,
+      calledModels: [],
     });
     expect(firstPage.page.nextCursor).toEqual(expect.any(String));
 

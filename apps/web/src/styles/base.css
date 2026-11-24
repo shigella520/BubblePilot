@@ -3502,7 +3502,7 @@ legend {
 }
 
 .execution-list-table {
-  min-width: 960px;
+  min-width: 1120px;
   table-layout: fixed;
 }
 .execution-list-table th:nth-child(1) {
@@ -3512,16 +3512,31 @@ legend {
   width: 150px;
 }
 .execution-list-table th:nth-child(3) {
-  width: 120px;
+  width: 160px;
 }
 .execution-list-table th:nth-child(4) {
-  width: 220px;
+  width: 120px;
 }
 .execution-list-table th:nth-child(5) {
-  width: 155px;
+  width: 220px;
 }
 .execution-list-table th:nth-child(6) {
+  width: 155px;
+}
+.execution-list-table th:nth-child(7) {
   width: 95px;
+}
+.execution-model-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.execution-model-list li {
+  overflow-wrap: anywhere;
 }
 .execution-list-table td {
   overflow-wrap: anywhere;

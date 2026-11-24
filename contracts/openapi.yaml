@@ -3312,7 +3312,7 @@ paths:
             pattern: "^\\s*(created|running|retrying|succeeded|skipped|failed|dead-lettered|closed)(\\s*,\\s*(created|running|retrying|succeeded|skipped|failed|dead-lettered|closed))*\\s*$"
       responses:
         "200":
-          description: 按创建时间倒序分页返回工作流执行列表；每项包含匹配聊天名称/ID、回复缓存统计和只读 timing 耗时概览。timing 区分实际总历时与模型/工具/回复/其他节点累计时间，缺失返回 null，运行值截至 observedAt，关闭记录不计算总历时；分项不能相加为总耗时。图片摘要等后台操作不计入回复缓存统计。无可统计的对话回复请求或 Provider 未返回缓存统计时命中率为 null。
+          description: 按创建时间倒序分页返回工作流执行列表；每项包含匹配聊天名称/ID、calledModels 字符串数组、回复缓存统计和只读 timing 耗时概览。calledModels 从本执行关联的 Provider Attempt 模型快照去重，按首次记录时间升序、同时间按模型名稳定排序，包含失败及降级尝试，不区分 Provider，无记录时为空数组；不推测未关联的后台摘要模型。timing 区分实际总历时与模型/工具/回复/其他节点累计时间，缺失返回 null，运行值截至 observedAt，关闭记录不计算总历时；分项不能相加为总耗时。图片摘要等后台操作不计入回复缓存统计。无可统计的对话回复请求或 Provider 未返回缓存统计时命中率为 null。
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/executions/{executionId}:
