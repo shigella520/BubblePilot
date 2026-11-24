@@ -1,3 +1,4 @@
+import { chatDisplayNameSql } from "../archive/chat-display-name-sql.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { z } from "zod";
@@ -894,7 +895,7 @@ export class TaskService {
         creator_real_name: string | null;
       }
     >(
-      `SELECT t.*,c.display_name AS chat_name,w.name AS workflow_name,i.real_name AS creator_real_name FROM scheduled_tasks t JOIN chats c ON c.id=t.chat_id JOIN workflows w ON w.id=t.workflow_id
+      `SELECT t.*,${chatDisplayNameSql("c")} AS chat_name,w.name AS workflow_name,i.real_name AS creator_real_name FROM scheduled_tasks t JOIN chats c ON c.id=t.chat_id JOIN workflows w ON w.id=t.workflow_id
    LEFT JOIN chat_participant_identities i ON i.chat_id=t.chat_id AND i.sender_id=t.creator_sender_id
    WHERE ($1::uuid IS NULL OR t.workflow_id=$1) AND ($2::uuid IS NULL OR t.chat_id=$2) AND ($3::text IS NULL OR t.creator_sender_id=$3) AND ($4::text IS NULL OR t.status=$4) AND ($7::text IS NULL OR t.lifecycle=$7) ORDER BY t.created_at DESC,t.id DESC LIMIT $5 OFFSET $6`,
       [

@@ -1,3 +1,4 @@
+import { chatDisplayNameSql } from "../archive/chat-display-name-sql.js";
 import type { BotIdentity } from "./bot-identity.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
@@ -161,13 +162,13 @@ export class BotIdentityService {
       ).rows,
       memoryJobs: (
         await this.pool.query<Record<string, unknown>>(
-          `SELECT j.id,j.chat_id,c.display_name,j.status,j.cursor_index,j.through_index,j.error_code FROM memory_jobs j JOIN chats c ON c.id=j.chat_id WHERE j.reason='rebuild' AND ($1::uuid[] IS NULL OR j.chat_id=ANY($1)) ORDER BY j.created_at DESC LIMIT 30`,
+          `SELECT j.id,j.chat_id,${chatDisplayNameSql("c")} AS display_name,j.status,j.cursor_index,j.through_index,j.error_code FROM memory_jobs j JOIN chats c ON c.id=j.chat_id WHERE j.reason='rebuild' AND ($1::uuid[] IS NULL OR j.chat_id=ANY($1)) ORDER BY j.created_at DESC LIMIT 30`,
           [relatedChats],
         )
       ).rows,
       chats: (
         await this.pool.query<Record<string, unknown>>(
-          `SELECT id,display_name,bot_identity_revision,bot_memory_rebuild_required FROM chats WHERE deleted_at IS NULL AND (($1::uuid[] IS NOT NULL AND id=ANY($1)) OR ($1::uuid[] IS NULL AND (bot_memory_rebuild_required)))`,
+          `SELECT id,${chatDisplayNameSql("c")} AS display_name,bot_identity_revision,bot_memory_rebuild_required FROM chats c WHERE deleted_at IS NULL AND (($1::uuid[] IS NOT NULL AND id=ANY($1)) OR ($1::uuid[] IS NULL AND (bot_memory_rebuild_required)))`,
           [relatedChats],
         )
       ).rows,

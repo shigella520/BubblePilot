@@ -168,6 +168,138 @@ describe.runIf(testDatabaseUrl !== undefined)(
       ).resolves.toMatchObject({ status: "invalid-sender" });
     });
 
+    it("resolves direct names from scoped peer identities without rewriting gateway metadata", async () => {
+      const db = new Client({ connectionString: testDatabaseUrl });
+      await db.connect();
+      const adapter = new BlueBubblesWebhookAdapter();
+      const suffix = randomUUID();
+      const peer = `fictional-${suffix}@example.test`;
+      const created: string[] = [];
+      const ingest = async (
+        guid: string,
+        sender: string,
+        type: "direct" | "group" = "direct",
+      ) => {
+        const normalized = adapter.normalize(
+          newMessageWebhook({
+            messageGuid: randomUUID(),
+            chatGuid: guid,
+            chatIdentifier: sender,
+            senderAddress: sender,
+            chatDisplayName: type === "group" ? "虚构群聊" : "网关原始显示名",
+          }),
+          randomUUID(),
+        );
+        if (normalized.kind !== "message") throw new Error("Invalid fixture");
+        await repository.ingestMessage(
+          {
+            ...normalized.envelope,
+            chat: { ...normalized.envelope.chat, type },
+          },
+          true,
+        );
+        const row = (
+          await db.query<{ id: string }>(
+            "SELECT id FROM chats WHERE provider_chat_id=$1",
+            [guid],
+          )
+        ).rows[0]!;
+        created.push(row.id);
+        return row.id;
+      };
+      const checkName = async (id: string, expected: string) => {
+        for (const items of [
+          await repository.listChats({ limit: 100, cursor: null }),
+          await repository.listChatMonitoring({ limit: 100, cursor: null }),
+        ])
+          expect(items.find((c) => c.id === id)?.displayName).toBe(expected);
+        const messages = await repository.searchMessages({
+          chatId: id,
+          keyword: null,
+          senderId: null,
+          sentFrom: null,
+          sentTo: null,
+          limit: 10,
+          cursor: null,
+        });
+        expect(messages[0]?.chatDisplayName).toBe(expected);
+      };
+      try {
+        const direct = await ingest(`iMessage;-;${peer}`, peer);
+        const other = await ingest(`SMS;-;${peer}`, peer);
+        const group = await ingest(`any;+;${peer}`, peer, "group");
+        await repository.saveChatParticipantIdentities({
+          chatId: other,
+          expectedVersion: 1,
+          identities: [
+            { senderId: peer, realName: "其他聊天本名", nickname: null },
+          ],
+        });
+        await checkName(direct, peer);
+        await repository.saveChatParticipantIdentities({
+          chatId: direct,
+          expectedVersion: 1,
+          identities: [{ senderId: peer, realName: "林一", nickname: "小林" }],
+        });
+        await checkName(direct, "林一");
+        await checkName(other, "其他聊天本名");
+        await repository.saveChatParticipantIdentities({
+          chatId: direct,
+          expectedVersion: 2,
+          identities: [{ senderId: peer, realName: null, nickname: "小林" }],
+        });
+        await checkName(direct, "小林");
+        await db.query(
+          "UPDATE chat_participant_identities SET real_name='  ' WHERE chat_id=$1",
+          [direct],
+        );
+        await checkName(direct, "小林");
+        await repository.saveChatParticipantIdentities({
+          chatId: direct,
+          expectedVersion: 3,
+          identities: [],
+        });
+        await checkName(direct, peer);
+        // A stray mapped sender is never used as the private conversation peer.
+        await db.query(
+          "INSERT INTO chat_participant_identities(id,chat_id,sender_id,real_name) VALUES($1,$2,'unrelated@example.test','不可误认')",
+          [randomUUID(), direct],
+        );
+        await checkName(direct, peer);
+        await repository.saveChatParticipantIdentities({
+          chatId: group,
+          expectedVersion: 1,
+          identities: [
+            { senderId: peer, realName: "群成员", nickname: "群昵称" },
+          ],
+        });
+        await checkName(group, "虚构群聊");
+        const phone = "+15550100123";
+        const phoneId = await ingest(`iMessage;-;${phone}`, phone);
+        await checkName(phoneId, phone);
+        await repository.saveChatParticipantIdentities({
+          chatId: phoneId,
+          expectedVersion: 1,
+          identities: [{ senderId: phone, realName: "陈禾", nickname: "阿禾" }],
+        });
+        await checkName(phoneId, "陈禾");
+        expect(
+          (
+            await db.query(
+              "SELECT display_name,version FROM chats WHERE id=$1",
+              [direct],
+            )
+          ).rows[0],
+        ).toEqual({ display_name: "网关原始显示名", version: 1 });
+      } finally {
+        await db.query("DELETE FROM messages WHERE chat_id=ANY($1::uuid[])", [
+          created,
+        ]);
+        await db.query("DELETE FROM chats WHERE id=ANY($1::uuid[])", [created]);
+        await db.end();
+      }
+    });
+
     it("allows only one concurrent pending link preview result to win", async () => {
       const suffix = randomUUID();
       const adapter = new BlueBubblesWebhookAdapter();

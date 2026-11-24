@@ -1,3 +1,4 @@
+import { chatDisplayNameSql } from "../archive/chat-display-name-sql.js";
 import { backgroundMetadata } from "./workflow-event.js";
 import {
   executionTiming,
@@ -210,7 +211,7 @@ const executionSelect = `SELECT
   e.id, e.trigger_event, e.bot_identity, e.startup_closure, e.message_match_source, e.provider, e.external_event_id,
   source_message.id AS source_message_id,
   source_message.provider_message_id AS source_provider_message_id,
-  source_chat.provider_chat_id, source_chat.display_name AS chat_display_name,
+  source_chat.provider_chat_id, ${chatDisplayNameSql("source_chat")} AS chat_display_name,
   e.trigger_id,
   t.name AS trigger_name, v.workflow_id, w.name AS workflow_name,
   e.workflow_version_id, v.version AS workflow_version,

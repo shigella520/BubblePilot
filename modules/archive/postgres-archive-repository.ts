@@ -1,3 +1,4 @@
+import { chatDisplayNameSql } from "./chat-display-name-sql.js";
 import { messageRevisionNotice } from "./message-revision.js";
 import type { ReplyPreview, RevisionState } from "./message-revision.js";
 import type { MessageAuthor } from "../identity/bot-identity.js";
@@ -578,7 +579,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
   async listChats(options: PageOptions): Promise<readonly ChatSummary[]> {
     const result = await this.pool.query<ChatRow>(
       `SELECT
-         c.id, c.provider_chat_id, c.type, c.display_name, c.enabled, c.version,
+         c.id, c.provider_chat_id, c.type, ${chatDisplayNameSql("c")} AS display_name, c.enabled, c.version,
          EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
          c.updated_at,
          COUNT(m.id)::text AS message_count
@@ -608,7 +609,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
   ): Promise<readonly ChatSummary[]> {
     const result = await this.pool.query<ChatRow>(
       `SELECT
-         c.id, c.provider_chat_id, c.type, c.display_name, c.enabled, c.version,
+         c.id, c.provider_chat_id, c.type, ${chatDisplayNameSql("c")} AS display_name, c.enabled, c.version,
          EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
          c.updated_at, COUNT(m.id)::text AS message_count
        FROM chats c
@@ -868,7 +869,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          m.link_preview_error_code, m.link_preview_diagnostics,
          m.link_preview_fetched_at,
          c.id AS chat_id, c.provider_chat_id,
-         c.display_name AS chat_display_name
+         ${chatDisplayNameSql("c")} AS chat_display_name
        FROM messages m
        INNER JOIN chats c ON c.id = m.chat_id
        WHERE c.enabled = TRUE
@@ -1209,7 +1210,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
   private async readChatSummary(chatId: string): Promise<ChatSummary | null> {
     const result = await this.pool.query<ChatRow>(
       `SELECT
-         c.id, c.provider_chat_id, c.type, c.display_name, c.enabled, c.version,
+         c.id, c.provider_chat_id, c.type, ${chatDisplayNameSql("c")} AS display_name, c.enabled, c.version,
          EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
          c.updated_at, COUNT(m.id)::text AS message_count
        FROM chats c

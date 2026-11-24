@@ -1,3 +1,4 @@
+import { chatDisplayNameSql } from "../archive/chat-display-name-sql.js";
 import { parseWorkflowDefinition } from "./workflow-definition.js";
 import { parseTriggerConditions } from "./trigger-matcher.js";
 import { DEFAULT_CONTEXT_SETTINGS } from "./context-settings-types.js";
@@ -22,6 +23,7 @@ interface Activity {
   provider_chat_id: string;
   type: "direct" | "group" | "unknown";
   display_name: string | null;
+  resolved_display_name: string | null;
   generation: string;
   consumed_generation: string;
   last_activity_at: Date;
@@ -82,7 +84,7 @@ export class IdleScheduler {
     db: Pool | PoolClient = this.pool,
   ): Promise<Activity[]> {
     return (
-      await db.query<Activity>(`SELECT a.*,c.provider_chat_id,c.type,c.display_name,c.next_message_index
+      await db.query<Activity>(`SELECT a.*,c.provider_chat_id,c.type,c.display_name,${chatDisplayNameSql("c")} AS resolved_display_name,c.next_message_index
       FROM idle_chat_activity a JOIN chats c ON c.id=a.chat_id
       WHERE c.enabled AND c.deleted_at IS NULL AND c.provider='bluebubbles'
       AND EXISTS(SELECT 1 FROM messages m WHERE m.chat_id=c.id AND m.message_index=a.last_message_index AND m.content_redacted_at IS NULL)`)
@@ -118,7 +120,7 @@ export class IdleScheduler {
       provider: string | null;
       model: string | null;
     }>(
-      `SELECT e.id,c.provider_chat_id AS "chatId",c.display_name AS "chatName",e.created_at AS "createdAt",e.completed_at AS "completedAt",v.version,
+      `SELECT e.id,c.provider_chat_id AS "chatId",${chatDisplayNameSql("c")} AS "chatName",e.created_at AS "createdAt",e.completed_at AS "completedAt",v.version,
       CASE WHEN a.state='unknown' THEN 'unknown' ELSE e.status END AS status,
       COALESCE(n.output_summary->>'reason',e.error_code) AS reason,n.output_summary->>'skipReason' AS "skipReason",
       (SELECT count(*)::int FROM ai_provider_attempts p WHERE p.execution_id=e.id) AS "requestCount",
@@ -186,7 +188,7 @@ export class IdleScheduler {
           latest && ["created", "running", "retrying"].includes(latest.status);
         results.push({
           chatId,
-          chatName: activity?.display_name ?? latest?.chatName ?? null,
+          chatName: activity?.resolved_display_name ?? latest?.chatName ?? null,
           dailyLimit: config.dailyLimit,
           latest,
           workflowRemaining,
@@ -321,6 +323,7 @@ export class IdleScheduler {
           provider_chat_id: event.chat.providerChatId,
           type: event.chat.type,
           display_name: event.chat.displayName,
+          resolved_display_name: null,
           generation: event.idle.activityGeneration,
           consumed_generation: event.idle.activityGeneration,
           last_activity_at: new Date(event.idle.lastActivityAt),

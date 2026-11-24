@@ -1,3 +1,4 @@
+import { chatDisplayNameSql } from "../archive/chat-display-name-sql.js";
 import { executionPolicy } from "../ai/execution-policy.js";
 import {
   memoryMessage,
@@ -537,7 +538,7 @@ export class MemoryRepository {
         }
       >(
         `SELECT j.id,j.chat_id,j.generation_id,j.reason,j.from_index,j.through_index,j.cursor_index,j.status,j.request_key,j.attempts,j.error_code,j.version,j.created_at,j.updated_at,j.range_from,j.range_to,j.progress_scope,j.progress_samples,j.progress_started_at,j.progress_last_at,
-      c.display_name AS chat_name,g.config->>'model' AS model,
+      ${chatDisplayNameSql("c")} AS chat_name,g.config->>'model' AS model,
       (j.progress_worker=$2 AND j.progress_started_at IS NOT NULL AND c.enabled AND c.deleted_at IS NULL AND EXISTS(SELECT 1 FROM memory_settings WHERE enabled) AND EXISTS(SELECT 1 FROM memory_chats mc WHERE mc.chat_id=j.chat_id AND mc.enabled) AND g.status!='retired' AND NOT EXISTS(SELECT 1 FROM memory_jobs other WHERE other.id<>j.id AND other.status='running' AND other.lease_until>now())) AS current,
       p.total,p.processed,p.removed,p.remaining,p.characters
       FROM (SELECT * FROM memory_jobs WHERE ($1::uuid IS NULL OR chat_id=$1) AND ($7::uuid IS NULL OR id=$7) AND ($3::timestamptz IS NULL OR (date_trunc('milliseconds',created_at),id)<($3,$4::uuid)) ORDER BY CASE WHEN $5 THEN 0 WHEN status='running' OR (status='queued' AND progress_worker=$2) THEN 0 WHEN status IN ('queued','paused') THEN 1 ELSE 2 END,date_trunc('milliseconds',created_at) DESC,id DESC LIMIT $6) j JOIN chats c ON c.id=j.chat_id JOIN memory_generations g ON g.id=j.generation_id

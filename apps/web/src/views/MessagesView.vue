@@ -689,7 +689,16 @@ async function saveParticipants() {
       },
     );
     if (participantChat.value?.id === chat.id) applyParticipantSet(updated);
-    message.value = `聊天「${chat.displayName || chat.providerChatId}」的成员映射已保存。`;
+    try {
+      await Promise.all([chatPager.refresh(), loadChatOptions()]);
+      const refreshed = chats.value.find((item) => item.id === chat.id);
+      if (refreshed && participantChat.value?.id === chat.id)
+        participantChat.value = refreshed;
+      message.value = "成员映射已保存，聊天名称已更新。";
+    } catch {
+      message.value = "成员映射已保存，但聊天名称刷新失败，请点击刷新重试。";
+      messageIsError.value = true;
+    }
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;

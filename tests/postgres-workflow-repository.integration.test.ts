@@ -387,6 +387,7 @@ describe.runIf(testDatabaseUrl !== undefined)(
       const normalized = new BlueBubblesWebhookAdapter().normalize(
         newMessageWebhook({
           messageGuid: `fake-workflow-message-${suffix}`,
+          senderAddress: `fake-chat-${suffix}`,
           chatGuid: `iMessage;-;fake-chat-${suffix}`,
           chatDisplayName: `Fictional chat ${suffix}`,
           text: "/db run",
@@ -471,13 +472,40 @@ describe.runIf(testDatabaseUrl !== undefined)(
           expect.objectContaining({
             id: first.executionIds[0],
             providerChatId: `iMessage;-;fake-chat-${suffix}`,
-            chatDisplayName: `Fictional chat ${suffix}`,
+            chatDisplayName: `fake-chat-${suffix}`,
             cachedPromptTokens: null,
             cacheEligiblePromptTokens: 0,
             cacheHitRate: null,
           }),
         ]),
       );
+
+      const namedChat = (
+        await archive.listChats({ limit: 100, cursor: null })
+      ).find(
+        (chat) =>
+          chat.providerChatId === normalized.envelope.chat.providerChatId,
+      )!;
+      await archive.saveChatParticipantIdentities({
+        chatId: namedChat.id,
+        expectedVersion: 1,
+        identities: [
+          {
+            senderId: `fake-chat-${suffix}`,
+            realName: "虚构本名",
+            nickname: "虚构昵称",
+          },
+        ],
+      });
+      expect(
+        (await repository.getExecution(first.executionIds[0]!))
+          ?.chatDisplayName,
+      ).toBe("虚构本名");
+      expect(
+        (await repository.listExecutions({ limit: 100, cursor: null })).find(
+          (e) => e.id === first.executionIds[0],
+        )?.chatDisplayName,
+      ).toBe("虚构本名");
 
       // Fictional delivery: closing resolves attention without rewriting delivery history.
       const attentionDatabase = new Client({

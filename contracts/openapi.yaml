@@ -1882,7 +1882,7 @@ paths:
         - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
-          description: 已启用监听的聊天列表。
+          description: 已启用监听的聊天列表。BlueBubbles direct 的 displayName 按当前聊天对端成员映射的本名、昵称、原始号码或邮箱依次取值；群聊名称不变。
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/chats/{chatId}/messages:
@@ -2023,7 +2023,7 @@ paths:
         - $ref: "#/components/parameters/Cursor"
       responses:
         "200":
-          description: 返回已发现聊天的监听状态、长期记忆授权 memoryAuthorized（无授权记录为 false）、乐观版本和消息数量，不返回正文。
+          description: 返回已发现聊天的监听状态、长期记忆授权 memoryAuthorized（无授权记录为 false）、乐观版本和消息数量，不返回正文。displayName 与聊天列表共用私聊本名、昵称、原始标识的优先级。
         "401":
           $ref: "#/components/responses/Error"
   /api/v1/chat-monitoring/{chatId}:
