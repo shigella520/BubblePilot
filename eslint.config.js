@@ -25,6 +25,7 @@ export default tseslint.config(
       parserOptions: {
         extraFileExtensions: [".vue"],
         projectService: {
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 9,
           allowDefaultProject: [
             "scripts/*.mjs",
             "plugins/opensandbox/runtime/*.mjs",

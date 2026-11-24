@@ -6,6 +6,7 @@ interface AiPromptZones {
   staticTask: AiChatMessage | null;
   participants: AiChatMessage | null;
   history: readonly AiChatMessage[];
+  templateData?: AiChatMessage | null;
   currentMessage: AiChatMessage | null;
   dynamicTask: readonly AiChatMessage[];
   currentResources: AiChatMessage | null;
@@ -34,13 +35,17 @@ export function assemblePromptZones(zones: AiPromptZones): {
 } {
   const messages = joinedSystem(zones.system);
   if (zones.staticTask) messages.push(zones.staticTask);
-  if (zones.participants) messages.push(zones.participants);
+  if (zones.participants)
+    messages.push({ ...zones.participants, promptRegion: "participants" });
   const configurationMessageCount = messages.length;
   messages.push(...zones.history);
   messages.push(...joinedSystem(zones.executionSystem));
+  if (zones.templateData) messages.push(zones.templateData);
   if (zones.currentMessage) messages.push(zones.currentMessage);
   messages.push(...zones.dynamicTask);
-  if (zones.currentResources) messages.push(zones.currentResources);
-  if (zones.diagnostics) messages.push(zones.diagnostics);
+  if (zones.currentResources)
+    messages.push({ ...zones.currentResources, promptRegion: "attachments" });
+  if (zones.diagnostics)
+    messages.push({ ...zones.diagnostics, promptRegion: "diagnostics" });
   return { messages, configurationMessageCount };
 }

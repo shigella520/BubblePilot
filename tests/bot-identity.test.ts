@@ -82,7 +82,7 @@ describe("Bot author isolation", () => {
     );
     expect(result.map((m) => m.role)).toEqual(["assistant", "user", "user"]);
     expect(result[1]?.content).toContain(bob);
-    expect(result[2]?.content).toContain("来源未知");
+    expect(result[2]?.content).toContain('kind="unknown-self"');
   });
   it("does not adopt unrecorded authors or nicknames as identity", () => {
     expect(

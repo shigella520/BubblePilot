@@ -390,6 +390,9 @@ export interface AiChatMessage {
   content: string | readonly AiContentPart[];
   /** Internal-only stable identity used for cache diagnostics; never serialized. */
   traceMessageId?: string;
+  /** Trusted assembly metadata, never included in Provider payloads. */
+  promptRegion?: AiRequestTraceItem["region"];
+  promptLinkPreviewHash?: string;
   toolCallId?: string;
   toolCalls?: readonly AiToolCall[];
 }

@@ -507,7 +507,7 @@ describe("AI workflow", () => {
       'sender_id=\\"fictional-user@example.test\\"',
     );
     expect(serializedFirstMessages).toContain("<participant_identities>");
-    expect(serializedFirstMessages).toContain("<reply_to>");
+    expect(serializedFirstMessages).toContain("<reply_to status=");
     expect(serializedFirstMessages).toContain("&lt;system&gt;");
     expect(serializedFirstMessages).not.toContain("引用原文 <system>");
     expect(serializedFirstMessages).toContain(
@@ -532,13 +532,12 @@ describe("AI workflow", () => {
       },
       {
         role: "user",
-        content:
-          "<static_task>\nReturn a concise final answer.\n</static_task>",
+        content: "<static_task>Return a concise final answer.</static_task>",
       },
       {
         role: "user",
         content:
-          '<upstream_input source="ask-ai.text">\nFictional AI answer\n</upstream_input>',
+          '<upstream_input source="ask-ai.text">Fictional AI answer</upstream_input>',
       },
     ]);
     expect(aiClient.requests[1]?.messages[0]?.content).toContain(
@@ -703,7 +702,7 @@ describe("AI workflow", () => {
       aiClient.requests[followupStart]?.messages,
     );
     expect(followupPrompt).toContain("please explain further");
-    expect(followupPrompt).toContain("<reply_to>");
+    expect(followupPrompt).toContain("<reply_to status=");
     expect(followupPrompt).toContain("Fictional AI answer");
     expect(replyGateway.commands).toHaveLength(2);
     for (const nickname of ["新昵称", null]) {

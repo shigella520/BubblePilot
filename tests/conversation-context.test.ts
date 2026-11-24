@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   fitContextMessages,
+  contextMessageCharacters,
   historyCoverage,
   retainedWindowCount,
 } from "../modules/workflow/conversation-context-service.js";
@@ -120,7 +121,7 @@ describe("raw conversation context contract", () => {
       "Asia/Shanghai",
     );
     expect(message?.content).toContain(
-      "[2026-08-10 08:00:01 GMT+08:00 [Asia/Shanghai]]",
+      'sent_at="2026-08-10 08:00:01 GMT+08:00 [Asia/Shanghai]"',
     );
     expect(message?.content).not.toContain("2026-08-10T00:00:01.000Z");
   });
@@ -132,9 +133,11 @@ describe("raw conversation context contract", () => {
       contextMessage("3", { body: "newest" }),
     ];
     expect(
-      fitContextMessages(messages, "middle".length + "newest".length).map(
-        (message) => message.providerMessageId,
-      ),
+      fitContextMessages(
+        messages,
+        contextMessageCharacters(messages[1]!) +
+          contextMessageCharacters(messages[2]!),
+      ).map((message) => message.providerMessageId),
     ).toEqual(["2", "3"]);
     expect(
       fitContextMessages(messages, 1).map(

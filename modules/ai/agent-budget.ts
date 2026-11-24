@@ -1,3 +1,4 @@
+import { promptText } from "./prompt-xml.js";
 import type {
   AgentBudgetReason,
   AgentBudgetSnapshot,
@@ -54,31 +55,37 @@ export class AgentBudget {
     currentTime?: string,
   ) {
     const s = this.snapshot;
-    return `<agent_budget_status>${JSON.stringify({
-      images: s.images,
-      scope: "current-agent-run",
-      currentTime,
-      modelRound: turn,
-      maxModelRounds: maxTurns,
-      modelRoundsAfterThis: maxTurns - turn,
-      toolCalls: {
-        used: s.toolCalls,
-        limit: s.settings.maxToolCalls,
-        remaining: Math.max(0, s.settings.maxToolCalls - s.toolCalls),
-      },
-      toolOutputCharacters: {
-        used: s.toolOutputCharacters,
-        limit: s.settings.maxToolOutputCharacters,
-        remaining: this.remainingCharacters,
-      },
-      toolDurationMs: {
-        used: s.toolDurationMs,
-        limit: s.settings.maxToolDurationMs,
-        remaining: Math.max(0, s.settings.maxToolDurationMs - s.toolDurationMs),
-      },
-      toolExecutionAvailable: finalizationReason === null,
-      finalizationReason,
-    })}</agent_budget_status>`;
+    return promptText(
+      "agent_budget_status",
+      JSON.stringify({
+        images: s.images,
+        scope: "current-agent-run",
+        currentTime,
+        modelRound: turn,
+        maxModelRounds: maxTurns,
+        modelRoundsAfterThis: maxTurns - turn,
+        toolCalls: {
+          used: s.toolCalls,
+          limit: s.settings.maxToolCalls,
+          remaining: Math.max(0, s.settings.maxToolCalls - s.toolCalls),
+        },
+        toolOutputCharacters: {
+          used: s.toolOutputCharacters,
+          limit: s.settings.maxToolOutputCharacters,
+          remaining: this.remainingCharacters,
+        },
+        toolDurationMs: {
+          used: s.toolDurationMs,
+          limit: s.settings.maxToolDurationMs,
+          remaining: Math.max(
+            0,
+            s.settings.maxToolDurationMs - s.toolDurationMs,
+          ),
+        },
+        toolExecutionAvailable: finalizationReason === null,
+        finalizationReason,
+      }),
+    );
   }
   control(reason: string = this.snapshot.reasons[0] ?? "tool-output") {
     return JSON.stringify({

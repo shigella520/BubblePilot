@@ -14,7 +14,7 @@
     "build": "pnpm build:server && pnpm build:web",
     "build:server": "tsc -p tsconfig.build.json",
     "build:web": "pnpm --dir apps/web build",
-    "contracts:check": "node scripts/check-openapi-routes.mjs && node scripts/check-config-contract.mjs",
+    "contracts:check": "node scripts/check-openapi-routes.mjs && node scripts/check-config-contract.mjs && node scripts/check-prompt-xml.mjs",
     "contracts:workflow-schema": "pnpm build:server && node scripts/generate-workflow-schema.mjs",
     "db:migrate": "tsx app/migrate.ts",
     "db:migrate:local": "tsx --env-file=.env.local app/migrate.ts",
@@ -52,6 +52,7 @@
     "pg": "^8.16.3",
     "sharp": "^0.35.5",
     "undici": "^8.12.3",
+    "xmlbuilder2": "4.0.3",
     "yaml": "^2.9.0",
     "yauzl": "^3.4.0",
     "zod": "^4.6.6"

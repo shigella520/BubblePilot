@@ -217,12 +217,11 @@ function promptItemMetrics(item: unknown) {
     typeof (item as Record<string, unknown>).traceMessageId === "string"
       ? ((item as Record<string, unknown>).traceMessageId as string)
       : undefined;
-  const linkPreviewLines = text
-    .split("\n")
-    .filter(
-      (line) =>
-        line.includes("<link_previews") || line.includes("[link_preview"),
-    );
+  const linkPreview =
+    item !== null && typeof item === "object"
+      ? (item as Record<string, unknown>).promptLinkPreviewHash
+      : undefined;
+
   return {
     contentKinds: [...contentKinds].sort(),
     textCharacters,
@@ -232,10 +231,7 @@ function promptItemMetrics(item: unknown) {
       traceMessageId === undefined ? null : sha256(traceMessageId),
     textHash: sha256(text),
     imageContentHash: imageParts.length === 0 ? null : hashJson(imageParts),
-    linkPreviewHash:
-      linkPreviewLines.length === 0
-        ? null
-        : sha256(linkPreviewLines.join("\n")),
+    linkPreviewHash: typeof linkPreview === "string" ? linkPreview : null,
   };
 }
 
@@ -249,7 +245,7 @@ function traceItems(items: readonly unknown[]): readonly AiRequestTraceItem[] {
         ? (item as Record<string, unknown>)
         : {};
     const metrics = promptItemMetrics(item);
-    const region = promptItemRegion(item, record);
+    const region = promptItemRegion(record);
     return {
       index,
       role:
@@ -267,23 +263,13 @@ function traceItems(items: readonly unknown[]): readonly AiRequestTraceItem[] {
 }
 
 function promptItemRegion(
-  item: unknown,
   record: Readonly<Record<string, unknown>>,
 ): AiRequestTraceItem["region"] {
-  const text = JSON.stringify(item);
   if (record.role === "system") return "system";
-  if (text.includes("<history_summary")) return "summary";
-  if (text.includes("<chat_history")) return "history";
-  if (text.includes("<participant_identities")) return "participants";
-  if (text.includes("<link_previews")) return "link-previews";
-  if (
-    text.includes("<current_attachments") ||
-    text.includes("input_image") ||
-    text.includes("image_url")
-  )
-    return "attachments";
-  if (text.includes("<resource_diagnostics")) return "diagnostics";
-  return "dynamic";
+  return (
+    (record.promptRegion as AiRequestTraceItem["region"] | undefined) ??
+    "dynamic"
+  );
 }
 
 function divergenceReason(
@@ -404,6 +390,7 @@ function normalizeAssistantContent(
     return [
       {
         role: "user",
+        promptRegion: message.promptRegion ?? "attachments",
         ...(message.traceMessageId === undefined
           ? {}
           : { traceMessageId: message.traceMessageId }),
@@ -469,6 +456,12 @@ function tracePayloadMessages(
 ): readonly unknown[] {
   return normalizeAssistantContent(messages).map((message) => ({
     role: message.role,
+    ...(message.promptRegion === undefined
+      ? {}
+      : { promptRegion: message.promptRegion }),
+    ...(message.promptLinkPreviewHash === undefined
+      ? {}
+      : { promptLinkPreviewHash: message.promptLinkPreviewHash }),
     content:
       provider.apiKind === "responses"
         ? responsesContent(message.content)

@@ -3,6 +3,7 @@ FROM node:22-alpine AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 COPY apps/web/package.json ./apps/web/package.json
 COPY plugins/opensandbox/server/package.json ./plugins/opensandbox/server/package.json
 RUN pnpm install --frozen-lockfile --filter bubblepilot --filter ./apps/web
@@ -19,6 +20,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches ./patches
 COPY apps/web/package.json ./apps/web/package.json
 COPY plugins/opensandbox/server/package.json ./plugins/opensandbox/server/package.json
 RUN pnpm install --prod --frozen-lockfile --filter bubblepilot --filter ./apps/web

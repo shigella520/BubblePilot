@@ -1,0 +1,72 @@
+diff --git a/lib/constants.js b/lib/constants.js
+index 57fb44aa339076f13e5347f3f04899b97bf53cd4..82084c40e105c75d8135da958db99a4fa0c63c0c 100644
+--- a/lib/constants.js
++++ b/lib/constants.js
+@@ -1,5 +1,5 @@
+ "use strict";
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.nonEntityAmpersandRegex = void 0;
+-exports.nonEntityAmpersandRegex = /&(?![A-Za-z]+;|#\d+;)/g;
++exports.nonEntityAmpersandRegex = /&/g;
+ //# sourceMappingURL=constants.js.map
+\ No newline at end of file
+diff --git a/lib/readers/ObjectReader.js b/lib/readers/ObjectReader.js
+index 3f0a137476f52befa7f6dd18597cf06b1f9fe549..62d71af7329f8f768628d88b6970a259042fcfce 100644
+--- a/lib/readers/ObjectReader.js
++++ b/lib/readers/ObjectReader.js
+@@ -39,12 +39,12 @@ class ObjectReader extends BaseReader_1.BaseReader {
+                         }
+                         else /* if (isMap(val) || isObject(val)) */ {
+                             (0, util_1.forEachObject)(val, (attrKey, attrVal) => {
+-                                lastChild = this.attribute(node, undefined, this.sanitize(attrKey), this._decodeAttributeValue(this.sanitize(attrVal))) || lastChild;
++                                lastChild = this.attribute(node, undefined, this.sanitize(attrKey), this.sanitize(attrVal)) || lastChild;
+                             });
+                         }
+                     }
+                     else {
+-                        lastChild = this.attribute(node, undefined, this.sanitize(key.substring(options.convert.att.length)), this._decodeAttributeValue(this.sanitize(val?.toString()))) || lastChild;
++                        lastChild = this.attribute(node, undefined, this.sanitize(key.substring(options.convert.att.length)), this.sanitize(val?.toString())) || lastChild;
+                     }
+                 }
+                 else if (!options.ignoreConverters && key.indexOf(options.convert.text) === 0) {
+@@ -54,7 +54,7 @@ class ObjectReader extends BaseReader_1.BaseReader {
+                         lastChild = this.parse(node, val);
+                     }
+                     else {
+-                        lastChild = this.text(node, this._decodeText(this.sanitize(val?.toString()))) || lastChild;
++                        lastChild = this.text(node, this.sanitize(val?.toString())) || lastChild;
+                     }
+                 }
+                 else if (!options.ignoreConverters && key.indexOf(options.convert.cdata) === 0) {
+@@ -127,7 +127,7 @@ class ObjectReader extends BaseReader_1.BaseReader {
+                     const parent = this.element(node, undefined, this.sanitize(key));
+                     if (parent) {
+                         lastChild = parent;
+-                        this.text(parent, this._decodeText(this.sanitize(val?.toString())));
++                        this.text(parent, this.sanitize(val?.toString()));
+                     }
+                 }
+                 else {
+@@ -141,7 +141,7 @@ class ObjectReader extends BaseReader_1.BaseReader {
+         }
+         else {
+             // text node
+-            lastChild = this.text(node, this._decodeText(this.sanitize(obj?.toString()))) || lastChild;
++            lastChild = this.text(node, this.sanitize(obj?.toString())) || lastChild;
+         }
+         return lastChild || node;
+     }
+diff --git a/lib/writers/BaseWriter.js b/lib/writers/BaseWriter.js
+index fb09fc6c97363065f85f054095f64d4ab1b07f0c..b847296c958c536b3c87eb9c36073ef97c9a346f 100644
+--- a/lib/writers/BaseWriter.js
++++ b/lib/writers/BaseWriter.js
+@@ -855,7 +855,8 @@ class BaseWriter {
+          */
+         const markup = node.data.replace(constants_1.nonEntityAmpersandRegex, '&amp;')
+             .replace(/</g, '&lt;')
+-            .replace(/>/g, '&gt;');
++            .replace(/>/g, '&gt;')
++            .replace(/\r/g, '&#13;');
+         this.text(markup);
+     }
+     /**

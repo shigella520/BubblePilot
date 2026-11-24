@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  xmlbuilder2>js-yaml: 4.3.2
   '@hono/node-server@2': 2.1.8
   hono@4: 4.13.18
   nanoid@<3.3.18: 3.3.18
@@ -15,6 +16,9 @@ overrides:
   body-parser@2: 2.4.0
   glob@>=9 <14.0.2: 14.0.2
   minimatch@11: 11.0.1
+
+patchedDependencies:
+  xmlbuilder2@4.0.3: 8d0d6a23979e4d7764d710d2da654de6e7a1d3e6a513ea8216fdd5dfb6576d81
 
 importers:
 
@@ -50,6 +54,9 @@ importers:
       undici:
         specifier: ^8.12.3
         version: 8.12.3
+      xmlbuilder2:
+        specifier: 4.0.3
+        version: 4.0.3(patch_hash=8d0d6a23979e4d7764d710d2da654de6e7a1d3e6a513ea8216fdd5dfb6576d81)
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -646,6 +653,22 @@ packages:
     cpu: [x64]
     os: [linux]
     libc: [glibc]
+
+  '@oozcitak/dom@2.0.2':
+    resolution: {integrity: sha512-GjpKhkSYC3Mj4+lfwEyI1dqnsKTgwGy48ytZEhm4A/xnH/8z9M3ZVXKr/YGQi3uCLs1AEBS+x5T2JPiueEDW8w==}
+    engines: {node: '>=20.0'}
+
+  '@oozcitak/infra@2.0.2':
+    resolution: {integrity: sha512-2g+E7hoE2dgCz/APPOEK5s3rMhJvNxSMBrP+U+j1OWsIbtSpWxxlUjq1lU8RIsFJNYv7NMlnVsCuHcUzJW+8vA==}
+    engines: {node: '>=20.0'}
+
+  '@oozcitak/url@3.0.0':
+    resolution: {integrity: sha512-ZKfET8Ak1wsLAiLWNfFkZc/BraDccuTJKR6svTYc7sVjbR+Iu0vtXdiDMY4o6jaFl5TW2TlS7jbLl4VovtAJWQ==}
+    engines: {node: '>=20.0'}
+
+  '@oozcitak/util@10.0.0':
+    resolution: {integrity: sha512-hAX0pT/73190NLqBPPWSdBVGtbY6VOhWYK3qqHqtXQ1gK7kS2yz4+ivsN07hpJ6I3aeMtKP6J6npsEKOAzuTLA==}
+    engines: {node: '>=20.0'}
 
   '@opentelemetry/api@1.10.0':
     resolution: {integrity: sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ==}
@@ -1620,6 +1643,10 @@ packages:
     resolution: {integrity: sha512-CY6crGq313MX8GkwvB7tzgp99vjQxY1++5y10/BKN/GUfHqWaOGQMNZkBvqSzsZKWk/ijwHlWzzkLulsGHhjWQ==}
     hasBin: true
 
+  js-yaml@4.3.2:
+    resolution: {integrity: sha512-SFNOvSJ+Dgf/9An904Yx+CgSlIPCkIpao4qo51lpee25TIRejdH3rhR4EZMGoNx3/TP3O+wzWuiTFl4sqbltzA==}
+    hasBin: true
+
   jsbi@4.3.2:
     resolution: {integrity: sha512-9fqMSQbhJykSeii05nxKl4m6Eqn2P6rOlYiS+C5Dr/HPIU/7yZxu5qzbs40tgaFORiw2Amd0mirjxatXYMkIew==}
 
@@ -2325,6 +2352,10 @@ packages:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
 
+  xmlbuilder2@4.0.3:
+    resolution: {integrity: sha512-bx8Q1STctnNaaDymWnkfQLKofs0mGNN7rLLapJlGuV3VlvegD7Ls4ggMjE3aUSWItCCzU0PEv45lI87iSigiCA==}
+    engines: {node: '>=20.0'}
+
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
     engines: {node: '>=0.4'}
@@ -2725,6 +2756,23 @@ snapshots:
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
+
+  '@oozcitak/dom@2.0.2':
+    dependencies:
+      '@oozcitak/infra': 2.0.2
+      '@oozcitak/url': 3.0.0
+      '@oozcitak/util': 10.0.0
+
+  '@oozcitak/infra@2.0.2':
+    dependencies:
+      '@oozcitak/util': 10.0.0
+
+  '@oozcitak/url@3.0.0':
+    dependencies:
+      '@oozcitak/infra': 2.0.2
+      '@oozcitak/util': 10.0.0
+
+  '@oozcitak/util@10.0.0': {}
 
   '@opentelemetry/api@1.10.0': {}
 
@@ -3794,6 +3842,10 @@ snapshots:
     dependencies:
       argparse: 2.0.1
 
+  js-yaml@4.3.2:
+    dependencies:
+      argparse: 2.0.1
+
   jsbi@4.3.2: {}
 
   json-buffer@3.0.1: {}
@@ -4491,6 +4543,13 @@ snapshots:
   wrappy@1.0.2: {}
 
   xml-name-validator@5.0.0: {}
+
+  xmlbuilder2@4.0.3(patch_hash=8d0d6a23979e4d7764d710d2da654de6e7a1d3e6a513ea8216fdd5dfb6576d81):
+    dependencies:
+      '@oozcitak/dom': 2.0.2
+      '@oozcitak/infra': 2.0.2
+      '@oozcitak/util': 10.0.0
+      js-yaml: 4.3.2
 
   xtend@4.0.2: {}
 

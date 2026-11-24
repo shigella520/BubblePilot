@@ -2,7 +2,10 @@ import {
   attachmentContextMessage,
   attachmentMetadataCharacters,
 } from "../attachments/attachment-catalogue.js";
-import { messageRevisionNotice } from "../archive/message-revision.js";
+import {
+  conversationMessageContent,
+  historyAttachmentProjection,
+} from "./conversation-prompt.js";
 import type {
   ReplyPreview,
   RevisionState,
@@ -110,6 +113,7 @@ export interface ConversationContextTrigger {
   contextSnapshot: ConversationContextSnapshot;
 }
 export interface ConversationContextLoadInput {
+  timeZone?: string;
   executionId: string | null;
   provider: string;
   providerChatId: string;
@@ -179,32 +183,17 @@ function contextMessage(row: MessageRow): IndexedContextMessage {
   };
 }
 
-function messageCharacters(message: ContextMessage): number {
-  const previewCharacters = message.linkPreview.items.reduce(
-    (total, item) =>
-      total +
-      item.url.length +
-      (item.title?.length ?? 0) +
-      (item.summary?.length ?? 0) +
-      (item.siteName?.length ?? 0),
-    0,
-  );
-  const attachmentCharacters = attachmentMetadataCharacters(
-    attachmentContextMessage(message),
-  );
-  const imageSummaryCharacters = (message.imageSummaries ?? []).reduce(
-    (total, summary) =>
-      total +
-      (summary.status === "succeeded" ? (summary.summary?.length ?? 0) : 0),
-    0,
-  );
+export function contextMessageCharacters(
+  message: ContextMessage,
+  timeZone = "UTC",
+): number {
   return (
-    message.body.length +
-    messageRevisionNotice(message).length +
-    (message.replyTo ? JSON.stringify(message.replyTo).length : 0) +
-    previewCharacters +
-    attachmentCharacters +
-    imageSummaryCharacters
+    conversationMessageContent(
+      message,
+      timeZone,
+      "chat_history",
+      historyAttachmentProjection(message, new Set()),
+    ).length + attachmentMetadataCharacters(attachmentContextMessage(message))
   );
 }
 
@@ -217,13 +206,14 @@ function messageCharacters(message: ContextMessage): number {
 export function fitContextMessages(
   messages: readonly ContextMessage[],
   characterLimit: number,
+  timeZone = "UTC",
 ): readonly ContextMessage[] {
   const selected: ContextMessage[] = [];
   let characters = 0;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message === undefined) continue;
-    const size = messageCharacters(message);
+    const size = contextMessageCharacters(message, timeZone);
     if (characters + size > characterLimit) {
       if (selected.length === 0) selected.unshift(message);
       break;
@@ -558,8 +548,12 @@ export class ConversationContextService {
       const messages = fitContextMessages(
         candidates,
         snapshot.settings.characterLimit,
+        input.timeZone,
       );
-      const characters = messages.reduce((n, m) => n + messageCharacters(m), 0);
+      const characters = messages.reduce(
+        (n, m) => n + contextMessageCharacters(m, input.timeZone),
+        0,
+      );
       const reasons = [
         ...(windowEvicted ? ["window-evicted"] : []),
         ...(messages.length < candidates.length ? ["history-trimmed"] : []),

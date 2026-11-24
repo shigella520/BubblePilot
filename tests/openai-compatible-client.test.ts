@@ -1,3 +1,4 @@
+import { sha256 } from "../app/canonical-json.js";
 import {
   allToolDefinitions,
   assertStrictSchema,
@@ -538,6 +539,8 @@ describe("OpenAiCompatibleClient", () => {
       fetchImplementation,
     );
     const history = (preview: string, withImage: boolean) => ({
+      promptRegion: "history" as const,
+      promptLinkPreviewHash: sha256(preview),
       role: "user" as const,
       content: [
         {
