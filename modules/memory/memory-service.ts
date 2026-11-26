@@ -9,7 +9,7 @@ import { isImageAttachment } from "../ai/image-reference.js";
 import { sha256 } from "../../app/canonical-json.js";
 import { executionPolicy } from "../ai/execution-policy.js";
 import { promptMessage } from "../ai/prompt-xml.js";
-import { localIsoTimestamp } from "../shared/local-time.js";
+import { modelTimestamp } from "../shared/local-time.js";
 import { z } from "zod";
 import {
   appliedFilters,
@@ -422,7 +422,7 @@ export class MemorySession {
   /** Model-facing instant in the chat timezone; storage stays UTC. */
   private localTime(value: string): string {
     try {
-      return localIsoTimestamp(value, chatTimeZone(this.scope.timeZone));
+      return modelTimestamp(value, chatTimeZone(this.scope.timeZone));
     } catch {
       return value;
     }

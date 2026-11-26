@@ -7,7 +7,7 @@ import {
   linkPreviewImageReference,
 } from "../ai/image-reference.js";
 import { sha256 } from "../../app/canonical-json.js";
-import { formatContextTimestamp } from "./context-time.js";
+import { modelTimestamp } from "./context-time.js";
 
 export function conversationMessageContent(
   message: ContextMessage,
@@ -19,7 +19,7 @@ export function conversationMessageContent(
     ...message,
     id: message.providerMessageId,
     text: message.body,
-    sentAt: formatContextTimestamp(message.sentAt, timeZone),
+    sentAt: modelTimestamp(message.sentAt, timeZone),
     author: messageAuthor(message),
     attachments,
   });

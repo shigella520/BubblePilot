@@ -68,7 +68,7 @@ import type {
   HistoryCoverage,
 } from "./conversation-context-service.js";
 import type { ContextSettingsService } from "./context-settings-service.js";
-import { formatContextTimestamp } from "./context-time.js";
+import { formatContextTimestamp, modelTimestamp } from "./context-time.js";
 import { localIsoTimestamp } from "../shared/local-time.js";
 
 export interface NodeExecutionContext {
@@ -158,13 +158,7 @@ abstract class BaseNodeHandler implements NodeHandler {
  * literal date reads as the local calendar day.
  */
 function scheduledTaskProjection(scheduled: ScheduledTaskEvent["scheduled"]) {
-  const local = (value: string) => {
-    try {
-      return localIsoTimestamp(value, scheduled.timeZone);
-    } catch {
-      return value;
-    }
-  };
+  const local = (value: string) => modelTimestamp(value, scheduled.timeZone);
   return {
     ...scheduled,
     scheduledAt: local(scheduled.scheduledAt),
@@ -274,7 +268,7 @@ function resolveContextPath(
     case "context.event.message.providerMessageId":
       return context.envelope.message?.providerMessageId;
     case "context.event.message.sentAt":
-      return formatContextTimestamp(
+      return modelTimestamp(
         context.envelope.message?.sentAt ??
           (context.envelope.message === null
             ? backgroundMetadata(context.envelope).triggeredAt
@@ -316,7 +310,7 @@ function resolveContextPath(
     case "context.history.messages":
       return context.history.map((message) => ({
         ...message,
-        sentAt: formatContextTimestamp(message.sentAt, context.timeZone),
+        sentAt: modelTimestamp(message.sentAt, context.timeZone),
       }));
     case "context.history.count":
       return context.history.length;
@@ -650,6 +644,27 @@ const bubblePilotInputProtocol = promptText(
 const imessageOutputInstruction =
   "回复将作为 iMessage 纯文本发送。日常聊天使用自然段、适量换行和简单列表；链接直接写 URL，不使用 HTML/XML 标签包裹回复，不依赖 Markdown 标题、强调、表格等排版表达含义。用户明确要求代码、标记语言示例或讨论相关语法时，保留必要的原始符号、标签、缩进和换行，确保内容准确；代码示例可以使用代码围栏或行内代码标记，以便发送端识别并保护代码内容。保持既有角色、语气和语言，不向用户解释这些格式规则。";
 
+/** Prompt-only coverage view; stored summaries and snapshots keep UTC. */
+function coverageProjection(
+  coverage: HistoryCoverage,
+  timeZone: string,
+): HistoryCoverage {
+  const range = (value: HistoryCoverage["retained"]) =>
+    value === null
+      ? null
+      : {
+          ...value,
+          earliestSentAt: modelTimestamp(value.earliestSentAt, timeZone),
+          latestSentAt: modelTimestamp(value.latestSentAt, timeZone),
+        };
+  return {
+    ...coverage,
+    retained: range(coverage.retained),
+    omitted: range(coverage.omitted),
+    windowEvicted: range(coverage.windowEvicted),
+  };
+}
+
 export function conversationHistoryMessages(
   history: readonly ContextMessage[],
   _identities: Readonly<Record<string, ChatParticipantIdentity>>,
@@ -695,7 +710,10 @@ export function conversationHistoryMessages(
             content:
               promptText(
                 "history_coverage",
-                JSON.stringify({ ...coverage, incompleteReasons }),
+                JSON.stringify({
+                  ...coverageProjection(coverage, timeZone),
+                  incompleteReasons,
+                }),
               ) +
               `\n覆盖范围只描述本次提供的历史。windowEvicted 表示较早原文已移出消息窗口，omitted 表示因字符预算裁剪、未提供的原文；存在缺口时不可把当前上下文视为完整记录，也不能据此推断某人最后发言时间。`,
           },
@@ -1197,9 +1215,11 @@ class AiChatNodeHandler extends BaseNodeHandler {
         messages,
         configurationMessageCount,
         attachmentContext: {
-          current: current ? attachmentContextMessage(current) : null,
+          current: current
+            ? attachmentContextMessage(current, context.timeZone)
+            : null,
           history: node.config.includeLoadedContext
-            ? history.map(attachmentContextMessage)
+            ? history.map((m) => attachmentContextMessage(m, context.timeZone))
             : [],
         },
         maxOutputTokens: generationPolicy.maxOutputTokens,
@@ -1237,9 +1257,11 @@ class AiChatNodeHandler extends BaseNodeHandler {
                   triggerMessageId: context.envelope.message.providerMessageId,
                   executionId: context.executionId,
                 },
-                current: attachmentContextMessage(current!),
+                current: attachmentContextMessage(current!, context.timeZone),
                 history: node.config.includeLoadedContext
-                  ? history.map(attachmentContextMessage)
+                  ? history.map((m) =>
+                      attachmentContextMessage(m, context.timeZone),
+                    )
                   : [],
               },
             }

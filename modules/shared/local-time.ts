@@ -31,3 +31,25 @@ export function localIsoTimestamp(
   const fraction = millis === 0 ? "" : `.${String(millis).padStart(3, "0")}`;
   return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}:${part("second")}${fraction}${offset}`;
 }
+
+const legacyContextTimestamp =
+  /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) GMT([+-]\d{2}:\d{2})? \[[^\]]+\]$/u;
+
+/**
+ * The single model-facing timestamp form: ISO 8601 with the chat timezone
+ * offset (see localIsoTimestamp). Accepts stored UTC instants and values
+ * already rendered by formatContextTimestamp; unparseable input is returned
+ * unchanged rather than failing prompt assembly.
+ * formatContextTimestamp stays for human-facing text only.
+ */
+export function modelTimestamp(timestamp: string, timeZone: string): string {
+  const legacy = legacyContextTimestamp.exec(timestamp);
+  const instant = legacy
+    ? `${legacy[1]}T${legacy[2]}${legacy[3] ?? "+00:00"}`
+    : timestamp;
+  try {
+    return localIsoTimestamp(instant, timeZone);
+  } catch {
+    return timestamp;
+  }
+}

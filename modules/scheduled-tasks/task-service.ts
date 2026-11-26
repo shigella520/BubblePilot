@@ -1,3 +1,4 @@
+import { modelTimestamp } from "../shared/local-time.js";
 import { chatDisplayNameSql } from "../archive/chat-display-name-sql.js";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
@@ -98,6 +99,28 @@ export function publicTask(t: TaskRow) {
               : t.consumed_count - (t.status === "running" ? 1 : 0),
           )
         : [],
+  };
+}
+/**
+ * Tool-result view of a task: times in the task timezone so the model can
+ * confirm the local date and hour directly. HTTP responses and audit events
+ * keep publicTask's UTC instants.
+ */
+export function modelTaskView<
+  T extends {
+    scheduledAt: string;
+    nextScheduledAt: string | null;
+    upcoming: string[];
+    timeZone: string;
+  },
+>(task: T): T {
+  const local = (value: string) => modelTimestamp(value, task.timeZone);
+  return {
+    ...task,
+    scheduledAt: local(task.scheduledAt),
+    nextScheduledAt:
+      task.nextScheduledAt === null ? null : local(task.nextScheduledAt),
+    upcoming: task.upcoming.map(local),
   };
 }
 export class TaskService {
@@ -280,11 +303,13 @@ export class TaskService {
             if (name === "create_scheduled_task")
               return JSON.stringify({
                 status: "created",
-                task: publicTask(
-                  await this.create(
-                    executionId,
-                    createTaskSchema.parse(parsed),
-                    ctx,
+                task: modelTaskView(
+                  publicTask(
+                    await this.create(
+                      executionId,
+                      createTaskSchema.parse(parsed),
+                      ctx,
+                    ),
                   ),
                 ),
               });
@@ -296,7 +321,11 @@ export class TaskService {
                 workflowId: scope.workflow_id,
                 senderId: scope.sender_id,
               });
-              const output = JSON.stringify({ status: "ok", ...items });
+              const output = JSON.stringify({
+                status: "ok",
+                ...items,
+                items: items.items.map(modelTaskView),
+              });
               return output.length <= ctx.maxOutputCharacters
                 ? output
                 : JSON.stringify({
@@ -328,7 +357,10 @@ export class TaskService {
                   name === "cancel_scheduled_task",
                   ctx,
                 );
-            return JSON.stringify({ status: "ok", task: publicTask(updated) });
+            return JSON.stringify({
+              status: "ok",
+              task: modelTaskView(publicTask(updated)),
+            });
           } catch (e) {
             return JSON.stringify({
               status: "failed",
@@ -430,8 +462,10 @@ export class TaskService {
         timeZone: input.timeZone,
       });
       if (
-        JSON.stringify({ status: "created", task: publicTask(task) }).length >
-        ctx.maxOutputCharacters
+        JSON.stringify({
+          status: "created",
+          task: modelTaskView(publicTask(task)),
+        }).length > ctx.maxOutputCharacters
       )
         throw new TaskError("TASK_RESULT_BUDGET");
       ctx.signal.throwIfAborted();
@@ -551,7 +585,7 @@ export class TaskService {
         );
         if (
           ctx &&
-          JSON.stringify(publicTask(updated)).length + 100 >
+          JSON.stringify(modelTaskView(publicTask(updated))).length + 100 >
             ctx.maxOutputCharacters
         )
           throw new TaskError("TASK_RESULT_BUDGET");
@@ -726,7 +760,7 @@ export class TaskService {
       );
       if (
         ctx &&
-        JSON.stringify(publicTask(updated)).length + 100 >
+        JSON.stringify(modelTaskView(publicTask(updated))).length + 100 >
           ctx.maxOutputCharacters
       )
         throw new TaskError("TASK_RESULT_BUDGET");

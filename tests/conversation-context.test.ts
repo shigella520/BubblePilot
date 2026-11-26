@@ -120,10 +120,32 @@ describe("raw conversation context contract", () => {
       [],
       "Asia/Shanghai",
     );
-    expect(message?.content).toContain(
-      'sent_at="2026-08-10 08:00:01 GMT+08:00 [Asia/Shanghai]"',
-    );
+    expect(message?.content).toContain('sent_at="2026-08-10T08:00:01+08:00"');
     expect(message?.content).not.toContain("2026-08-10T00:00:01.000Z");
+  });
+  it("renders history coverage in the execution time zone", () => {
+    const range = {
+      count: 2,
+      firstMessageIndex: "1",
+      lastMessageIndex: "2",
+      earliestSentAt: "2026-08-10T00:00:01.000Z",
+      latestSentAt: "2026-08-10T15:59:59.000Z",
+    };
+    const coverage = { retained: range, omitted: null, windowEvicted: range };
+    const messages = conversationHistoryMessages(
+      [contextMessage("1")],
+      {},
+      [],
+      "Asia/Shanghai",
+      coverage,
+      ["window-evicted"],
+    );
+    const text = JSON.stringify(messages.at(-1)?.content);
+    expect(text).toContain("2026-08-10T08:00:01+08:00");
+    expect(text).toContain("2026-08-10T23:59:59+08:00");
+    expect(text).not.toContain("2026-08-10T00:00:01.000Z");
+    // The stored coverage object is not mutated.
+    expect(coverage.retained.earliestSentAt).toBe("2026-08-10T00:00:01.000Z");
   });
 
   it("trims older complete messages while retaining the newest suffix", () => {

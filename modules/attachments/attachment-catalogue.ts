@@ -1,3 +1,4 @@
+import { modelTimestamp } from "../shared/local-time.js";
 import type { ContextMessage } from "../archive/archive-repository.js";
 import type { MessageAttachment } from "../ingestion/message-envelope.js";
 import type { AttachmentListing } from "./attachment-policy.js";
@@ -9,9 +10,15 @@ import {
 export interface AttachmentContextMessage {
   providerMessageId: string;
   attachments: readonly MessageAttachment[];
+  /** Stored UTC instant; used for ordering. */
   sentAt?: string;
+  /** Model-facing chat-local rendering of sentAt, when the timezone is known. */
+  localSentAt?: string;
   senderId?: string | null;
 }
+
+/** Widest model-facing timestamp, so metadata charges never under-count. */
+const timestampCharge = "0000-00-00T00:00:00.000+00:00";
 export interface AttachmentContext {
   current: AttachmentContextMessage | null;
   history: readonly AttachmentContextMessage[];
@@ -19,10 +26,14 @@ export interface AttachmentContext {
 
 export function attachmentContextMessage(
   message: ContextMessage,
+  timeZone?: string,
 ): AttachmentContextMessage {
   return {
     providerMessageId: message.providerMessageId,
     sentAt: message.sentAt,
+    ...(timeZone === undefined
+      ? {}
+      : { localSentAt: modelTimestamp(message.sentAt, timeZone) }),
     senderId: message.senderId,
     attachments:
       message.revisionState && message.revisionState !== "active"
@@ -83,7 +94,7 @@ export async function initialAttachmentCatalogue(
     current: boolean,
   ): InitialListing => ({
     messageId: current ? "current-message" : message!.providerMessageId,
-    sentAt: message?.sentAt ?? null,
+    sentAt: message?.localSentAt ?? message?.sentAt ?? null,
     senderId: message?.senderId?.slice(0, 512) ?? null,
     archived: true,
     contentRead: false,
@@ -195,7 +206,7 @@ export function attachmentMetadataCharacters(
   if (!message.attachments.length) return 0;
   return encodeCatalogue({
     messageId: message.providerMessageId,
-    sentAt: message.sentAt ?? null,
+    sentAt: message.sentAt === undefined ? null : timestampCharge,
     senderId: message.senderId?.slice(0, 512) ?? null,
     archived: true,
     contentRead: false,

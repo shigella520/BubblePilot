@@ -39,3 +39,5 @@ export function formatContextTimestamp(
     parts.find((candidate) => candidate.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}:${part("second")} ${part("timeZoneName")} [${timeZone}]`;
 }
+
+export { modelTimestamp } from "../shared/local-time.js";

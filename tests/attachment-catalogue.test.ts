@@ -142,3 +142,41 @@ it("bounds the whole initial directory to 100 entries, leaving older files disco
   expect(c.omittedMessages).toBe(1);
   expect(c.omittedAttachments).toBe(30);
 });
+it("shows chat-local sentAt to the model while ordering by stored instants", async () => {
+  const contextMessage = (id: string, sentAt: string) =>
+    attachmentContextMessage(
+      {
+        providerMessageId: id,
+        senderId: "fictional-user",
+        sentAt,
+        body: "",
+        attachments: [file(`${id}.pdf`)],
+        linkPreview: emptyLinkPreview(),
+      } as unknown as Parameters<typeof attachmentContextMessage>[0],
+      "Asia/Shanghai",
+    );
+  const current = contextMessage("current", "2026-11-16T16:00:00.000Z");
+  const older = contextMessage("older", "2026-11-16T03:00:00.000Z");
+  const newer = contextMessage("newer", "2026-11-16T15:30:00.000Z");
+  expect(current.sentAt).toBe("2026-11-16T16:00:00.000Z");
+  const c = parse(
+    (
+      await initialAttachmentCatalogue(
+        { current, history: [older, newer] },
+        10000,
+      )
+    ).text,
+  );
+  expect(c.sentAt).toBe("2026-11-17T00:00:00+08:00");
+  expect(c.history.map((h) => h.sentAt)).toEqual([
+    "2026-11-16T23:30:00+08:00",
+    "2026-11-16T11:00:00+08:00",
+  ]);
+  // The charge uses a fixed widest timestamp, independent of precision/offset.
+  expect(attachmentMetadataCharacters(current)).toBe(
+    attachmentMetadataCharacters({
+      ...current,
+      sentAt: "2026-11-16T16:00:00.123Z",
+    }),
+  );
+});
