@@ -296,11 +296,9 @@ if (!baseUrl || !model) {
                 if (payload.order !== "asc") matched.reverse();
                 const limit =
                   typeof payload.limit === "number" ? payload.limit : 20;
+                result.participants = { "fictional-alice": "虚构甲" };
                 result.evidence = matched.slice(0, limit).map((row) => ({
                   ref: "M" + Number(row.day),
-                  messageId: "fictional-" + row.day,
-                  sentAt: row.sentAt,
-                  senderId: "fictional-alice",
                   text: row.text,
                 }));
                 result.status = matched.length ? "succeeded" : "no-results";
@@ -377,14 +375,12 @@ if (!baseUrl || !model) {
                 : "2026-09-01T08:00:00+08:00 sender_id=fictional-alice role=user\n虚构计划仍在测试，尚未启用。";
             const content = JSON.stringify({
               status: valid ? "succeeded" : "no-results",
+              participants: valid ? { "fictional-alice": "虚构甲" } : {},
               evidence: valid
                 ? [
                     {
                       ref: excerptDay ? "M" + Number(excerptDay) : "M8",
                       text,
-                      participants: [
-                        { senderId: "fictional-alice", name: "虚构甲" },
-                      ],
                     },
                   ]
                 : [],

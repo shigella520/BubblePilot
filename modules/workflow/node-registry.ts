@@ -55,6 +55,7 @@ import type { ReplyGateway } from "../integrations/bluebubbles/reply-gateway.js"
 import {
   backgroundMetadata,
   triggerType,
+  type ScheduledTaskEvent,
   type WorkflowEvent,
 } from "./workflow-event.js";
 import { parseIdleDecision } from "./idle-policy.js";
@@ -68,6 +69,7 @@ import type {
 } from "./conversation-context-service.js";
 import type { ContextSettingsService } from "./context-settings-service.js";
 import { formatContextTimestamp } from "./context-time.js";
+import { localIsoTimestamp } from "../shared/local-time.js";
 
 export interface NodeExecutionContext {
   idleDecisionAccepted?: boolean;
@@ -148,6 +150,26 @@ abstract class BaseNodeHandler implements NodeHandler {
       );
     }
   }
+}
+
+/**
+ * Prompt-only view of a scheduled envelope. The stored event keeps UTC
+ * instants; the model sees the same instants in the task timezone so a
+ * literal date reads as the local calendar day.
+ */
+function scheduledTaskProjection(scheduled: ScheduledTaskEvent["scheduled"]) {
+  const local = (value: string) => {
+    try {
+      return localIsoTimestamp(value, scheduled.timeZone);
+    } catch {
+      return value;
+    }
+  };
+  return {
+    ...scheduled,
+    scheduledAt: local(scheduled.scheduledAt),
+    triggeredAt: local(scheduled.triggeredAt),
+  };
 }
 
 function messageField(
@@ -971,7 +993,9 @@ class AiChatNodeHandler extends BaseNodeHandler {
     )
       dynamicTask.push({
         role: "user",
-        content: JSON.stringify({ scheduled_task: context.envelope.scheduled }),
+        content: JSON.stringify({
+          scheduled_task: scheduledTaskProjection(context.envelope.scheduled),
+        }),
       });
     if (
       !scheduled &&
@@ -1143,7 +1167,7 @@ class AiChatNodeHandler extends BaseNodeHandler {
       result = await this.agent.run({
         runtimeTools,
         ...(runtimeTools.length
-          ? { executionTime: new Date().toISOString() }
+          ? { executionTime: localIsoTimestamp(new Date(), context.timeZone) }
           : {}),
         ...(node.config.includeLoadedContext
           ? {

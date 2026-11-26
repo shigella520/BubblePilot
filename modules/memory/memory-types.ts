@@ -1,6 +1,5 @@
 import type { AttachmentListing } from "../attachments/attachment-policy.js";
 import { executionPolicy } from "../ai/execution-policy.js";
-import type { MessageAuthor } from "../identity/bot-identity.js";
 import { z } from "zod";
 import {
   embeddingConfigSchema,
@@ -70,16 +69,16 @@ export interface MemoryScope {
   executionId: string | null;
   generation: Generation;
 }
+/**
+ * Model-facing source item. `text` holds the XML message projections (id,
+ * sender_id, chat-local sent_at, author, body); identity names are emitted once
+ * per tool result as `participants` rather than repeated per item.
+ */
 export interface Evidence {
   attachments?: AttachmentListing[];
   images?: { image_ref: string; messageId: string; attachmentIndex: number }[];
-  authors?: MessageAuthor[];
   ref: string;
   text: string;
-  messageIds: string[];
-  dates: string[];
-  senderIds: string[];
-  participants: { senderId: string; name: string }[];
 }
 export interface MemoryCoverage {
   failed?: number;
@@ -102,6 +101,8 @@ export interface MemorySearchResult {
     guidance: string;
   }[];
   retrievalMode: "hybrid" | "keyword-only";
+  /** sender_id -> display name for the returned evidence. */
+  participants?: Record<string, string>;
   evidence: Evidence[];
   coverage: MemoryCoverage;
   retrievalId: string;

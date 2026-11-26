@@ -36,6 +36,13 @@ import {
 } from "../modules/memory/memory-service.js";
 import { defaultMemoryConfig } from "../modules/memory/memory-types.js";
 import type { EmbeddingClient } from "../modules/memory/embedding-client.js";
+
+/** Message ids from the XML projection (fixtures use archive ids as provider ids). */
+function messageIdsOf(evidence: { text: string }): string[] {
+  return load(evidence.text, { xml: true })("message")
+    .map((_, element) => element.attribs.id ?? "")
+    .get();
+}
 const url = process.env.TEST_DATABASE_URL;
 describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
   let repo: MemoryRepository;
@@ -129,8 +136,6 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       evidence: {
         ref: string;
         text: string;
-        messageIds: string[];
-        senderIds: string[];
       }[];
     };
     const read = async (tool: string, args: unknown) =>
@@ -147,8 +152,8 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       expect($("message").attr("sender_id")).toBe("fictional-sender");
       expect($("text").text()).toBe(attack);
       expect($("system")).toHaveLength(0);
-      expect(evidence.messageIds).toEqual([source]);
-      expect(evidence.senderIds).toEqual(["fictional-sender"]);
+      expect(messageIdsOf(evidence)).toEqual([source]);
+      expect(Object.keys(evidence).sort()).toEqual(["ref", "text"]);
       const expanded = await read("read_chat_excerpt", {
         ref: evidence.ref,
         before: 0,
@@ -392,11 +397,11 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     ) as {
       evidence: Array<{
         ref: string;
-        messageId: string;
+        text: string;
         attachments: Array<{ entries: unknown[]; nextOffset: number }>;
       }>;
     };
-    expect(result.evidence.map((e) => e.messageId)).toEqual([both]);
+    expect(result.evidence.flatMap(messageIdsOf)).toEqual([both]);
     expect(result.evidence[0]?.attachments[0]?.entries).toHaveLength(20);
     expect(result.evidence[0]?.attachments[0]?.nextOffset).toBe(20);
     const next = JSON.parse(
@@ -467,13 +472,13 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     ) as {
       beforeCount: number;
       afterCount: number;
-      evidence: { messageIds: string[] }[];
+      evidence: { text: string }[];
     };
     expect(expanded.beforeCount).toBe(8);
     expect(expanded.afterCount).toBe(8);
-    expect(expanded.evidence[0]!.messageIds).toHaveLength(17);
-    expect(expanded.evidence[0]!.messageIds).not.toContain(ids[11]);
-    expect(expanded.evidence[0]!.messageIds).not.toContain(ids[16]);
+    expect(messageIdsOf(expanded.evidence[0]!)).toHaveLength(17);
+    expect(messageIdsOf(expanded.evidence[0]!)).not.toContain(ids[11]);
+    expect(messageIdsOf(expanded.evidence[0]!)).not.toContain(ids[16]);
     const bounded = JSON.parse(
       await session.execute(
         "read_chat_excerpt",
@@ -482,20 +487,20 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     ) as {
       afterCount: number;
       hasLater: boolean;
-      evidence: { messageIds: string[] }[];
+      evidence: { text: string }[];
     };
     expect(bounded.afterCount).toBe(10);
     expect(bounded.hasLater).toBe(false);
-    expect(bounded.evidence[0]!.messageIds).not.toContain(ids[26]);
+    expect(messageIdsOf(bounded.evidence[0]!)).not.toContain(ids[26]);
     const fitted = JSON.parse(
       await session.execute("read_chat_excerpt", JSON.stringify({ ref }), {
         signal: new AbortController().signal,
         deadline: Date.now() + 60000,
         maxOutputCharacters: 1600,
       }),
-    ) as { truncated: boolean; evidence: { messageIds: string[] }[] };
+    ) as { truncated: boolean; evidence: { text: string }[] };
     expect(fitted.truncated).toBe(true);
-    expect(fitted.evidence[0]!.messageIds).toContain(ids[14]);
+    expect(messageIdsOf(fitted.evidence[0]!)).toContain(ids[14]);
   });
   it("returns default eight or requested twenty semantic sources and reports limited selection", async () => {
     const id = await chat();
@@ -1003,7 +1008,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
         hasMore: boolean;
         truncated: boolean;
         count?: number;
-        evidence: { messageId: string; ref: string }[];
+        evidence: { text: string; ref: string }[];
         groups: { message: { ref: string } | null }[];
       };
     const first = await execute(
@@ -1020,8 +1025,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
       cursor: first.nextCursor,
     });
     expect(
-      new Set([...first.evidence, ...next.evidence].map((r) => r.messageId))
-        .size,
+      new Set([...first.evidence, ...next.evidence].flatMap(messageIdsOf)).size,
     ).toBe(4);
     expect(
       (

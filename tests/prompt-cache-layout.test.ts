@@ -622,7 +622,9 @@ describe.each(["chat-completions", "responses"] as const)(
         expect(text.indexOf("<agent_budget_status>")).toBeGreaterThan(
           text.indexOf("Stable fictional history"),
         );
-        expect(text).toContain(`2026-11-0${i + 1}T03:00:00.000Z`);
+        // Runtime time is model-facing local ISO in the chat timezone.
+        expect(text).toContain(`2026-11-0${i + 1}T11:00:00+08:00`);
+        expect(text).not.toContain(`2026-11-0${i + 1}T03:00:00.000Z`);
         expect(r.messages.at(-1)!.role).toBe("user");
         expect(gatewaySystem(f.payloads[i]!)).toBe(
           gatewaySystem(f.payloads[0]!),
@@ -1034,6 +1036,17 @@ describe.each(["chat-completions", "responses"] as const)(
         expect(messageText(r)).toContain(
           mode === "idle" ? "虚构主动交流任务" : "虚构提醒任务",
         );
+        if (mode !== "idle") {
+          // The model reads the task-local calendar day; storage stays UTC.
+          expect(messageText(r)).toContain(
+            '"scheduledAt":"2026-11-01T09:00:00+08:00"',
+          );
+          expect(messageText(r)).not.toContain("2026-11-01T01:00:00Z");
+          expect(
+            (ctx.envelope as { scheduled: { scheduledAt: string } }).scheduled
+              .scheduledAt,
+          ).toBe("2026-11-01T01:00:00Z");
+        }
         expect(
           r.messages
             .slice(firstHistory(r) + 1)

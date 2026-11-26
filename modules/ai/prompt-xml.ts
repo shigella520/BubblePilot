@@ -100,9 +100,19 @@ export function promptLinkPreviewFingerprintInput(
   const data = linkData(preview);
   return data === undefined ? undefined : serialize({ link_previews: data });
 }
+export interface PromptMessageOptions {
+  /**
+   * History tool results only: a participant author whose sender_id equals the
+   * message sender_id is emitted with only its kind attribute. The
+   * message attribute remains the single application-owned identity, so the
+   * projection stays unambiguous while avoiding a repeated identifier.
+   */
+  compactParticipantAuthor?: boolean;
+}
 export function promptMessage(
   section: "chat_history" | "current_message",
   data: PromptMessage,
+  options: PromptMessageOptions = {},
 ): string {
   const reply = data.replyTo;
   const links = linkData(data.linkPreview);
@@ -113,7 +123,12 @@ export function promptMessage(
         "@id": data.id,
         "@sender_id": data.senderId ?? "",
         "@sent_at": data.sentAt,
-        author: authorData(data.author),
+        author:
+          options.compactParticipantAuthor &&
+          data.author.kind === "participant" &&
+          (data.author.senderId ?? "") === (data.senderId ?? "")
+            ? { "@kind": "participant" }
+            : authorData(data.author),
         text: { "#": visibleRevisionText(data, data.text) },
         ...(notice ? { revision_notice: notice } : {}),
         ...(reply
