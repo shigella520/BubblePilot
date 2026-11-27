@@ -320,14 +320,20 @@ export class MemoryRepository {
   async coverage(scope: MemoryScope) {
     const row = (
       await this.pool.query<{ total: string; indexed: string; failed: string }>(
-        `SELECT count(*) total,count(i.message_id) indexed,
+        // Failed ranges are collected once per chat (not a job-table scan per
+        // unindexed message), and the execution boundary check only runs
+        // when there is a boundary: large chats stay well under the timeout.
+        `WITH failed AS MATERIALIZED (
+          SELECT from_index,through_index,range_from,range_to FROM memory_jobs
+          WHERE chat_id=$1 AND generation_id=$2 AND status='failed')
+        SELECT count(*) total,count(i.message_id) indexed,
         count(*) FILTER (WHERE i.message_id IS NULL AND EXISTS (
-          SELECT 1 FROM memory_jobs j WHERE j.chat_id=m.chat_id AND j.generation_id=$2 AND j.status='failed'
-          AND m.message_index BETWEEN j.from_index AND j.through_index
+          SELECT 1 FROM failed j WHERE m.message_index BETWEEN j.from_index AND j.through_index
           AND (j.range_from IS NULL OR m.sent_at>=j.range_from) AND (j.range_to IS NULL OR m.sent_at<=j.range_to)
         )) failed FROM messages m
       LEFT JOIN memory_indexed_messages i ON i.message_id=m.id AND i.generation_id=$2
-      WHERE m.chat_id=$1 AND m.message_index<$3 AND m.content_redacted_at IS NULL AND execution_history_allows($4,m.id)`,
+      WHERE m.chat_id=$1 AND m.message_index<$3 AND m.content_redacted_at IS NULL
+      AND ($4::uuid IS NULL OR execution_history_allows($4,m.id))`,
         [
           scope.chatId,
           scope.generation.id,
