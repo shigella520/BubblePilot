@@ -78,15 +78,20 @@ function failureLabel(value: unknown): string | null {
       MEMORY_MODEL_CHANGED: "向量模型与索引代次不一致",
       MEMORY_MODEL_IDENTITY_UNAVAILABLE: "无法确认向量模型身份",
       MEMORY_EMBEDDING_HTTP_ERROR: "向量服务返回 HTTP 错误",
-      MEMORY_EMBEDDING_UNAVAILABLE: "向量服务连接失败或超时",
+      MEMORY_EMBEDDING_UNAVAILABLE: "向量服务连接失败",
+      MEMORY_EMBEDDING_TIMEOUT: "向量服务响应超时",
       MEMORY_EMBEDDING_EMPTY: "向量服务返回空响应",
       MEMORY_EMBEDDING_TOO_LARGE: "向量服务响应过大",
       MEMORY_EMBEDDING_INPUT_INVALID: "向量输入不符合要求",
       MEMORY_EMBEDDING_INVALID_OUTPUT: "向量格式或维度不符合要求",
       MEMORY_EMBEDDING_INVALID_ORDER: "向量返回顺序不符合要求",
     };
-    const status = failure.httpStatus;
-    return `${stage}：${messages[String(failure.errorCode)] ?? "向量服务不可用或返回异常"}${Number.isInteger(status) && typeof status === "number" && status >= 100 && status <= 599 ? `（HTTP ${status}）` : ""}`;
+    const summary = embeddingFailureSummary({
+      httpStatus: failure.httpStatus,
+      upstreamCode: failure.upstreamCode,
+      upstreamRequestId: failure.upstreamRequestId,
+    });
+    return `${stage}：${messages[String(failure.errorCode)] ?? "向量服务不可用或返回异常"}${summary ? `（${summary}）` : ""}`;
   }
   if (category === "database-error") {
     const code = failure.errorCode;
@@ -139,6 +144,52 @@ export function memoryToolLabel(
     fallback ? `向量检索已降级：${fallback}` : null,
     details.status === "partial" ? "索引覆盖不完整" : null,
     details.status === "no-results" ? "未找到匹配结果" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+const token = (value: unknown, pattern: RegExp) =>
+  typeof value === "string" && pattern.test(value) ? value : undefined;
+
+/**
+ * Operator summary of sanitized embedding failure facts (job error_detail or
+ * tool diagnostics). Unknown or malformed fields are ignored.
+ */
+export function embeddingFailureSummary(detail: unknown): string {
+  if (!detail || typeof detail !== "object") return "";
+  const d = detail as Record<string, unknown>;
+  const status =
+    typeof d.httpStatus === "number" &&
+    Number.isInteger(d.httpStatus) &&
+    d.httpStatus >= 100 &&
+    d.httpStatus <= 599
+      ? d.httpStatus
+      : undefined;
+  const seconds = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0
+      ? `${(value / 1000).toFixed(value < 10000 ? 1 : 0)} 秒`
+      : undefined;
+  const kind =
+    d.kind === "timeout"
+      ? `超时${seconds(d.timeoutMs) ? `（上限 ${seconds(d.timeoutMs)}）` : ""}`
+      : d.kind === "network"
+        ? "连接失败"
+        : d.kind === "response"
+          ? "响应无效"
+          : undefined;
+  const code = token(d.upstreamCode, /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u);
+  const requestId = token(
+    d.upstreamRequestId,
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{3,127}$/u,
+  );
+  const elapsed = d.kind === "timeout" ? undefined : seconds(d.elapsedMs);
+  return [
+    kind,
+    status ? `HTTP ${status}` : undefined,
+    code ? `上游错误 ${code}` : undefined,
+    requestId ? `上游请求 ID ${requestId}` : undefined,
+    elapsed ? `耗时 ${elapsed}` : undefined,
   ]
     .filter(Boolean)
     .join(" · ");

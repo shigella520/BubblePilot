@@ -37,7 +37,18 @@ import {
   HttpEmbeddingClient,
   EmbeddingError,
   type EmbeddingClient,
+  type EmbeddingFailureDetail,
 } from "./embedding-client.js";
+
+/** Operator log event; carries no message text, input or credentials. */
+export interface EmbeddingFailureEvent {
+  operation: "index" | "search" | "probe";
+  code: string;
+  model: string;
+  host: string;
+  detail?: EmbeddingFailureDetail;
+  jobId?: string;
+}
 import { chunkMessages, fuseRanks, type MemoryMessage } from "./chunking.js";
 import {
   memoryFailureDiagnostic,
@@ -184,10 +195,38 @@ export const memoryTools: readonly AiToolDefinition[] = [
 export class MemoryService {
   private timer: NodeJS.Timeout | null = null;
   private inFlight: Promise<void> | null = null;
+  /** Optional operator sink, wired to the application log at startup. */
+  onEmbeddingFailure?: (event: EmbeddingFailureEvent) => void;
   constructor(
     readonly repository: MemoryRepository,
     readonly embedding: EmbeddingClient = new HttpEmbeddingClient(),
   ) {}
+  reportEmbeddingFailure(
+    operation: EmbeddingFailureEvent["operation"],
+    config: { model: string; baseUrl: string },
+    error: unknown,
+    jobId?: string,
+  ) {
+    if (!(error instanceof EmbeddingError) || !this.onEmbeddingFailure) return;
+    let host = "invalid";
+    try {
+      host = new URL(config.baseUrl).host;
+    } catch {
+      // Keep the placeholder; the endpoint was validated when saved.
+    }
+    try {
+      this.onEmbeddingFailure({
+        operation,
+        code: error.code,
+        model: config.model,
+        host,
+        ...(error.detail ? { detail: error.detail } : {}),
+        ...(jobId ? { jobId } : {}),
+      });
+    } catch {
+      // Logging must never change indexing or retrieval outcomes.
+    }
+  }
   async view() {
     const s = await this.repository.settings();
     return {
@@ -212,10 +251,17 @@ export class MemoryService {
       (previous.encrypted_secret
         ? this.repository.cipher.decrypt(previous.encrypted_secret)
         : null);
-    const identity = await this.embedding.identity(parsed, secret);
-    const vectors = await this.embedding.encode(parsed, secret, [
-      "虚构测试：林晓决定使用旧电脑备份。",
-    ]);
+    let identity: string;
+    let vectors: number[][];
+    try {
+      identity = await this.embedding.identity(parsed, secret);
+      vectors = await this.embedding.encode(parsed, secret, [
+        "虚构测试：林晓决定使用旧电脑备份。",
+      ]);
+    } catch (error) {
+      this.reportEmbeddingFailure("probe", parsed, error);
+      throw error;
+    }
     return {
       identity,
       dimensions: vectors[0]?.length,
@@ -290,8 +336,9 @@ export class MemoryService {
         )
         .catch(() => undefined);
     }, 15000);
+    let generation: Awaited<ReturnType<MemoryRepository["generation"]>> = null;
     try {
-      const generation = await this.repository.generation(job.generation_id);
+      generation = await this.repository.generation(job.generation_id);
       if (!generation)
         throw new EmbeddingError("MEMORY_GENERATION_UNAVAILABLE");
       const secret = generation.encrypted_secret
@@ -339,9 +386,12 @@ export class MemoryService {
         batch.at(-1)?.index ?? Number(job.through_index),
       );
     } catch (error) {
+      if (generation)
+        this.reportEmbeddingFailure("index", generation.config, error, job.id);
       await this.repository.fail(
         job,
         error instanceof EmbeddingError ? error.code : "MEMORY_INDEX_FAILED",
+        error instanceof EmbeddingError ? error.detail : undefined,
       );
     } finally {
       clearInterval(heartbeat);
@@ -629,6 +679,7 @@ export class MemorySession {
         )[0] ?? null;
     } catch (error) {
       this.embeddingFallback = memoryFailureDiagnostic(embeddingStage, error);
+      this.service.reportEmbeddingFailure("search", generation.config, error);
       vector = null;
     }
     const keywords = await keywordPromise;

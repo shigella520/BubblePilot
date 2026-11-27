@@ -24,7 +24,10 @@ import {
   type MemoryScope,
   type MemorySearch,
 } from "./memory-types.js";
-import type { EmbeddingConfig } from "./embedding-client.js";
+import type {
+  EmbeddingConfig,
+  EmbeddingFailureDetail,
+} from "./embedding-client.js";
 import { estimateProgress, type ProgressSample } from "./job-progress.js";
 export interface MemoryJob {
   reason: string;
@@ -527,6 +530,7 @@ export class MemoryRepository {
           model: string;
           reason: string;
           error_code: string | null;
+          error_detail: Record<string, unknown> | null;
           created_at: Date;
           updated_at: Date;
           current: boolean;
@@ -537,7 +541,7 @@ export class MemoryRepository {
           characters: number;
         }
       >(
-        `SELECT j.id,j.chat_id,j.generation_id,j.reason,j.from_index,j.through_index,j.cursor_index,j.status,j.request_key,j.attempts,j.error_code,j.version,j.created_at,j.updated_at,j.range_from,j.range_to,j.progress_scope,j.progress_samples,j.progress_started_at,j.progress_last_at,
+        `SELECT j.id,j.chat_id,j.generation_id,j.reason,j.from_index,j.through_index,j.cursor_index,j.status,j.request_key,j.attempts,j.error_code,j.error_detail,j.version,j.created_at,j.updated_at,j.range_from,j.range_to,j.progress_scope,j.progress_samples,j.progress_started_at,j.progress_last_at,
       ${chatDisplayNameSql("c")} AS chat_name,g.config->>'model' AS model,
       (j.progress_worker=$2 AND j.progress_started_at IS NOT NULL AND c.enabled AND c.deleted_at IS NULL AND EXISTS(SELECT 1 FROM memory_settings WHERE enabled) AND EXISTS(SELECT 1 FROM memory_chats mc WHERE mc.chat_id=j.chat_id AND mc.enabled) AND g.status!='retired' AND NOT EXISTS(SELECT 1 FROM memory_jobs other WHERE other.id<>j.id AND other.status='running' AND other.lease_until>now())) AS current,
       p.total,p.processed,p.removed,p.remaining,p.characters
@@ -862,10 +866,10 @@ export class MemoryRepository {
       );
     });
   }
-  async fail(job: MemoryJob, code: string) {
+  async fail(job: MemoryJob, code: string, detail?: EmbeddingFailureDetail) {
     await this.pool.query(
-      "UPDATE memory_jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,reason=CASE WHEN reason='rebuild' THEN reason ELSE 'backfill' END,error_code=$3,progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,lease_owner=NULL,lease_until=NULL,next_attempt_at=now()+interval '10 seconds'*attempts,version=version+1 WHERE id=$1 AND lease_owner=$2 AND status='running'",
-      [job.id, job.lease_owner, code],
+      "UPDATE memory_jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,reason=CASE WHEN reason='rebuild' THEN reason ELSE 'backfill' END,error_code=$3,error_detail=COALESCE($4::jsonb,'{}'::jsonb)||jsonb_build_object('at',now()),progress_worker=NULL,progress_samples='[]',progress_started_at=NULL,progress_last_at=NULL,lease_owner=NULL,lease_until=NULL,next_attempt_at=now()+interval '10 seconds'*attempts,version=version+1 WHERE id=$1 AND lease_owner=$2 AND status='running'",
+      [job.id, job.lease_owner, code, detail ? JSON.stringify(detail) : null],
     );
   }
   async excerpt(scope: MemoryScope, chunkId: string): Promise<MemoryMessage[]> {

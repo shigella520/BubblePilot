@@ -4189,6 +4189,22 @@ components:
         cursor_index:
           { type: string, description: "诊断游标，不是已处理数量。" }
         through_index: { type: string }
+        error_code:
+          {
+            type: [string, "null"],
+            description: "最近一次失败的错误码；任务之后成功时保留，作为历史参考。",
+          }
+        error_detail:
+          type: [object, "null"]
+          description: 最近一次失败的脱敏事实，不含上游响应正文、消息内容或凭据；0080 之前的失败为空。
+          properties:
+            kind: { type: string, enum: [timeout, network, http, response] }
+            httpStatus: { type: integer, minimum: 100, maximum: 599 }
+            upstreamRequestId: { type: string, maxLength: 128 }
+            upstreamCode: { type: string, maxLength: 64 }
+            elapsedMs: { type: integer, minimum: 0 }
+            timeoutMs: { type: integer, minimum: 1 }
+            at: { type: string, format: date-time }
         progress:
           $ref: "#/components/schemas/MemoryJobProgress"
     MemoryJobProgress:

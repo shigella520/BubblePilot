@@ -14,7 +14,10 @@ import {
   type MemoryScope,
 } from "../modules/memory/memory-types.js";
 import type { MemoryToolDiagnostic } from "../modules/memory/memory-diagnostics.js";
-import { memoryToolLabel } from "../apps/web/src/utils/memory-tool-diagnostics.js";
+import {
+  embeddingFailureSummary,
+  memoryToolLabel,
+} from "../apps/web/src/utils/memory-tool-diagnostics.js";
 import { memoryTools } from "../modules/memory/memory-service.js";
 import { restoreToolArguments } from "../modules/ai/tool-schema.js";
 
@@ -319,6 +322,49 @@ describe("history search diagnostics", () => {
       memoryToolLabel("search_chat_history", { ...diagnostics[0] }),
     ).toContain("HTTP 429");
     expect(JSON.stringify(diagnostics)).not.toContain("fictional-topic");
+  });
+
+  it("keeps sanitized upstream facts for timeouts and gateway errors", async () => {
+    const { execute, encode, diagnostics } = fixture();
+    encode.mockRejectedValueOnce(
+      new EmbeddingError("MEMORY_EMBEDDING_HTTP_ERROR", 500, {
+        kind: "http",
+        httpStatus: 500,
+        upstreamRequestId: "fictional0gateway0id",
+        upstreamCode: "api_error",
+        elapsedMs: 4200,
+      }),
+    );
+    await execute('{"query":"fictional-topic"}');
+    expect(diagnostics[0]?.embeddingFallback).toMatchObject({
+      failureKind: "http",
+      httpStatus: 500,
+      upstreamRequestId: "fictional0gateway0id",
+      upstreamCode: "api_error",
+      elapsedMs: 4200,
+    });
+    const label = memoryToolLabel("search_chat_history", {
+      ...diagnostics[0],
+    });
+    expect(label).toContain("HTTP 500");
+    expect(label).toContain("上游请求 ID fictional0gateway0id");
+    expect(
+      embeddingFailureSummary({
+        kind: "timeout",
+        timeoutMs: 15000,
+        elapsedMs: 15003,
+      }),
+    ).toBe("超时（上限 15 秒）");
+    expect(
+      embeddingFailureSummary({
+        kind: "http",
+        httpStatus: 500,
+        upstreamRequestId: "bad id with spaces",
+        upstreamCode: "<script>",
+        elapsedMs: 3937,
+      }),
+    ).toBe("HTTP 500 · 耗时 3.9 秒");
+    expect(embeddingFailureSummary(null)).toBe("");
   });
 
   it("records mixed retrieval and explains when the keyword branch failed", async () => {

@@ -33,7 +33,9 @@ import { MemoryRepository } from "../modules/memory/memory-repository.js";
 import {
   MemoryService,
   memoryTools,
+  type EmbeddingFailureEvent,
 } from "../modules/memory/memory-service.js";
+import { EmbeddingError } from "../modules/memory/embedding-client.js";
 import { defaultMemoryConfig } from "../modules/memory/memory-types.js";
 import type { EmbeddingClient } from "../modules/memory/embedding-client.js";
 
@@ -504,6 +506,55 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     for (const rejected of [plain, hidden, edited, foreign, future, current])
       expect(await quotedOf(rejected)).toBeUndefined();
     // Leave no queued index jobs for later bounded drains.
+    await drain();
+  });
+
+  it("records sanitized embedding failure detail on the job and operator log", async () => {
+    const id = await chat();
+    await drain();
+    await message(id, "虚构索引失败消息");
+    const events: EmbeddingFailureEvent[] = [];
+    const failing = new MemoryService(repo, {
+      identity: () => Promise.resolve("fixture-v1"),
+      encode: () =>
+        Promise.reject(
+          new EmbeddingError("MEMORY_EMBEDDING_HTTP_ERROR", 500, {
+            kind: "http",
+            httpStatus: 500,
+            upstreamRequestId: "fictional0req0id",
+            upstreamCode: "api_error",
+            elapsedMs: 3210,
+          }),
+        ),
+    });
+    failing.onEmbeddingFailure = (event) => events.push(event);
+    await repo.pool.query(
+      "UPDATE memory_jobs SET next_attempt_at=now() WHERE status='queued'",
+    );
+    await failing.work();
+    const job = (await repo.jobs(id)).find(
+      (j) => j.error_code === "MEMORY_EMBEDDING_HTTP_ERROR",
+    );
+    expect(job?.error_detail).toMatchObject({
+      kind: "http",
+      httpStatus: 500,
+      upstreamRequestId: "fictional0req0id",
+      upstreamCode: "api_error",
+      elapsedMs: 3210,
+      at: expect.any(String) as unknown,
+    });
+    expect(events).toEqual([
+      expect.objectContaining({
+        operation: "index",
+        code: "MEMORY_EMBEDDING_HTTP_ERROR",
+        jobId: job?.id,
+        detail: expect.objectContaining({
+          upstreamRequestId: "fictional0req0id",
+        }) as unknown,
+      }),
+    ]);
+    expect(JSON.stringify(events)).not.toContain("虚构索引失败消息");
+    // The job retries and succeeds with the healthy fixture afterwards.
     await drain();
   });
 

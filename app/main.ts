@@ -290,6 +290,9 @@ const messageRetention =
         ),
       )
     : undefined;
+memoryService.onEmbeddingFailure = (event) => {
+  application.log.warn(event, "Memory embedding failure");
+};
 const replyGateway = new ManagedBlueBubblesReplyGateway(
   blueBubblesSettings,
   (diagnostic) => {

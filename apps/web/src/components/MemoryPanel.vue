@@ -8,6 +8,7 @@ import {
   jsonBody,
 } from "../services/api";
 import { useSessionStore } from "../stores/session";
+import { embeddingFailureSummary } from "../utils/memory-tool-diagnostics";
 import { ProgressPoller } from "../services/progress-poller";
 import AdminDetailDialog from "./AdminDetailDialog.vue";
 import CursorPagination from "./CursorPagination.vue";
@@ -69,6 +70,7 @@ interface Job {
   cursor_index: string;
   through_index: string;
   error_code: string | null;
+  error_detail?: Record<string, unknown> | null;
   request_key: string | null;
   chat_name: string | null;
   model: string;
@@ -907,7 +909,14 @@ onBeforeUnmount(() => {
             {{ localTime(job.updated_at) }} · 当前批次尝试 {{ job.attempts }} 次
           </p>
           <p>索引代次：{{ job.generation_id }}</p>
-          <p v-if="job.error_code">{{ job.error_code }}</p>
+          <p v-if="job.error_code">
+            最近错误：{{ job.error_code
+            }}<template v-if="embeddingFailureSummary(job.error_detail)">
+              （{{ embeddingFailureSummary(job.error_detail) }}）</template
+            ><template v-if="typeof job.error_detail?.at === 'string'">
+              · {{ localTime(job.error_detail.at) }}</template
+            >
+          </p>
           <details>
             <summary>诊断信息</summary>
             处理游标 {{ job.cursor_index }} /

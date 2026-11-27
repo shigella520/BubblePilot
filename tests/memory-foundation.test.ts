@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { HttpEmbeddingClient } from "../modules/memory/embedding-client.js";
+import {
+  EmbeddingError,
+  HttpEmbeddingClient,
+} from "../modules/memory/embedding-client.js";
 import {
   chunkMessages,
   keywordTokens,
@@ -116,6 +119,80 @@ describe("memory foundations", () => {
     ).rejects.toMatchObject({
       code: "MEMORY_EMBEDDING_HTTP_ERROR",
       httpStatus: 500,
+    });
+  });
+  it("extracts only identifier-shaped upstream facts from gateway errors", async () => {
+    const body = JSON.stringify({
+      error: {
+        message:
+          "Service error for private provider text (request id: a1b2c3d4e5f60708)",
+        type: "rix_api_error",
+        code: "api_error",
+      },
+    });
+    const client = new HttpEmbeddingClient(
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response(body, { status: 500 })),
+    );
+    const error: unknown = await client
+      .encode(defaultMemoryConfig, "fictional-secret-value", ["x"])
+      .then(
+        () => null,
+        (e: unknown) => e,
+      );
+    if (!(error instanceof EmbeddingError))
+      throw new Error("expected an EmbeddingError");
+    expect(error.detail).toMatchObject({
+      kind: "http",
+      httpStatus: 500,
+      upstreamRequestId: "a1b2c3d4e5f60708",
+      upstreamCode: "api_error",
+    });
+    expect(error.message).toContain("上游请求 ID a1b2c3d4e5f60708");
+    const serialized = JSON.stringify({ ...error.detail, m: error.message });
+    expect(serialized).not.toContain("private provider text");
+    expect(serialized).not.toContain("fictional-secret-value");
+
+    const fromHeader = new HttpEmbeddingClient(
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response("<html>bad gateway</html>", {
+          status: 502,
+          headers: { "x-request-id": "fictional-header-id" },
+        }),
+      ),
+    );
+    await expect(
+      fromHeader.encode(defaultMemoryConfig, null, ["x"]),
+    ).rejects.toMatchObject({
+      detail: { httpStatus: 502, upstreamRequestId: "fictional-header-id" },
+    });
+  });
+  it("separates timeouts from connection failures", async () => {
+    const hanging = new HttpEmbeddingClient(
+      vi.fn<typeof fetch>().mockImplementation(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(init.signal!.reason as Error),
+            );
+          }),
+      ),
+    );
+    await expect(
+      hanging.encode(defaultMemoryConfig, null, ["x"], 20),
+    ).rejects.toMatchObject({
+      code: "MEMORY_EMBEDDING_TIMEOUT",
+      detail: { kind: "timeout", timeoutMs: 20 },
+    });
+    const refused = new HttpEmbeddingClient(
+      vi.fn<typeof fetch>().mockRejectedValue(new TypeError("fetch failed")),
+    );
+    await expect(
+      refused.encode(defaultMemoryConfig, null, ["x"]),
+    ).rejects.toMatchObject({
+      code: "MEMORY_EMBEDDING_UNAVAILABLE",
+      detail: { kind: "network" },
     });
   });
   it("retains exact identifiers and Chinese words", () => {

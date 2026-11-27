@@ -32,6 +32,11 @@ export interface MemoryFailureDiagnostic {
   validationIssues?: { field?: string; code: string }[];
   errorCode?: string;
   httpStatus?: number;
+  /** Embedding only: sanitized upstream facts for support tickets. */
+  failureKind?: "timeout" | "network" | "http" | "response";
+  upstreamRequestId?: string;
+  upstreamCode?: string;
+  elapsedMs?: number;
 }
 
 export interface MemoryToolDiagnostic {
@@ -81,6 +86,7 @@ const embeddingCodes = new Set([
   "MEMORY_EMBEDDING_EMPTY",
   "MEMORY_EMBEDDING_TOO_LARGE",
   "MEMORY_EMBEDDING_UNAVAILABLE",
+  "MEMORY_EMBEDDING_TIMEOUT",
   "MEMORY_EMBEDDING_INPUT_INVALID",
   "MEMORY_EMBEDDING_INVALID_OUTPUT",
   "MEMORY_EMBEDDING_INVALID_ORDER",
@@ -135,6 +141,16 @@ export function memoryFailureDiagnostic(
       error.httpStatus >= 100 &&
       error.httpStatus <= 599
         ? { httpStatus: error.httpStatus }
+        : {}),
+      ...(error.detail ? { failureKind: error.detail.kind } : {}),
+      ...(error.detail?.upstreamRequestId
+        ? { upstreamRequestId: error.detail.upstreamRequestId }
+        : {}),
+      ...(error.detail?.upstreamCode
+        ? { upstreamCode: error.detail.upstreamCode }
+        : {}),
+      ...(error.detail?.elapsedMs !== undefined
+        ? { elapsedMs: error.detail.elapsedMs }
         : {}),
     };
   if (error instanceof pg.DatabaseError)
