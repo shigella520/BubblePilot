@@ -17,6 +17,7 @@ interface Target {
   pluginId: string;
   pluginName: string;
   server: string;
+  kind?: "sandbox" | "generator";
   fileTypes?: string[];
 }
 const targets = ref<Target[]>([]),
@@ -38,8 +39,11 @@ onMounted(async () => {
     if (active) loading.value = false;
   }
 });
+// Image generators are bound separately in the image generation section.
 const candidates = computed(() =>
-  targets.value.filter((t) => props.pluginIds.includes(t.pluginId)),
+  targets.value.filter(
+    (t) => t.kind !== "generator" && props.pluginIds.includes(t.pluginId),
+  ),
 );
 const selected = computed(() =>
   candidates.value.find(

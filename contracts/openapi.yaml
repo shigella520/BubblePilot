@@ -9,7 +9,7 @@ paths:
   /api/v1/plugins/image-export-targets:
     get:
       operationId: listImageExportTargets
-      description: Approved sandbox services with PNG or file export v1; returns allowed fileTypes (including gif for file export v1). Legacy path retained. Does not enable workflows or create sandboxes.
+      description: Approved plugin services with PNG or file export v1; returns allowed fileTypes (including gif for file export v1). kind is sandbox (bound through imageReply) or generator (bound through imageGeneration); anchorTool and workspacePrefix identify the approved transport anchor and path namespace. Legacy path retained. Does not enable workflows or create sandboxes.
       security: [{ sessionAuth: [] }]
       responses:
         "200":
@@ -17,7 +17,10 @@ paths:
             description: List of pluginId,
             pluginName,
             server,
-            version and fileTypes,
+            version,
+            kind,
+            anchorTool,
+            workspacePrefix and fileTypes,
           }
         "401": { $ref: "#/components/responses/Error" }
   /api/v1/executions/{executionId}/generated-images:
@@ -84,14 +87,18 @@ paths:
   /api/v1/plugins/attachment-targets:
     get:
       operationId: listAttachmentSandboxTargets
-      description: Approved enabled plugin services advertising attachment protocol v1. Metadata only; no sandbox is created. Publish and runtime independently revalidate the binding.
+      description: Approved enabled plugin services advertising attachment protocol v1. kind is sandbox (bound through attachmentHandling) or generator (bound through imageGeneration, with accepted image mimeTypes). Metadata only; no sandbox is created. Publish and runtime independently revalidate the binding.
       security: [{ sessionAuth: [] }]
       responses:
         "200":
           {
             description: List of pluginId,
             pluginName,
-            server and protocol version.,
+            server,
+            protocol version,
+            kind,
+            anchorTool,
+            workspacePrefix and optional mimeTypes.,
           }
         "401": { $ref: "#/components/responses/Error" }
   /api/v1/scheduled-tasks:

@@ -44,7 +44,7 @@ export function pluginToolPresentation(
   return {
     title:
       item.toolName === "import_chat_attachment"
-        ? `附件导入 · ${server ?? "沙箱"}`
+        ? `${field("target") === "image_generator" ? "图片导入（生图）" : "附件导入"} · ${server ?? "目标"}`
         : ["read_tool_result", "search_tool_result"].includes(item.toolName)
           ? `${item.toolName === "read_tool_result" ? "读取结果" : "搜索结果"} · ${server ?? ""} / ${tool ?? ""}`
           : server && tool

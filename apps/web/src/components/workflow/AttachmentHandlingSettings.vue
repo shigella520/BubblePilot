@@ -19,14 +19,18 @@ interface Target {
   pluginId: string;
   pluginName: string;
   server: string;
+  kind?: "sandbox" | "generator";
 }
 const targets = ref<Target[]>([]);
 const loading = ref(true);
 const error = ref("");
 const showLimits = ref(false);
 const draft = ref(attachmentLimitsSchema.parse({}));
+// Image generators are bound separately in the image generation section.
 const candidates = computed(() =>
-  targets.value.filter((t) => props.pluginIds.includes(t.pluginId)),
+  targets.value.filter(
+    (t) => t.kind !== "generator" && props.pluginIds.includes(t.pluginId),
+  ),
 );
 const selected = computed(() =>
   candidates.value.find(

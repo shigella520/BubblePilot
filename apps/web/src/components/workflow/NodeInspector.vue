@@ -2,6 +2,7 @@
 import ToggleSwitch from "../ToggleSwitch.vue";
 import { normalizeWebSearchPolicy } from "../../../../../modules/ai/web-search-policy";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, vue/no-mutating-props */
+import ImageGenerationSettings from "./ImageGenerationSettings.vue";
 import AttachmentHandlingSettings from "./AttachmentHandlingSettings.vue";
 import ImageReplySettings from "./ImageReplySettings.vue";
 import ScheduledTriggerSettings from "./ScheduledTriggerSettings.vue";
@@ -288,6 +289,19 @@ function configVisible(item: any): boolean {
       :plugin-ids="props.config.pluginIds ?? []"
       :output-format="props.config.outputFormat ?? 'text'"
       @update:model-value="(value) => (props.config.attachmentHandling = value)"
+    />
+    <ImageGenerationSettings
+      v-if="node.data.block.type === 'ai-chat'"
+      :model-value="props.config.imageGeneration"
+      :plugin-ids="props.config.pluginIds ?? []"
+      :output-format="props.config.outputFormat ?? 'text'"
+      :sandbox-targets="[
+        props.config.imageReply?.enabled ? props.config.imageReply : undefined,
+        props.config.attachmentHandling?.enabled
+          ? props.config.attachmentHandling
+          : undefined,
+      ]"
+      @update:model-value="(value) => (props.config.imageGeneration = value)"
     />
     <RouterLink v-if="node.data.block.type === 'ai-chat'" to="/memes"
       >管理表情包库</RouterLink
