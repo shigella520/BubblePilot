@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmAction } from "../services/confirm";
 import { partialFailureMessage, settleAll } from "../utils/settle";
 import { formatDateTime } from "../utils/format";
 import StatusBadge from "../components/StatusBadge.vue";
@@ -84,7 +85,7 @@ function startNewWorkflow() {
 async function deleteWorkflow(workflow: Workflow) {
   if (
     workflowDeleteBusyIds.has(workflow.id) ||
-    !window.confirm(`确认删除工作流「${workflow.name}」？`)
+    !(await confirmAction(`确认删除工作流「${workflow.name}」？`))
   )
     return;
   workflowDeleteBusyIds.add(workflow.id);
@@ -901,7 +902,7 @@ async function createTrigger() {
 async function deleteTrigger(trigger: Trigger) {
   if (
     triggerDeleteBusyIds.has(trigger.id) ||
-    !window.confirm(`确认删除触发器「${trigger.name}」？`)
+    !(await confirmAction(`确认删除触发器「${trigger.name}」？`))
   )
     return;
   triggerDeleteBusyIds.add(trigger.id);
@@ -965,7 +966,7 @@ onMounted(load);
         <button class="active" type="button"><Boxes :size="18" />工作流</button>
       </nav>
       <div class="sidebar-note">
-        拖入动作块、连接端口并保存，工作流会立即生效。
+        拖入动作块、连接端口并保存；启用后才接收消息，已启用的工作流点击「保存并发布」即更新线上版本。
       </div>
     </aside>
     <div class="admin-workspace">
@@ -1279,6 +1280,8 @@ onMounted(load);
                     </button>
                     <button
                       class="switch-button"
+                      role="switch"
+                      :aria-checked="workflow.status === 'active'"
                       :class="{ active: workflow.status === 'active' }"
                       type="button"
                       :disabled="
@@ -1286,6 +1289,11 @@ onMounted(load);
                         workflowToggleBusyIds.has(workflow.id)
                       "
                       :aria-busy="workflowToggleBusyIds.has(workflow.id)"
+                      :title="
+                        workflow.publishedVersion === null
+                          ? '尚无已保存版本：请先在画布中保存，再启用'
+                          : undefined
+                      "
                       @click="toggleWorkflow(workflow)"
                     >
                       <span></span
@@ -1680,6 +1688,8 @@ onMounted(load);
                       </div>
                       <button
                         class="switch-button"
+                        role="switch"
+                        :aria-checked="trigger.enabled"
                         :class="{ active: trigger.enabled }"
                         :disabled="triggerToggleBusyIds.has(trigger.id)"
                         :aria-busy="triggerToggleBusyIds.has(trigger.id)"

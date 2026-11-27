@@ -18,6 +18,10 @@ const session = useSessionStore();
 const baseline = ref(JSON.stringify(props.draft));
 const dirty = ref(false);
 const confirmingClose = ref(false);
+/** Locked until authorized: no filling in a form that would end in a 403. */
+const locked = computed(
+  () => props.sensitiveRequired && !session.sensitiveActive,
+);
 const hasChanges = computed(() =>
   props.draft === undefined
     ? dirty.value
@@ -45,7 +49,7 @@ defineExpose({ close });
     <SensitiveUnlock v-if="sensitiveRequired && !session.sensitiveActive" />
     <fieldset
       class="dialog-form-content"
-      :disabled="busy"
+      :disabled="busy || locked"
       :aria-busy="busy"
       @input="dirty = true"
       @change="dirty = true"
@@ -80,7 +84,9 @@ defineExpose({ close });
       >
         关闭
       </button>
-      <slot name="actions" />
+      <fieldset class="dialog-form-actions" :disabled="locked">
+        <slot name="actions" />
+      </fieldset>
     </footer>
   </AdminDetailDialog>
 </template>
@@ -100,6 +106,12 @@ defineExpose({ close });
   padding: 0;
   margin: 0;
   min-width: 0;
+}
+.dialog-form-actions {
+  display: contents;
+  border: 0;
+  padding: 0;
+  margin: 0;
 }
 .dialog-form-footer {
   display: flex;

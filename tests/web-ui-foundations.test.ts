@@ -6,6 +6,10 @@ import {
 } from "../apps/web/src/services/api.js";
 import { statusLabel } from "../apps/web/src/utils/status-labels.js";
 import {
+  confirmAction,
+  confirmState,
+} from "../apps/web/src/services/confirm.js";
+import {
   formatBytes,
   formatDateTime,
   formatDuration,
@@ -92,5 +96,24 @@ describe("web UI foundations", () => {
       ),
     ).toBe("部分内容未能加载：触发器。可点击刷新重试。\n离线");
     expect(partialFailureMessage([], {}, String)).toBe("");
+  });
+
+  it("confirms through one in-app dialog with danger defaults", async () => {
+    const pending = confirmAction("确认删除工作流「示例」？");
+    expect(confirmState.current).toMatchObject({
+      confirmText: "确认删除",
+      danger: true,
+    });
+    confirmState.current!.resolve(true);
+    await expect(pending).resolves.toBe(true);
+    expect(confirmState.current).toBeNull();
+
+    const first = confirmAction("跳过下一次？", { danger: false });
+    expect(confirmState.current?.danger).toBe(false);
+    // A newer request supersedes an unanswered one as cancelled.
+    const second = confirmAction("暂停周期？", { confirmText: "暂停" });
+    await expect(first).resolves.toBe(false);
+    confirmState.current!.resolve(false);
+    await expect(second).resolves.toBe(false);
   });
 });

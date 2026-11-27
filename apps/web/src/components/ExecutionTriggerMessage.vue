@@ -105,7 +105,7 @@ onBeforeUnmount(conceal);
           :aria-expanded="unlocking"
           @click="unlocking = !unlocking"
         >
-          <KeyRound :size="15" />敏感验证
+          <KeyRound :size="15" />解锁查看
         </button>
         <button
           class="icon-button"
@@ -114,7 +114,7 @@ onBeforeUnmount(conceal);
           :aria-label="message ? '隐藏触发消息' : '查看触发消息'"
           :title="
             !session.sensitiveActive
-              ? '请先完成敏感验证'
+              ? '需要敏感操作授权'
               : message
                 ? '隐藏触发消息'
                 : '查看触发消息'
@@ -182,7 +182,7 @@ onBeforeUnmount(conceal);
               ? "正在读取触发消息…"
               : session.sensitiveActive
                 ? "已验证，点击小眼睛查看原文。"
-                : "内容已隐藏，敏感验证后点击小眼睛查看。"
+                : "内容已隐藏，完成敏感操作授权后点击小眼睛查看。"
           }}
         </p>
       </div>

@@ -104,6 +104,12 @@ export const useSessionStore = defineStore("session", () => {
     applySession(null);
   }
 
+  /** Any page can ask the header to open the unlock dialog in place. */
+  const unlockRequests = ref(0);
+  function requestUnlock() {
+    unlockRequests.value += 1;
+  }
+
   async function verifySensitive(password: string) {
     applySession(
       await apiRequest<SessionView>("/api/v1/auth/sensitive", {
@@ -122,5 +128,7 @@ export const useSessionStore = defineStore("session", () => {
     login,
     logout,
     verifySensitive,
+    unlockRequests,
+    requestUnlock,
   };
 });

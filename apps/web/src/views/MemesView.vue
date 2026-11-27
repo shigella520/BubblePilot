@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
 import ToggleSwitch from "../components/ToggleSwitch.vue";
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
@@ -261,9 +262,9 @@ async function deleteCollection() {
     return;
   }
   if (
-    !window.confirm(
+    !(await confirmAction(
       `删除合集“${fresh.name}”？其中 ${fresh.count} 张表情将移入未分类，图片和启用状态不变。`,
-    )
+    ))
   )
     return;
   await perform(async () => {
@@ -337,9 +338,9 @@ async function runBatch(action: BatchAction, retry = false) {
       }));
   if (!targets.length) return;
   if (
-    !window.confirm(
+    !(await confirmAction(
       `${action.type === "delete" ? "删除" : action.type === "move" ? "移动" : action.enabled ? "启用" : "停用"}所选的 ${targets.length} 张表情？${action.type === "delete" ? "删除后退出检索，历史投递记录保留。" : ""}`,
-    )
+    ))
   )
     return;
   bulkBusy.value = true;
@@ -560,7 +561,7 @@ async function refreshEditing() {
       tags.value !== item.tags.join("，") ||
       active.value !== item.enabled ||
       assetCollection.value !== (item.collectionId ?? "")) &&
-    !window.confirm("刷新会丢弃未保存的修改，继续？")
+    !(await confirmAction("刷新会丢弃未保存的修改，继续？"))
   )
     return;
   await perform(async () => {
@@ -596,7 +597,10 @@ async function adopt() {
 }
 async function remove() {
   const item = editing.value;
-  if (!item || !window.confirm(`删除“${item.name}”？已产生的投递记录会保留。`))
+  if (
+    !item ||
+    !(await confirmAction(`删除“${item.name}”？已产生的投递记录会保留。`))
+  )
     return;
   await perform(async () => {
     await apiRequest(`/api/v1/memes/${item.id}`, {

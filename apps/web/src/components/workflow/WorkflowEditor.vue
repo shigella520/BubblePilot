@@ -39,6 +39,8 @@ const props = defineProps<{
   blocks: Block[];
   workflowName?: string;
   definition?: any;
+  /** "保存并发布" when saving publishes to an enabled workflow. */
+  saveLabel?: string;
 }>();
 const emit = defineEmits<{
   (event: "create", name: string, definition: any): void;
@@ -311,10 +313,23 @@ function updateInput(port: string, value: any) {
     }
   }
 }
+/** Shown after a delete so the existing undo is discoverable. */
+const removedNotice = ref<string | null>(null);
+let removedTimer: ReturnType<typeof setTimeout> | undefined;
+function announceRemoval(label: string) {
+  removedNotice.value = label;
+  clearTimeout(removedTimer);
+  removedTimer = setTimeout(() => (removedNotice.value = null), 8000);
+}
+function undoRemoval() {
+  removedNotice.value = null;
+  undo();
+}
 function removeSelected() {
   if (!selected.value) return;
   if (selected.value.data.block.type === "message-trigger") return;
   recordHistory();
+  announceRemoval(String(selected.value.data.label ?? "动作块"));
   const id = selected.value.id;
   nodes.value = nodes.value.filter((node) => node.id !== id);
   edges.value = edges.value.filter(
@@ -760,6 +775,15 @@ function onKeydown(event: KeyboardEvent) {
   <p v-if="saveValidationError" role="alert" class="workflow-save-validation">
     {{ saveValidationError }}
   </p>
+  <p v-if="removedNotice" class="workflow-undo-notice" role="status">
+    已删除「{{ removedNotice }}」<button
+      class="button secondary tiny"
+      type="button"
+      @click="undoRemoval"
+    >
+      撤销
+    </button>
+  </p>
   <div class="workflow-editor-v2" @keydown="onKeydown">
     <div class="workflow-toolbar">
       <button class="button secondary" type="button" @click="openCreator()">
@@ -785,7 +809,7 @@ function onKeydown(event: KeyboardEvent) {
         type="button"
         @click="save"
       >
-        保存
+        {{ props.saveLabel ?? "保存" }}
       </button>
     </div>
     <div

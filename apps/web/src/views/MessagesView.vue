@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import LockedHint from "../components/LockedHint.vue";
+import { confirmAction } from "../services/confirm";
 import { formatDateTime, formatTime } from "../utils/format";
 import StatusBadge from "../components/StatusBadge.vue";
 import AdminFormDialog from "../components/AdminFormDialog.vue";
@@ -590,7 +592,9 @@ async function deleteChat(chat: Chat) {
   }
   const label = chat.displayName || chat.providerChatId;
   if (
-    !window.confirm(`确认删除聊天「${label}」？历史消息和执行记录仍会保留。`)
+    !(await confirmAction(
+      `确认删除聊天「${label}」？历史消息和执行记录仍会保留。`,
+    ))
   ) {
     return;
   }
@@ -932,8 +936,8 @@ onBeforeUnmount(() =>
         </div>
         <p class="panel-description">
           这里列出 Webhook
-          已发现的聊天。启停操作需要二次验证，并使用版本号防止并发覆盖。
-          长期记忆授权独立于聊天监听；已授权不代表全局服务已开启或索引已完成，可点击对应聊天的“配置”调整。角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建需要二次验证，会更新聊天共享历史并产生模型用量；索引记录在“历史索引”。
+          已发现的聊天。启停操作需要敏感操作授权，并使用版本号防止并发覆盖。
+          长期记忆授权独立于聊天监听；已授权不代表全局服务已开启或索引已完成，可点击对应聊天的“配置”调整。角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建需要敏感操作授权，会更新聊天共享历史并产生模型用量；索引记录在“历史索引”。
         </p>
         <div class="table-shell">
           <table>
@@ -997,6 +1001,8 @@ onBeforeUnmount(() =>
                 <td>
                   <button
                     class="switch-button"
+                    role="switch"
+                    :aria-checked="chat.enabled"
                     :class="{ active: chat.enabled }"
                     type="button"
                     :disabled="
@@ -1239,7 +1245,7 @@ onBeforeUnmount(() =>
         <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
           <Search :size="24" />
           <strong>消息正文已遮蔽</strong>
-          <span>完成二次验证后才能搜索和显示归档内容。</span>
+          <LockedHint reason="完成敏感操作授权后才能搜索和显示归档内容。" />
         </div>
         <div v-else class="message-results">
           <article v-for="item in messages" :key="item.id">

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import LockedHint from "../LockedHint.vue";
+import { confirmAction } from "../../services/confirm";
 import TaskScheduleEditor from "./TaskScheduleEditor.vue";
 import type { TaskSchedule } from "../../../../../modules/scheduled-tasks/task-schedule";
 import AdminFormDialog from "../AdminFormDialog.vue";
@@ -287,6 +289,20 @@ async function control(
   task: Task,
   operation: "pause" | "resume" | "skip-next",
 ) {
+  if (
+    operation !== "resume" &&
+    !(await confirmAction(
+      operation === "pause"
+        ? "暂停后不再按周期发送，直到手动恢复；暂停期间的周期不会补发。"
+        : "仅跳过下一次发送，之后的周期照常进行。",
+      {
+        title: operation === "pause" ? "暂停该周期任务？" : "跳过下一次？",
+        confirmText: operation === "pause" ? "暂停周期" : "跳过下一次",
+        danger: false,
+      },
+    ))
+  )
+    return;
   await action(async () => {
     const result = await apiRequest<Task>(
       `/api/v1/scheduled-tasks/${task.id}/${operation}`,
@@ -301,6 +317,13 @@ async function control(
   });
 }
 async function cancel(task: Task) {
+  if (
+    !(await confirmAction(
+      "取消后该任务（含所有后续周期）不再发送，且不能恢复；如本次发送已提交，仍可能送达。",
+      { title: "取消整个任务？", confirmText: "取消任务" },
+    ))
+  )
+    return;
   await action(async () => {
     const result = await apiRequest<Task>(
       `/api/v1/scheduled-tasks/${task.id}/cancel`,
@@ -368,7 +391,7 @@ onBeforeUnmount(() => generation++);
         <p class="eyebrow">SCHEDULED TASKS</p>
         <h2>定时任务</h2>
         <p>
-          按创建时间从新到旧排列，默认显示待执行任务。修改、暂停、跳过、取消和删除需要敏感验证。已结束任务按系统设置中的保留天数自动清理。
+          按创建时间从新到旧排列，默认显示待执行任务。修改、暂停、跳过、取消和删除需要敏感操作授权。已结束任务按系统设置中的保留天数自动清理。
         </p>
       </div>
       <button
@@ -405,9 +428,7 @@ onBeforeUnmount(() => generation++);
         </select></label
       >
     </div>
-    <p v-if="!session.sensitiveActive">
-      请先在顶部完成敏感验证，才能修改任务或查看详情。
-    </p>
+    <LockedHint reason="完成敏感操作授权后才能修改任务或查看详情。" />
     <p v-if="error" role="alert">{{ error }}</p>
     <div class="table-scroll">
       <table>

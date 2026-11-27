@@ -34,7 +34,7 @@ async function login() {
       <img src="/bubblepilot-icon.png" alt="BubblePilot" />
       <p class="eyebrow">SELF-HOSTED AUTOMATION</p>
       <h1>欢迎回到 BubblePilot</h1>
-      <p>登录只建立管理会话；正文和生产配置仍由短时效二次验证保护。</p>
+      <p>登录只建立管理会话；正文和生产配置仍由短时效的敏感操作授权保护。</p>
       <form @submit.prevent="login">
         <label>
           <span>登录密码</span>

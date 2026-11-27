@@ -9,7 +9,7 @@ import {
   Settings,
   ShieldCheck,
 } from "@lucide/vue";
-import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import { errorMessage } from "../services/api";
@@ -46,6 +46,25 @@ onMounted(() => {
 onBeforeUnmount(() => navigationObserver?.disconnect());
 const unlockOpen = ref(false);
 const unlockTrigger = ref<HTMLElement | null>(null);
+// Pages call session.requestUnlock() instead of pointing at the header.
+watch(
+  () => session.unlockRequests,
+  () => {
+    if (!session.sensitiveActive) unlockOpen.value = true;
+  },
+);
+// Minute-level clock for the remaining authorization time.
+const now = ref(Date.now());
+let clock: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  clock = setInterval(() => (now.value = Date.now()), 30_000);
+});
+onBeforeUnmount(() => clearInterval(clock));
+const sensitiveMinutesLeft = computed(() => {
+  const until = session.session?.sensitiveUntil;
+  if (!session.sensitiveActive || !until) return null;
+  return Math.max(1, Math.ceil((Date.parse(until) - now.value) / 60_000));
+});
 watch(
   () => session.sensitiveActive,
   (active) => {
@@ -89,9 +108,16 @@ async function logout() {
       <RouterLink to="/settings"><Settings :size="16" />设置</RouterLink>
     </nav>
     <div class="topbar-meta">
-      <span class="connection-pill online">
+      <span
+        class="connection-pill"
+        :class="session.sensitiveActive ? 'online' : 'locked'"
+      >
         <span class="status-dot"></span>
-        {{ session.sensitiveActive ? "敏感授权有效" : "管理会话有效" }}
+        {{
+          sensitiveMinutesLeft !== null
+            ? `敏感操作授权 · 剩余 ${sensitiveMinutesLeft} 分钟`
+            : "敏感操作未解锁"
+        }}
       </span>
       <button
         ref="unlockTrigger"

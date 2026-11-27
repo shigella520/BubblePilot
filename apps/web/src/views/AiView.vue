@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmAction } from "../services/confirm";
 import { partialFailureMessage, settleAll } from "../utils/settle";
 import { formatDateTime } from "../utils/format";
 import AdminFormDialog from "../components/AdminFormDialog.vue";
@@ -26,6 +27,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 
 import {
   apiRequest,
+  diagnosticSeparator,
   errorMessage,
   jsonBody,
   parseJsonObject,
@@ -535,7 +537,7 @@ async function providerAction(
   if (action === "delete" && providerDeleteBusyIds.has(item.id)) return;
   if (
     action === "delete" &&
-    !window.confirm(`确认删除 AI Provider「${item.name}」？`)
+    !(await confirmAction(`确认删除 AI Provider「${item.name}」？`))
   )
     return;
   if (action === "toggle") {
@@ -604,9 +606,11 @@ async function providerAction(
       );
       feedback = result.success
         ? `AI Provider「${item.name}」${allVerified ? "测试通过" : "连接正常，但部分能力未通过"}：${result.message}（${result.model} · ${result.durationMs} ms）。`
-        : `AI Provider「${item.name}」连接测试失败：${result.message}${
-            result.errorCode === null ? "" : `（${result.errorCode}）`
-          }（${result.durationMs} ms）。`;
+        : `AI Provider「${item.name}」连接测试失败：${result.message}（${result.durationMs} ms）。${
+            result.errorCode === null
+              ? ""
+              : `${diagnosticSeparator}${result.errorCode}`
+          }`;
       feedbackIsError = !result.success || !allVerified;
       const imageMismatch = result.checks.find(
         (check) =>
@@ -617,7 +621,9 @@ async function providerAction(
       if (imageMismatch?.responsePreview) {
         feedback += ` 固定图片探测回复：${imageMismatch.responsePreview}`;
       }
-      await load();
+      // Refresh provider health only; reloading the page would discard
+      // unsaved edits in the other settings forms.
+      providers.value = await apiRequest<Provider[]>("/api/v1/ai/providers");
     }
     if (action === "reset") {
       const updated = await apiRequest<Provider>(
@@ -813,7 +819,7 @@ async function toggleRoute(item: AiRoute) {
 async function deleteRoute(item: AiRoute) {
   if (
     routeDeleteBusyIds.has(item.id) ||
-    !window.confirm(`确认删除 Provider 路由「${item.name}」？`)
+    !(await confirmAction(`确认删除 Provider 路由「${item.name}」？`))
   )
     return;
   routeDeleteBusyIds.add(item.id);
@@ -1533,6 +1539,8 @@ onMounted(async () => {
                 <td>
                   <button
                     class="switch-button"
+                    role="switch"
+                    :aria-checked="item.enabled"
                     :class="{ active: item.enabled }"
                     :disabled="routeToggleBusyIds.has(item.id)"
                     :aria-busy="routeToggleBusyIds.has(item.id)"

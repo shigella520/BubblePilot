@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import LockedHint from "./LockedHint.vue";
+import { confirmAction } from "../services/confirm";
 import { ref, watch, nextTick, onUnmounted } from "vue";
 import { apiRequest } from "../services/api";
 import { useRoute } from "vue-router";
@@ -55,11 +57,11 @@ async function load() {
 async function act(item: Delivery, action: "retry" | "close") {
   if (
     busy.value ||
-    !window.confirm(
+    !(await confirmAction(
       action === "retry"
         ? "仅重试这张图片，文字不会重发。确认继续？"
         : "关闭该图片的跟进，保留原始投递结果。确认继续？",
-    )
+    ))
   )
     return;
   busy.value = true;
@@ -135,8 +137,8 @@ watch(
             @click="act(item, 'close')"
           >
             关闭跟进</button
-          ><span v-if="!sensitiveActive">请先在顶栏解锁敏感操作</span></template
-        >
+          ><LockedHint compact
+        /></template>
       </div>
     </article>
   </section>

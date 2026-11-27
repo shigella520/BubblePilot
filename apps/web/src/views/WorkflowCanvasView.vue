@@ -1,6 +1,15 @@
 <script setup lang="ts">
+import { useDirtyGuard } from "../composables/useDirtyGuard";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call */
-import { ArrowLeft, Check, Download, LoaderCircle, Power } from "@lucide/vue";
+import {
+  AlertCircle,
+  ArrowLeft,
+  Check,
+  CircleDot,
+  Download,
+  LoaderCircle,
+  Power,
+} from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -68,6 +77,8 @@ async function approveIdle() {
   await pending?.action();
 }
 const saveState = ref<"saved" | "dirty" | "saving" | "error">("saved");
+// An unsaved or failed save must not be lost by navigating away.
+useDirtyGuard(() => saveState.value === "dirty" || saveState.value === "error");
 
 interface AiRouteOption {
   id: string;
@@ -170,7 +181,7 @@ async function create(name: string, nextDefinition: any) {
       }),
       headers: { "content-type": "application/json" },
     });
-    message.value = "工作流已保存，请在顶部启用。";
+    message.value = "工作流已保存。点击右上角「启用」后开始接收消息。";
     messageIsError.value = false;
     saveState.value = "saved";
     candidateVersion.value = version.version;
@@ -218,8 +229,8 @@ async function saveVersion(
     saveState.value = "saved";
     message.value =
       workflowStatus.value === "active"
-        ? "已保存并更新当前启用版本。"
-        : "已保存新版本，请在顶部启用。";
+        ? `已保存并发布 v${version.version}，新消息将使用此版本。`
+        : `已保存 v${version.version}。点击右上角「启用」后开始接收消息。`;
     messageIsError.value = false;
   } catch (cause) {
     saveState.value = "error";
@@ -326,8 +337,10 @@ onMounted(load);
           @input="markDirty"
         />
       </div>
-      <span class="workflow-save-state" :class="saveState">
-        <LoaderCircle v-if="saveState === 'saving'" :size="14" />
+      <span class="workflow-save-state" :class="saveState" role="status">
+        <LoaderCircle v-if="saveState === 'saving'" :size="14" class="spin" />
+        <AlertCircle v-else-if="saveState === 'error'" :size="14" />
+        <CircleDot v-else-if="saveState === 'dirty'" :size="14" />
         <Check v-else :size="14" />
         {{
           saveState === "saving"
@@ -339,6 +352,21 @@ onMounted(load);
                 : "已保存"
         }}
       </span>
+      <span
+        v-if="!isNew && candidateVersion !== null"
+        class="workflow-version-info"
+        :title="
+          workflowStatus === 'active'
+            ? '已启用：保存会直接发布为线上版本'
+            : '未启用：保存不影响线上'
+        "
+        >编辑 v{{ candidateVersion
+        }}{{
+          workflowStatus === "active" && publishedVersion !== null
+            ? ` · 线上 v${publishedVersion}`
+            : " · 未启用"
+        }}</span
+      >
       <div class="workflow-canvas-actions">
         <BotIdentityPanel
           v-if="!isNew"
@@ -418,6 +446,7 @@ onMounted(load);
         :blocks="blocks"
         :workflow-name="workflowName"
         :definition="definition"
+        :save-label="workflowStatus === 'active' ? '保存并发布' : '保存'"
         @create="create"
         @version="saveVersion"
         @change="markDirty"

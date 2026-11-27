@@ -3,6 +3,7 @@ import { onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import AppHeader from "./components/AppHeader.vue";
+import ConfirmHost from "./components/ConfirmHost.vue";
 import { useSessionStore } from "./stores/session";
 
 const session = useSessionStore();
@@ -29,5 +30,6 @@ onMounted(() => session.restore());
       正在连接 BubblePilot…
     </div>
     <RouterView v-else />
+    <ConfirmHost />
   </div>
 </template>

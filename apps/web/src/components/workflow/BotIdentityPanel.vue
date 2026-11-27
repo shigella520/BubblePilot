@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmAction } from "../../services/confirm";
 import { formatDateTime } from "../../utils/format";
 import { computed, ref, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
@@ -85,6 +86,15 @@ async function refresh(includeIdentity = false) {
   } finally {
     loading.value = false;
   }
+}
+async function confirmBackfill() {
+  if (
+    await confirmAction(
+      "将扫描归档消息并把能精确匹配到本工作流的历史标记为其发送；不调用模型，可能需要一段时间。",
+      { title: "回填历史归属？", confirmText: "开始回填", danger: false },
+    )
+  )
+    await act(false);
 }
 async function act(saveNickname: boolean) {
   if (busy.value || loading.value) return;
@@ -232,7 +242,7 @@ const stateLabel = (s: string) =>
       <button
         class="button secondary"
         :disabled="busy || loading"
-        @click="act(false)"
+        @click="confirmBackfill"
       >
         回填本自动化历史归属
       </button>

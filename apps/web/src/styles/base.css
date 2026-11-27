@@ -924,6 +924,12 @@ td .keyline {
 .workflow-save-state.error {
   color: #b42318;
 }
+.workflow-save-state.dirty {
+  color: var(--bubblepilot-warning);
+}
+.workflow-save-state.saving {
+  color: var(--bubblepilot-muted);
+}
 .workflow-canvas-actions {
   display: flex;
   gap: 8px;
@@ -3632,4 +3638,30 @@ legend {
 }
 .load-error-state .row-actions {
   justify-content: center;
+}
+
+.workflow-undo-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--bubblepilot-space-3);
+  margin: 0 0 var(--bubblepilot-space-2);
+  padding: var(--bubblepilot-space-2) var(--bubblepilot-space-3);
+  border: 1px solid var(--bubblepilot-info-line);
+  border-radius: var(--bubblepilot-radius-sm);
+  background: var(--bubblepilot-info-bg);
+  font-size: var(--bubblepilot-text-sm);
+}
+
+.connection-pill.locked {
+  color: var(--bubblepilot-muted);
+}
+.connection-pill.locked .status-dot {
+  background: var(--bubblepilot-neutral);
+  box-shadow: none;
+}
+
+.workflow-version-info {
+  color: var(--bubblepilot-muted);
+  font-size: var(--bubblepilot-text-xs);
+  white-space: nowrap;
 }

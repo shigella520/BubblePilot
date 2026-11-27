@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
 import StatusBadge from "./StatusBadge.vue";
 import AdminFormDialog from "./AdminFormDialog.vue";
@@ -360,6 +361,14 @@ async function authorize() {
   if (!session.sensitiveActive || chat.version === null) return;
   const id = chatId.value;
   const enabled = !chat.enabled;
+  if (
+    !enabled &&
+    !(await confirmAction(
+      "停用后模型不能再检索这个聊天的长期历史，已建立的索引保留，可随时重新授权。",
+      { title: "停用此聊天的长期检索？", confirmText: "停用检索" },
+    ))
+  )
+    return;
   await apiRequest(`/api/v1/chats/${id}/memory`, {
     method: "PUT",
     body: jsonBody({ enabled, expectedVersion: chat.version }),
@@ -404,8 +413,32 @@ async function backfill() {
   notice.value = "补建任务已创建，可在下方任务列表查看进度。";
   await refresh();
 }
+const jobActionConfirmations: Record<
+  string,
+  { title: string; message: string; confirmText: string; danger: boolean }
+> = {
+  cancel: {
+    title: "取消索引任务？",
+    message: "已写入的向量保留，未处理的部分不会继续；需要时可重新发起补建。",
+    confirmText: "取消任务",
+    danger: true,
+  },
+  activate: {
+    title: "启用此索引代次？",
+    message:
+      "启用后长期检索立即改用该代次的向量，旧代次退役。请确认覆盖范围已满足需要。",
+    confirmText: "启用代次",
+    danger: false,
+  },
+};
 async function action(job: Job, name: string) {
   if (!session.sensitiveActive) return;
+  const confirmation = jobActionConfirmations[name];
+  if (
+    confirmation &&
+    !(await confirmAction(confirmation.message, confirmation))
+  )
+    return;
   await apiRequest(`/api/v1/memory/jobs/${job.id}/actions`, {
     method: "POST",
     body: jsonBody({ action: name, expectedVersion: job.version }),

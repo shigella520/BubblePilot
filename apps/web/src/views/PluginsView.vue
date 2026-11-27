@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
 import { retainedApprovals } from "../utils/plugin-tool-approval";
 import PluginOverviewCard from "../components/PluginOverviewCard.vue";
@@ -90,6 +91,7 @@ interface ImportTask {
 const items = ref<PluginListItem[]>([]),
   busy = ref(false),
   error = ref(""),
+  notice = ref(""),
   showImport = ref(false),
   url = ref(""),
   gitRef = ref(""),
@@ -167,6 +169,7 @@ async function action(fn: () => Promise<void>) {
   if (busy.value) return;
   busy.value = true;
   error.value = "";
+  notice.value = "";
   try {
     await fn();
   } catch (e) {
@@ -331,9 +334,9 @@ async function install() {
     const existing = items.value.find((p) => p.name === preview.value!.name);
     if (
       existing &&
-      !confirm(
+      !(await confirmAction(
         "将安装新版本并切换后续执行。请确认已检查 Skill、工具和服务地址变化。",
-      )
+      ))
     )
       return;
     const data = await apiRequest<Detail>(
@@ -352,7 +355,18 @@ async function install() {
     preview.value = null;
     selected.value = data;
     await load();
+    notice.value = `插件「${data.name}」已安装，后续执行将使用此版本。`;
   });
+}
+async function rollback(revision: string) {
+  if (
+    !(await confirmAction(
+      "后续执行将改用该版本的 Skill 与工具定义；工具授权需与该版本一致，必要时请重新测试连接。",
+      { title: "回退到此版本？", confirmText: "回退版本", danger: false },
+    ))
+  )
+    return;
+  await update({ revision });
 }
 async function update(body: Record<string, unknown>) {
   await action(async () => {
@@ -364,15 +378,23 @@ async function update(body: Record<string, unknown>) {
       }),
     });
     await load();
+    notice.value =
+      "revision" in body
+        ? "已回退到所选版本。"
+        : "enabled" in body
+          ? body.enabled
+            ? "插件已启用。"
+            : "插件已停用，引用它的工作流将无法调用其工具。"
+          : "插件已更新。";
   });
 }
 async function save() {
   if (
     !approved.value.length &&
     (selected.value?.config.tools.length ?? 0) > 0 &&
-    !confirm(
+    !(await confirmAction(
       "当前没有勾选任何工具，保存后将撤销此插件全部工具授权，使用它的工作流会失败。确认继续？",
-    )
+    ))
   )
     return;
   await action(async () => {
@@ -396,6 +418,7 @@ async function save() {
     for (const c of Object.values(connections.value))
       c.callTimeoutSeconds ??= 45;
     await load();
+    notice.value = "配置与工具授权已保存。";
   });
 }
 async function view(file: string) {
@@ -407,7 +430,12 @@ async function view(file: string) {
   });
 }
 async function remove() {
-  if (!confirm("卸载插件？有工作流引用时将阻止卸载，历史文件仍保留。")) return;
+  if (
+    !(await confirmAction(
+      "卸载插件？有工作流引用时将阻止卸载，历史文件仍保留。",
+    ))
+  )
+    return;
   await action(async () => {
     await apiRequest(`/api/v1/plugins/${selected.value!.id}`, {
       method: "DELETE",
@@ -415,6 +443,7 @@ async function remove() {
     });
     selected.value = null;
     await load();
+    notice.value = "插件已卸载，历史文件仍保留。";
   });
 }
 </script>
@@ -436,6 +465,9 @@ async function remove() {
         </button>
       </div>
     </header>
+    <DismissibleMessage v-if="notice" @close="notice = ''">{{
+      notice
+    }}</DismissibleMessage>
     <DismissibleMessage v-if="error" error @close="error = ''">{{
       error
     }}</DismissibleMessage>
@@ -711,11 +743,17 @@ async function remove() {
               v-if="preview"
               class="button primary"
               :disabled="!tested"
+              :aria-describedby="tested ? undefined : 'plugin-test-required'"
               @click="install"
             >
               确认安装</button
             ><template v-if="selected"
-              ><button class="button primary" :disabled="!tested" @click="save">
+              ><button
+                class="button primary"
+                :disabled="!tested"
+                :aria-describedby="tested ? undefined : 'plugin-test-required'"
+                @click="save"
+              >
                 保存配置与授权</button
               ><button
                 class="button secondary"
@@ -726,6 +764,14 @@ async function remove() {
                 卸载
               </button></template
             >
+            <small
+              v-if="(preview || selected) && !tested"
+              id="plugin-test-required"
+              class="plugin-test-required"
+              >需先点击上方「测试连接并发现工具」，通过后才能{{
+                preview ? "安装" : "保存"
+              }}；修改连接设置后需重新测试。</small
+            >
           </div>
           <details v-if="selected">
             <summary>历史版本与回退</summary>
@@ -734,7 +780,7 @@ async function remove() {
               <button
                 class="button secondary tiny"
                 :disabled="v.hash === selected.revision"
-                @click="update({ revision: v.hash })"
+                @click="rollback(v.hash)"
               >
                 回退到此版本
               </button>
@@ -759,6 +805,11 @@ async function remove() {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.plugin-test-required {
+  flex-basis: 100%;
+  color: var(--bubblepilot-warning);
+  font-size: var(--bubblepilot-text-sm);
 }
 .plugin-heading h1 {
   display: flex;

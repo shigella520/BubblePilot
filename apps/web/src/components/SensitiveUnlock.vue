@@ -50,7 +50,7 @@ async function verify() {
   <form v-else class="sensitive-unlock" @submit.prevent="verify">
     <KeyRound :size="20" />
     <div>
-      <strong>需要二次验证</strong
+      <strong>需要敏感操作授权</strong
       ><span>查看受保护内容或执行敏感操作前，请输入独立的敏感操作密码。</span>
     </div>
     <input

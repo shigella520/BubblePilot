@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import LockedHint from "../components/LockedHint.vue";
+import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
 import {
   pluginToolPresentation,
@@ -833,9 +835,9 @@ async function closeRecoveryQueue() {
   if (!session.sensitiveActive || recoveryBusy.value || !recoveryOnly.value)
     return;
   if (
-    !window.confirm(
+    !(await confirmAction(
       "确认批量关闭整个恢复队列中的待恢复任务？范围包含所有分页中的等待重试、失败和死信记录；正在执行的任务不受影响。关闭后停止重试、不重发消息，保留执行历史。发送结果未知的记录也会关闭并退出待处理告警，但不代表发送成功，请先核对聊天。",
-    )
+    ))
   )
     return;
   recoveryBusy.value = true;
@@ -861,7 +863,7 @@ async function recover(action: "retry" | "close") {
   if (detail.value === null || !session.sensitiveActive || recoveryBusy.value)
     return;
   if (
-    !window.confirm(
+    !(await confirmAction(
       action === "retry"
         ? "确认创建一条新的恢复执行？原执行历史会保留。"
         : detail.value.deliveries.some(
@@ -869,7 +871,7 @@ async function recover(action: "retry" | "close") {
             )
           ? "此消息可能已经发送，请先核对对应聊天。关闭后将不再显示待处理告警，但发送结果仍保留为未知，不会重新发送。确认关闭？"
           : "确认人工关闭这条失败执行？",
-    )
+    ))
   )
     return;
   recoveryBusy.value = true;
@@ -1317,7 +1319,7 @@ function contextSnapshotValue(
               :title="
                 session.sensitiveActive
                   ? '关闭整个恢复队列，包含所有分页'
-                  : '请先在顶栏解锁敏感操作'
+                  : '需要敏感操作授权（点击顶栏钥匙图标解锁）'
               "
               @click="closeRecoveryQueue"
             >
@@ -1467,7 +1469,7 @@ function contextSnapshotValue(
         <div v-if="!session.sensitiveActive" class="empty-panel sensitive-mask">
           <ShieldCheck :size="24" />
           <strong>审计事件已遮蔽</strong>
-          <span>完成二次验证后才能查看审计事件。</span>
+          <LockedHint reason="完成敏感操作授权后才能查看审计事件。" />
         </div>
         <div v-else class="table-shell">
           <table>
@@ -2047,6 +2049,10 @@ function contextSnapshotValue(
                           rawResponses[item.id]!.body || "（空响应正文）"
                         }}</pre>
                       </template>
+                      <LockedHint
+                        v-else-if="!session.sensitiveActive"
+                        reason="原始响应需要敏感操作授权。"
+                      />
                     </details>
                     <p v-else class="keyline raw-request-unavailable">
                       当前实例无可用原始响应：可能尚未收到完整响应、未曾保存或缓存已过期。
@@ -2082,6 +2088,10 @@ function contextSnapshotValue(
                       <pre v-else-if="rawRequests[item.id] !== undefined">{{
                         rawRequests[item.id]
                       }}</pre>
+                      <LockedHint
+                        v-else-if="!session.sensitiveActive"
+                        reason="原始请求报文需要敏感操作授权。"
+                      />
                     </details>
                     <p v-else class="keyline raw-request-unavailable">
                       当前实例未保留此原始请求报文。可能未曾保存、应用已重启、超出最近
