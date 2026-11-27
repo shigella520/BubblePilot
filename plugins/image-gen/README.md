@@ -40,7 +40,7 @@
 1. 在 Dockge 新建栈（例如 `image-gen`），粘贴 `deploy/compose.yaml`，按 `deploy/.env.example` 在栈的 `.env` 中填写实际值：上游地址、上游 Key、随机 Bearer Token（至少 24 个字符）。
 2. 群晖不会自动创建绑定目录：先创建栈目录下的 `data/`，并让容器用户（UID 1000）可写，用于保存每日额度计数。
 3. 网络：
-   - `bubblepilot_mcp`（内部网络）：BubblePilot 通过别名 `image-gen-mcp:8080` 访问；
+   - `bubblepilot_mcp`（内部网络）：BubblePilot 通过别名 `image-gen-mcp:8080` 访问。该别名只挂在内部网络上；服务名（`image-gen`）会在所有网络上注册 DNS，不能与别名相同，否则同样接入 macvlan 的 BubblePilot 会解析到不监听的 `.78`；
    - `macvlan_gw11`：只用于经 `.11` 网关访问上游，地址默认 `192.168.31.78`。
 4. 监听规则：服务启动时绑定第一个不属于 `LISTEN_EXCLUDE_CIDR`（默认 `192.168.31.0/24`）的 IPv4 地址，即内部网络地址，**不在 macvlan 局域网地址上监听**；找不到合格地址时拒绝启动。健康检查只在容器内 `127.0.0.1:8081/healthz`。上线后应从局域网另一台设备确认 `192.168.31.78:8080` 无法连接。
 5. 在 BubblePilot 插件管理导入 `plugin/` 包，`mcp.json` 中的 `${IMAGE_GEN_MCP_TOKEN}` 填写与 `MCP_BEARER_TOKEN` 相同的值（格式为 `Bearer <token>`），发现并批准三个工具。

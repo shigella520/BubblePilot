@@ -2,8 +2,11 @@
 # bubblepilot_mcp network; macvlan_gw11 only provides egress via the .11 gateway.
 # The HTTP listener binds to the internal address (LISTEN_EXCLUDE_CIDR), never
 # to the macvlan/LAN address, and every endpoint requires the bearer token.
+# The service name is a DNS name on every attached network, including the
+# macvlan one where nothing listens, so it must differ from the MCP alias.
+# BubblePilot connects to image-gen-mcp, which exists only on bubblepilot_mcp.
 services:
-  image-gen-mcp:
+  image-gen:
     image: ${IMAGE_GEN_MCP_IMAGE:-ghcr.io/shigella520/bubblepilot-image-gen-mcp:dev}
     pull_policy: missing
     restart: unless-stopped
