@@ -82,9 +82,13 @@ jobs:
         run: |
           docker compose config
           docker compose --env-file plugins/opensandbox/deploy/.env.example -f plugins/opensandbox/deploy/compose.yaml config --quiet
+          docker compose --env-file plugins/image-gen/deploy/.env.example -f plugins/image-gen/deploy/compose.yaml config --quiet
 
       - name: Build sandbox adapter image
         run: docker build -f plugins/opensandbox/server/Dockerfile -t bubblepilot-opensandbox-mcp:ci .
+
+      - name: Build image generation adapter image
+        run: docker build -f plugins/image-gen/server/Dockerfile -t bubblepilot-image-gen-mcp:ci .
 
   sandbox-runtime:
     runs-on: ubuntu-latest

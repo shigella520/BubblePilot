@@ -31,7 +31,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm ops:check && pnpm contracts:check && pnpm docs:check && pnpm build && pnpm sandbox:verify",
+    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm ops:check && pnpm contracts:check && pnpm docs:check && pnpm build && pnpm sandbox:verify && pnpm imagegen:verify",
     "db:prepare-memory": "tsx app/prepare-memory.ts",
     "memory:evaluate": "tsx app/evaluate-memory.ts",
     "memory:benchmark": "tsx app/benchmark-memory.ts",
@@ -39,7 +39,8 @@
     "agent:evaluate": "tsx app/evaluate-agent.ts",
     "chat:benchmark": "tsx app/benchmark-chat-queries.ts",
     "memes:organize": "tsx app/organize-memes.ts",
-    "sandbox:verify": "pnpm --dir plugins/opensandbox/server typecheck && pnpm --dir plugins/opensandbox/server test && pnpm --dir plugins/opensandbox/server build"
+    "sandbox:verify": "pnpm --dir plugins/opensandbox/server typecheck && pnpm --dir plugins/opensandbox/server test && pnpm --dir plugins/opensandbox/server build",
+    "imagegen:verify": "pnpm --dir plugins/image-gen/server typecheck && pnpm --dir plugins/image-gen/server test && pnpm --dir plugins/image-gen/server build"
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.1",

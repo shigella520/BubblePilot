@@ -1,0 +1,55 @@
+# bubblepilot-image-gen MCP adapter. BubblePilot reaches it on the internal
+# bubblepilot_mcp network; macvlan_gw11 only provides egress via the .11 gateway.
+# The HTTP listener binds to the internal address (LISTEN_EXCLUDE_CIDR), never
+# to the macvlan/LAN address, and every endpoint requires the bearer token.
+services:
+  image-gen-mcp:
+    image: ${IMAGE_GEN_MCP_IMAGE:-ghcr.io/shigella520/bubblepilot-image-gen-mcp:dev}
+    pull_policy: missing
+    restart: unless-stopped
+    init: true
+    read_only: true
+    user: "1000:1000"
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 64
+    environment:
+      PORT: "8080"
+      LISTEN_EXCLUDE_CIDR: ${LISTEN_EXCLUDE_CIDR:-192.168.31.0/24}
+      MAX_MCP_SESSIONS: ${MAX_MCP_SESSIONS:-8}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-900}
+      WORKSPACE_MAX_FILES: ${WORKSPACE_MAX_FILES:-16}
+      WORKSPACE_MAX_MIB: ${WORKSPACE_MAX_MIB:-64}
+      ATTACHMENT_IMPORT_TIMEOUT_SECONDS: ${ATTACHMENT_IMPORT_TIMEOUT_SECONDS:-45}
+      IMAGE_API_BASE_URL: ${IMAGE_API_BASE_URL:?Set the OpenAI Images compatible base URL}
+      IMAGE_MODEL: ${IMAGE_MODEL:-gpt-image-2}
+      IMAGE_DEFAULT_QUALITY: ${IMAGE_DEFAULT_QUALITY:-medium}
+      IMAGE_MAX_QUALITY: ${IMAGE_MAX_QUALITY:-high}
+      IMAGE_TIMEOUT_SECONDS: ${IMAGE_TIMEOUT_SECONDS:-150}
+      IMAGE_DAILY_LIMIT: ${IMAGE_DAILY_LIMIT:-20}
+      IMAGE_SESSION_LIMIT: ${IMAGE_SESSION_LIMIT:-4}
+      IMAGE_QUOTA_TIMEZONE: ${IMAGE_QUOTA_TIMEZONE:-Asia/Shanghai}
+      IMAGE_EDIT_FIELD: ${IMAGE_EDIT_FIELD:-auto}
+      QUOTA_FILE: /data/quota.json
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:?Set a random bearer token of at least 24 characters}
+      IMAGE_API_KEY: ${IMAGE_API_KEY:?Set the upstream API key}
+    volumes:
+      - ./data:/data
+    networks:
+      mcp_clients:
+        aliases: [image-gen-mcp]
+      macvlan_net:
+        ipv4_address: ${IMAGE_GEN_MACVLAN_IPV4:-192.168.31.78}
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+networks:
+  mcp_clients:
+    external: true
+    name: bubblepilot_mcp
+  macvlan_net:
+    external: true
+    name: macvlan_gw11

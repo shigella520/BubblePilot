@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - plugins/opensandbox/server
+  - plugins/image-gen/server
 
 allowBuilds:
   esbuild: true

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "image-gen": {
+      "type": "streamable-http",
+      "url": "http://image-gen-mcp:8080/mcp",
+      "headers": { "Authorization": "${IMAGE_GEN_MCP_TOKEN}" }
+    }
+  }
+}
