@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { retainedApprovals } from "../utils/plugin-tool-approval";
 import PluginOverviewCard from "../components/PluginOverviewCard.vue";
 import type { PluginListItem } from "../utils/plugin-overview";
 import ToggleSwitch from "../components/ToggleSwitch.vue";
@@ -310,6 +311,7 @@ function connectionPayload() {
 }
 async function test() {
   await action(async () => {
+    const previous = [...approved.value];
     tools.value = await apiRequest("/api/v1/plugins/connections/test", {
       method: "POST",
       body: JSON.stringify({
@@ -317,7 +319,9 @@ async function test() {
         pluginId: selected.value?.id,
       }),
     });
-    approved.value = [];
+    // Keys include the definition hash: unchanged tools stay approved, changed
+    // or new tools need an explicit review. Never silently revoke everything.
+    approved.value = retainedApprovals(previous, tools.value);
     tested.value = true;
   });
 }
@@ -362,6 +366,14 @@ async function update(body: Record<string, unknown>) {
   });
 }
 async function save() {
+  if (
+    !approved.value.length &&
+    (selected.value?.config.tools.length ?? 0) > 0 &&
+    !confirm(
+      "当前没有勾选任何工具，保存后将撤销此插件全部工具授权，使用它的工作流会失败。确认继续？",
+    )
+  )
+    return;
   await action(async () => {
     selected.value = await apiRequest(
       `/api/v1/plugins/${selected.value!.id}/config`,

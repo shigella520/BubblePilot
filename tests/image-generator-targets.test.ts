@@ -212,6 +212,14 @@ describe("multi-target attachment import", () => {
     expect(f.download).toHaveBeenCalledWith("photo", expect.anything(), {
       original: false,
     });
+    // Registration metadata names no single target; the call records it.
+    expect(f.tool.metadata).toMatchObject({
+      targets: [
+        { target: "sandbox", server: "sandbox" },
+        { target: "image_generator", server: "image" },
+      ],
+    });
+    expect(f.tool.metadata).not.toHaveProperty("pluginId");
     expect(f.generator.transfer).toHaveBeenCalledTimes(1);
     expect(f.sandbox.transfer).not.toHaveBeenCalled();
     const sheet = await f.call({ attachment_ref: f.refs[1] });

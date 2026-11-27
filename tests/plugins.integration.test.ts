@@ -222,6 +222,15 @@ describe.runIf(url)("plugin lifecycle and isolated runtime", () => {
       expect(row).not.toHaveProperty("config");
       expect(JSON.stringify(row)).not.toContain("fictional-private-secret");
       expect(JSON.stringify(row)).not.toContain(mock.url);
+      // Saving with no tools would silently break the published workflows
+      // above (inactive ones included); keeping one tool remains allowed.
+      const inUse = await service.get(pluginId);
+      await expect(
+        service.configure(pluginId, inUse.version, connection(), [], [], []),
+      ).rejects.toMatchObject({ code: "PLUGIN_TOOLS_IN_USE", statusCode: 409 });
+      expect((await service.get(pluginId)).config.tools).toHaveLength(
+        original.config.tools.length,
+      );
     } finally {
       for (const id of workflows) {
         await service.pool.query(

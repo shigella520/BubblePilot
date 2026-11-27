@@ -16,8 +16,13 @@ export function pluginToolPresentation(
 ) {
   if (!["plugin", "attachment"].includes(String(item.requestDetails?.kind)))
     return null;
+  // Imports into multi-target nodes only know their destination per call, so
+  // the response's actual target wins; other tools keep request-first order.
+  const actualFirst = item.toolName === "import_chat_attachment";
   const field = (key: string) => {
-    const value = item.requestDetails?.[key] ?? item.responseDetails?.[key];
+    const value = actualFirst
+      ? (item.responseDetails?.[key] ?? item.requestDetails?.[key])
+      : (item.requestDetails?.[key] ?? item.responseDetails?.[key]);
     return typeof value === "string" && value ? value : null;
   };
   const id = field("pluginId");

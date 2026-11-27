@@ -131,3 +131,53 @@ it("distinguishes prepared media from actual dispatched requests", async () => {
     ])[0]?.state,
   ).toContain("请求成功");
 });
+
+describe("chat attachment import presentation", () => {
+  const importCall = (
+    requestDetails: Record<string, unknown>,
+    responseDetails: Record<string, unknown> | null,
+  ) => ({
+    toolName: "import_chat_attachment",
+    nodeId: "ai",
+    requestDetails: {
+      kind: "attachment",
+      tool: "import_chat_attachment",
+      ...requestDetails,
+    },
+    responseDetails,
+  });
+  it("labels the actual target of a multi-target import", () => {
+    expect(
+      pluginToolPresentation(
+        importCall(
+          {
+            targets: [
+              { target: "sandbox", pluginId: "s", server: "opensandbox" },
+              { target: "image_generator", pluginId: "g", server: "image-gen" },
+            ],
+          },
+          {
+            outcome: "success",
+            target: "image_generator",
+            pluginId: "g",
+            server: "image-gen",
+          },
+        ),
+      ),
+    ).toMatchObject({
+      title: "图片导入（生图） · image-gen",
+      server: "image-gen",
+      id: "g",
+    });
+  });
+  it("keeps single-target sandbox imports unchanged", () => {
+    expect(
+      pluginToolPresentation(
+        importCall(
+          { pluginId: "s", server: "opensandbox" },
+          { outcome: "success", pluginId: "s", server: "opensandbox" },
+        ),
+      ),
+    ).toMatchObject({ title: "附件导入 · opensandbox" });
+  });
+});

@@ -2369,7 +2369,9 @@ function contextSnapshotValue(
                   <p v-if="item.toolName === 'import_chat_attachment'">
                     {{
                       item.responseDetails?.outcome === "success"
-                        ? "已导入；分析结果请查看后续命令。文件随任务清理。"
+                        ? item.responseDetails?.target === "image_generator"
+                          ? "已导入生图插件，可用于改图。文件随任务清理。"
+                          : "已导入；分析结果请查看后续命令。文件随任务清理。"
                         : "附件未完成导入。"
                     }}
                     <template v-if="item.responseDetails?.filename"

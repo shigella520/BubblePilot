@@ -148,6 +148,21 @@ export class AttachmentSession {
   private primaryMetadata() {
     return [...this.channels.values()][0]!.metadata;
   }
+  /**
+   * Registration metadata becomes each call's request details. With several
+   * targets the destination is only known per call, so list the bound targets
+   * instead of naming one; each call's diagnostics record the actual target.
+   */
+  private registrationMetadata() {
+    if (this.channels.size === 1) return this.primaryMetadata();
+    return {
+      targets: [...this.channels].map(([target, channel]) => ({
+        target,
+        pluginId: channel.metadata.pluginId,
+        server: channel.metadata.server,
+      })),
+    };
+  }
   catalogue(
     message: Pick<MemoryMessage, "id" | "providerMessageId" | "attachments">,
     offset = 0,
@@ -365,11 +380,12 @@ export class AttachmentSession {
       diagnostics: "plugin",
       metadata: {
         kind: "attachment",
-        ...this.primaryMetadata(),
+        ...this.registrationMetadata(),
         tool: "import_chat_attachment",
       },
       execute: async (raw, ctx) => {
         const started = Date.now();
+        let requested: AttachmentTargetName | undefined;
         try {
           const args = JSON.parse(raw) as Record<string, unknown>;
           const names = this.targetNames();
@@ -388,6 +404,7 @@ export class AttachmentSession {
           )
             throw new AttachmentError("ATTACHMENT_ARGUMENTS_INVALID");
           const name = target as AttachmentTargetName;
+          requested = name;
           const result = await this.import(args.attachment_ref, ctx, name);
           const text = JSON.stringify(result);
           if (text.length > ctx.maxOutputCharacters)
@@ -439,7 +456,12 @@ export class AttachmentSession {
                       : "Do not claim the file was read. Explain the limitation; do not replay unknown imports or commands.",
             }),
             diagnostics: {
-              ...this.primaryMetadata(),
+              ...(requested
+                ? this.channels.get(requested)!.metadata
+                : this.primaryMetadata()),
+              ...(this.channels.size > 1 && requested
+                ? { target: requested }
+                : {}),
               outcome: "error",
               errorCode: code,
               durationMs: Date.now() - started,

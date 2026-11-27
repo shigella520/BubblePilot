@@ -506,6 +506,14 @@ export class PluginService {
     this.checkConnections(p.package, connections);
     if (disabledSkills.some((s) => !p.package.skills.some((k) => k.id === s)))
       pluginError("UNKNOWN_SKILL");
+    // Revoking every tool of a plugin that published workflows still use
+    // would break them silently; require unbinding those workflows first.
+    if (!approved.length && p.config.tools.length && (await this.inUse(id)))
+      throw new ApplicationError(
+        "PLUGIN_TOOLS_IN_USE",
+        "已发布的工作流仍在使用此插件，不能撤销全部工具授权。请先在相关工作流中取消该插件并发布，或至少保留一个工具。",
+        409,
+      );
     const discovered = await this.discover(connections);
     const tools = discovered.filter((t) =>
       approved.includes(`${t.server}/${t.definition.name}#${t.hash}`),
@@ -520,6 +528,25 @@ export class PluginService {
         autoSyncTools: autoSyncTools ?? p.config.autoSyncTools ?? false,
       },
     });
+  }
+  /**
+   * True when a non-deleted workflow's published version binds the plugin on
+   * an AI node. Inactive workflows count: reactivating them must not fail.
+   */
+  private async inUse(id: string) {
+    const result = await this.pool.query<{ used: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM workflows w
+         JOIN workflow_versions wv ON wv.id = w.published_version_id
+         WHERE w.deleted_at IS NULL AND EXISTS (
+           SELECT 1 FROM jsonb_array_elements(wv.definition->'nodes') node
+           WHERE node->>'type' = 'ai-chat'
+             AND (node->'config'->'pluginIds') @> jsonb_build_array($1::text)
+         )
+       ) AS used`,
+      [id],
+    );
+    return result.rows[0]?.used ?? false;
   }
   async runtimeSettings() {
     const result = await this.pool.query<{
