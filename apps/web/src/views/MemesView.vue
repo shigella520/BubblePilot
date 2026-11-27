@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ExtensionTabs from "../components/ExtensionTabs.vue";
+import ExtensionSidebar from "../components/ExtensionSidebar.vue";
 import ModalShell from "../components/ModalShell.vue";
 import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
@@ -703,721 +703,754 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <main class="meme-page">
-    <ExtensionTabs />
-    <header class="meme-heading">
-      <div>
-        <h1>表情包</h1>
-        <p>全局共享表情库。上传后自动生成摘要，在 AI 节点中按需启用。</p>
-      </div>
-      <button class="button primary" @click="open(null)">
-        <ImagePlus :size="18" aria-hidden="true" />上传表情
-      </button>
-    </header>
-    <div class="meme-library-layout">
-      <aside class="meme-collections" aria-label="表情合集">
-        <div class="meme-collections-heading">
-          <strong>我的合集</strong
-          ><button
-            class="meme-close"
-            aria-label="新建合集"
-            :disabled="bulkBusy"
-            @click="editCollection(null)"
-          >
-            <FolderPlus :size="18" />
-          </button>
-        </div>
-        <p v-if="collectionError" role="alert">
-          {{ collectionError }}
-          <button class="button secondary" @click="loadCollections">
-            重试
-          </button>
-        </p>
-        <nav class="meme-collection-desktop">
-          <button
-            :class="{ active: collection === 'all' }"
-            :disabled="bulkBusy"
-            @click="chooseCollection('all')"
-          >
-            <Folder :size="18" /><span>全部表情</span
-            ><small>{{ collectionTotal }}</small>
-          </button>
-          <button
-            :class="{ active: collection === 'unclassified' }"
-            :disabled="bulkBusy"
-            @click="chooseCollection('unclassified')"
-          >
-            <Folder :size="18" /><span>未分类</span
-            ><small>{{ unclassified }}</small>
-          </button>
-          <button
-            v-for="c in collections"
-            :key="c.id"
-            :class="{ active: collection === c.id }"
-            :disabled="bulkBusy"
-            @click="chooseCollection(c.id)"
-          >
-            <img
-              v-if="c.effectiveCoverMemeId"
-              :src="`/api/v1/memes/${c.effectiveCoverMemeId}/thumbnail`"
-              alt=""
-              loading="lazy"
-            /><Folder v-else :size="18" /><span>{{ c.name }}</span
-            ><small>{{ c.count }}</small>
-          </button>
-        </nav>
-        <select
-          class="meme-collection-mobile"
-          aria-label="选择合集"
-          :value="collection"
-          :disabled="bulkBusy"
-          @change="chooseCollection(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="all">全部表情（{{ collectionTotal }}）</option>
-          <option value="unclassified">未分类（{{ unclassified }}）</option>
-          <option v-for="c in collections" :key="c.id" :value="c.id">
-            {{ c.name }}（{{ c.count }}）
-          </option>
-        </select>
-      </aside>
-      <section class="meme-library-content" :aria-label="collectionTitle">
-        <div class="meme-collection-title">
+  <main class="page-container split-admin-page reveal">
+    <ExtensionSidebar
+      note="表情包为全局共享素材库，上传后自动生成摘要，在 AI 节点中按需启用。"
+    />
+    <div class="admin-workspace">
+      <section id="memes" class="admin-panel meme-page">
+        <div class="panel-head">
           <div>
-            <h2>{{ collectionTitle }}</h2>
-            <p v-if="currentCollection?.description">
-              {{ currentCollection.description }}
-            </p>
+            <p class="card-kicker">表情包</p>
+            <h2>表情库</h2>
           </div>
-          <button
-            v-if="currentCollection"
-            class="button secondary"
-            :disabled="bulkBusy"
-            @click="editCollection(currentCollection)"
-          >
-            <Settings2 :size="16" />管理合集
+          <button class="button primary" @click="open(null)">
+            <ImagePlus :size="18" aria-hidden="true" />上传表情
           </button>
         </div>
-        <form
-          class="meme-filters"
-          @submit.prevent="
-            page = 0;
-            load();
-          "
-        >
-          <input
-            v-model="query"
-            :disabled="bulkBusy"
-            placeholder="搜索名称或标签"
-            aria-label="搜索名称或标签"
-          /><select
-            v-model="enabled"
-            :disabled="bulkBusy"
-            aria-label="启用状态"
-          >
-            <option value="">全部启用状态</option>
-            <option value="true">已启用</option>
-            <option value="false">已停用</option></select
-          ><select v-model="status" :disabled="bulkBusy" aria-label="摘要状态">
-            <option value="">全部摘要状态</option>
-            <option v-for="(label, key) in labels" :key="key" :value="key">
-              {{ label }}
-            </option></select
-          ><select
-            v-model="sort"
-            :disabled="bulkBusy"
-            aria-label="排序"
-            @change="load()"
-          >
-            <option v-for="(label, key) in sortOptions" :key="key" :value="key">
-              {{ label }}
-            </option></select
-          ><button
-            class="button secondary meme-query"
-            :disabled="loading || bulkBusy"
-          >
-            <LoaderCircle
-              v-if="loading"
-              :size="16"
-              class="meme-spinner"
-              aria-hidden="true"
-            />{{ loading ? "查询中" : "查询" }}
-          </button>
-        </form>
-        <p class="meme-summary-hint">
-          使用次数为 BlueBubbles
-          确认发送成功的累计次数，不代表已读；升级前已清理的投递无法补算。
+        <p class="panel-description">
+          全局共享表情库。上传后自动生成摘要，在 AI 节点中按需启用。
         </p>
-        <p v-if="error" role="alert">{{ error }}</p>
-
-        <p v-if="filtersPending && !loading">
-          筛选条件已更改，请先查询再选择素材。
-        </p>
-        <div class="meme-selection-bar">
-          <button
-            class="button secondary"
-            :disabled="loading || filtersPending || bulkBusy || !items.length"
-            @click="selectPage"
-          >
-            选择当前页
-          </button>
-          <button
-            class="button secondary"
-            :disabled="
-              loading || filtersPending || bulkBusy || selecting || !total
-            "
-            @click="selectAll"
-          >
-            {{ selecting ? "正在选择…" : `选择筛选结果全部 ${total} 张` }}
-          </button>
-          <span>已选 {{ selected.size }} 张</span
-          ><button
-            v-if="selected.size"
-            class="button secondary"
-            :disabled="bulkBusy"
-            @click="selected.clear()"
-          >
-            清空
-          </button>
-        </div>
-        <div
-          v-if="selected.size || bulkResults.length || bulkBusy"
-          class="meme-bulk-panel"
-        >
-          <div class="meme-bulk-controls">
-            <select
-              v-model="bulkTarget"
-              aria-label="批量移动目标"
-              :disabled="bulkBusy"
-            >
-              <option value="">未分类</option>
-              <option v-for="c in collections" :key="c.id" :value="c.id">
-                {{ c.name }}
-              </option></select
-            ><button
-              class="button secondary"
-              :disabled="
-                bulkBusy ||
-                !selected.size ||
-                bulkFailures.some((r) => r.status === 'unknown')
-              "
-              @click="
-                runBatch({ type: 'move', collectionId: bulkTarget || null })
-              "
-            >
-              移动到</button
-            ><button
-              class="button secondary"
-              :disabled="
-                bulkBusy ||
-                !selected.size ||
-                bulkFailures.some((r) => r.status === 'unknown')
-              "
-              @click="runBatch({ type: 'enable', enabled: true })"
-            >
-              启用</button
-            ><button
-              class="button secondary"
-              :disabled="
-                bulkBusy ||
-                !selected.size ||
-                bulkFailures.some((r) => r.status === 'unknown')
-              "
-              @click="runBatch({ type: 'enable', enabled: false })"
-            >
-              停用</button
-            ><button
-              class="button danger-ghost meme-delete"
-              :disabled="
-                bulkBusy ||
-                !selected.size ||
-                bulkFailures.some((r) => r.status === 'unknown')
-              "
-              @click="runBatch({ type: 'delete' })"
-            >
-              删除
-            </button>
-          </div>
-          <div v-if="bulkTotal" role="status" class="meme-bulk-progress">
-            已处理 {{ bulkResults.length }} / {{ bulkTotal }} · 成功
-            {{ bulkSucceeded }} · 失败
-            {{ bulkFailures.filter((r) => r.status !== "unknown").length }} ·
-            待核对
-            {{ bulkFailures.filter((r) => r.status === "unknown").length }} ·
-            未开始 {{ Math.max(0, bulkTotal - bulkResults.length)
-            }}<span v-if="stopBatch"> · 已停止后续批次</span>
-          </div>
-          <button
-            v-if="bulkBusy"
-            class="button secondary"
-            :disabled="stopBatch"
-            @click="stopBatch = true"
-          >
-            停止后续批次
-          </button>
-          <template v-else-if="bulkFailures.length"
-            ><button
-              v-if="bulkFailures.some((r) => r.status === 'unknown')"
-              class="button secondary"
-              @click="checkUnknown"
-            >
-              核对未知结果</button
-            ><button
-              v-if="
-                lastAction && bulkFailures.some((r) => r.status !== 'unknown')
-              "
-              class="button secondary"
-              :disabled="bulkFailures.some((r) => r.status === 'unknown')"
-              @click="runBatch(lastAction, true)"
-            >
-              刷新并重试失败项
-            </button>
-            <details>
-              <summary>查看未完成项</summary>
-              <ul>
-                <li v-for="r in bulkFailures" :key="r.id">
-                  {{ r.id }} ·
-                  {{
-                    r.status === "unknown"
-                      ? "结果待核对"
-                      : r.status === "missing"
-                        ? "素材不存在"
-                        : "版本或状态已变化"
-                  }}
-                </li>
-              </ul>
-            </details></template
-          >
-        </div>
-        <div class="meme-grid" :aria-busy="loading">
-          <article
-            v-for="item in items"
-            :key="item.id"
-            class="meme-card"
-            :class="{ 'is-selected': selected.has(item.id) }"
-          >
-            <label class="meme-card-select"
-              ><input
-                type="checkbox"
-                :checked="selected.has(item.id)"
-                :disabled="bulkBusy || filtersPending || loading"
-                :aria-label="`选择 ${item.name}`"
-                @change="toggleSelection(item)" /></label
-            ><button
-              class="meme-card-open"
-              :disabled="bulkBusy"
-              @click="open(item)"
-            >
-              <img
-                :src="`/api/v1/memes/${item.id}/thumbnail`"
-                :alt="item.name"
-                loading="lazy"
-              /><strong>{{ item.name }}</strong
-              ><span>{{ item.tags.join(" · ") || "无标签" }}</span
-              ><small
-                >{{ item.enabled ? "已启用" : "已停用" }} ·
-                {{ labels[item.summaryStatus] }}</small
+        <div class="meme-library-layout">
+          <aside class="meme-collections" aria-label="表情合集">
+            <div class="meme-collections-heading">
+              <strong>我的合集</strong
+              ><button
+                class="meme-close"
+                aria-label="新建合集"
+                :disabled="bulkBusy"
+                @click="editCollection(null)"
               >
-              <small>已使用 {{ item.usageCount }} 次</small>
-            </button>
-          </article>
-        </div>
-        <p v-if="!loading && !items.length">暂无匹配表情。</p>
-        <footer class="meme-filters">
-          <button
-            :disabled="page === 0 || loading || bulkBusy"
-            @click="
-              page--;
-              load();
-            "
-          >
-            上一页</button
-          ><span>共 {{ total }} 张 · 第 {{ page + 1 }} 页</span
-          ><button
-            :disabled="(page + 1) * 24 >= total || loading || bulkBusy"
-            @click="
-              page++;
-              load();
-            "
-          >
-            下一页
-          </button>
-        </footer>
-      </section>
-    </div>
-    <ModalShell
-      v-if="collectionModal"
-      labelledby="collection-title"
-      @close="!busy && (collectionModal = false)"
-    >
-      <section class="meme-dialog">
-        <header class="meme-dialog-heading">
-          <div>
-            <h2 id="collection-title">
-              {{ collectionEditing ? "管理合集" : "新建合集" }}
-            </h2>
-            <p>按系列整理表情，标签继续用于情绪和场景检索。</p>
-          </div>
-          <button
-            class="meme-close"
-            aria-label="关闭合集弹窗"
-            :disabled="busy"
-            @click="collectionModal = false"
-          >
-            <X :size="20" />
-          </button>
-        </header>
-        <p v-if="error" role="alert">{{ error }}</p>
-        <form @submit.prevent="saveCollection">
-          <label
-            >合集名称<input
-              v-model="collectionName"
-              required
-              maxlength="120"
-              :disabled="busy"
-              placeholder="例如：什么猫" /></label
-          ><label
-            >说明<textarea
-              v-model="collectionDescription"
-              maxlength="2000"
-              :disabled="busy"
-              placeholder="简短说明这个系列的特点"
-            /></label
-          ><label v-if="collectionEditing"
-            >封面<select v-model="collectionCover" :disabled="busy">
-              <option value="">自动使用最早加入的表情</option>
-              <option
-                v-if="collectionEditing.coverMemeId"
-                :value="collectionEditing.coverMemeId"
-              >
-                保留指定封面
-              </option>
-            </select></label
-          >
-          <p class="meme-summary-hint">
-            可在合集内任一表情的编辑弹窗中将其设为封面。
-          </p>
-          <footer class="meme-dialog-actions">
-            <button
-              v-if="collectionEditing"
-              type="button"
-              class="button danger-ghost meme-delete"
-              :disabled="busy"
-              @click="deleteCollection"
-            >
-              删除合集</button
-            ><button
-              type="button"
-              class="button secondary"
-              :disabled="busy"
-              @click="collectionModal = false"
-            >
-              取消</button
-            ><button class="button primary" :disabled="busy">
-              {{ busy ? "保存中…" : "保存" }}
-            </button>
-          </footer>
-        </form>
-      </section>
-    </ModalShell>
-    <ModalShell
-      v-if="modal"
-      labelledby="meme-title"
-      @close="requestCloseEditor"
-    >
-      <section class="meme-dialog" :class="{ 'is-editing': editing }">
-        <header class="meme-dialog-heading">
-          <div>
-            <h2 id="meme-title">{{ editing ? "编辑表情" : "上传表情" }}</h2>
-            <p>
-              {{
-                editing
-                  ? "完善素材信息，让 AI 更容易找到它。"
-                  : "收藏一个表情，让聊天多一点趣味。"
-              }}
-            </p>
-          </div>
-          <button
-            type="button"
-            class="meme-close"
-            aria-label="关闭表情弹窗"
-            :disabled="busy"
-            @click="requestCloseEditor"
-          >
-            <X :size="20" />
-          </button>
-        </header>
-        <p v-if="error" role="alert">{{ error }}</p>
-        <form class="meme-editor" @submit.prevent="save">
-          <aside v-if="editing" class="meme-media-panel">
-            <div class="meme-preview-stage">
-              <img
-                class="meme-preview"
-                :src="`/api/v1/memes/${editing.id}/${play ? 'file' : 'thumbnail'}`"
-                :alt="editing.name"
-              />
-            </div>
-            <div class="meme-preview-toolbar">
-              <span class="meme-format">{{
-                editing.mimeType.split("/")[1].toUpperCase()
-              }}</span>
-              <button
-                v-if="editing.mimeType === 'image/gif'"
-                type="button"
-                class="button secondary"
-                :aria-pressed="play"
-                @click="play = !play"
-              >
-                <Square v-if="play" :size="15" aria-hidden="true" />
-                <Play v-else :size="15" aria-hidden="true" />
-                {{ play ? "停止播放" : "播放 GIF" }}
+                <FolderPlus :size="18" />
               </button>
             </div>
-            <p class="meme-media-note">发送时使用原图，GIF 保留动画。</p>
-            <div class="meme-availability">
+            <p v-if="collectionError" role="alert">
+              {{ collectionError }}
+              <button class="button secondary" @click="loadCollections">
+                重试
+              </button>
+            </p>
+            <nav class="meme-collection-desktop">
+              <button
+                :class="{ active: collection === 'all' }"
+                :disabled="bulkBusy"
+                @click="chooseCollection('all')"
+              >
+                <Folder :size="18" /><span>全部表情</span
+                ><small>{{ collectionTotal }}</small>
+              </button>
+              <button
+                :class="{ active: collection === 'unclassified' }"
+                :disabled="bulkBusy"
+                @click="chooseCollection('unclassified')"
+              >
+                <Folder :size="18" /><span>未分类</span
+                ><small>{{ unclassified }}</small>
+              </button>
+              <button
+                v-for="c in collections"
+                :key="c.id"
+                :class="{ active: collection === c.id }"
+                :disabled="bulkBusy"
+                @click="chooseCollection(c.id)"
+              >
+                <img
+                  v-if="c.effectiveCoverMemeId"
+                  :src="`/api/v1/memes/${c.effectiveCoverMemeId}/thumbnail`"
+                  alt=""
+                  loading="lazy"
+                /><Folder v-else :size="18" /><span>{{ c.name }}</span
+                ><small>{{ c.count }}</small>
+              </button>
+            </nav>
+            <select
+              class="meme-collection-mobile"
+              aria-label="选择合集"
+              :value="collection"
+              :disabled="bulkBusy"
+              @change="
+                chooseCollection(($event.target as HTMLSelectElement).value)
+              "
+            >
+              <option value="all">全部表情（{{ collectionTotal }}）</option>
+              <option value="unclassified">未分类（{{ unclassified }}）</option>
+              <option v-for="c in collections" :key="c.id" :value="c.id">
+                {{ c.name }}（{{ c.count }}）
+              </option>
+            </select>
+          </aside>
+          <section class="meme-library-content" :aria-label="collectionTitle">
+            <div class="meme-collection-title">
               <div>
-                <strong>允许 AI 使用</strong>
+                <h2>{{ collectionTitle }}</h2>
+                <p v-if="currentCollection?.description">
+                  {{ currentCollection.description }}
+                </p>
+              </div>
+              <button
+                v-if="currentCollection"
+                class="button secondary"
+                :disabled="bulkBusy"
+                @click="editCollection(currentCollection)"
+              >
+                <Settings2 :size="16" />管理合集
+              </button>
+            </div>
+            <form
+              class="meme-filters"
+              @submit.prevent="
+                page = 0;
+                load();
+              "
+            >
+              <input
+                v-model="query"
+                :disabled="bulkBusy"
+                placeholder="搜索名称或标签"
+                aria-label="搜索名称或标签"
+              /><select
+                v-model="enabled"
+                :disabled="bulkBusy"
+                aria-label="启用状态"
+              >
+                <option value="">全部启用状态</option>
+                <option value="true">已启用</option>
+                <option value="false">已停用</option></select
+              ><select
+                v-model="status"
+                :disabled="bulkBusy"
+                aria-label="摘要状态"
+              >
+                <option value="">全部摘要状态</option>
+                <option v-for="(label, key) in labels" :key="key" :value="key">
+                  {{ label }}
+                </option></select
+              ><select
+                v-model="sort"
+                :disabled="bulkBusy"
+                aria-label="排序"
+                @change="load()"
+              >
+                <option
+                  v-for="(label, key) in sortOptions"
+                  :key="key"
+                  :value="key"
+                >
+                  {{ label }}
+                </option></select
+              ><button
+                class="button secondary meme-query"
+                :disabled="loading || bulkBusy"
+              >
+                <LoaderCircle
+                  v-if="loading"
+                  :size="16"
+                  class="meme-spinner"
+                  aria-hidden="true"
+                />{{ loading ? "查询中" : "查询" }}
+              </button>
+            </form>
+            <p class="meme-summary-hint">
+              使用次数为 BlueBubbles
+              确认发送成功的累计次数，不代表已读；升级前已清理的投递无法补算。
+            </p>
+            <p v-if="error" role="alert">{{ error }}</p>
+
+            <p v-if="filtersPending && !loading">
+              筛选条件已更改，请先查询再选择素材。
+            </p>
+            <div class="meme-selection-bar">
+              <button
+                class="button secondary"
+                :disabled="
+                  loading || filtersPending || bulkBusy || !items.length
+                "
+                @click="selectPage"
+              >
+                选择当前页
+              </button>
+              <button
+                class="button secondary"
+                :disabled="
+                  loading || filtersPending || bulkBusy || selecting || !total
+                "
+                @click="selectAll"
+              >
+                {{ selecting ? "正在选择…" : `选择筛选结果全部 ${total} 张` }}
+              </button>
+              <span>已选 {{ selected.size }} 张</span
+              ><button
+                v-if="selected.size"
+                class="button secondary"
+                :disabled="bulkBusy"
+                @click="selected.clear()"
+              >
+                清空
+              </button>
+            </div>
+            <div
+              v-if="selected.size || bulkResults.length || bulkBusy"
+              class="meme-bulk-panel"
+            >
+              <div class="meme-bulk-controls">
+                <select
+                  v-model="bulkTarget"
+                  aria-label="批量移动目标"
+                  :disabled="bulkBusy"
+                >
+                  <option value="">未分类</option>
+                  <option v-for="c in collections" :key="c.id" :value="c.id">
+                    {{ c.name }}
+                  </option></select
+                ><button
+                  class="button secondary"
+                  :disabled="
+                    bulkBusy ||
+                    !selected.size ||
+                    bulkFailures.some((r) => r.status === 'unknown')
+                  "
+                  @click="
+                    runBatch({ type: 'move', collectionId: bulkTarget || null })
+                  "
+                >
+                  移动到</button
+                ><button
+                  class="button secondary"
+                  :disabled="
+                    bulkBusy ||
+                    !selected.size ||
+                    bulkFailures.some((r) => r.status === 'unknown')
+                  "
+                  @click="runBatch({ type: 'enable', enabled: true })"
+                >
+                  启用</button
+                ><button
+                  class="button secondary"
+                  :disabled="
+                    bulkBusy ||
+                    !selected.size ||
+                    bulkFailures.some((r) => r.status === 'unknown')
+                  "
+                  @click="runBatch({ type: 'enable', enabled: false })"
+                >
+                  停用</button
+                ><button
+                  class="button danger-ghost meme-delete"
+                  :disabled="
+                    bulkBusy ||
+                    !selected.size ||
+                    bulkFailures.some((r) => r.status === 'unknown')
+                  "
+                  @click="runBatch({ type: 'delete' })"
+                >
+                  删除
+                </button>
+              </div>
+              <div v-if="bulkTotal" role="status" class="meme-bulk-progress">
+                已处理 {{ bulkResults.length }} / {{ bulkTotal }} · 成功
+                {{ bulkSucceeded }} · 失败
+                {{ bulkFailures.filter((r) => r.status !== "unknown").length }}
+                · 待核对
+                {{ bulkFailures.filter((r) => r.status === "unknown").length }}
+                · 未开始 {{ Math.max(0, bulkTotal - bulkResults.length)
+                }}<span v-if="stopBatch"> · 已停止后续批次</span>
+              </div>
+              <button
+                v-if="bulkBusy"
+                class="button secondary"
+                :disabled="stopBatch"
+                @click="stopBatch = true"
+              >
+                停止后续批次
+              </button>
+              <template v-else-if="bulkFailures.length"
+                ><button
+                  v-if="bulkFailures.some((r) => r.status === 'unknown')"
+                  class="button secondary"
+                  @click="checkUnknown"
+                >
+                  核对未知结果</button
+                ><button
+                  v-if="
+                    lastAction &&
+                    bulkFailures.some((r) => r.status !== 'unknown')
+                  "
+                  class="button secondary"
+                  :disabled="bulkFailures.some((r) => r.status === 'unknown')"
+                  @click="runBatch(lastAction, true)"
+                >
+                  刷新并重试失败项
+                </button>
+                <details>
+                  <summary>查看未完成项</summary>
+                  <ul>
+                    <li v-for="r in bulkFailures" :key="r.id">
+                      {{ r.id }} ·
+                      {{
+                        r.status === "unknown"
+                          ? "结果待核对"
+                          : r.status === "missing"
+                            ? "素材不存在"
+                            : "版本或状态已变化"
+                      }}
+                    </li>
+                  </ul>
+                </details></template
+              >
+            </div>
+            <div class="meme-grid" :aria-busy="loading">
+              <article
+                v-for="item in items"
+                :key="item.id"
+                class="meme-card"
+                :class="{ 'is-selected': selected.has(item.id) }"
+              >
+                <label class="meme-card-select"
+                  ><input
+                    type="checkbox"
+                    :checked="selected.has(item.id)"
+                    :disabled="bulkBusy || filtersPending || loading"
+                    :aria-label="`选择 ${item.name}`"
+                    @change="toggleSelection(item)" /></label
+                ><button
+                  class="meme-card-open"
+                  :disabled="bulkBusy"
+                  @click="open(item)"
+                >
+                  <img
+                    :src="`/api/v1/memes/${item.id}/thumbnail`"
+                    :alt="item.name"
+                    loading="lazy"
+                  /><strong>{{ item.name }}</strong
+                  ><span>{{ item.tags.join(" · ") || "无标签" }}</span
+                  ><small
+                    >{{ item.enabled ? "已启用" : "已停用" }} ·
+                    {{ labels[item.summaryStatus] }}</small
+                  >
+                  <small>已使用 {{ item.usageCount }} 次</small>
+                </button>
+              </article>
+            </div>
+            <p v-if="!loading && !items.length">暂无匹配表情。</p>
+            <footer class="meme-filters">
+              <button
+                :disabled="page === 0 || loading || bulkBusy"
+                @click="
+                  page--;
+                  load();
+                "
+              >
+                上一页</button
+              ><span>共 {{ total }} 张 · 第 {{ page + 1 }} 页</span
+              ><button
+                :disabled="(page + 1) * 24 >= total || loading || bulkBusy"
+                @click="
+                  page++;
+                  load();
+                "
+              >
+                下一页
+              </button>
+            </footer>
+          </section>
+        </div>
+        <ModalShell
+          v-if="collectionModal"
+          labelledby="collection-title"
+          @close="!busy && (collectionModal = false)"
+        >
+          <section class="meme-dialog">
+            <header class="meme-dialog-heading">
+              <div>
+                <h2 id="collection-title">
+                  {{ collectionEditing ? "管理合集" : "新建合集" }}
+                </h2>
+                <p>按系列整理表情，标签继续用于情绪和场景检索。</p>
+              </div>
+              <button
+                class="meme-close"
+                aria-label="关闭合集弹窗"
+                :disabled="busy"
+                @click="collectionModal = false"
+              >
+                <X :size="20" />
+              </button>
+            </header>
+            <p v-if="error" role="alert">{{ error }}</p>
+            <form @submit.prevent="saveCollection">
+              <label
+                >合集名称<input
+                  v-model="collectionName"
+                  required
+                  maxlength="120"
+                  :disabled="busy"
+                  placeholder="例如：什么猫" /></label
+              ><label
+                >说明<textarea
+                  v-model="collectionDescription"
+                  maxlength="2000"
+                  :disabled="busy"
+                  placeholder="简短说明这个系列的特点"
+                /></label
+              ><label v-if="collectionEditing"
+                >封面<select v-model="collectionCover" :disabled="busy">
+                  <option value="">自动使用最早加入的表情</option>
+                  <option
+                    v-if="collectionEditing.coverMemeId"
+                    :value="collectionEditing.coverMemeId"
+                  >
+                    保留指定封面
+                  </option>
+                </select></label
+              >
+              <p class="meme-summary-hint">
+                可在合集内任一表情的编辑弹窗中将其设为封面。
+              </p>
+              <footer class="meme-dialog-actions">
+                <button
+                  v-if="collectionEditing"
+                  type="button"
+                  class="button danger-ghost meme-delete"
+                  :disabled="busy"
+                  @click="deleteCollection"
+                >
+                  删除合集</button
+                ><button
+                  type="button"
+                  class="button secondary"
+                  :disabled="busy"
+                  @click="collectionModal = false"
+                >
+                  取消</button
+                ><button class="button primary" :disabled="busy">
+                  {{ busy ? "保存中…" : "保存" }}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </ModalShell>
+        <ModalShell
+          v-if="modal"
+          labelledby="meme-title"
+          @close="requestCloseEditor"
+        >
+          <section class="meme-dialog" :class="{ 'is-editing': editing }">
+            <header class="meme-dialog-heading">
+              <div>
+                <h2 id="meme-title">{{ editing ? "编辑表情" : "上传表情" }}</h2>
                 <p>
                   {{
-                    active
-                      ? "可被检索并用于聊天回复"
-                      : "已停用，不会出现在检索结果中"
+                    editing
+                      ? "完善素材信息，让 AI 更容易找到它。"
+                      : "收藏一个表情，让聊天多一点趣味。"
                   }}
                 </p>
               </div>
-              <ToggleSwitch
-                v-model="active"
-                label="允许 AI 使用"
+              <button
+                type="button"
+                class="meme-close"
+                aria-label="关闭表情弹窗"
                 :disabled="busy"
-              />
-            </div>
-          </aside>
-          <div
-            v-else
-            class="meme-drop"
-            :class="{ 'is-dragging': dragging, 'has-file': file }"
-            @dragover.prevent="dragging = !busy"
-            @dragleave.self="dragging = false"
-            @drop.prevent="drop"
-          >
-            <input
-              ref="fileInput"
-              class="meme-file-input"
-              type="file"
-              tabindex="-1"
-              aria-label="选择表情图片"
-              accept="image/jpeg,image/png,image/webp,image/gif"
-              :disabled="busy"
-              @change="pick"
-            />
-            <template v-if="file">
-              <img
-                class="meme-upload-preview"
-                :src="previewUrl"
-                alt="待上传表情预览"
-              />
-              <div class="meme-file-info">
-                <Check :size="16" aria-hidden="true" /><strong>{{
-                  file.name
-                }}</strong
-                ><span>{{
-                  file.size < 1024 * 1024
-                    ? `${Math.max(1, Math.round(file.size / 1024))} KiB`
-                    : `${(file.size / 1024 / 1024).toFixed(2)} MiB`
-                }}</span>
-              </div>
-            </template>
-            <template v-else>
-              <div class="meme-upload-icon">
-                <UploadCloud
-                  :size="30"
-                  :stroke-width="1.6"
-                  aria-hidden="true"
-                />
-              </div>
-              <strong>{{
-                dragging ? "松开鼠标，添加这张表情" : "把表情拖到这里"
-              }}</strong>
-              <span class="meme-drop-subtitle"
-                >也可以从设备中选择一张喜欢的图片</span
+                @click="requestCloseEditor"
               >
-            </template>
-            <button
-              type="button"
-              class="button secondary meme-choose"
-              :disabled="busy"
-              @click="fileInput?.click()"
-            >
-              <ImagePlus :size="18" aria-hidden="true" />{{
-                file ? "重新选择" : "选择图片"
-              }}
-            </button>
-            <small>JPEG、PNG、静态 WebP、GIF · 最大 10 MiB</small>
-            <div
-              v-if="busy"
-              class="meme-upload-progress"
-              role="status"
-              aria-live="polite"
-            >
-              <progress :value="progress" max="100" aria-label="图片上传进度" />
-              <span>{{
-                progress === 100
-                  ? "上传完成，正在处理图片…"
-                  : `正在上传 ${progress}%`
-              }}</span>
-            </div>
-          </div>
-          <div class="meme-editor-fields">
-            <label
-              >所属合集<select v-model="assetCollection" :disabled="busy">
-                <option value="">未分类</option>
-                <option v-for="c in collections" :key="c.id" :value="c.id">
-                  {{ c.name }}
-                </option>
-              </select></label
-            ><button
-              v-if="
-                editing?.collectionId &&
-                assetCollection === editing.collectionId
-              "
-              type="button"
-              class="button secondary"
-              :disabled="busy"
-              @click="setCover"
-            >
-              将此表情设为合集封面
-            </button>
-            <label
-              ><span>名称 <span class="meme-field-hint">必填</span></span
-              ><input
-                v-model="name"
-                required
-                maxlength="120"
-                placeholder="例如：小狗跳舞"
-                :disabled="busy" /></label
-            ><label
-              >描述<textarea
-                v-model="description"
-                maxlength="2000"
-                placeholder="描述表情的含义或适用场景，例如：开心到跳起来"
-                :disabled="busy"
-              /></label
-            ><label
-              >标签（逗号分隔）<input
-                v-model="tags"
-                placeholder="例如：开心，兴奋，卖萌"
-                :disabled="busy"
-            /></label>
-            <p v-if="editing">
-              已使用 {{ editing.usageCount }} 次 ·
-              {{
-                editing.usageCount === 0
-                  ? "尚未使用"
-                  : editing.lastUsedAt
-                    ? "最近使用：" + formatDateTime(editing.lastUsedAt)
-                    : "未记录使用时间"
-              }}
-            </p>
-            <section v-if="editing" class="meme-summary-panel">
-              <div class="meme-summary-heading">
-                <h3><Sparkles :size="17" aria-hidden="true" />AI 摘要</h3>
-                <span class="meme-status">{{
-                  labels[editing.summaryStatus]
-                }}</span>
-              </div>
-              <p class="meme-summary-hint">
-                帮助 AI
-                理解画面和使用场景，可直接编辑。重新生成的候选需确认后才会替换。
-              </p>
-              <label
-                ><span class="meme-field-hint">当前摘要</span
-                ><textarea
-                  v-model="summary"
-                  maxlength="2400"
+                <X :size="20" />
+              </button>
+            </header>
+            <p v-if="error" role="alert">{{ error }}</p>
+            <form class="meme-editor" @submit.prevent="save">
+              <aside v-if="editing" class="meme-media-panel">
+                <div class="meme-preview-stage">
+                  <img
+                    class="meme-preview"
+                    :src="`/api/v1/memes/${editing.id}/${play ? 'file' : 'thumbnail'}`"
+                    :alt="editing.name"
+                  />
+                </div>
+                <div class="meme-preview-toolbar">
+                  <span class="meme-format">{{
+                    editing.mimeType.split("/")[1].toUpperCase()
+                  }}</span>
+                  <button
+                    v-if="editing.mimeType === 'image/gif'"
+                    type="button"
+                    class="button secondary"
+                    :aria-pressed="play"
+                    @click="play = !play"
+                  >
+                    <Square v-if="play" :size="15" aria-hidden="true" />
+                    <Play v-else :size="15" aria-hidden="true" />
+                    {{ play ? "停止播放" : "播放 GIF" }}
+                  </button>
+                </div>
+                <p class="meme-media-note">发送时使用原图，GIF 保留动画。</p>
+                <div class="meme-availability">
+                  <div>
+                    <strong>允许 AI 使用</strong>
+                    <p>
+                      {{
+                        active
+                          ? "可被检索并用于聊天回复"
+                          : "已停用，不会出现在检索结果中"
+                      }}
+                    </p>
+                  </div>
+                  <ToggleSwitch
+                    v-model="active"
+                    label="允许 AI 使用"
+                    :disabled="busy"
+                  />
+                </div>
+              </aside>
+              <div
+                v-else
+                class="meme-drop"
+                :class="{ 'is-dragging': dragging, 'has-file': file }"
+                @dragover.prevent="dragging = !busy"
+                @dragleave.self="dragging = false"
+                @drop.prevent="drop"
+              >
+                <input
+                  ref="fileInput"
+                  class="meme-file-input"
+                  type="file"
+                  tabindex="-1"
+                  aria-label="选择表情图片"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
                   :disabled="busy"
-                  rows="5"
+                  @change="pick"
                 />
-              </label>
-              <p
-                v-if="editing.summaryError"
-                class="meme-summary-hint"
-                role="status"
-              >
-                {{ summaryErrorMessage(editing.summaryError) }}
-              </p>
-              <div class="meme-summary-actions">
+                <template v-if="file">
+                  <img
+                    class="meme-upload-preview"
+                    :src="previewUrl"
+                    alt="待上传表情预览"
+                  />
+                  <div class="meme-file-info">
+                    <Check :size="16" aria-hidden="true" /><strong>{{
+                      file.name
+                    }}</strong
+                    ><span>{{
+                      file.size < 1024 * 1024
+                        ? `${Math.max(1, Math.round(file.size / 1024))} KiB`
+                        : `${(file.size / 1024 / 1024).toFixed(2)} MiB`
+                    }}</span>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="meme-upload-icon">
+                    <UploadCloud
+                      :size="30"
+                      :stroke-width="1.6"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <strong>{{
+                    dragging ? "松开鼠标，添加这张表情" : "把表情拖到这里"
+                  }}</strong>
+                  <span class="meme-drop-subtitle"
+                    >也可以从设备中选择一张喜欢的图片</span
+                  >
+                </template>
                 <button
-                  class="button secondary"
                   type="button"
-                  :disabled="
-                    busy ||
-                    ['pending', 'processing'].includes(editing.summaryStatus)
-                  "
-                  @click="generate"
+                  class="button secondary meme-choose"
+                  :disabled="busy"
+                  @click="fileInput?.click()"
                 >
-                  <Sparkles :size="16" aria-hidden="true" />{{
-                    editing.summary ? "重新生成候选" : "重试摘要"
+                  <ImagePlus :size="18" aria-hidden="true" />{{
+                    file ? "重新选择" : "选择图片"
                   }}
                 </button>
+                <small>JPEG、PNG、静态 WebP、GIF · 最大 10 MiB</small>
+                <div
+                  v-if="busy"
+                  class="meme-upload-progress"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <progress
+                    :value="progress"
+                    max="100"
+                    aria-label="图片上传进度"
+                  />
+                  <span>{{
+                    progress === 100
+                      ? "上传完成，正在处理图片…"
+                      : `正在上传 ${progress}%`
+                  }}</span>
+                </div>
+              </div>
+              <div class="meme-editor-fields">
+                <label
+                  >所属合集<select v-model="assetCollection" :disabled="busy">
+                    <option value="">未分类</option>
+                    <option v-for="c in collections" :key="c.id" :value="c.id">
+                      {{ c.name }}
+                    </option>
+                  </select></label
+                ><button
+                  v-if="
+                    editing?.collectionId &&
+                    assetCollection === editing.collectionId
+                  "
+                  type="button"
+                  class="button secondary"
+                  :disabled="busy"
+                  @click="setCover"
+                >
+                  将此表情设为合集封面
+                </button>
+                <label
+                  ><span>名称 <span class="meme-field-hint">必填</span></span
+                  ><input
+                    v-model="name"
+                    required
+                    maxlength="120"
+                    placeholder="例如：小狗跳舞"
+                    :disabled="busy" /></label
+                ><label
+                  >描述<textarea
+                    v-model="description"
+                    maxlength="2000"
+                    placeholder="描述表情的含义或适用场景，例如：开心到跳起来"
+                    :disabled="busy"
+                  /></label
+                ><label
+                  >标签（逗号分隔）<input
+                    v-model="tags"
+                    placeholder="例如：开心，兴奋，卖萌"
+                    :disabled="busy"
+                /></label>
+                <p v-if="editing">
+                  已使用 {{ editing.usageCount }} 次 ·
+                  {{
+                    editing.usageCount === 0
+                      ? "尚未使用"
+                      : editing.lastUsedAt
+                        ? "最近使用：" + formatDateTime(editing.lastUsedAt)
+                        : "未记录使用时间"
+                  }}
+                </p>
+                <section v-if="editing" class="meme-summary-panel">
+                  <div class="meme-summary-heading">
+                    <h3><Sparkles :size="17" aria-hidden="true" />AI 摘要</h3>
+                    <span class="meme-status">{{
+                      labels[editing.summaryStatus]
+                    }}</span>
+                  </div>
+                  <p class="meme-summary-hint">
+                    帮助 AI
+                    理解画面和使用场景，可直接编辑。重新生成的候选需确认后才会替换。
+                  </p>
+                  <label
+                    ><span class="meme-field-hint">当前摘要</span
+                    ><textarea
+                      v-model="summary"
+                      maxlength="2400"
+                      :disabled="busy"
+                      rows="5"
+                    />
+                  </label>
+                  <p
+                    v-if="editing.summaryError"
+                    class="meme-summary-hint"
+                    role="status"
+                  >
+                    {{ summaryErrorMessage(editing.summaryError) }}
+                  </p>
+                  <div class="meme-summary-actions">
+                    <button
+                      class="button secondary"
+                      type="button"
+                      :disabled="
+                        busy ||
+                        ['pending', 'processing'].includes(
+                          editing.summaryStatus,
+                        )
+                      "
+                      @click="generate"
+                    >
+                      <Sparkles :size="16" aria-hidden="true" />{{
+                        editing.summary ? "重新生成候选" : "重试摘要"
+                      }}
+                    </button>
+                    <button
+                      class="button secondary"
+                      type="button"
+                      :disabled="busy"
+                      @click="refreshEditing"
+                    >
+                      <RefreshCw :size="16" aria-hidden="true" />刷新状态
+                    </button>
+                  </div>
+                  <div v-if="editing.candidateSummary" class="meme-candidate">
+                    <strong>新摘要候选</strong>
+                    <p>{{ editing.candidateSummary }}</p>
+                    <button
+                      class="button secondary"
+                      type="button"
+                      :disabled="busy"
+                      @click="adopt"
+                    >
+                      采用候选摘要
+                    </button>
+                  </div>
+                </section>
+                <p v-if="!editing" class="meme-summary-hint">
+                  上传后自动生成 AI 摘要；名称、描述和标签帮助 AI
+                  理解与检索表情。
+                </p>
+              </div>
+              <footer class="meme-dialog-actions">
+                <button
+                  v-if="editing"
+                  class="button danger-ghost meme-delete"
+                  type="button"
+                  :disabled="busy"
+                  @click="remove"
+                >
+                  <Trash2 :size="16" aria-hidden="true" />删除表情
+                </button>
                 <button
                   class="button secondary"
                   type="button"
                   :disabled="busy"
-                  @click="refreshEditing"
+                  @click="requestCloseEditor"
                 >
-                  <RefreshCw :size="16" aria-hidden="true" />刷新状态
-                </button>
-              </div>
-              <div v-if="editing.candidateSummary" class="meme-candidate">
-                <strong>新摘要候选</strong>
-                <p>{{ editing.candidateSummary }}</p>
-                <button
-                  class="button secondary"
-                  type="button"
-                  :disabled="busy"
-                  @click="adopt"
+                  取消</button
+                ><button
+                  class="button primary"
+                  :disabled="busy || (!editing && !file)"
                 >
-                  采用候选摘要
+                  <LoaderCircle
+                    v-if="busy"
+                    :size="18"
+                    class="meme-spinner"
+                    aria-hidden="true"
+                  />
+                  <UploadCloud
+                    v-else-if="!editing"
+                    :size="18"
+                    aria-hidden="true"
+                  />
+                  {{ busy ? "处理中…" : editing ? "保存修改" : "上传表情" }}
                 </button>
-              </div>
-            </section>
-            <p v-if="!editing" class="meme-summary-hint">
-              上传后自动生成 AI 摘要；名称、描述和标签帮助 AI 理解与检索表情。
-            </p>
-          </div>
-          <footer class="meme-dialog-actions">
-            <button
-              v-if="editing"
-              class="button danger-ghost meme-delete"
-              type="button"
-              :disabled="busy"
-              @click="remove"
-            >
-              <Trash2 :size="16" aria-hidden="true" />删除表情
-            </button>
-            <button
-              class="button secondary"
-              type="button"
-              :disabled="busy"
-              @click="requestCloseEditor"
-            >
-              取消</button
-            ><button
-              class="button primary"
-              :disabled="busy || (!editing && !file)"
-            >
-              <LoaderCircle
-                v-if="busy"
-                :size="18"
-                class="meme-spinner"
-                aria-hidden="true"
-              />
-              <UploadCloud v-else-if="!editing" :size="18" aria-hidden="true" />
-              {{ busy ? "处理中…" : editing ? "保存修改" : "上传表情" }}
-            </button>
-          </footer>
-        </form>
+              </footer>
+            </form>
+          </section>
+        </ModalShell>
       </section>
-    </ModalShell>
+    </div>
   </main>
 </template>
 <style scoped>
@@ -1429,21 +1462,12 @@ onUnmounted(() => {
 .meme-filters > select {
   width: auto;
 }
-.meme-page {
-  max-width: 1200px;
-  margin: auto;
-  padding: 24px;
-}
-.meme-heading,
 .meme-filters {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 20px;
-}
-.meme-heading {
-  justify-content: space-between;
 }
 .meme-grid {
   display: grid;

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import LockedHint from "./LockedHint.vue";
+/** embedded: rendered inside a dialog that supplies the title. */
+defineProps<{ embedded?: boolean }>();
 import { onMounted, ref } from "vue";
 import { RefreshCw, Save } from "@lucide/vue";
 import { apiRequest, errorMessage, jsonBody } from "../services/api";
@@ -70,8 +73,11 @@ async function save() {
 onMounted(load);
 </script>
 <template>
-  <section id="plugin-budget" class="admin-panel">
-    <div class="panel-head">
+  <section
+    id="plugin-budget"
+    :class="embedded ? 'plugin-budget-embedded' : 'admin-panel'"
+  >
+    <div v-if="!embedded" class="panel-head">
       <div>
         <p class="card-kicker">插件</p>
         <h2>插件工具预算</h2>
@@ -130,9 +136,7 @@ onMounted(load);
           所有插件一起使用将超限，可减少单个工作流所选插件或调整上限。
         </p>
       </div>
-      <p v-if="!session.sensitiveActive" class="panel-description">
-        修改预算需要先完成敏感操作验证。
-      </p>
+      <LockedHint reason="修改预算需要敏感操作授权。" />
       <div class="form-actions">
         <button
           class="button primary"

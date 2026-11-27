@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import AiUsagePanel from "../components/AiUsagePanel.vue";
 import { enumLabel } from "../utils/status-labels";
 import { confirmAction } from "../services/confirm";
 import { partialFailureMessage, settleAll } from "../utils/settle";
@@ -11,7 +10,6 @@ import MemoryPanel from "../components/MemoryPanel.vue";
 import {
   Activity,
   Bot,
-  ChartColumn,
   ChevronDown,
   ChevronUp,
   Cpu,
@@ -869,7 +867,6 @@ onMounted(async () => {
           { id: 'image-input-settings', label: '原生图片输入', icon: Image },
           { id: 'providers', label: 'Provider', icon: Bot },
           { id: 'routes', label: '路由策略', icon: Route },
-          { id: 'ai-usage', label: '用量与缓存', icon: ChartColumn },
         ]"
       />
       <div class="sidebar-note">
@@ -1742,7 +1739,6 @@ onMounted(async () => {
           </form>
         </AdminFormDialog>
       </section>
-      <AiUsagePanel id="ai-usage" />
     </div>
   </main>
 </template>

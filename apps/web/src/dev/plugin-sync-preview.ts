@@ -1,5 +1,6 @@
 // Development-only preview. All API calls use fictional in-memory data.
 import { createApp, h } from "vue";
+import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import { createPinia } from "pinia";
 import PluginsView from "../views/PluginsView.vue";
 import { useSessionStore } from "../stores/session";
@@ -229,7 +230,17 @@ window.fetch = (input, init) => {
   );
 };
 const pinia = createPinia();
-createApp({ render: () => h("main", { class: "app-shell" }, [h(PluginsView)]) })
+// Memory router so sidebar links render as in the app.
+const router = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: "/plugins", component: PluginsView },
+    { path: "/memes", component: PluginsView },
+  ],
+});
+await router.push("/plugins");
+createApp({ render: () => h("main", { class: "app-shell" }, [h(RouterView)]) })
   .use(pinia)
+  .use(router)
   .mount("#app");
 await useSessionStore(pinia).restore();

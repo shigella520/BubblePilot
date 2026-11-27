@@ -561,6 +561,45 @@ onMounted(load);
             <p class="card-kicker">版本化工作流</p>
             <h2>工作流</h2>
           </div>
+          <details class="dev-resources">
+            <summary class="button secondary">
+              <FileJson :size="16" />开发者资源
+            </summary>
+            <div
+              class="dev-resources-menu"
+              role="group"
+              aria-label="复制给 AI 编写工作流的资源"
+            >
+              <button
+                class="button secondary tiny"
+                type="button"
+                @click="copyWorkflowResource('schema')"
+              >
+                <ClipboardCopy :size="14" />Schema
+              </button>
+              <button
+                class="button secondary tiny"
+                type="button"
+                @click="copyWorkflowResource('guide')"
+              >
+                <ClipboardCopy :size="14" />编写指南
+              </button>
+              <button
+                class="button secondary tiny"
+                type="button"
+                @click="copyWorkflowResource('catalog')"
+              >
+                <ClipboardCopy :size="14" />Binding Catalog
+              </button>
+              <button
+                class="button secondary tiny"
+                type="button"
+                @click="copyWorkflowResource('prompt')"
+              >
+                <ClipboardCopy :size="14" />标准提示词
+              </button>
+            </div>
+          </details>
           <button class="button secondary" @click="load">
             <RefreshCw :size="16" />刷新
           </button>
@@ -575,39 +614,6 @@ onMounted(load);
             <Plus :size="16" />新建工作流
           </button>
         </div>
-        <details class="workflow-ai-tools">
-          <summary>
-            <FileJson :size="16" />开发者资源：让 AI 编写工作流时复制
-          </summary>
-          <button
-            class="button tiny secondary"
-            type="button"
-            @click="copyWorkflowResource('schema')"
-          >
-            <ClipboardCopy :size="14" />Schema
-          </button>
-          <button
-            class="button tiny secondary"
-            type="button"
-            @click="copyWorkflowResource('guide')"
-          >
-            <ClipboardCopy :size="14" />编写指南
-          </button>
-          <button
-            class="button tiny secondary"
-            type="button"
-            @click="copyWorkflowResource('catalog')"
-          >
-            <ClipboardCopy :size="14" />Binding Catalog
-          </button>
-          <button
-            class="button tiny secondary"
-            type="button"
-            @click="copyWorkflowResource('prompt')"
-          >
-            <ClipboardCopy :size="14" />标准提示词
-          </button>
-        </details>
         <div class="table-shell">
           <table>
             <thead>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleMessage from "../DismissibleMessage.vue";
 import LockedHint from "../LockedHint.vue";
 import { confirmAction } from "../../services/confirm";
 import TaskScheduleEditor from "./TaskScheduleEditor.vue";
@@ -385,17 +386,13 @@ onBeforeUnmount(() => generation++);
 </script>
 <template>
   <section class="admin-panel scheduled-tasks">
-    <p v-if="notice" role="status">{{ notice }}</p>
-    <header class="scheduled-tasks-heading">
+    <div class="panel-head">
       <div>
-        <p class="eyebrow">定时任务</p>
+        <p class="card-kicker">定时任务</p>
         <h2>定时任务</h2>
-        <p>
-          按创建时间从新到旧排列，默认显示待执行任务。修改、暂停、跳过、取消和删除需要敏感操作授权。已结束任务按下方「定时任务全局设置」中的保留天数自动清理。
-        </p>
       </div>
       <button
-        class="button secondary scheduled-tasks-refresh"
+        class="button secondary"
         type="button"
         :disabled="busy || mutating"
         @click="load"
@@ -403,7 +400,13 @@ onBeforeUnmount(() => generation++);
         <RefreshCw :size="16" :class="{ 'button-spinner': busy }" />
         {{ busy ? "刷新中…" : "刷新" }}
       </button>
-    </header>
+    </div>
+    <p class="panel-description">
+      按创建时间从新到旧排列，默认显示待执行任务。修改、暂停、跳过、取消和删除需要敏感操作授权。已结束任务按下方「定时任务全局设置」中的保留天数自动清理。
+    </p>
+    <DismissibleMessage v-if="notice" @close="notice = ''">{{
+      notice
+    }}</DismissibleMessage>
     <div class="task-filters">
       <label
         >工作流<select v-model="workflowId">
@@ -429,8 +432,10 @@ onBeforeUnmount(() => generation++);
       >
     </div>
     <LockedHint reason="完成敏感操作授权后才能修改任务或查看详情。" />
-    <p v-if="error" role="alert">{{ error }}</p>
-    <div class="table-scroll">
+    <DismissibleMessage v-if="error" error inline @close="error = ''">{{
+      error
+    }}</DismissibleMessage>
+    <div class="table-shell scheduled-task-table">
       <table>
         <thead>
           <tr>
@@ -746,7 +751,7 @@ onBeforeUnmount(() => generation++);
             <CalendarClock :size="17" />调度规则与逐次记录
           </h3>
           <p>{{ detail.summary?.scheduleSummary }}</p>
-          <div class="table-scroll">
+          <div class="table-shell">
             <table>
               <thead>
                 <tr>
@@ -899,14 +904,6 @@ footer {
   justify-content: space-between;
   flex-wrap: wrap;
 }
-.scheduled-tasks-heading {
-  align-items: flex-start;
-}
-.scheduled-tasks-refresh {
-  flex: 0 0 auto;
-  align-self: flex-start;
-  white-space: nowrap;
-}
 .task-filters label,
 .task-editor label {
   display: grid;
@@ -919,24 +916,8 @@ footer {
 .task-filters label {
   min-width: 0;
 }
-.table-scroll {
-  overflow: auto;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.scheduled-tasks > .table-scroll > table {
+.scheduled-task-table > table {
   min-width: 1040px;
-}
-th {
-  white-space: nowrap;
-}
-th,
-td {
-  text-align: left;
-  padding: 12px;
-  border-bottom: 1px solid #e5e7eb;
 }
 td:first-child {
   min-width: 160px;

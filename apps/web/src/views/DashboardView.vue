@@ -362,12 +362,13 @@ onMounted(load);
         </div>
       </div>
       <div v-if="operations?.alerts.length" class="runtime-alert-list">
-        <span v-for="alert in operations.alerts" :key="alert.code">
-          <span :title="alert.code">{{
-            enumLabel("operationsAlert", alert.code)
-          }}</span>
-          · {{ alert.count }}
-        </span>
+        <span
+          v-for="alert in operations.alerts"
+          :key="alert.code"
+          :title="alert.code"
+          >{{ enumLabel("operationsAlert", alert.code) }} ·
+          {{ alert.count }}</span
+        >
       </div>
     </section>
     <section class="admin-panel"><MemeDeliveries /></section>

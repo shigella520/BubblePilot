@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AiUsagePanel from "../components/AiUsagePanel.vue";
 import CopyableId from "../components/CopyableId.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 import { auditActionLabel, enumLabel } from "../utils/status-labels";
@@ -24,6 +25,7 @@ import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentBudgetDetails from "../components/AgentBudgetDetails.vue";
 import MemorySources from "../components/MemorySources.vue";
 import {
+  ChartColumn,
   ClipboardCopy,
   FileClock,
   FileJson,
@@ -965,6 +967,7 @@ function contextSnapshotValue(
       <SectionNavigation
         :items="[
           { id: 'executions', label: '执行记录', icon: FileClock },
+          { id: 'ai-usage', label: '用量与缓存', icon: ChartColumn },
           { id: 'audit', label: '审计事件', icon: ShieldCheck },
         ]"
       />
@@ -1152,6 +1155,7 @@ function contextSnapshotValue(
           @next="changePage(executionPager.next)"
         />
       </section>
+      <AiUsagePanel id="ai-usage" />
       <section id="audit" class="admin-panel">
         <div class="panel-head">
           <div>

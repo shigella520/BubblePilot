@@ -541,11 +541,11 @@ a {
   gap: 8px;
   margin-top: 14px;
 }
-.runtime-alert-list span {
-  padding: 6px 9px;
+.runtime-alert-list > span {
+  padding: 6px 11px;
   color: var(--bubblepilot-danger);
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: var(--bubblepilot-text-xs);
+  font-size: var(--bubblepilot-text-sm);
+  font-weight: 650;
   border: 1px solid rgba(192, 75, 69, 0.24);
   border-radius: 999px;
   background: rgba(192, 75, 69, 0.07);
@@ -2737,39 +2737,6 @@ legend {
   background: #fff;
 }
 
-.workflow-ai-tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.55rem;
-  margin: 0 0 1rem;
-  padding: 0.7rem 0.8rem;
-  border: 1px solid var(--bubblepilot-line);
-  border-radius: 12px;
-  background: var(--bubblepilot-surface-subtle);
-}
-
-.workflow-ai-tools > summary {
-  display: inline-flex;
-  flex-basis: 100%;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--bubblepilot-muted);
-  font-size: var(--bubblepilot-text-sm);
-  font-weight: 700;
-  cursor: pointer;
-}
-.workflow-ai-tools:not([open]) {
-  padding-block: 0.5rem;
-}
-.workflow-ai-tools > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-right: auto;
-  font-weight: 700;
-}
-
 .workflow-import-dialog {
   color: var(--bubblepilot-text);
 }
@@ -3700,4 +3667,32 @@ legend {
     flex-wrap: wrap;
     margin-left: 0;
   }
+}
+
+/* Developer resources: a toolbar button that opens a small menu. */
+.dev-resources {
+  position: relative;
+}
+.dev-resources > summary {
+  list-style: none;
+}
+.dev-resources > summary::-webkit-details-marker {
+  display: none;
+}
+.dev-resources-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  gap: var(--bubblepilot-space-2);
+  min-width: 200px;
+  padding: var(--bubblepilot-space-3);
+  border: 1px solid var(--bubblepilot-line-strong);
+  border-radius: var(--bubblepilot-radius-sm);
+  background: var(--bubblepilot-surface);
+  box-shadow: var(--bubblepilot-shadow-soft);
+}
+.dev-resources-menu .button {
+  justify-content: flex-start;
 }

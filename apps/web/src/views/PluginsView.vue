@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import CopyableId from "../components/CopyableId.vue";
 import PluginSettingsPanel from "../components/PluginSettingsPanel.vue";
-import ExtensionTabs from "../components/ExtensionTabs.vue";
+import ExtensionSidebar from "../components/ExtensionSidebar.vue";
+import AdminDetailDialog from "../components/AdminDetailDialog.vue";
 import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
 import { retainedApprovals } from "../utils/plugin-tool-approval";
@@ -9,7 +11,7 @@ import type { PluginListItem } from "../utils/plugin-overview";
 import ToggleSwitch from "../components/ToggleSwitch.vue";
 import AdminFormDialog from "../components/AdminFormDialog.vue";
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
-import { Plus, Puzzle, RefreshCw, UploadCloud } from "@lucide/vue";
+import { Plus, RefreshCw, SlidersHorizontal, UploadCloud } from "@lucide/vue";
 import PluginToolPicker from "../components/PluginToolPicker.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { pluginErrorMessage, canInspectPlugin } from "../utils/plugin-feedback";
@@ -94,6 +96,7 @@ const items = ref<PluginListItem[]>([]),
   busy = ref(false),
   error = ref(""),
   notice = ref(""),
+  budgetOpen = ref(false),
   showImport = ref(false),
   url = ref(""),
   gitRef = ref(""),
@@ -112,6 +115,8 @@ const items = ref<PluginListItem[]>([]),
   tested = ref(false);
 const previous = ref<Detail | null>(null);
 const autoSyncTools = ref(false);
+/** Workflow id → name, so references show names instead of UUIDs. */
+const workflowNames = ref<Record<string, string>>({});
 const workflowReferences = computed(() => {
   const groups = new Map<string, number[]>();
   for (const reference of selected.value?.references ?? []) {
@@ -166,6 +171,14 @@ onBeforeUnmount(() => {
 });
 async function load() {
   items.value = await apiRequest("/api/v1/plugins");
+  // Names are a convenience; references still render with ids if this fails.
+  await apiRequest<Array<{ id: string; name: string }>>("/api/v1/workflows")
+    .then((workflows) => {
+      workflowNames.value = Object.fromEntries(
+        workflows.map((workflow) => [workflow.id, workflow.name]),
+      );
+    })
+    .catch(() => undefined);
 }
 async function action(fn: () => Promise<void>) {
   if (busy.value) return;
@@ -450,45 +463,62 @@ async function remove() {
 }
 </script>
 <template>
-  <main class="plugins-page">
-    <ExtensionTabs />
-    <header class="plugin-heading">
-      <div>
-        <h1><Puzzle :size="28" /> 插件</h1>
-        <p>
+  <main class="page-container split-admin-page reveal">
+    <ExtensionSidebar
+      note="执行类工具须由管理员明确授权；插件工具预算限制每次执行加载的工具目录大小。"
+    />
+    <div class="admin-workspace">
+      <section id="plugins" class="admin-panel">
+        <div class="panel-head">
+          <div>
+            <p class="card-kicker">插件</p>
+            <h2>已安装插件</h2>
+          </div>
+          <div class="plugin-actions">
+            <button
+              class="button secondary"
+              :disabled="busy"
+              @click="action(load)"
+            >
+              <RefreshCw :size="16" />刷新</button
+            ><button
+              class="button secondary"
+              type="button"
+              @click="budgetOpen = true"
+            >
+              <SlidersHorizontal :size="16" />插件工具预算</button
+            ><button class="button primary" :disabled="busy" @click="reset">
+              <Plus :size="16" />安装插件
+            </button>
+          </div>
+        </div>
+        <p class="panel-description">
           按需扩展外部能力，支持声明式 Skill 与 HTTP
           MCP；执行类工具须由管理员明确授权。
         </p>
-      </div>
-      <div class="plugin-actions">
-        <button class="button secondary" :disabled="busy" @click="action(load)">
-          <RefreshCw :size="16" />刷新</button
-        ><button class="button primary" :disabled="busy" @click="reset">
-          <Plus :size="16" />安装插件
-        </button>
-      </div>
-    </header>
-    <DismissibleMessage v-if="notice" @close="notice = ''">{{
-      notice
-    }}</DismissibleMessage>
-    <DismissibleMessage v-if="error" error @close="error = ''">{{
-      error
-    }}</DismissibleMessage>
-    <div class="plugin-status" role="status">
-      <span v-if="busy">正在处理，请稍候…</span>
+        <DismissibleMessage v-if="notice" @close="notice = ''">{{
+          notice
+        }}</DismissibleMessage>
+        <DismissibleMessage v-if="error" error @close="error = ''">{{
+          error
+        }}</DismissibleMessage>
+        <div class="plugin-status" role="status">
+          <span v-if="busy">正在处理，请稍候…</span>
+        </div>
+        <div class="plugin-grid">
+          <PluginOverviewCard
+            v-for="item in items"
+            :key="item.id"
+            :item="item"
+            :disabled="busy"
+            @open="open"
+          />
+        </div>
+        <p v-if="!items.length && !busy" class="empty-cell">
+          还没有安装插件。导入后检查能力、配置服务，再授权给 AI 节点。
+        </p>
+      </section>
     </div>
-    <div class="plugin-grid">
-      <PluginOverviewCard
-        v-for="item in items"
-        :key="item.id"
-        :item="item"
-        :disabled="busy"
-        @open="open"
-      />
-    </div>
-    <p v-if="!items.length && !busy">
-      还没有安装插件。导入后检查能力、配置服务，再授权给 AI 节点。
-    </p>
     <AdminFormDialog
       v-if="showImport || preview || selected"
       :sensitive-required="true"
@@ -704,7 +734,15 @@ async function remove() {
               :key="group.id"
               class="reference-group"
             >
-              <code>{{ group.id }}</code>
+              <RouterLink
+                v-if="workflowNames[group.id]"
+                class="reference-name"
+                :to="`/automation/${group.id}`"
+                >{{ workflowNames[group.id] }}</RouterLink
+              >
+              <span v-else class="reference-name"
+                >已删除的工作流 <CopyableId :value="group.id"
+              /></span>
               <div class="version-list">
                 <span v-for="version in group.versions" :key="version"
                   >v{{ version }}</span
@@ -795,16 +833,17 @@ async function remove() {
         <pre v-if="content" class="plugin-content">{{ content }}</pre>
       </section></AdminFormDialog
     >
-    <PluginSettingsPanel />
+    <AdminDetailDialog
+      v-if="budgetOpen"
+      title="插件工具预算"
+      size="md"
+      @close="budgetOpen = false"
+    >
+      <PluginSettingsPanel embedded />
+    </AdminDetailDialog>
   </main>
 </template>
 <style scoped>
-.plugins-page {
-  max-width: 1160px;
-  margin: auto;
-  padding: 24px;
-}
-.plugin-heading,
 .plugin-actions {
   display: flex;
   flex-wrap: wrap;
@@ -817,18 +856,15 @@ async function remove() {
   color: var(--bubblepilot-warning);
   font-size: var(--bubblepilot-text-sm);
 }
-.plugin-heading h1 {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-.plugin-heading p,
 .plugin-panel p {
   color: var(--bubblepilot-muted, #64748b);
 }
 .plugin-status {
-  min-height: 44px;
-  padding: 10px 0;
+  min-height: 0;
+  color: var(--bubblepilot-muted);
+}
+.plugin-status:not(:empty) {
+  padding: 8px 0;
 }
 .plugin-grid {
   display: grid;
@@ -924,10 +960,9 @@ async function remove() {
   gap: 10px;
   margin-top: 16px;
 }
-.reference-group code {
-  font-size: 12px;
+.reference-name {
+  font-weight: 700;
   overflow-wrap: anywhere;
-  color: var(--bubblepilot-muted);
 }
 .version-list {
   display: flex;
@@ -950,13 +985,6 @@ async function remove() {
   text-align: left;
 }
 @media (max-width: 640px) {
-  .plugins-page {
-    padding: 14px;
-  }
-  .plugin-heading {
-    align-items: flex-start;
-    flex-direction: column;
-  }
   .plugin-actions {
     flex-wrap: wrap;
   }

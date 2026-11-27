@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { formatDateTime } from "../../utils/format";
 import { computed, ref, watch, onBeforeUnmount } from "vue";
-import { Search } from "@lucide/vue";
+import { RefreshCw, Search } from "@lucide/vue";
 import { apiRequest, errorMessage } from "../../services/api";
 interface Attempt {
   id: string;
@@ -173,21 +173,25 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <section class="idle-dashboard">
-    <header class="idle-heading">
+    <header class="panel-head">
       <div>
-        <small>PROACTIVE CONVERSATION</small>
+        <p class="card-kicker">空闲交流</p>
         <h2>空闲主动交流</h2>
-        <p>当前状态基于已发布版本 · 历史保留各版本记录 · 每 30 秒刷新</p>
       </div>
       <button
         class="button secondary"
         :disabled="stateBusy || historyBusy"
         @click="refresh"
       >
-        {{ stateBusy || historyBusy ? "刷新中…" : "刷新状态" }}
+        <RefreshCw :size="16" />{{
+          stateBusy || historyBusy ? "刷新中…" : "刷新"
+        }}
       </button>
     </header>
-    <div class="idle-shared-filters">
+    <p class="panel-description">
+      当前状态基于已发布版本 · 历史保留各版本记录 · 每 30 秒刷新
+    </p>
+    <div class="filter-grid idle-shared-filters">
       <slot name="workflow-filter" />
       <label
         >聊天<select v-model="chat" @change="filter">
@@ -197,16 +201,16 @@ onBeforeUnmount(() => {
           </option>
         </select></label
       >
-      <small>筛选同时作用于下方两个表格</small>
+      <small class="idle-filter-hint">筛选同时作用于下方两个表格</small>
     </div>
-    <section class="idle-table-panel">
+    <section class="idle-subsection">
       <h3>
         当前聊天状态 <span>{{ visibleRows.length }} 个聊天</span>
       </h3>
       <p v-if="stateError" role="alert">
         {{ stateError }} <button @click="loadState">重试</button>
       </p>
-      <div class="idle-table-scroll">
+      <div class="table-shell">
         <table class="idle-state-table">
           <thead>
             <tr>
@@ -287,14 +291,12 @@ onBeforeUnmount(() => {
         </table>
       </div>
     </section>
-    <section class="idle-table-panel">
-      <div class="idle-heading">
-        <h3>历史触发记录</h3>
-      </div>
+    <section class="idle-subsection">
+      <h3>历史触发记录</h3>
       <p v-if="historyError" role="alert">
         {{ historyError }} <button @click="loadHistory">重试</button>
       </p>
-      <div class="idle-table-scroll">
+      <div class="table-shell">
         <table class="idle-history-table">
           <thead>
             <tr>
@@ -411,65 +413,22 @@ onBeforeUnmount(() => {
   gap: 20px;
   color: var(--bubblepilot-text, #252a31);
 }
-.idle-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  flex-wrap: wrap;
-}
-.idle-heading h2 {
-  margin: 6px 0;
-  font-size: 26px;
-}
-.idle-heading p {
-  color: #717780;
-  font-size: 13px;
-}
-.idle-heading small {
-  color: #1583da;
-  letter-spacing: 1.4px;
-  font-weight: 700;
-}
-.idle-table-panel {
-  background: var(--bubblepilot-surface, #fff);
-  border: 1px solid #e6e7e9;
-  border-radius: 20px;
-  padding: 24px;
+.idle-subsection {
   min-width: 0;
 }
-.idle-table-panel h3 {
-  font-size: 17px;
-  margin: 0 0 18px;
+.idle-subsection h3 {
+  margin: 0;
+  font-size: var(--bubblepilot-text-lg);
 }
-.idle-table-panel h3 span {
-  font-size: 12px;
-  color: #858b92;
-  font-weight: 400;
+.idle-subsection h3 span {
   margin-left: 12px;
+  color: var(--bubblepilot-muted);
+  font-size: var(--bubblepilot-text-sm);
+  font-weight: 400;
 }
-.idle-table-scroll {
-  overflow-x: auto;
-}
-table {
-  min-width: 0;
-  width: 100%;
-  border-collapse: collapse;
-  text-align: left;
-  font-size: 13px;
-}
-th {
-  color: #7b8189;
-  font-weight: 500;
-  padding: 14px 12px;
-  background: #f7f8fa;
-  white-space: nowrap;
-}
-td {
-  padding: 18px 12px;
-  border-bottom: 1px solid #eff0f2;
-  vertical-align: top;
-  min-width: 125px;
+.idle-filter-hint {
+  align-self: center;
+  color: var(--bubblepilot-muted);
 }
 td small {
   display: block;
@@ -539,16 +498,10 @@ footer button {
   padding: 8px 12px;
 }
 @media (max-width: 640px) {
-  .idle-table-panel {
-    padding: 16px;
-  }
-  .idle-heading h2 {
-    font-size: 22px;
-  }
   .idle-filters {
     flex-wrap: wrap;
   }
-  .idle-table-panel td {
+  .idle-subsection td {
     min-width: 115px;
   }
 }
@@ -571,12 +524,12 @@ footer button {
   .idle-history-table td:nth-child(n + 4) {
     display: none;
   }
-  .idle-table-panel td {
+  .idle-subsection td {
     min-width: 0;
     overflow-wrap: anywhere;
     padding: 14px 7px;
   }
-  .idle-table-panel th {
+  .idle-subsection th {
     padding: 12px 7px;
   }
   .idle-badge {
@@ -584,14 +537,7 @@ footer button {
   }
 }
 .idle-shared-filters {
-  display: flex;
-  align-items: end;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding: 20px;
-  border: 1px solid #e6e7e9;
-  border-radius: 16px;
-  background: var(--bubblepilot-surface, #fff);
+  margin-top: 0;
 }
 .idle-shared-filters label,
 .idle-shared-filters :deep(label) {
