@@ -62,6 +62,7 @@ import {
   chatExcerptSchema,
   memorySettingsSchema,
   memorySearchSchema,
+  defaultEmbeddingTimeoutSeconds,
   type MemoryScope,
   type MemorySearch,
   type Evidence,
@@ -233,6 +234,8 @@ export class MemoryService {
       ...s.config,
       enabled: s.enabled,
       version: s.version,
+      timeoutSeconds:
+        s.request_timeout_seconds ?? defaultEmbeddingTimeoutSeconds,
       secretConfigured: !!s.encrypted_secret,
       databaseReady: await this.repository.ready(),
       generations: (await this.repository.generations()).map((g) => ({
@@ -243,9 +246,25 @@ export class MemoryService {
       })),
     };
   }
+  /** Saved embedding request timeout in milliseconds. */
+  async requestTimeoutMs() {
+    try {
+      const s = await this.repository.settings();
+      return (
+        (s.request_timeout_seconds ?? defaultEmbeddingTimeoutSeconds) * 1000
+      );
+    } catch {
+      // An unreadable setting must not break retrieval; use the default.
+      return defaultEmbeddingTimeoutSeconds * 1000;
+    }
+  }
   async probe(input: unknown) {
     const parsed = memorySettingsSchema.parse(input);
     const previous = await this.repository.settings();
+    const timeoutMs =
+      (parsed.timeoutSeconds ??
+        previous.request_timeout_seconds ??
+        defaultEmbeddingTimeoutSeconds) * 1000;
     const secret =
       parsed.secret ??
       (previous.encrypted_secret
@@ -255,9 +274,12 @@ export class MemoryService {
     let vectors: number[][];
     try {
       identity = await this.embedding.identity(parsed, secret);
-      vectors = await this.embedding.encode(parsed, secret, [
-        "虚构测试：林晓决定使用旧电脑备份。",
-      ]);
+      vectors = await this.embedding.encode(
+        parsed,
+        secret,
+        ["虚构测试：林晓决定使用旧电脑备份。"],
+        timeoutMs,
+      );
     } catch (error) {
       this.reportEmbeddingFailure("probe", parsed, error);
       throw error;
@@ -269,7 +291,7 @@ export class MemoryService {
     };
   }
   async update(input: unknown) {
-    const { enabled, expectedVersion, secret, ...config } =
+    const { enabled, expectedVersion, secret, timeoutSeconds, ...config } =
       memorySettingsSchema.parse(input);
     if (enabled && !(await this.repository.ready()))
       throw new ApplicationError(
@@ -283,8 +305,13 @@ export class MemoryService {
     const existing = (await this.repository.generations()).find(
       (g) => hashJson(g.config) === hashJson(config),
     );
+    // Reuse the identity without contacting the service when the model is
+    // untouched: disabling, or saving only operational settings such as the
+    // timeout (possible during an outage). New credentials are still probed.
     const identity =
-      !enabled && unchanged && existing
+      unchanged &&
+      existing &&
+      (!enabled || (enabled === old.enabled && secret === undefined))
         ? existing.identity
         : (await this.probe(input)).identity;
     await this.repository.saveSettings(
@@ -293,6 +320,7 @@ export class MemoryService {
       expectedVersion,
       secret,
       identity,
+      timeoutSeconds,
     );
     return this.view();
   }
@@ -369,6 +397,7 @@ export class MemoryService {
           (!job.range_to || Date.parse(m.sentAt) <= job.range_to.getTime()),
       );
       const chunks = chunkMessages(included);
+      const timeoutMs = await this.requestTimeoutMs();
       const vectors: number[][] = [];
       for (let i = 0; i < chunks.length; i += 4)
         vectors.push(
@@ -376,6 +405,7 @@ export class MemoryService {
             generation.config,
             secret,
             chunks.slice(i, i + 4).map((c) => c.text),
+            timeoutMs,
           )),
         );
       await this.repository.publish(
@@ -671,7 +701,7 @@ export class MemorySession {
             Math.max(
               1,
               Math.min(
-                15000,
+                await this.service.requestTimeoutMs(),
                 (this.operationContext?.deadline ?? Infinity) - Date.now(),
               ),
             ),

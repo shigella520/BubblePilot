@@ -20,6 +20,7 @@ import {
 } from "./chunking.js";
 import {
   defaultMemoryConfig,
+  defaultEmbeddingTimeoutSeconds,
   type Generation,
   type MemoryScope,
   type MemorySearch,
@@ -95,6 +96,7 @@ export class MemoryRepository {
         enabled: boolean;
         version: number;
         encrypted_secret: string | null;
+        request_timeout_seconds: number;
       }>("SELECT * FROM memory_settings WHERE id=1")
     ).rows[0];
     return (
@@ -103,6 +105,7 @@ export class MemoryRepository {
         enabled: false,
         version: 0,
         encrypted_secret: null,
+        request_timeout_seconds: defaultEmbeddingTimeoutSeconds,
       }
     );
   }
@@ -119,6 +122,7 @@ export class MemoryRepository {
     expectedVersion: number,
     secret: string | undefined,
     identity: string,
+    timeoutSeconds?: number,
   ) {
     return this.transaction(async (db) => {
       await db.query(
@@ -169,9 +173,10 @@ export class MemoryRepository {
           [existing.id, encrypted],
         );
       await db.query(
-        `INSERT INTO memory_settings(id,enabled,config,encrypted_secret,version) VALUES(1,$1,$2,$3,1)
-        ON CONFLICT(id) DO UPDATE SET enabled=$1,config=$2,encrypted_secret=$3,version=memory_settings.version+1`,
-        [enabled, config, encrypted],
+        `INSERT INTO memory_settings(id,enabled,config,encrypted_secret,version,request_timeout_seconds) VALUES(1,$1,$2,$3,1,COALESCE($4::int,${defaultEmbeddingTimeoutSeconds}))
+        ON CONFLICT(id) DO UPDATE SET enabled=$1,config=$2,encrypted_secret=$3,version=memory_settings.version+1,
+        request_timeout_seconds=COALESCE($4::int,memory_settings.request_timeout_seconds)`,
+        [enabled, config, encrypted, timeoutSeconds ?? null],
       );
     });
   }

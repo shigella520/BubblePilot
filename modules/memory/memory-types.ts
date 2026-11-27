@@ -5,10 +5,20 @@ import {
   embeddingConfigSchema,
   type EmbeddingConfig,
 } from "./embedding-client.js";
+export const defaultEmbeddingTimeoutSeconds = 15;
+export const minEmbeddingTimeoutSeconds = 5;
+export const maxEmbeddingTimeoutSeconds = 120;
 export const memorySettingsSchema = embeddingConfigSchema.extend({
   enabled: z.boolean(),
   expectedVersion: z.number().int().min(0),
   secret: z.string().max(8192).optional(),
+  /** Request timeout; stored apart from the generation config. */
+  timeoutSeconds: z
+    .number()
+    .int()
+    .min(minEmbeddingTimeoutSeconds)
+    .max(maxEmbeddingTimeoutSeconds)
+    .optional(),
 });
 export const memorySearchValidationRules = [
   "Use either senderId or botWorkflowId, not both.",

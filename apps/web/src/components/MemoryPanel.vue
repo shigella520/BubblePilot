@@ -52,6 +52,7 @@ interface Settings {
   dimensions: number;
   modelVersion: string;
   queryPrefix: string;
+  timeoutSeconds: number;
   version: number;
   secretConfigured: boolean;
   databaseReady: boolean;
@@ -320,6 +321,7 @@ function payload() {
     dimensions,
     modelVersion,
     queryPrefix,
+    timeoutSeconds,
   } = settings.value;
   return {
     enabled,
@@ -329,6 +331,7 @@ function payload() {
     dimensions,
     modelVersion,
     queryPrefix,
+    ...(Number.isInteger(timeoutSeconds) ? { timeoutSeconds } : {}),
     expectedVersion: version,
     ...(secret.value ? { secret: secret.value } : {}),
   };
@@ -574,6 +577,19 @@ onBeforeUnmount(() => {
           >模型版本标识<input v-model="settings.modelVersion" required
         /></label>
         <label>问题编码前缀<textarea v-model="settings.queryPrefix" /></label>
+        <label
+          >请求超时（秒）<input
+            v-model.number="settings.timeoutSeconds"
+            type="number"
+            min="5"
+            max="120"
+            step="1"
+            required
+          /><small
+            >索引、检索与测试连接共用，范围 5～120
+            秒；检索时仍受工具剩余时间限制。只改超时不会重建索引。</small
+          ></label
+        >
         <label
           >更新凭据（留空保留）<input
             v-model="secret"

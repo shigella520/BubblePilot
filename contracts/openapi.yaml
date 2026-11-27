@@ -4105,6 +4105,11 @@ components:
         queryPrefix:
           type: string
           maxLength: 1000
+        timeoutSeconds:
+          type: integer
+          minimum: 5
+          maximum: 120
+          description: Embedding 请求超时（索引、查询向量、测试连接）；省略时保留已保存值，缺省 15。不属于索引代次配置，修改不会新建代次；只改此项且未更换凭据时保存不探测服务。
         expectedVersion:
           type: integer
           minimum: 0

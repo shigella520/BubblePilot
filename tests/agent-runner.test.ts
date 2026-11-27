@@ -1184,6 +1184,8 @@ describe("AgentRunner", () => {
     const memory = {
       repository: memoryRepository,
       session: sessionFactory,
+      requestTimeoutMs: vi.fn().mockResolvedValue(15000),
+      reportEmbeddingFailure: vi.fn(),
       embedding: {
         identity: vi.fn().mockResolvedValue("fictional-model"),
         encode: vi.fn().mockResolvedValue([[1, 0]]),

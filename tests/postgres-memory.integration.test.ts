@@ -509,6 +509,62 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     await drain();
   });
 
+  it("saves the embedding timeout without probing, a new generation or rebuild", async () => {
+    const identity = vi.fn((...a: Parameters<EmbeddingClient["identity"]>) =>
+      embedding.identity(...a),
+    );
+    const encode = vi.fn((...a: Parameters<EmbeddingClient["encode"]>) =>
+      embedding.encode(...a),
+    );
+    const svc = new MemoryService(repo, { identity, encode });
+    const before = await svc.view();
+    expect(before.timeoutSeconds).toBe(15);
+    const generationCount = (await repo.generations()).length;
+    const version = before.version;
+    const form = {
+      enabled: before.enabled,
+      protocol: before.protocol,
+      baseUrl: before.baseUrl,
+      model: before.model,
+      dimensions: before.dimensions,
+      modelVersion: before.modelVersion,
+      queryPrefix: before.queryPrefix,
+    };
+    const saved = await svc.update({
+      ...form,
+      timeoutSeconds: 40,
+      expectedVersion: version,
+    });
+    expect(saved.timeoutSeconds).toBe(40);
+    expect(identity).not.toHaveBeenCalled();
+    expect(encode).not.toHaveBeenCalled();
+    expect((await repo.generations()).length).toBe(generationCount);
+    expect(await svc.requestTimeoutMs()).toBe(40000);
+    // Omitting the field keeps the saved value.
+    const kept = await svc.update({ ...form, expectedVersion: saved.version });
+    expect(kept.timeoutSeconds).toBe(40);
+    await expect(
+      svc.update({ ...form, timeoutSeconds: 4, expectedVersion: kept.version }),
+    ).rejects.toThrow();
+
+    const id = await chat();
+    await drain();
+    await message(id, "虚构超时配置消息");
+    await repo.pool.query(
+      "UPDATE memory_jobs SET next_attempt_at=now() WHERE status='queued'",
+    );
+    for (let i = 0; i < 10 && !encode.mock.calls.length; i++) await svc.work();
+    expect(encode.mock.calls[0]?.[3]).toBe(40000);
+
+    const restored = await svc.update({
+      ...form,
+      timeoutSeconds: 15,
+      expectedVersion: kept.version,
+    });
+    expect(restored.timeoutSeconds).toBe(15);
+    await drain();
+  });
+
   it("records sanitized embedding failure detail on the job and operator log", async () => {
     const id = await chat();
     await drain();
