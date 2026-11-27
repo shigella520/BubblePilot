@@ -78,10 +78,10 @@ onMounted(load);
       全部应用侧工具共用单次 Agent
       运行预算，不是每日额度。证据足够时模型可以提前回答，无须用满预算。增加预算可能增加等待时间和模型用量，不保证答案一定正确。
     </p>
-    <DismissibleMessage v-if="error" error inline @close="error = ''">{{
+    <DismissibleMessage v-if="error" error @close="error = ''">{{
       error
     }}</DismissibleMessage>
-    <DismissibleMessage v-if="message" inline @close="message = ''">{{
+    <DismissibleMessage v-if="message" @close="message = ''">{{
       message
     }}</DismissibleMessage>
     <p v-if="settings" class="muted">

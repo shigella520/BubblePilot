@@ -106,7 +106,6 @@ onBeforeUnmount(() => generation++);
     <DismissibleMessage
       v-if="message && !draft"
       :error="failed"
-      inline
       @close="message = ''"
       >{{ message }}</DismissibleMessage
     >
@@ -132,7 +131,6 @@ onBeforeUnmount(() => generation++);
       <DismissibleMessage
         v-if="message"
         :error="failed"
-        inline
         @close="message = ''"
         >{{ message }}</DismissibleMessage
       >

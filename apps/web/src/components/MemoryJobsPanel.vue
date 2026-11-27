@@ -255,13 +255,11 @@ onBeforeUnmount(() => {
     <DismissibleMessage
       v-if="error && !selectedJob"
       error
-      inline
       @close="error = ''"
       >{{ error }}</DismissibleMessage
     >
     <DismissibleMessage
       v-else-if="notice && !selectedJob"
-      inline
       @close="notice = ''"
       >{{ notice }}</DismissibleMessage
     >
@@ -377,10 +375,10 @@ onBeforeUnmount(() => {
       :return-focus="jobTrigger"
       @close="closeJob"
     >
-      <DismissibleMessage v-if="error" error inline @close="error = ''">{{
+      <DismissibleMessage v-if="error" error @close="error = ''">{{
         error
       }}</DismissibleMessage>
-      <DismissibleMessage v-else-if="notice" inline @close="notice = ''">{{
+      <DismissibleMessage v-else-if="notice" @close="notice = ''">{{
         notice
       }}</DismissibleMessage>
       <article

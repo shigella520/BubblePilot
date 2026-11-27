@@ -346,10 +346,10 @@ onBeforeUnmount(() => {
       根据问题自行检索已启用聊天的历史，无需添加工作流节点；可检索范围受消息保留期限限制。索引文本会发送到下方向量服务，检索出的证据会发送到当前对话
       Provider。
     </p>
-    <DismissibleMessage v-if="error" error inline @close="error = ''">{{
+    <DismissibleMessage v-if="error" error @close="error = ''">{{
       error
     }}</DismissibleMessage>
-    <DismissibleMessage v-else-if="notice" inline @close="notice = ''">{{
+    <DismissibleMessage v-else-if="notice" @close="notice = ''">{{
       notice
     }}</DismissibleMessage>
 

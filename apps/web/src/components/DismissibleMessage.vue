@@ -19,6 +19,17 @@ const props = defineProps<{
   persistent?: boolean;
 }>();
 const emit = defineEmits<{ close: [] }>();
+/**
+ * An open native <dialog> sits in the browser top layer, above anything in
+ * <body>. A toast raised while a dialog is open goes into that dialog so it
+ * stays visible (it is position: fixed, so it still sits in the corner).
+ */
+const host: string | HTMLElement =
+  typeof document === "undefined"
+    ? "body"
+    : (Array.from(document.querySelectorAll<HTMLElement>("dialog[open]")).at(
+        -1,
+      ) ?? "body");
 const slots = useSlots();
 
 /** Success toasts close themselves; errors and inline messages stay. */
@@ -61,7 +72,7 @@ const parts = computed(() => {
 </script>
 
 <template>
-  <Teleport to="body" :disabled="inline">
+  <Teleport :to="host" :disabled="inline">
     <div
       class="form-message"
       :class="{ error, 'inline-message': inline }"
