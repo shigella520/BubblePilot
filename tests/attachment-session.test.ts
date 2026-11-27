@@ -276,7 +276,7 @@ it("does not share references, grants historical candidates explicitly and caps 
 });
 it("rejects concurrent imports, count overrun and invalid body types without retaining temp files", async () => {
   const f = await fixture();
-  f.input.config.limits.files = 1;
+  f.input.config!.limits.files = 1;
   let resume!: () => void;
   f.download.mockImplementationOnce(async () => {
     await new Promise<void>((r) => {
@@ -341,7 +341,7 @@ it("enforces actual streaming bytes and releases temporary reservations on failu
 it("extended import time cannot outlive the remaining Agent budget or caller cancellation", async () => {
   for (const cancel of [false, true]) {
     const f = await fixture();
-    f.input.config.limits.timeoutSeconds = 150;
+    f.input.config!.limits.timeoutSeconds = 150;
     const controller = new AbortController();
     let entered!: () => void;
     const ready = new Promise<void>((resolve) => {

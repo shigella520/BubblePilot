@@ -66,6 +66,7 @@ describe("generated image reply boundaries", () => {
     } as ImageArtifact;
     const channel = {
       check: vi.fn().mockResolvedValue(undefined),
+      workspacePrefix: "/workspace/",
       export: vi.fn().mockResolvedValue(Buffer.from("mock-transfer")),
     };
     const plugins = {

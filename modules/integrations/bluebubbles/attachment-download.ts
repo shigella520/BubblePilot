@@ -6,14 +6,26 @@ export class BlueBubblesAttachmentDownloader {
     private readonly settings: Pick<BlueBubblesSettingsService, "resolve">,
     private readonly request: typeof fetch = fetch,
   ) {}
-  async download(id: string, signal: AbortSignal) {
+  /**
+   * original=false asks the gateway for its compatible rendition (for
+   * example HEIC photos as JPEG). Used only where a target cannot accept the
+   * original format; the bytes are staged temporarily and never persisted.
+   */
+  async download(
+    id: string,
+    signal: AbortSignal,
+    options: { original?: boolean } = {},
+  ) {
     const settings = await this.settings.resolve();
     const url = new URL(
       `/api/v1/attachment/${encodeURIComponent(id)}/download`,
       settings.serverUrl + "/",
     );
     url.searchParams.set("password", settings.accessToken);
-    url.searchParams.set("original", "true");
+    url.searchParams.set(
+      "original",
+      options.original === false ? "false" : "true",
+    );
     const response = await this.request(url, {
       signal,
       redirect: "manual",

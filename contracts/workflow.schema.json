@@ -1065,6 +1065,34 @@
                         "required": ["enabled", "pluginId", "server"],
                         "additionalProperties": false
                       },
+                      "imageGeneration": {
+                        "type": "object",
+                        "properties": {
+                          "enabled": {
+                            "default": false,
+                            "type": "boolean"
+                          },
+                          "pluginId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              {
+                                "type": "string",
+                                "const": ""
+                              }
+                            ]
+                          },
+                          "server": {
+                            "type": "string",
+                            "maxLength": 200
+                          }
+                        },
+                        "required": ["enabled", "pluginId", "server"],
+                        "additionalProperties": false
+                      },
                       "pluginIds": {
                         "maxItems": 10,
                         "type": "array",

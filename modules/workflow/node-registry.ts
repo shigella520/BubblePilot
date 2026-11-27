@@ -166,6 +166,10 @@ function scheduledTaskProjection(scheduled: ScheduledTaskEvent["scheduled"]) {
   };
 }
 
+function generatorBinding(config: { pluginId: string; server: string }) {
+  return { pluginId: config.pluginId, server: config.server };
+}
+
 function messageField(
   envelope: WorkflowEvent,
   field:
@@ -1229,7 +1233,8 @@ class AiChatNodeHandler extends BaseNodeHandler {
         outputFormat: idleDecision ? "json" : node.config.outputFormat,
         allowMemes: !scheduled && (node.config.allowMemes ?? false),
         pluginIds: scheduled ? [] : (node.config.pluginIds ?? []),
-        ...(node.config.imageReply?.enabled &&
+        ...((node.config.imageReply?.enabled ||
+          node.config.imageGeneration?.enabled) &&
         !scheduled &&
         !idleDecision &&
         context.envelope.message &&
@@ -1237,20 +1242,31 @@ class AiChatNodeHandler extends BaseNodeHandler {
         !context.envelope.metadata.isReplay
           ? {
               imageReplyInput: {
-                config: node.config.imageReply,
+                ...(node.config.imageReply?.enabled
+                  ? { config: node.config.imageReply }
+                  : {}),
+                ...(node.config.imageGeneration?.enabled
+                  ? { generator: generatorBinding(node.config.imageGeneration) }
+                  : {}),
                 executionId: context.executionId,
                 nodeId: node.id,
                 chatId: context.envelope.chat.providerChatId,
               },
             }
           : {}),
-        ...(node.config.attachmentHandling?.enabled &&
+        ...((node.config.attachmentHandling?.enabled ||
+          node.config.imageGeneration?.enabled) &&
         context.envelope.message &&
         !context.envelope.message.isFromMe &&
         !context.envelope.metadata.isReplay
           ? {
               attachmentInput: {
-                config: node.config.attachmentHandling,
+                ...(node.config.attachmentHandling?.enabled
+                  ? { config: node.config.attachmentHandling }
+                  : {}),
+                ...(node.config.imageGeneration?.enabled
+                  ? { generator: generatorBinding(node.config.imageGeneration) }
+                  : {}),
                 scope: {
                   provider: context.envelope.provider,
                   providerChatId: context.envelope.chat.providerChatId,

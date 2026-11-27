@@ -35,6 +35,71 @@ const binaryTypes: Record<string, string[]> = {
   gif: ["image/gif"],
   webp: ["image/webp"],
 };
+const generatorConvertible: Record<string, string[]> = {
+  heic: ["image/heic", "image/heic-sequence"],
+  heif: ["image/heif", "image/heif-sequence"],
+};
+const generatorExtensions: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpeg",
+  "image/webp": "webp",
+};
+function safeBaseName(raw: string) {
+  return (
+    [
+      ...[...raw.normalize("NFKC")]
+        .map((c) =>
+          c === "/" ||
+          c === "\\" ||
+          c.charCodeAt(0) < 32 ||
+          c.charCodeAt(0) === 127
+            ? "_"
+            : c,
+        )
+        .join("")
+        .replace(/^\.+/u, "_"),
+    ]
+      .slice(0, 60)
+      .join("")
+      .replace(/\.[^.]*$/u, "") || "image"
+  );
+}
+/**
+ * Image generators accept only the declared image types. Accepted originals
+ * are imported as-is; HEIC/HEIF photos use the gateway's JPEG rendition.
+ */
+export function generatorImportPlan(
+  attachment: MessageAttachment,
+  mimeTypes: readonly string[],
+): { filename: string; extension: string; original: boolean } {
+  const raw = attachment.fileName ?? "image";
+  const extension = raw.split(".").at(-1)?.toLowerCase() ?? "";
+  const mime = attachment.mimeType?.split(";")[0]?.trim().toLowerCase();
+  const direct = Object.entries(generatorExtensions).find(
+    ([type]) =>
+      mimeTypes.includes(type) &&
+      (binaryTypes[extension]?.includes(type) ?? false) &&
+      (!mime || mime === "application/octet-stream" || mime === type),
+  );
+  if (direct)
+    return {
+      filename: `${safeBaseName(raw)}.${extension}`,
+      extension,
+      original: true,
+    };
+  const convertible =
+    !!generatorConvertible[extension] &&
+    (!mime ||
+      mime === "application/octet-stream" ||
+      generatorConvertible[extension].includes(mime));
+  if (convertible && mimeTypes.includes("image/jpeg"))
+    return {
+      filename: `${safeBaseName(raw)}.jpeg`,
+      extension: "jpeg",
+      original: false,
+    };
+  throw new AttachmentError("ATTACHMENT_TYPE_UNSUPPORTED_FOR_TARGET");
+}
 export function attachmentFilename(attachment: MessageAttachment) {
   const raw = attachment.fileName ?? "attachment.txt";
   const extension = raw.split(".").at(-1)?.toLowerCase() ?? "";

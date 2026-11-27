@@ -3484,6 +3484,11 @@ export function buildApplication(
                 node.config.pluginIds,
                 node.config.attachmentHandling,
               );
+            if (node.config.imageGeneration?.enabled)
+              await options.plugins.assertImageGenerationAvailable(
+                node.config.pluginIds,
+                node.config.imageGeneration,
+              );
           }
         }
         const routePolicies = new Map<string, "disabled" | "auto">();

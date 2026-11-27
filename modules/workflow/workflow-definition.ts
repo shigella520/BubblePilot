@@ -1,5 +1,9 @@
 import { attachmentHandlingSchema } from "../attachments/attachment-policy.js";
-import { imageReplySchema } from "../generated-images/image-policy.js";
+import {
+  imageGenerationSchema,
+  imageReplySchema,
+  replyAttachmentsEnabled,
+} from "../generated-images/image-policy.js";
 import { scheduledTriggerSchema } from "../scheduled-tasks/task-policy.js";
 import { idleTriggerSchema } from "./idle-policy.js";
 import { validateIdlePaths } from "./idle-workflow-validation.js";
@@ -145,6 +149,7 @@ const aiChatNodeSchema = z.object({
       allowMemes: z.boolean().optional(),
       attachmentHandling: attachmentHandlingSchema.optional(),
       imageReply: imageReplySchema.optional(),
+      imageGeneration: imageGenerationSchema.optional(),
       pluginIds: z.array(z.string().uuid()).max(10).optional(),
       webSearch: z.enum(["disabled", "auto", "required"]).optional(), // required is a legacy alias of auto; see normalizeWebSearchPolicy.
       webSearchSources: z.enum(["full", "compact", "hidden"]).default("full"),
@@ -182,6 +187,30 @@ const aiChatNodeSchema = z.object({
         message:
           "Image reply requires text output, an approved plugin and the same sandbox as attachment handling",
         path: ["imageReply"],
+      },
+    )
+    .refine(
+      (config) => {
+        const generator = config.imageGeneration;
+        if (!generator?.enabled) return true;
+        const same = (target?: { pluginId: string; server: string }) =>
+          !!target &&
+          target.pluginId === generator.pluginId &&
+          target.server === generator.server;
+        return (
+          config.outputFormat === "text" &&
+          !!config.pluginIds?.includes(generator.pluginId) &&
+          !(config.imageReply?.enabled && same(config.imageReply)) &&
+          !(
+            config.attachmentHandling?.enabled &&
+            same(config.attachmentHandling)
+          )
+        );
+      },
+      {
+        message:
+          "Image generation requires text output, an approved plugin and a target distinct from the sandbox",
+        path: ["imageGeneration"],
       },
     )
     .refine(
@@ -432,7 +461,7 @@ function validateSemantics(definition: WorkflowDefinition): void {
           "Meme reply must bind text and meme from the same enabled text AI node, without native reply.",
         );
     }
-    if (node.type === "ai-chat" && node.config.imageReply?.enabled) {
+    if (node.type === "ai-chat" && replyAttachmentsEnabled(node.config)) {
       const consumers = definition.nodes.filter(
         (n) =>
           n.type === "reply" &&
@@ -454,7 +483,7 @@ function validateSemantics(definition: WorkflowDefinition): void {
         image.kind !== "output" ||
         image.port !== "generatedImage" ||
         source?.type !== "ai-chat" ||
-        !source.config.imageReply?.enabled ||
+        !replyAttachmentsEnabled(source.config) ||
         node.config.replyToSourceMessage ||
         text?.kind !== "output" ||
         text.port !== "text" ||

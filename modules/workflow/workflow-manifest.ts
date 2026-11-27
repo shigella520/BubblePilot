@@ -405,6 +405,16 @@ export function importWorkflowManifest(input: {
           "在目标实例重新选择沙箱、开启图片回复并连接生成图片输出后发布。",
       });
     }
+    if (node.type === "ai-chat" && config.imageGeneration) {
+      delete config.imageGeneration;
+      attachmentWarnings.push({
+        path: `/spec/nodes/${node.id}/config/imageGeneration`,
+        severity: "warning",
+        code: "IMAGE_GENERATION_REBIND_REQUIRED",
+        message: "生图插件授权已移除。",
+        suggestion: "在目标实例重新选择生图插件并审阅后发布。",
+      });
+    }
     if (node.type === "ai-chat" && config.attachmentHandling) {
       delete config.attachmentHandling;
       attachmentWarnings.push({

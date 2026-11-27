@@ -2,7 +2,7 @@ import { promptText } from "./prompt-xml.js";
 import { RunImageSession } from "./run-image-session.js";
 import {
   GeneratedImageSession,
-  imageReplyGuidance,
+  replyAttachmentGuidance,
 } from "../generated-images/image-session.js";
 import type { GeneratedImageStore } from "../generated-images/image-store.js";
 import {
@@ -22,7 +22,7 @@ import { replyGuidance } from "../archive/message-revision.js";
 import { chatCountDiagnostics } from "../memory/chat-count-diagnostics.js";
 import type { AttachmentService } from "../attachments/attachment-service.js";
 import {
-  attachmentGuidance,
+  attachmentGuidanceFor,
   type AttachmentSession,
 } from "../attachments/attachment-session.js";
 import { safeBuiltinFailureCode } from "./tool-failure-code.js";
@@ -363,7 +363,10 @@ export class AgentRunner {
       request = {
         ...request,
         messages: [
-          { role: "system", content: imageReplyGuidance },
+          {
+            role: "system",
+            content: replyAttachmentGuidance(generated.boundTargets()),
+          },
           ...request.messages,
         ],
       };
@@ -382,7 +385,9 @@ export class AgentRunner {
             role: "system",
             content:
               attachmentCatalogueGuidance +
-              (attachments ? "\n" + attachmentGuidance : ""),
+              (attachments
+                ? "\n" + attachmentGuidanceFor(attachments.targetNames())
+                : ""),
           },
           ...request.messages,
         ],

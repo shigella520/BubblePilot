@@ -45,6 +45,33 @@ export const imageReplySchema = z
     message: "Choose the image reply sandbox",
   });
 export type ImageReply = z.infer<typeof imageReplySchema>;
+/**
+ * Optional generator target (an MCP image model plugin) bound alongside the
+ * sandbox. It imports chat images and returns PNG reply attachments; both
+ * reach the same Reply node as sandbox attachments.
+ */
+export const imageGenerationSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    pluginId: z.union([z.string().uuid(), z.literal("")]),
+    server: z.string().max(200),
+  })
+  .strict()
+  .refine((v) => !v.enabled || !!(v.pluginId && v.server), {
+    message: "Choose the image generator before enabling",
+  });
+export type ImageGeneration = z.infer<typeof imageGenerationSchema>;
+export interface ImageGeneratorBinding {
+  pluginId: string;
+  server: string;
+}
+/** Reply attachments are available from a sandbox, a generator or both. */
+export function replyAttachmentsEnabled(config: {
+  imageReply?: ImageReply | undefined;
+  imageGeneration?: ImageGeneration | undefined;
+}) {
+  return !!(config.imageReply?.enabled || config.imageGeneration?.enabled);
+}
 export function allowedReplyFileTypes(
   config: ImageReply,
 ): readonly ReplyFileType[] {
