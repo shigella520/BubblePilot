@@ -942,12 +942,6 @@ onBeforeUnmount(() => {
       </div>
     </aside>
     <div class="admin-workspace">
-      <DismissibleMessage
-        v-if="message"
-        :error="messageIsError"
-        @close="message = ''"
-        >{{ message }}</DismissibleMessage
-      >
       <section id="monitoring" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -1123,7 +1117,6 @@ onBeforeUnmount(() => {
           :sensitive-required="false"
           @close="closeParticipantEditor"
         >
-          <p v-if="message" role="status">{{ message }}</p>
           <div v-if="participantBusy" class="empty-panel">
             <Users :size="28" /><strong>正在读取历史成员…</strong>
           </div>
@@ -1904,6 +1897,14 @@ onBeforeUnmount(() => {
       </section>
     </ModalShell>
   </Teleport>
+  <!-- Last in the template: a toast raised as a dialog closes (e.g. the member
+    editor failing to load) must not be placed into that closing dialog. -->
+  <DismissibleMessage
+    v-if="message"
+    :error="messageIsError"
+    @close="message = ''"
+    >{{ message }}</DismissibleMessage
+  >
 </template>
 
 <style scoped>

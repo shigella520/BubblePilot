@@ -252,17 +252,6 @@ onBeforeUnmount(() => {
       补全历史和归属重建由启用聊天、一键修复和切换模型自动创建；向量服务故障时任务转为“等待重试”，按
       5、15、60 分钟退避自动重试，最长 24 小时。
     </p>
-    <DismissibleMessage
-      v-if="error && !selectedJob"
-      error
-      @close="error = ''"
-      >{{ error }}</DismissibleMessage
-    >
-    <DismissibleMessage
-      v-else-if="notice && !selectedJob"
-      @close="notice = ''"
-      >{{ notice }}</DismissibleMessage
-    >
     <p v-if="progressError" class="panel-description" role="status">
       连接异常，显示最后一次获取的进度，将自动重试。
     </p>
@@ -499,6 +488,19 @@ onBeforeUnmount(() => {
         </div>
       </article>
     </AdminDetailDialog>
+    <!-- After the dialog: closing it hands the message back to this toast,
+      which must not be placed into the dialog that is closing. -->
+    <DismissibleMessage
+      v-if="error && !selectedJob"
+      error
+      @close="error = ''"
+      >{{ error }}</DismissibleMessage
+    >
+    <DismissibleMessage
+      v-else-if="notice && !selectedJob"
+      @close="notice = ''"
+      >{{ notice }}</DismissibleMessage
+    >
   </component>
 </template>
 

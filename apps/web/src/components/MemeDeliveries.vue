@@ -3,6 +3,7 @@ import LockedHint from "./LockedHint.vue";
 import { confirmAction } from "../services/confirm";
 import { ref, watch, nextTick, onUnmounted } from "vue";
 import { apiRequest } from "../services/api";
+import DismissibleMessage from "./DismissibleMessage.vue";
 import { useRoute } from "vue-router";
 const props = defineProps<{
   executionId?: string;
@@ -30,7 +31,10 @@ interface Delivery {
 }
 const items = ref<Delivery[]>([]),
   busy = ref(false),
-  error = ref("");
+  /** The list failed to load: shown in place with a retry button. */
+  error = ref(""),
+  /** A retry/close click failed: corner toast. */
+  actionError = ref("");
 let requestSequence = 0;
 onUnmounted(() => {
   requestSequence++;
@@ -65,13 +69,14 @@ async function act(item: Delivery, action: "retry" | "close") {
   )
     return;
   busy.value = true;
+  actionError.value = "";
   try {
     await apiRequest(`/api/v1/meme-deliveries/${item.id}/${action}`, {
       method: "POST",
     });
     await load();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "处置失败。";
+    actionError.value = e instanceof Error ? e.message : "处置失败。";
   } finally {
     busy.value = false;
   }
@@ -88,6 +93,9 @@ watch(
     <p v-if="error" role="alert">
       {{ error }} <button class="button secondary" @click="load">重试</button>
     </p>
+    <DismissibleMessage v-if="actionError" error @close="actionError = ''">{{
+      actionError
+    }}</DismissibleMessage>
     <p v-if="!items.length && !error">
       暂无表情{{ executionId ? "投递" : "待处理项" }}。
     </p>

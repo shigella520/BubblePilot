@@ -878,12 +878,6 @@ onMounted(async () => {
       <AgentSettingsPanel />
       <MemorySettingsPanel />
       <MemoryJobsPanel id="memory-jobs" embedded />
-      <DismissibleMessage
-        v-if="message"
-        :error="messageIsError"
-        @close="message = ''"
-        >{{ message }}</DismissibleMessage
-      >
       <section id="search-settings" class="admin-panel">
         <div class="panel-head">
           <div>
@@ -1394,7 +1388,6 @@ onMounted(async () => {
           :draft="providerForm"
           @close="providerDialog = false"
         >
-          <p v-if="message" role="alert">{{ message }}</p>
           <form
             id="provider-form"
             class="settings-form boxed-form"
@@ -1642,7 +1635,6 @@ onMounted(async () => {
           :draft="routeForm"
           @close="routeDialog = false"
         >
-          <p v-if="message" role="alert">{{ message }}</p>
           <form class="settings-form boxed-form" @submit.prevent="saveRoute">
             <h3>
               <Route :size="18" />{{ routeForm.id ? "编辑路由" : "新建路由" }}
@@ -1741,5 +1733,14 @@ onMounted(async () => {
         </AdminFormDialog>
       </section>
     </div>
+    <!-- After the Provider/route dialogs: saving closes the dialog and raises
+      the result toast in the same update; it must not go into the closing
+      dialog. -->
+    <DismissibleMessage
+      v-if="message"
+      :error="messageIsError"
+      @close="message = ''"
+      >{{ message }}</DismissibleMessage
+    >
   </main>
 </template>

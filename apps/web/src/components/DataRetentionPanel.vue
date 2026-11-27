@@ -103,12 +103,6 @@ onBeforeUnmount(() => generation++);
       执行结束超过保留期限后，自动删除其节点轨迹、AI
       工具调用、路由决策和图片输入明细；执行记录本身、出站发送和用量统计保留。
     </p>
-    <DismissibleMessage
-      v-if="message && !draft"
-      :error="failed"
-      @close="message = ''"
-      >{{ message }}</DismissibleMessage
-    >
     <dl v-if="current" class="settings-summary">
       <div>
         <dt>执行明细保留</dt>
@@ -173,6 +167,14 @@ onBeforeUnmount(() => generation++);
         </div>
       </form>
     </AdminFormDialog>
+    <!-- After the dialog: closing it hands the message back to this toast,
+      which must not be placed into the dialog that is closing. -->
+    <DismissibleMessage
+      v-if="message && !draft"
+      :error="failed"
+      @close="message = ''"
+      >{{ message }}</DismissibleMessage
+    >
   </section>
 </template>
 <style scoped>

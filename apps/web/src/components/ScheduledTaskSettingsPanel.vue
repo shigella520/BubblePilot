@@ -112,12 +112,6 @@ onBeforeUnmount(() => generation++);
     <p class="panel-description">
       统一管理提醒调度、实例容量和历史任务保留期限。任务列表见上方「定时任务」，执行详情在「执行与审计」。
     </p>
-    <DismissibleMessage
-      v-if="message && !draft"
-      :error="failed"
-      @close="message = ''"
-      >{{ message }}</DismissibleMessage
-    >
     <dl v-if="current" class="settings-summary">
       <div>
         <dt>调度状态</dt>
@@ -229,6 +223,14 @@ onBeforeUnmount(() => generation++);
         </div>
       </form>
     </AdminFormDialog>
+    <!-- After the dialog: closing it hands the message back to this toast,
+      which must not be placed into the dialog that is closing. -->
+    <DismissibleMessage
+      v-if="message && !draft"
+      :error="failed"
+      @close="message = ''"
+      >{{ message }}</DismissibleMessage
+    >
   </section>
 </template>
 <style scoped>

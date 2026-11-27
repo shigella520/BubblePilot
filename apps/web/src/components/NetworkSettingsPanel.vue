@@ -15,6 +15,8 @@ const hosts = ref("");
 const busy = ref(false);
 const message = ref("");
 const failed = ref(false);
+/** Initial load failed: the form below is empty, so explain it in place. */
+const loadError = ref("");
 function apply(value: Settings) {
   current.value = value;
   hosts.value = value.trustedFakeIpHosts.join("\n");
@@ -23,11 +25,14 @@ async function load() {
   if (busy.value) return;
   busy.value = true;
   message.value = "";
+  loadError.value = "";
   try {
     apply(await apiRequest<Settings>("/api/v1/settings/network"));
   } catch (e) {
-    failed.value = true;
-    message.value = errorMessage(e);
+    if (current.value) {
+      failed.value = true;
+      message.value = errorMessage(e);
+    } else loadError.value = errorMessage(e);
   } finally {
     busy.value = false;
   }
@@ -72,13 +77,12 @@ onMounted(load);
       图片与链接预览、插件 Git 导入、MCP
       连接共用此配置。升级时会自动迁移原图片可信域名。
     </p>
-    <DismissibleMessage
-      v-if="message"
-      :error="failed"
-      inline
-      @close="message = ''"
-      >{{ message }}</DismissibleMessage
-    >
+    <DismissibleMessage v-if="loadError" error inline @close="loadError = ''">{{
+      loadError
+    }}</DismissibleMessage>
+    <DismissibleMessage v-if="message" :error="failed" @close="message = ''">{{
+      message
+    }}</DismissibleMessage>
     <form @submit.prevent="save">
       <label
         ><span>可信 Fake-IP 域名（每行一个）</span

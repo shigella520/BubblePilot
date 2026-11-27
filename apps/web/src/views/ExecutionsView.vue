@@ -1042,7 +1042,7 @@ function contextSnapshotValue(
           </div>
         </div>
         <div class="table-shell">
-          <table class="execution-list-table">
+          <table class="execution-list-table sticky-actions">
             <thead>
               <tr>
                 <th>工作流</th>

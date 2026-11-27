@@ -543,7 +543,6 @@ async function remove() {
         content = '';
       "
     >
-      <p v-if="error" role="alert">{{ error }}</p>
       <section v-if="showImport" class="plugin-panel">
         <h2>安装向导</h2>
         <p>支持公开 HTTPS Git 仓库或 ZIP。不会运行包内代码。</p>

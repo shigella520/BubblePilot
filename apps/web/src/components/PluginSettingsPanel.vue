@@ -30,10 +30,13 @@ const limit = ref(64000);
 const busy = ref(false);
 const message = ref("");
 const failed = ref(false);
+/** Initial load failed: the form below is empty, so explain it in place. */
+const loadError = ref("");
 async function load() {
   if (busy.value) return;
   busy.value = true;
   message.value = "";
+  loadError.value = "";
   try {
     const value = await apiRequest<Settings & { usage: Usage }>(
       "/api/v1/settings/plugins",
@@ -42,8 +45,10 @@ async function load() {
     usage.value = value.usage;
     limit.value = value.catalogueCharacters;
   } catch (e) {
-    failed.value = true;
-    message.value = errorMessage(e);
+    if (current.value) {
+      failed.value = true;
+      message.value = errorMessage(e);
+    } else loadError.value = errorMessage(e);
   } finally {
     busy.value = false;
   }
@@ -91,13 +96,12 @@ onMounted(load);
       目录字符数，不含聊天上下文、角色提示词、内置工具或工具返回结果。字符数不是
       Token 数；启用更多工具会增加模型输入成本。
     </p>
-    <DismissibleMessage
-      v-if="message"
-      :error="failed"
-      inline
-      @close="message = ''"
-      >{{ message }}</DismissibleMessage
-    >
+    <DismissibleMessage v-if="loadError" error inline @close="loadError = ''">{{
+      loadError
+    }}</DismissibleMessage>
+    <DismissibleMessage v-if="message" :error="failed" @close="message = ''">{{
+      message
+    }}</DismissibleMessage>
     <form @submit.prevent="save">
       <label
         ><span>插件目录字符上限</span

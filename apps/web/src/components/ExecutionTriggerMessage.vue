@@ -9,6 +9,7 @@ import {
 } from "@lucide/vue";
 import { onBeforeUnmount, ref, watch } from "vue";
 import SensitiveUnlock from "./SensitiveUnlock.vue";
+import DismissibleMessage from "./DismissibleMessage.vue";
 import { apiRequest, errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
 
@@ -186,7 +187,9 @@ onBeforeUnmount(conceal);
           }}
         </p>
       </div>
-      <p v-if="error" class="form-message error" role="alert">{{ error }}</p>
+      <DismissibleMessage v-if="error" error @close="error = ''">{{
+        error
+      }}</DismissibleMessage>
     </template>
   </section>
 </template>

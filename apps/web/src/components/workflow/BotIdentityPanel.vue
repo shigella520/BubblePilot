@@ -5,6 +5,7 @@ import { computed, ref, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { Bot, RefreshCw } from "@lucide/vue";
 import AdminDetailDialog from "../AdminDetailDialog.vue";
+import DismissibleMessage from "../DismissibleMessage.vue";
 import { apiRequest, errorMessage } from "../../services/api";
 const props = defineProps<{ workflowId: string }>();
 const router = useRouter();
@@ -39,7 +40,11 @@ const open = ref(false),
   loading = ref(false),
   busy = ref(false),
   nickname = ref(""),
-  notice = ref("");
+  /** Action results (save, backfill, retry, refresh): corner toasts. */
+  notice = ref(""),
+  error = ref(""),
+  /** Opening the dialog failed to load anything: explained in place. */
+  loadError = ref("");
 const identity = ref<Identity | null>(null),
   status = ref<Status | null>(null);
 const workflows = computed(() =>
@@ -58,12 +63,15 @@ async function show() {
   identity.value = null;
   status.value = null;
   notice.value = "";
+  error.value = "";
+  loadError.value = "";
   await refresh(true);
 }
 async function refresh(includeIdentity = false) {
   if (loading.value) return;
   const token = ++generation;
   loading.value = true;
+  loadError.value = "";
   try {
     const [s, i] = await Promise.all([
       apiRequest<Status>(
@@ -82,7 +90,9 @@ async function refresh(includeIdentity = false) {
       nickname.value = i.nickname ?? "";
     }
   } catch (e) {
-    if (token === generation) notice.value = errorMessage(e);
+    if (token !== generation) return;
+    if (status.value || identity.value) error.value = errorMessage(e);
+    else loadError.value = errorMessage(e);
   } finally {
     loading.value = false;
   }
@@ -99,6 +109,8 @@ async function confirmBackfill() {
 async function act(saveNickname: boolean) {
   if (busy.value || loading.value) return;
   busy.value = true;
+  notice.value = "";
+  error.value = "";
   const token = generation;
   try {
     const result = await apiRequest<Identity>(
@@ -127,7 +139,7 @@ async function act(saveNickname: boolean) {
       : "历史归属回填已启动，请刷新查看进度。";
     await refresh();
   } catch (e) {
-    if (token === generation) notice.value = errorMessage(e);
+    if (token === generation) error.value = errorMessage(e);
   } finally {
     busy.value = false;
   }
@@ -135,6 +147,7 @@ async function act(saveNickname: boolean) {
 async function retry(id: string) {
   if (busy.value || loading.value) return;
   busy.value = true;
+  error.value = "";
   const token = generation;
   try {
     await apiRequest(`/api/v1/bot-attributions/${id}/retry`, {
@@ -142,7 +155,7 @@ async function retry(id: string) {
     });
     if (token === generation) await refresh();
   } catch (e) {
-    if (token === generation) notice.value = errorMessage(e);
+    if (token === generation) error.value = errorMessage(e);
   } finally {
     busy.value = false;
   }
@@ -190,7 +203,13 @@ const stateLabel = (s: string) =>
         }}</small
       >
     </form>
-    <p v-if="notice" role="status">{{ notice }}</p>
+    <p v-if="loadError" role="alert">{{ loadError }}</p>
+    <DismissibleMessage v-if="notice" @close="notice = ''">{{
+      notice
+    }}</DismissibleMessage>
+    <DismissibleMessage v-if="error" error @close="error = ''">{{
+      error
+    }}</DismissibleMessage>
     <div class="panel-head">
       <h3>本自动化的历史消息</h3>
       <button

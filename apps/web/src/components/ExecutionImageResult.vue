@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from "vue";
 import AdminDetailDialog from "./AdminDetailDialog.vue";
+import DismissibleMessage from "./DismissibleMessage.vue";
 import { apiRequest, errorMessage } from "../services/api";
 import { useSessionStore } from "../stores/session";
 const props = defineProps<{
@@ -176,7 +177,9 @@ function requests() {
       }}</pre>
     </AdminDetailDialog>
     <p v-if="!session.sensitiveActive">解锁敏感操作后可查看图片。</p>
-    <p v-if="error" role="status">{{ error }}</p>
+    <DismissibleMessage v-if="error" error @close="error = ''">{{
+      error
+    }}</DismissibleMessage>
     <AdminDetailDialog
       v-if="expanded && url && session.sensitiveActive"
       title="执行图片 · 兼容版本"

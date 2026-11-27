@@ -2,6 +2,7 @@
 import { ref, watch, onBeforeUnmount } from "vue";
 import { Download, Eye, LoaderCircle } from "@lucide/vue";
 import { apiRequest, downloadFile } from "../services/api";
+import DismissibleMessage from "./DismissibleMessage.vue";
 const props = defineProps<{ executionId: string; sensitiveActive: boolean }>();
 interface Item {
   id: string;
@@ -16,6 +17,9 @@ interface Item {
   errorCode: string | null;
 }
 const items = ref<Item[]>([]),
+  /** The list itself failed to load: shown in place of the list. */
+  loadError = ref(""),
+  /** A preview/download click failed: corner toast. */
   error = ref(""),
   busy = ref<string | null>(null),
   previews = ref<Record<string, string>>({});
@@ -33,6 +37,7 @@ watch(
     const version = ++generation;
     clear();
     items.value = [];
+    loadError.value = "";
     error.value = "";
     try {
       const result = await apiRequest<Item[]>(
@@ -41,7 +46,7 @@ watch(
       if (version === generation) items.value = result;
     } catch {
       if (version === generation)
-        error.value = "附件记录加载失败，请重新打开详情。";
+        loadError.value = "附件记录加载失败，请重新打开详情。";
     }
   },
   { immediate: true },
@@ -106,9 +111,12 @@ const states: Record<string, string> = {
 };
 </script>
 <template>
-  <section v-if="items.length || error" class="generated-images">
+  <section v-if="items.length || loadError" class="generated-images">
     <h4>附件回复</h4>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <p v-if="loadError" role="alert">{{ loadError }}</p>
+    <DismissibleMessage v-if="error" error @close="error = ''">{{
+      error
+    }}</DismissibleMessage>
     <article v-for="item in items" :key="item.id">
       <div class="generated-image-row">
         <div class="generated-image-info">

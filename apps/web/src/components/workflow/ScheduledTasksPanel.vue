@@ -97,6 +97,8 @@ const workflowId = ref(""),
   busy = ref(false),
   mutating = ref(false),
   error = ref(""),
+  /** List load failed while the table is empty: explained above the table. */
+  loadError = ref(""),
   detail = ref<TaskDetail | null>(null),
   detailTask = ref<Task | null>(null),
   editing = ref<Task | null>(null),
@@ -150,7 +152,7 @@ function eventLabel(type: string) {
 async function load() {
   const ticket = ++generation;
   busy.value = true;
-  error.value = "";
+  loadError.value = "";
   try {
     const query = new URLSearchParams({
       offset: String(offset.value),
@@ -166,7 +168,9 @@ async function load() {
     items.value = data.items;
     hasMore.value = data.hasMore;
   } catch (e) {
-    if (ticket === generation) error.value = errorMessage(e);
+    if (ticket !== generation) return;
+    if (items.value.length) error.value = errorMessage(e);
+    else loadError.value = errorMessage(e);
   } finally {
     if (ticket === generation) busy.value = false;
   }
@@ -404,26 +408,26 @@ onBeforeUnmount(() => generation++);
     <p class="panel-description">
       按创建时间从新到旧排列，默认显示待执行任务。修改、暂停、跳过、取消和删除需要敏感操作授权。已结束任务按下方「定时任务全局设置」中的保留天数自动清理。
     </p>
-    <DismissibleMessage v-if="notice" @close="notice = ''">{{
-      notice
-    }}</DismissibleMessage>
     <div class="task-filters">
       <label
-        >工作流<select v-model="workflowId">
+        ><span>工作流</span
+        ><select v-model="workflowId">
           <option value="">全部工作流</option>
           <option v-for="w in workflows" :key="w.id" :value="w.id">
             {{ w.name }}
           </option>
         </select></label
       ><label
-        >聊天<select v-model="chatId">
+        ><span>聊天</span
+        ><select v-model="chatId">
           <option value="">全部聊天</option>
           <option v-for="c in chats" :key="c.id" :value="c.id">
             {{ c.displayName ?? c.id }}
           </option>
         </select></label
       ><label
-        >状态<select v-model="status">
+        ><span>状态</span
+        ><select v-model="status">
           <option value="">全部状态</option>
           <option v-for="(label, key) in taskLabels" :key="key" :value="key">
             {{ label }}
@@ -432,11 +436,11 @@ onBeforeUnmount(() => generation++);
       >
     </div>
     <LockedHint reason="完成敏感操作授权后才能修改任务或查看详情。" />
-    <DismissibleMessage v-if="error" error inline @close="error = ''">{{
-      error
+    <DismissibleMessage v-if="loadError" error inline @close="loadError = ''">{{
+      loadError
     }}</DismissibleMessage>
     <div class="table-shell scheduled-task-table">
-      <table>
+      <table class="sticky-actions">
         <thead>
           <tr>
             <th>任务概要</th>
@@ -585,7 +589,6 @@ onBeforeUnmount(() => generation++);
         <p v-if="deleting.status === 'delivery_unknown'">
           此任务的发送结果未知，删除不代表确认未发送，也不会重试。
         </p>
-        <p v-if="error" class="task-alert" role="alert">{{ error }}</p>
         <button
           class="button danger-ghost"
           :disabled="mutating || !session.sensitiveActive"
@@ -612,7 +615,6 @@ onBeforeUnmount(() => generation++);
             labels[editing.status]
           }}</span>
         </div>
-        <p v-if="error" class="task-alert" role="alert">{{ error }}</p>
         <section class="task-card">
           <label class="task-field"
             >任务概要<input
@@ -887,6 +889,14 @@ onBeforeUnmount(() => generation++);
         </div>
       </div>
     </AdminDetailDialog>
+    <!-- Toasts after the dialogs: a toast raised as a dialog closes must not
+      be placed into that closing dialog. -->
+    <DismissibleMessage v-if="notice" @close="notice = ''">{{
+      notice
+    }}</DismissibleMessage>
+    <DismissibleMessage v-if="error" error @close="error = ''">{{
+      error
+    }}</DismissibleMessage>
   </section>
 </template>
 <style scoped>
@@ -918,6 +928,14 @@ footer {
 }
 .scheduled-task-table > table {
   min-width: 1040px;
+}
+/* Chat names, times and states stay readable instead of wrapping per word. */
+.scheduled-task-table td:nth-child(2) {
+  min-width: 150px;
+}
+.scheduled-task-table td:nth-child(4),
+.scheduled-task-table td:nth-child(5) {
+  white-space: nowrap;
 }
 td:first-child {
   min-width: 160px;
@@ -1242,14 +1260,6 @@ textarea {
 .task-timeline strong {
   font-size: 14px;
   font-weight: 500;
-}
-.task-alert {
-  padding: 12px 16px;
-  border-radius: 12px;
-  background: #fff0ed;
-  color: var(--bubblepilot-danger);
-  font-size: 13px;
-  margin: 0;
 }
 @media (max-width: 600px) {
   .task-card {

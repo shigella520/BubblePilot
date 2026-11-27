@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import ExtensionSidebar from "../components/ExtensionSidebar.vue";
 import ModalShell from "../components/ModalShell.vue";
+import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
 import ToggleSwitch from "../components/ToggleSwitch.vue";
@@ -64,7 +65,12 @@ const items = ref<Meme[]>([]),
   status = ref(""),
   loading = ref(false),
   busy = ref(false),
+  /** Action results (save, delete, batch, select…): corner toast. */
   error = ref(""),
+  /** The library list failed to load: shown above the list. */
+  loadError = ref(""),
+  /** The picked upload file was rejected: shown next to the file picker. */
+  fileError = ref(""),
   modal = ref(false),
   editing = ref<Meme | null>(null),
   progress = ref(0),
@@ -425,6 +431,7 @@ watch(modal, (value) => {
   if (!value) {
     file.value = null;
     dragging.value = false;
+    fileError.value = "";
   }
 });
 const labels: Record<string, string> = {
@@ -473,11 +480,11 @@ async function load(background = false) {
       loadedFilters.value = scope;
       items.value = result.items;
       total.value = result.total;
-      error.value = "";
+      loadError.value = "";
     }
   } catch (e) {
     if (seq === sequence)
-      error.value = e instanceof Error ? e.message : "加载失败，请重试。";
+      loadError.value = e instanceof Error ? e.message : "加载失败，请重试。";
   } finally {
     if (seq === sequence) loading.value = false;
   }
@@ -502,6 +509,7 @@ function open(item: Meme | null) {
   progress.value = 0;
   modal.value = true;
   error.value = "";
+  fileError.value = "";
 }
 async function perform(action: () => Promise<unknown>) {
   if (busy.value) return;
@@ -633,7 +641,7 @@ async function remove() {
 function chooseFiles(files: FileList | null | undefined) {
   if (busy.value || !files?.length) return;
   if (files.length !== 1) {
-    error.value = "每次请选择一张图片。";
+    fileError.value = "每次请选择一张图片。";
     return;
   }
   const candidate = files[0];
@@ -642,14 +650,14 @@ function chooseFiles(files: FileList | null | undefined) {
       candidate.type,
     )
   ) {
-    error.value = "请选择 JPEG、PNG、静态 WebP 或 GIF 图片。";
+    fileError.value = "请选择 JPEG、PNG、静态 WebP 或 GIF 图片。";
     return;
   }
   if (candidate.size > 10 * 1024 * 1024) {
-    error.value = "图片超过 10 MiB，请选择更小的文件。";
+    fileError.value = "图片超过 10 MiB，请选择更小的文件。";
     return;
   }
-  error.value = "";
+  fileError.value = "";
   file.value = candidate;
 }
 function pick(event: Event) {
@@ -864,7 +872,7 @@ onUnmounted(() => {
               使用次数为 BlueBubbles
               确认发送成功的累计次数，不代表已读；升级前已清理的投递无法补算。
             </p>
-            <p v-if="error" role="alert">{{ error }}</p>
+            <p v-if="loadError" role="alert">{{ loadError }}</p>
 
             <p v-if="filtersPending && !loading">
               筛选条件已更改，请先查询再选择素材。
@@ -1086,7 +1094,6 @@ onUnmounted(() => {
                 <X :size="20" />
               </button>
             </header>
-            <p v-if="error" role="alert">{{ error }}</p>
             <form @submit.prevent="saveCollection">
               <label
                 >合集名称<input
@@ -1166,7 +1173,6 @@ onUnmounted(() => {
                 <X :size="20" />
               </button>
             </header>
-            <p v-if="error" role="alert">{{ error }}</p>
             <form class="meme-editor" @submit.prevent="save">
               <aside v-if="editing" class="meme-media-panel">
                 <div class="meme-preview-stage">
@@ -1272,6 +1278,7 @@ onUnmounted(() => {
                   }}
                 </button>
                 <small>JPEG、PNG、静态 WebP、GIF · 最大 10 MiB</small>
+                <p v-if="fileError" role="alert">{{ fileError }}</p>
                 <div
                   v-if="busy"
                   class="meme-upload-progress"
@@ -1451,6 +1458,11 @@ onUnmounted(() => {
         </ModalShell>
       </section>
     </div>
+    <!-- After the dialogs: a toast raised as a dialog closes must not be
+      placed into that closing dialog. -->
+    <DismissibleMessage v-if="error" error @close="error = ''">{{
+      error
+    }}</DismissibleMessage>
   </main>
 </template>
 <style scoped>

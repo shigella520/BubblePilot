@@ -16,6 +16,7 @@ import WorkflowNode from "./WorkflowNode.vue";
 import WorkflowEdge from "./WorkflowEdge.vue";
 import NodeCreator from "./NodeCreator.vue";
 import NodeInspector from "./NodeInspector.vue";
+import DismissibleMessage from "../DismissibleMessage.vue";
 import "@vue-flow/core/dist/style.css";
 
 interface Port {
@@ -772,9 +773,12 @@ function onKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <p v-if="saveValidationError" role="alert" class="workflow-save-validation">
-    {{ saveValidationError }}
-  </p>
+  <DismissibleMessage
+    v-if="saveValidationError"
+    error
+    @close="saveValidationError = ''"
+    >{{ saveValidationError }}</DismissibleMessage
+  >
   <p v-if="removedNotice" class="workflow-undo-notice" role="status">
     已删除「{{ removedNotice }}」<button
       class="button secondary tiny"

@@ -4,9 +4,11 @@ import {
   Comment,
   Text,
   computed,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   onUpdated,
+  ref,
   useSlots,
   type VNode,
 } from "vue";
@@ -23,13 +25,24 @@ const emit = defineEmits<{ close: [] }>();
  * An open native <dialog> sits in the browser top layer, above anything in
  * <body>. A toast raised while a dialog is open goes into that dialog so it
  * stays visible (it is position: fixed, so it still sits in the corner).
+ * The target is chosen after the current render has finished, so a dialog
+ * closed by the same action is already gone and is never picked.
  */
-const host: string | HTMLElement =
-  typeof document === "undefined"
-    ? "body"
-    : (Array.from(document.querySelectorAll<HTMLElement>("dialog[open]")).at(
-        -1,
-      ) ?? "body");
+const host = ref<string | HTMLElement>("body");
+let watchedDialog: HTMLElement | null = null;
+function placeHost() {
+  void nextTick(() => {
+    const open = Array.from(
+      document.querySelectorAll<HTMLElement>("dialog[open]"),
+    ).at(-1);
+    host.value = open && open.isConnected ? open : "body";
+    // If that dialog closes while the toast is still showing, move the
+    // toast back to the page instead of letting it vanish with the dialog.
+    watchedDialog?.removeEventListener("close", placeHost);
+    watchedDialog = open ?? null;
+    watchedDialog?.addEventListener("close", placeHost);
+  });
+}
 const slots = useSlots();
 
 /** Success toasts close themselves; errors and inline messages stay. */
@@ -40,10 +53,20 @@ function schedule() {
   if (props.error || props.inline || props.persistent) return;
   timer = setTimeout(() => emit("close"), autoDismissMs);
 }
-onMounted(schedule);
-// Slot text changed (a new message in the same toast): restart the timer.
-onUpdated(schedule);
-onBeforeUnmount(() => clearTimeout(timer));
+onMounted(() => {
+  schedule();
+  placeHost();
+});
+// Slot text changed (a new message in the same toast): restart the timer
+// and re-check which dialog (if any) is open now.
+onUpdated(() => {
+  schedule();
+  placeHost();
+});
+onBeforeUnmount(() => {
+  clearTimeout(timer);
+  watchedDialog?.removeEventListener("close", placeHost);
+});
 
 /**
  * errorMessage() appends "诊断：CODE · request id" after a separator. Show the

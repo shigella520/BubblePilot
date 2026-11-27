@@ -2,6 +2,7 @@
 import { reactive, ref, watch } from "vue";
 import { apiRequest, errorMessage, jsonBody } from "../../services/api";
 import { serializeTriggerConfig } from "../../utils/workflow-trigger-config";
+import DismissibleMessage from "../DismissibleMessage.vue";
 
 const props = defineProps<{ config: Record<string, unknown> }>();
 type CheckField =
@@ -111,7 +112,9 @@ async function preview() {
     >
       {{ busy ? "检查中…" : "检查样本" }}
     </button>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <DismissibleMessage v-if="error" error @close="error = ''">{{
+      error
+    }}</DismissibleMessage>
     <div v-if="result" class="sample-result" aria-live="polite">
       <strong>{{ result.matched ? "匹配" : "不匹配" }}</strong>
       <span v-if="result.matchSource">{{

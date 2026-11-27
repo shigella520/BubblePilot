@@ -144,6 +144,7 @@ const versionDefinition = async () => {
 async function load() {
   busy.value = true;
   loadFailed.value = false;
+  message.value = "";
   try {
     const [actionBlocks, aiRoutes, chats] = await Promise.all([
       apiRequest<any[]>("/api/v1/workflows/action-blocks"),
@@ -396,12 +397,6 @@ onMounted(load);
         </button>
       </div>
     </header>
-    <DismissibleMessage
-      v-if="message"
-      :error="messageIsError"
-      @close="message = ''"
-      >{{ message }}</DismissibleMessage
-    >
     <AdminDetailDialog
       v-if="idleConfirmation"
       title="确认允许角色主动发言"
@@ -433,6 +428,14 @@ onMounted(load);
         </button>
       </div>
     </AdminDetailDialog>
+    <!-- After the dialog so a toast raised as it closes is not placed in it.
+      A load failure is explained by the error state below, not twice. -->
+    <DismissibleMessage
+      v-if="message && !loadFailed"
+      :error="messageIsError"
+      @close="message = ''"
+      >{{ message }}</DismissibleMessage
+    >
     <section v-if="loadFailed && !busy" class="workflow-canvas-main">
       <div class="load-error-state" role="alert">
         <h2>无法加载工作流</h2>
