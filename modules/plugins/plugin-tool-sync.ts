@@ -27,6 +27,14 @@ function contract(tool: ApprovedTool) {
     ...(tool.attachmentTransferVersion
       ? { attachmentTransferVersion: tool.attachmentTransferVersion }
       : {}),
+    // Generator namespaces and accepted inputs change what BP routes and
+    // imports, so they require review. Sandboxes never declare them.
+    ...(tool.transportWorkspacePrefix
+      ? { transportWorkspacePrefix: tool.transportWorkspacePrefix }
+      : {}),
+    ...(tool.attachmentMimeTypes
+      ? { attachmentMimeTypes: tool.attachmentMimeTypes }
+      : {}),
   });
 }
 export function toolContractHash(tool: ApprovedTool): string {

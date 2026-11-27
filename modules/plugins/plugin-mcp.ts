@@ -9,6 +9,10 @@ import {
 } from "../generated-images/image-policy.js";
 import { attachmentProtocol } from "../attachments/attachment-policy.js";
 import { boundedClose } from "./bounded-close.js";
+import {
+  parseTransportCapability,
+  sandboxWorkspacePrefix,
+} from "./plugin-transport.js";
 import type { TrustedHostsProvider } from "../shared/network-settings.js";
 import {
   McpError,
@@ -100,15 +104,17 @@ export class PluginMcp {
   private binaryFetch?: typeof fetch;
   private connectionUrl?: string;
   private authHeaders: Record<string, string> = {};
+  private capability(protocol: string) {
+    return parseTransportCapability(
+      this.client.getServerCapabilities()?.experimental?.[protocol],
+      { mimeTypes: protocol === attachmentProtocol },
+    );
+  }
   imageExportVersion() {
-    const value =
-      this.client.getServerCapabilities()?.experimental?.[imageExportProtocol];
-    return value && "version" in value && value.version === 1 ? 1 : null;
+    return this.capability(imageExportProtocol) ? 1 : null;
   }
   fileExportVersion() {
-    const value =
-      this.client.getServerCapabilities()?.experimental?.[fileExportProtocol];
-    return value && "version" in value && value.version === 1 ? 1 : null;
+    return this.capability(fileExportProtocol) ? 1 : null;
   }
   async exportImage(
     path: string,
@@ -211,11 +217,7 @@ export class PluginMcp {
     return bytes;
   }
   attachmentVersion() {
-    const capability =
-      this.client.getServerCapabilities()?.experimental?.[attachmentProtocol];
-    return capability && "version" in capability && capability.version === 1
-      ? 1
-      : null;
+    return this.capability(attachmentProtocol) ? 1 : null;
   }
   async transferAttachment(
     input: Record<string, unknown>,
@@ -398,18 +400,32 @@ export class PluginMcp {
         };
         compileMcpSchema(tool.inputSchema);
         if (tool.outputSchema) compileMcpSchema(tool.outputSchema);
-        const attachmentTransferVersion =
-          this.attachmentVersion() === 1 && tool.name === "prepare_sandbox"
-            ? (1 as const)
-            : undefined;
+        const file = this.capability(fileExportProtocol);
+        const image = this.capability(imageExportProtocol);
+        const attachment = this.capability(attachmentProtocol);
+        // Each capability binds only to its declared anchor tool.
+        const anchored = [file, image, attachment].filter(
+          (c) => c?.anchorTool === tool.name,
+        );
+        const prefixes = new Set(anchored.map((c) => c!.workspacePrefix));
+        if (prefixes.size > 1) pluginError("TRANSPORT_CAPABILITY_INVALID");
+        const workspacePrefix = [...prefixes][0];
         tools.push({
-          ...(this.fileExportVersion() === 1 && tool.name === "prepare_sandbox"
+          ...(file?.anchorTool === tool.name
             ? { fileExportVersion: 1 as const }
             : {}),
-          ...(this.imageExportVersion() === 1 && tool.name === "prepare_sandbox"
+          ...(image?.anchorTool === tool.name
             ? { imageExportVersion: 1 as const }
             : {}),
-          ...(attachmentTransferVersion ? { attachmentTransferVersion } : {}),
+          ...(attachment?.anchorTool === tool.name
+            ? { attachmentTransferVersion: 1 as const }
+            : {}),
+          ...(workspacePrefix && workspacePrefix !== sandboxWorkspacePrefix
+            ? { transportWorkspacePrefix: workspacePrefix }
+            : {}),
+          ...(attachment?.anchorTool === tool.name && attachment.mimeTypes
+            ? { attachmentMimeTypes: [...attachment.mimeTypes] }
+            : {}),
           server,
           definition,
           ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),

@@ -8,6 +8,7 @@ import {
   type ImageReply,
   allowedReplyFileTypes,
   generatedGifLimits,
+  needsFileExport,
 } from "./image-policy.js";
 import type { GeneratedImageStore, ImageArtifact } from "./image-store.js";
 export interface ImageReplyInput {
@@ -105,7 +106,11 @@ export class GeneratedImageSession {
             allowedReplyFileTypes(this.input.config),
           );
           const started = Date.now();
-          const bytes = await this.channel.export(parsed.data.path, signal);
+          const bytes = await this.channel.export(
+            parsed.data.path,
+            signal,
+            needsFileExport(this.input.config),
+          );
           const exported = Date.now();
           const artifact = await this.store.save(
             {

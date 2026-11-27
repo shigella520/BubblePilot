@@ -52,6 +52,10 @@ export interface ApprovedTool {
   imageExportVersion?: 1;
   fileExportVersion?: 1;
   attachmentTransferVersion?: 1;
+  /** Generator anchors only: dedicated workspace namespace, e.g. /workspace/image-gen/. */
+  transportWorkspacePrefix?: string;
+  /** Generator anchors only: attachment MIME types the target accepts. */
+  attachmentMimeTypes?: string[];
   outputSchema?: Record<string, unknown>;
   server: string;
   definition: AiToolDefinition;

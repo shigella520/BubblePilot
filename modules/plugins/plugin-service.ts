@@ -7,7 +7,10 @@ import type { AttachmentHandling } from "../attachments/attachment-policy.js";
 import {
   attachmentTargets,
   assertAttachmentBinding,
+  findAttachmentTarget,
 } from "./plugin-attachments.js";
+import { requiredTransportTools } from "./plugin-transport.js";
+import { toolContractHash } from "./plugin-tool-sync.js";
 import { ApplicationError } from "../../app/errors.js";
 import { pluginCatalogueUsage } from "./plugin-catalogue.js";
 import type { TrustedHostsProvider } from "../shared/network-settings.js";
@@ -604,21 +607,76 @@ export class PluginService {
       await client.connect(plugin.config.connections[config.server]!);
       if (client.attachmentVersion() !== 1)
         pluginError("ATTACHMENT_TARGET_UPGRADE_REQUIRED", 409);
-      const tools = await client.discover(config.server);
-      for (const name of [
+      await this.assertTransportToolsUnchanged(
+        client,
+        plugin,
+        config.server,
         "prepare_sandbox",
-        "run_command",
-        "read_file",
-        "write_file",
-      ]) {
-        const approved = plugin.config.tools.find(
-          (t) => t.server === config.server && t.definition.name === name,
-        );
-        if (!approved || !tools.some((t) => t.hash === approved.hash))
-          pluginError("ATTACHMENT_TOOL_REVIEW_REQUIRED", 409);
-      }
+        "attachment",
+        "ATTACHMENT_TOOL_REVIEW_REQUIRED",
+      );
     } finally {
       await client.close();
+    }
+  }
+  /** A generator target must offer both chat-image import and PNG export. */
+  async assertImageGenerationAvailable(
+    ids: string[],
+    binding: { pluginId: string; server: string },
+  ) {
+    const plugins = await Promise.all(ids.map((id) => this.get(id)));
+    const attachment = findAttachmentTarget(plugins, binding, "generator");
+    const exported = findImageExportTarget(plugins, binding, "generator", [
+      "png",
+    ]);
+    if (
+      attachment.anchorTool !== exported.anchorTool ||
+      attachment.workspacePrefix !== exported.workspacePrefix
+    )
+      pluginError("TRANSPORT_CAPABILITY_INVALID", 409);
+    const plugin = plugins.find((p) => p.id === binding.pluginId)!;
+    const client = new PluginMcp(this.trustedHosts);
+    try {
+      await client.connect(plugin.config.connections[binding.server]!);
+      if (client.attachmentVersion() !== 1 || client.imageExportVersion() !== 1)
+        pluginError("IMAGE_GENERATION_TARGET_UPGRADE_REQUIRED", 409);
+      await this.assertTransportToolsUnchanged(
+        client,
+        plugin,
+        binding.server,
+        attachment.anchorTool,
+        "attachment",
+        "IMAGE_GENERATION_TOOL_REVIEW_REQUIRED",
+      );
+    } finally {
+      await client.close();
+    }
+  }
+  private async assertTransportToolsUnchanged(
+    client: PluginMcp,
+    plugin: InstalledPlugin,
+    server: string,
+    anchorTool: string,
+    purpose: "export" | "attachment",
+    code: string,
+  ) {
+    const anchor = plugin.config.tools.find(
+      (t) => t.server === server && t.definition.name === anchorTool,
+    );
+    if (!anchor) pluginError(code, 409);
+    const live = await client.discover(server);
+    for (const name of requiredTransportTools(anchor, purpose)) {
+      const approved = plugin.config.tools.find(
+        (t) => t.server === server && t.definition.name === name,
+      );
+      const current = live.find((t) => t.definition.name === name);
+      if (
+        !approved ||
+        !current ||
+        current.hash !== approved.hash ||
+        toolContractHash(current) !== toolContractHash(approved)
+      )
+        pluginError(code, 409);
     }
   }
   async assertAvailable(ids: string[]) {
@@ -684,6 +742,7 @@ export class PluginService {
 import {
   imageExportTargets,
   assertImageExportBinding,
+  findImageExportTarget,
 } from "./plugin-image-exports.js";
 import {
   type ImageReply,

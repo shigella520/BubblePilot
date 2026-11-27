@@ -1,13 +1,21 @@
 import { prepareToolImages, type ToolMedia } from "../ai/tool-image-session.js";
-import { assertImageExportBinding } from "./plugin-image-exports.js";
+import {
+  assertImageExportBinding,
+  findImageExportTarget,
+  type ImageExportTarget,
+} from "./plugin-image-exports.js";
 import {
   type ImageReply,
-  needsFileExport,
+  allowedReplyFileTypes,
 } from "../generated-images/image-policy.js";
 import type { RunImageSession } from "../ai/run-image-session.js";
 import { compareTools, toolContractHash } from "./plugin-tool-sync.js";
 import type { AttachmentHandling } from "../attachments/attachment-policy.js";
-import { assertAttachmentBinding } from "./plugin-attachments.js";
+import {
+  findAttachmentTarget,
+  type AttachmentTarget,
+} from "./plugin-attachments.js";
+import { requiredTransportTools } from "./plugin-transport.js";
 import {
   PluginResultStore,
   resultLimits,
@@ -178,16 +186,55 @@ export class PluginSession {
     pluginError("TOOL_REVIEW_REQUIRED", 409);
   }
   attachmentChannel(config: AttachmentHandling) {
-    assertAttachmentBinding(this.plugins, config);
-    const p = this.plugins.find((p) => p.id === config.pluginId)!;
-    const tools = p.config.tools.filter(
-      (t) =>
-        t.server === config.server &&
-        ["prepare_sandbox", "run_command", "read_file", "write_file"].includes(
-          t.definition.name,
-        ),
+    return this.transferChannel(
+      findAttachmentTarget(this.plugins, config, "sandbox"),
     );
-    const prepare = tools.find((t) => t.definition.name === "prepare_sandbox")!;
+  }
+  imageExportChannel(config: ImageReply) {
+    const target = findImageExportTarget(
+      this.plugins,
+      config,
+      "sandbox",
+      allowedReplyFileTypes(config),
+    );
+    return this.exportChannel(target, (plugins) =>
+      assertImageExportBinding(plugins, config),
+    );
+  }
+  /** Generator targets provide both attachment import and PNG export. */
+  generatorChannels(binding: { pluginId: string; server: string }) {
+    const attachment = findAttachmentTarget(this.plugins, binding, "generator");
+    const exported = findImageExportTarget(this.plugins, binding, "generator", [
+      "png",
+    ]);
+    if (attachment.workspacePrefix !== exported.workspacePrefix)
+      pluginError("TRANSPORT_CAPABILITY_INVALID", 409);
+    return {
+      workspacePrefix: exported.workspacePrefix,
+      mimeTypes: attachment.mimeTypes ?? [],
+      attachment: this.transferChannel(attachment),
+      export: this.exportChannel(exported, (plugins) =>
+        findImageExportTarget(plugins, binding, "generator", ["png"]),
+      ),
+    };
+  }
+  private targetTools(
+    target: { pluginId: string; server: string; anchorTool: string },
+    purpose: "export" | "attachment",
+  ) {
+    const p = this.plugins.find((p) => p.id === target.pluginId)!;
+    const anchor = p.config.tools.find(
+      (t) =>
+        t.server === target.server && t.definition.name === target.anchorTool,
+    )!;
+    const names = requiredTransportTools(anchor, purpose);
+    const tools = p.config.tools.filter(
+      (t) => t.server === target.server && names.includes(t.definition.name),
+    );
+    return { p, anchor, tools };
+  }
+  private transferChannel(target: AttachmentTarget) {
+    const { p, anchor, tools } = this.targetTools(target, "attachment");
     const check = async () => {
       try {
         for (const tool of tools) await this.check(p, undefined, tool);
@@ -201,8 +248,10 @@ export class PluginSession {
         pluginId: p.id,
         pluginName: p.name,
         revision: p.revision,
-        server: config.server,
+        server: target.server,
       },
+      kind: target.kind,
+      workspacePrefix: target.workspacePrefix,
       check,
       invalidate: () => this.close(),
       transfer: async (
@@ -211,7 +260,7 @@ export class PluginSession {
         signal: AbortSignal,
       ) => {
         await check();
-        const client = await this.clientFor(p, prepare, signal);
+        const client = await this.clientFor(p, anchor, signal);
         try {
           const result = await client.transferAttachment(input, file, signal);
           await check();
@@ -224,35 +273,28 @@ export class PluginSession {
       },
     };
   }
-  imageExportChannel(config: ImageReply) {
-    assertImageExportBinding(this.plugins, config);
-    const p = this.plugins.find((p) => p.id === config.pluginId)!;
-    const tools = p.config.tools.filter(
-      (t) =>
-        t.server === config.server &&
-        ["prepare_sandbox", "run_command"].includes(t.definition.name),
-    );
-    const prepare = tools.find((t) => t.definition.name === "prepare_sandbox")!;
+  private exportChannel(
+    target: ImageExportTarget,
+    binding: (plugins: InstalledPlugin[]) => unknown,
+  ) {
+    const { p, anchor, tools } = this.targetTools(target, "export");
     const check = async () => {
       for (const tool of tools) await this.check(p, undefined, tool);
       // Both current and pinned approval must retain the export capability.
-      for (const revision of [undefined, p.revision]) {
-        assertImageExportBinding(
-          [await this.service.get(p.id, revision)],
-          config,
-        );
-      }
+      for (const revision of [undefined, p.revision])
+        binding([await this.service.get(p.id, revision)]);
     };
     return {
       check,
-      export: async (path: string, signal: AbortSignal) => {
+      workspacePrefix: target.workspacePrefix,
+      export: async (path: string, signal: AbortSignal, file: boolean) => {
         await check();
         await this.guard?.();
-        const client = await this.clientFor(p, prepare, signal);
+        const client = await this.clientFor(p, anchor, signal);
         const data = await client.exportImage(
           path,
           signal,
-          needsFileExport(config) || prepare.imageExportVersion !== 1,
+          file || anchor.imageExportVersion !== 1,
         );
         await check();
         await this.guard?.();
