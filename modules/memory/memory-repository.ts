@@ -754,12 +754,26 @@ export class MemoryRepository {
       );
     });
   }
+  /** Messages that already have current vectors in this generation. */
+  async indexedMessageIds(
+    generationId: string,
+    messageIds: readonly string[],
+  ): Promise<Set<string>> {
+    if (!messageIds.length) return new Set();
+    const rows = await this.pool.query<{ message_id: string }>(
+      "SELECT message_id FROM memory_indexed_messages WHERE generation_id=$1 AND message_id=ANY($2::uuid[])",
+      [generationId, messageIds],
+    );
+    return new Set(rows.rows.map((r) => r.message_id));
+  }
   async publish(
     job: MemoryJob,
     messages: MemoryMessage[],
     chunks: MemoryChunk[],
     vectors: number[][],
     scannedThrough?: number,
+    /** Already indexed in this batch: counted as processed, not re-embedded. */
+    skippedIds: readonly string[] = [],
   ) {
     await this.transaction(async (db) => {
       await db.query("SELECT id FROM chats WHERE id=$1 FOR SHARE", [
@@ -835,9 +849,19 @@ export class MemoryRepository {
         `UPDATE memory_job_items i SET state='removed' WHERE job_id=$1 AND state='pending' AND message_index<=$2 AND NOT EXISTS(SELECT 1 FROM messages m WHERE m.id=i.message_id AND m.content_redacted_at IS NULL)`,
         [job.id, cursor],
       );
+      if (skippedIds.length) {
+        // A skipped message must still be indexed; an edit in between clears
+        // the marker, so retry the batch instead of leaving a silent gap.
+        const still = await db.query(
+          "SELECT 1 FROM memory_indexed_messages WHERE generation_id=$1 AND message_id=ANY($2::uuid[])",
+          [job.generation_id, skippedIds],
+        );
+        if ((still.rowCount ?? 0) !== new Set(skippedIds).size)
+          throw new Error("MEMORY_SOURCE_CHANGED");
+      }
       const completed = await db.query<{ characters: number }>(
         `UPDATE memory_job_items SET state='processed' WHERE job_id=$1 AND state='pending' AND message_id=ANY($2::uuid[]) RETURNING characters`,
-        [job.id, messages.map((m) => m.id)],
+        [job.id, [...messages.map((m) => m.id), ...skippedIds]],
       );
       const timing = (
         await db.query<MemoryJob>("SELECT * FROM memory_jobs WHERE id=$1", [

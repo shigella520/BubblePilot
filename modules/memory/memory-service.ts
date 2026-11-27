@@ -390,12 +390,19 @@ export class MemoryService {
         batch.push(message);
         characters += message.text.length;
       }
-      const included = batch.filter(
+      const inRange = batch.filter(
         (m) =>
           (!job.range_from ||
             Date.parse(m.sentAt) >= job.range_from.getTime()) &&
           (!job.range_to || Date.parse(m.sentAt) <= job.range_to.getTime()),
       );
+      // Backfills fill gaps: messages with current vectors are skipped. Edits,
+      // retractions and attribution rebuilds clear the marker beforehand.
+      const indexed = await this.repository.indexedMessageIds(
+        job.generation_id,
+        inRange.map((m) => m.id),
+      );
+      const included = inRange.filter((m) => !indexed.has(m.id));
       const chunks = chunkMessages(included);
       const timeoutMs = await this.requestTimeoutMs();
       const vectors: number[][] = [];
@@ -414,6 +421,7 @@ export class MemoryService {
         chunks,
         vectors,
         batch.at(-1)?.index ?? Number(job.through_index),
+        [...indexed],
       );
     } catch (error) {
       if (generation)

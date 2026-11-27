@@ -565,6 +565,53 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     await drain();
   });
 
+  it("backfills only gaps: indexed messages are skipped yet counted as processed", async () => {
+    const id = await chat();
+    await drain();
+    for (let i = 0; i < 4; i++) await message(id, `虚构已索引消息 ${i}`);
+    await drain();
+    // Create a gap: drop the marker and vectors source for one message.
+    const gap = await message(id, "虚构缺口消息");
+    await repo.pool.query(
+      "DELETE FROM memory_jobs WHERE chat_id=$1 AND status='queued'",
+      [id],
+    );
+    const encode = vi.fn((...a: Parameters<EmbeddingClient["encode"]>) =>
+      embedding.encode(...a),
+    );
+    const svc = new MemoryService(repo, {
+      identity: (...a: Parameters<EmbeddingClient["identity"]>) =>
+        embedding.identity(...a),
+      encode,
+    });
+    const job = (await repo.createJob(
+      id,
+      generationId,
+      undefined,
+      undefined,
+      randomUUID(),
+    ))!;
+    await repo.pool.query(
+      "UPDATE memory_jobs SET next_attempt_at=now() WHERE id=$1",
+      [job.id],
+    );
+    for (let i = 0; i < 10; i++) {
+      const state = (await repo.jobs(id)).find((j) => j.id === job.id)!;
+      if (state.status === "succeeded") break;
+      await svc.work();
+    }
+    const done = (await repo.jobs(id)).find((j) => j.id === job.id)!;
+    expect(done.status).toBe("succeeded");
+    expect(done.progress.processed).toBe(5);
+    expect(done.progress.percent).toBe(100);
+    const embedded = encode.mock.calls.flatMap((call) => call[2]);
+    expect(embedded.join("\n")).toContain("虚构缺口消息");
+    expect(embedded.join("\n")).not.toContain("虚构已索引消息");
+    expect((await repo.indexedMessageIds(generationId, [gap])).has(gap)).toBe(
+      true,
+    );
+  });
+
   it("records sanitized embedding failure detail on the job and operator log", async () => {
     const id = await chat();
     await drain();
