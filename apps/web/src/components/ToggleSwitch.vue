@@ -38,7 +38,7 @@ defineProps<{ label: string; disabled?: boolean }>();
   transition: transform 0.15s;
 }
 .toggle-switch[aria-checked="true"] {
-  background: #2563eb;
+  background: var(--bubblepilot-accent);
 }
 .toggle-switch[aria-checked="true"] span {
   transform: translateX(15px);

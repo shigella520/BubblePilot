@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from "../utils/format";
 import { computed } from "vue";
 import {
   Clock3,
@@ -60,9 +61,7 @@ const rows = computed(() =>
   ].map((row) => ({ ...row, value: props.timing?.categories[row.key] })),
 );
 const asOf = computed(() =>
-  props.timing
-    ? new Date(props.timing.observedAt).toLocaleString()
-    : "未提供统计",
+  props.timing ? formatDateTime(props.timing.observedAt) : "未提供统计",
 );
 </script>
 

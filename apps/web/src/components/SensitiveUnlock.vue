@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from "../utils/format";
 import { KeyRound, ShieldCheck } from "@lucide/vue";
 import { onBeforeUnmount, ref } from "vue";
 
@@ -42,8 +43,7 @@ async function verify() {
       <strong>敏感操作已解锁</strong
       ><span>授权仅绑定当前会话，并会自动过期。</span>
       <span v-if="session.session?.sensitiveUntil"
-        >有效期至
-        {{ new Date(session.session.sensitiveUntil).toLocaleString() }}</span
+        >有效期至 {{ formatDateTime(session.session.sensitiveUntil) }}</span
       >
     </div>
   </div>

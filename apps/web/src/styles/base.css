@@ -544,7 +544,7 @@ a {
   padding: 6px 9px;
   color: var(--bubblepilot-danger);
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   border: 1px solid rgba(192, 75, 69, 0.24);
   border-radius: 999px;
   background: rgba(192, 75, 69, 0.07);
@@ -592,24 +592,40 @@ a {
     box-shadow 0.18s ease,
     opacity 0.18s ease;
   white-space: nowrap;
+  /* Default (no variant) renders as secondary so a bare .button is visible. */
+  color: var(--bubblepilot-text);
+  border: 1px solid var(--bubblepilot-line-strong);
+  background: rgba(255, 255, 255, 0.86);
 }
 .button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
+.button:focus-visible,
+.icon-button:focus-visible {
+  outline: none;
+  box-shadow: var(--bubblepilot-focus-ring);
+}
 .button.primary {
   color: #fff;
+  border-color: transparent;
   background: linear-gradient(135deg, #171717, #34373d);
   box-shadow: 0 13px 26px rgba(16, 19, 23, 0.15);
 }
 .button.secondary {
   color: var(--bubblepilot-text);
-  border: 1px solid var(--bubblepilot-line);
-  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--bubblepilot-line-strong);
+  background: rgba(255, 255, 255, 0.86);
+}
+/* Destructive, emphasised (confirm dialogs) and quiet (row actions). */
+.button.danger {
+  color: #fff;
+  border-color: transparent;
+  background: var(--bubblepilot-danger);
 }
 .button.danger-ghost {
   color: var(--bubblepilot-danger);
-  border: 1px solid rgba(227, 75, 67, 0.13);
-  background: rgba(227, 75, 67, 0.06);
+  border: 1px solid var(--bubblepilot-danger-line);
+  background: var(--bubblepilot-danger-bg);
 }
 .button.large {
   min-height: 52px;
@@ -630,7 +646,7 @@ a {
   border-radius: 999px;
   color: var(--bubblepilot-muted);
   background: rgba(23, 23, 23, 0.055);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   font-weight: 800;
   white-space: nowrap;
 }
@@ -658,6 +674,28 @@ a {
 .table-status.expired {
   color: #ae3029;
   background: rgba(227, 75, 67, 0.1);
+}
+/* Semantic tones used by StatusBadge. */
+.table-status.tone-success {
+  color: #08785b;
+  background: var(--bubblepilot-success-bg);
+}
+.table-status.tone-info {
+  color: #1263ac;
+  background: var(--bubblepilot-info-bg);
+}
+.table-status.tone-warning {
+  color: var(--bubblepilot-warning);
+  background: var(--bubblepilot-warning-bg);
+}
+.table-status.tone-danger {
+  color: #ae3029;
+  background: var(--bubblepilot-danger-bg);
+}
+.table-status.tone-neutral,
+.table-status.neutral {
+  color: var(--bubblepilot-neutral);
+  background: var(--bubblepilot-neutral-bg);
 }
 .table-status.published {
   color: #1263ac;
@@ -707,7 +745,7 @@ td {
 }
 th {
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -726,7 +764,7 @@ td .keyline {
   margin-top: 4px;
   overflow: hidden;
   color: var(--bubblepilot-muted);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -745,14 +783,14 @@ td .keyline {
 }
 
 .compression-succeeded {
-  color: var(--success, #20b486);
+  color: var(--bubblepilot-success, #20b486);
 }
 .compression-failed {
-  color: var(--danger, #e05252);
+  color: var(--bubblepilot-danger, #e05252);
 }
 .compression-busy,
 .compression-superseded {
-  color: var(--warning, #f59e0b);
+  color: var(--bubblepilot-warning, #f59e0b);
 }
 .mono {
   font-family: "SFMono-Regular", Consolas, monospace;
@@ -781,7 +819,7 @@ td .keyline {
 .decision-identifiers small {
   margin-top: 4px;
   color: var(--bubblepilot-muted);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .form-message {
   position: fixed;
@@ -797,7 +835,7 @@ td .keyline {
   border-radius: 14px;
   color: #08785b;
   background: rgba(255, 255, 255, 0.96);
-  font-size: 12px;
+  font-size: var(--bubblepilot-text-sm);
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
   backdrop-filter: blur(12px);
   animation: toast-in 0.2s ease-out;
@@ -829,7 +867,12 @@ td .keyline {
 }
 .form-message.error {
   color: #9d2d26;
-  background: rgba(227, 75, 67, 0.09);
+  border-color: var(--bubblepilot-danger-line);
+  /* Opaque so an error toast stays readable over page content. */
+  background: #fff6f5;
+}
+.form-message-content {
+  white-space: pre-line;
 }
 /* n8n-style workflow canvas */
 .workflow-editor-v2 {
@@ -993,7 +1036,7 @@ td .keyline {
 .workflow-node-head > small {
   overflow: hidden;
   color: #64748b;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   line-height: 1.45;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -1013,7 +1056,7 @@ td .keyline {
   border-bottom: 1px solid #f1f5f9;
   color: #334155;
   background: #fff;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .workflow-port-row:last-child {
   border-bottom: 0;
@@ -1026,7 +1069,7 @@ td .keyline {
 }
 .workflow-port-row em {
   color: #94a3b8;
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
   font-style: normal;
 }
 .workflow-port-row-input {
@@ -1099,7 +1142,7 @@ td .keyline {
   margin-top: 8px;
   overflow: hidden;
   color: #64748b;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: normal;
@@ -1111,7 +1154,7 @@ td .keyline {
   border-radius: 999px;
   color: #0369a1;
   background: #e0f2fe;
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .workflow-handle {
   z-index: 10;
@@ -1143,7 +1186,7 @@ td .keyline {
   align-items: center;
   gap: 4px;
   color: #64748b;
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
   white-space: nowrap;
   pointer-events: none;
 }
@@ -1247,7 +1290,7 @@ td .keyline {
 }
 .workflow-node-result small {
   color: #64748b;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .workflow-node-creator-empty {
   color: #64748b;
@@ -1277,7 +1320,7 @@ td .keyline {
 }
 .workflow-inspector-head small {
   color: #64748b;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .workflow-inspector-head h3 {
   margin: 4px 0 14px;
@@ -1303,7 +1346,7 @@ td .keyline {
   display: grid;
   gap: 4px;
   color: #64748b;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .workflow-inspector-inputs select {
   width: 100%;
@@ -1316,7 +1359,7 @@ td .keyline {
 }
 .workflow-inspector-field small {
   color: #94a3b8;
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .workflow-inspector-field input,
 .workflow-inspector-field select {
@@ -1355,7 +1398,7 @@ td .keyline {
   line-height: 1.5;
 }
 .workflow-template-editor code {
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .workflow-inspector-refs {
   display: grid;
@@ -1365,7 +1408,7 @@ td .keyline {
   border-radius: 9px;
   background: #f8fafc;
   color: #64748b;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .workflow-inspector-refs strong {
   color: #334155;
@@ -1387,7 +1430,7 @@ td .keyline {
   border-radius: 999px;
   color: #475569;
   background: white;
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
 }
 .workflow-edge-failure {
@@ -1412,6 +1455,12 @@ td .keyline {
     right: 12px;
     bottom: 12px;
     max-width: calc(100vw - 24px);
+  }
+}
+@media (max-width: 860px) {
+  /* Stay above the fixed bottom navigation. */
+  .form-message:not(.inline-message) {
+    bottom: calc(92px + env(safe-area-inset-bottom, 0px));
   }
 }
 /* Keep the workflow connection points visible above node labels and edges. */
@@ -1591,7 +1640,7 @@ input[type="checkbox"] {
   min-height: 18px;
   padding: 0;
   border-radius: 5px;
-  accent-color: var(--bubblepilot-blue);
+  accent-color: var(--bubblepilot-accent);
   justify-self: start;
   cursor: pointer;
 }
@@ -1649,7 +1698,7 @@ textarea:focus {
   border-radius: 8px;
   color: #196d58;
   background: rgba(19, 164, 116, 0.08);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
   font-weight: 800;
   white-space: nowrap;
 }
@@ -1658,7 +1707,7 @@ textarea:focus {
   max-width: 220px;
   overflow: hidden;
   color: var(--bubblepilot-text);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1714,7 +1763,7 @@ legend {
 .sensitive-status span {
   margin-top: 3px;
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .sensitive-unlock .form-message {
   grid-column: 2 / -1;
@@ -1732,7 +1781,7 @@ legend {
   border-radius: 999px;
   color: var(--bubblepilot-muted);
   background: rgba(23, 23, 23, 0.06);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   font-weight: 800;
   cursor: pointer;
   white-space: nowrap;
@@ -1829,7 +1878,7 @@ legend {
 .message-results header span,
 .message-results footer {
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .message-results footer {
   display: flex;
@@ -1854,9 +1903,9 @@ legend {
   padding: 6px 9px;
   border: 1px solid rgba(10, 132, 255, 0.14);
   border-radius: 999px;
-  color: var(--bubblepilot-blue);
+  color: var(--bubblepilot-accent);
   background: rgba(10, 132, 255, 0.06);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
   font-weight: 800;
   text-decoration: none;
 }
@@ -1902,7 +1951,7 @@ legend {
   padding: 5px 8px;
   border-radius: 999px;
   background: rgba(227, 75, 67, 0.08);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .trigger-preview-result.matched,
 .trigger-preview-result .passed {
@@ -1919,7 +1968,7 @@ legend {
   max-width: 340px;
   margin-top: 5px;
   color: #a9510a;
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -1940,7 +1989,7 @@ legend {
 }
 .message-body-details {
   margin: -4px 0 12px;
-  color: var(--bubblepilot-blue);
+  color: var(--bubblepilot-accent);
   font-size: 11px;
 }
 .message-body-details summary {
@@ -2012,7 +2061,7 @@ legend {
   border-radius: 8px;
   color: #9d2d26;
   background: rgba(227, 75, 67, 0.07);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .message-media-grid {
   display: grid;
@@ -2071,7 +2120,7 @@ legend {
 .message-media-copy header div > span,
 .message-media-summary > span {
   color: var(--bubblepilot-muted);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -2081,7 +2130,7 @@ legend {
   border-radius: 999px;
   color: var(--bubblepilot-muted);
   background: rgba(100, 116, 139, 0.1);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
   font-weight: 800;
 }
 .summary-state.succeeded {
@@ -2102,13 +2151,13 @@ legend {
 .message-media-status-copy {
   margin-top: 9px !important;
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   line-height: 1.55;
 }
 .message-media-summary {
   margin-top: 16px;
   padding: 13px 14px;
-  border-left: 3px solid var(--bubblepilot-blue);
+  border-left: 3px solid var(--bubblepilot-accent);
   background: rgba(10, 132, 255, 0.05);
 }
 .message-media-summary p {
@@ -2127,12 +2176,12 @@ legend {
 }
 .message-media-diagnostics dt {
   color: var(--bubblepilot-muted);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .message-media-diagnostics dd {
   margin: 3px 0 0;
   overflow-wrap: anywhere;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   font-weight: 750;
 }
 .message-media-route-traces {
@@ -2141,7 +2190,7 @@ legend {
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--bubblepilot-line);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .message-media-route-traces article {
   display: grid;
@@ -2162,7 +2211,7 @@ legend {
   border-radius: 6px;
   color: #9d2d26;
   background: rgba(227, 75, 67, 0.08);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .export-form .export-types {
   grid-column: 1 / -1;
@@ -2192,7 +2241,7 @@ legend {
 }
 .export-preview p {
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   line-height: 1.65;
 }
 .export-summary-grid {
@@ -2211,7 +2260,7 @@ legend {
 }
 .export-summary-grid span {
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .export-summary-grid strong {
   overflow: hidden;
@@ -2286,7 +2335,7 @@ legend {
   margin: 5px 0;
   overflow: hidden;
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2295,7 +2344,7 @@ legend {
   border-radius: 8px;
   color: var(--bubblepilot-muted);
   background: rgba(23, 23, 23, 0.04);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .row-actions {
   justify-content: flex-end;
@@ -2339,7 +2388,7 @@ legend {
 .route-order-label {
   padding-top: 7px;
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   font-weight: 750;
 }
 .route-order-block .route-flow {
@@ -2352,7 +2401,7 @@ legend {
   border-radius: 10px;
   color: #1263ac;
   background: rgba(10, 132, 255, 0.08);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2389,7 +2438,7 @@ legend {
   padding: 8px 10px;
   border-radius: 10px;
   background: rgba(10, 132, 255, 0.06);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .selected-provider-order > div > span {
   min-width: 0;
@@ -2464,7 +2513,7 @@ legend {
 }
 .compression-detail-list dt {
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .compression-detail-list dd {
   margin: 0;
@@ -2495,7 +2544,7 @@ legend {
   padding: 4px 7px;
   border-radius: 8px;
   background: rgba(23, 23, 23, 0.055);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -2537,7 +2586,7 @@ legend {
 .route-trace-card > p {
   margin: 6px 0 0;
   overflow-wrap: anywhere;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .route-candidate-grid {
   display: grid;
@@ -2552,7 +2601,7 @@ legend {
   padding: 8px 10px;
   border-radius: 10px;
   background: rgba(23, 23, 23, 0.035);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .trace-item .route-candidate-item {
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2568,7 +2617,7 @@ legend {
   margin: 5px 0 0;
   overflow-wrap: anywhere;
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .compression-status-events {
   display: grid;
@@ -2580,7 +2629,7 @@ legend {
   grid-template-columns: auto auto minmax(0, 1fr);
   gap: 9px;
   align-items: center;
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .compression-content-section {
   margin-top: 18px;
@@ -2593,7 +2642,7 @@ legend {
 }
 .compression-content-heading > svg {
   flex: 0 0 auto;
-  color: var(--bubblepilot-blue);
+  color: var(--bubblepilot-accent);
 }
 .compression-content-heading h3 {
   margin-bottom: 5px;
@@ -2628,7 +2677,7 @@ legend {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--bubblepilot-text);
-  font-family: var(--font-sans);
+  font-family: var(--bubblepilot-font);
   font-size: 12px;
   line-height: 1.65;
 }
@@ -2661,11 +2710,11 @@ legend {
   align-items: baseline;
   gap: 8px;
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .compression-message-meta strong {
-  color: var(--bubblepilot-blue);
-  font-family: var(--font-mono);
+  color: var(--bubblepilot-accent);
+  font-family: var(--bubblepilot-font-mono);
 }
 .compression-message-meta time {
   margin-left: auto;
@@ -2697,9 +2746,9 @@ legend {
   gap: 0.55rem;
   margin: 0 0 1rem;
   padding: 0.7rem 0.8rem;
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--bubblepilot-line);
   border-radius: 12px;
-  background: var(--surface-subtle);
+  background: var(--bubblepilot-surface-subtle);
 }
 
 .workflow-ai-tools > span {
@@ -2732,7 +2781,7 @@ legend {
 .workflow-import-dialog textarea {
   width: 100%;
   resize: vertical;
-  font-family: var(--font-mono);
+  font-family: var(--bubblepilot-font-mono);
 }
 
 .workflow-import-file {
@@ -2886,7 +2935,7 @@ legend {
 .context-snapshot-grid dt {
   margin-bottom: 5px;
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .context-snapshot-grid dd {
   margin: 0;
@@ -2949,14 +2998,14 @@ legend {
   border-radius: 999px;
   background: rgba(39, 104, 255, 0.08);
   color: var(--bubblepilot-accent, #2768ff);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   font-weight: 600;
   white-space: nowrap;
 }
 .trace-item p {
   margin: 4px 0;
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .trace-item .table-status {
   max-width: 100%;
@@ -2979,7 +3028,7 @@ legend {
   background: var(--bubblepilot-danger);
 }
 .trace-item details {
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .trace-item pre {
   max-height: 220px;
@@ -2987,7 +3036,7 @@ legend {
   padding: 10px;
   border-radius: 10px;
   background: rgba(23, 23, 23, 0.04);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
   white-space: pre-wrap;
 }
 .raw-request-diagnostic {
@@ -3024,7 +3073,7 @@ legend {
   border-radius: 0;
   border-top: 1px solid rgba(23, 23, 23, 0.08);
   background: rgba(23, 23, 23, 0.035);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   line-height: 1.55;
   white-space: pre;
 }
@@ -3052,7 +3101,7 @@ legend {
   border-radius: 14px;
   background: rgba(108, 140, 255, 0.055);
   color: var(--bubblepilot-text);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   white-space: normal;
 }
 .cache-diagnostic > summary {
@@ -3105,7 +3154,7 @@ legend {
 .cache-diagnostic-grid span {
   margin-bottom: 3px;
   color: var(--bubblepilot-muted);
-  font-size: 9px;
+  font-size: var(--bubblepilot-text-xs);
 }
 .cache-diagnostic-meta {
   margin: 9px 13px;
@@ -3564,4 +3613,23 @@ legend {
     top: 12px;
     right: 14px;
   }
+}
+
+.load-error-state {
+  max-width: 520px;
+  margin: 48px auto;
+  padding: 28px;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: var(--bubblepilot-radius-md);
+  background: var(--bubblepilot-surface);
+  text-align: center;
+}
+.load-error-state h2 {
+  margin: 0 0 8px;
+}
+.load-error-state p {
+  color: var(--bubblepilot-muted);
+}
+.load-error-state .row-actions {
+  justify-content: center;
 }

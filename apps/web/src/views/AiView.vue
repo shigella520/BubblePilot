@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { partialFailureMessage, settleAll } from "../utils/settle";
+import { formatDateTime } from "../utils/format";
 import AdminFormDialog from "../components/AdminFormDialog.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentSettingsPanel from "../components/AgentSettingsPanel.vue";
@@ -20,7 +22,7 @@ import {
   TestTube2,
   Trash2,
 } from "@lucide/vue";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 
 import {
   apiRequest,
@@ -188,6 +190,11 @@ const searchSettingsForm = reactive<WebSearchSettingsForm>({
 });
 const message = ref("");
 const messageIsError = ref(false);
+// A cleared message also clears the error tone, so a later success message
+// never inherits the red style of an earlier failure.
+watch(message, (value) => {
+  if (!value) messageIsError.value = false;
+});
 const busy = ref(false);
 const draggedId = ref<string | null>(null);
 const providerToggleBusyIds = reactive(new Set<string>());
@@ -310,29 +317,41 @@ async function load() {
   message.value = "";
   messageIsError.value = false;
   try {
-    const [
-      providerData,
-      routeData,
-      statusData,
-      settingsData,
-      imageSettingsData,
-      contextSettingsData,
-    ] = await Promise.all([
-      apiRequest<Provider[]>("/api/v1/ai/providers"),
-      apiRequest<AiRoute[]>("/api/v1/ai/routes"),
-      apiRequest<{ enabled: boolean; backend: string; ready: boolean }>(
-        "/api/v1/ai/search/status",
-      ),
-      apiRequest<WebSearchSettings>("/api/v1/ai/search/settings"),
-      apiRequest<ImageInputSettings>("/api/v1/ai/image-input/settings"),
-      apiRequest<ContextSettings>("/api/v1/ai/context/settings"),
-    ]);
-    providers.value = providerData;
-    routes.value = routeData;
-    searchStatus.value = statusData;
-    applySearchSettings(settingsData);
-    applyImageInputSettings(imageSettingsData);
-    applyContextSettings(contextSettingsData);
+    const { values, failed } = await settleAll({
+      providers: () => apiRequest<Provider[]>("/api/v1/ai/providers"),
+      routes: () => apiRequest<AiRoute[]>("/api/v1/ai/routes"),
+      searchStatus: () =>
+        apiRequest<{ enabled: boolean; backend: string; ready: boolean }>(
+          "/api/v1/ai/search/status",
+        ),
+      searchSettings: () =>
+        apiRequest<WebSearchSettings>("/api/v1/ai/search/settings"),
+      imageSettings: () =>
+        apiRequest<ImageInputSettings>("/api/v1/ai/image-input/settings"),
+      contextSettings: () =>
+        apiRequest<ContextSettings>("/api/v1/ai/context/settings"),
+    });
+    if (values.providers) providers.value = values.providers;
+    if (values.routes) routes.value = values.routes;
+    if (values.searchStatus) searchStatus.value = values.searchStatus;
+    if (values.searchSettings) applySearchSettings(values.searchSettings);
+    if (values.imageSettings) applyImageInputSettings(values.imageSettings);
+    if (values.contextSettings) applyContextSettings(values.contextSettings);
+    if (failed.length) {
+      message.value = partialFailureMessage(
+        failed,
+        {
+          providers: "Provider 列表",
+          routes: "路由",
+          searchStatus: "联网搜索状态",
+          searchSettings: "联网搜索设置",
+          imageSettings: "图片输入设置",
+          contextSettings: "聊天上下文设置",
+        },
+        errorMessage,
+      );
+      messageIsError.value = true;
+    }
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
@@ -356,6 +375,7 @@ async function saveContextSettings() {
     );
     applyContextSettings(saved);
     message.value = "聊天上下文配置已保存，将用于后续执行。";
+    messageIsError.value = false;
   } catch (cause) {
     message.value = errorMessage(cause);
     messageIsError.value = true;
@@ -1012,7 +1032,7 @@ onMounted(async () => {
             · 版本 {{ contextSettings.version }} · 更新于
             {{
               contextSettings.updatedAt
-                ? new Date(contextSettings.updatedAt).toLocaleString()
+                ? formatDateTime(contextSettings.updatedAt)
                 : "尚未保存"
             }}
           </p>
@@ -1254,7 +1274,6 @@ onMounted(async () => {
                   >推理强度：{{ item.reasoningEffort }}</span
                 ><span v-if="item.sessionAffinity === 'session-id-header'"
                   >固定会话与缓存键</span
-                >
                 ><span>{{
                   item.secretConfigured ? "API Key 已配置" : "API Key 未配置"
                 }}</span
@@ -1557,7 +1576,7 @@ onMounted(async () => {
                   {{ item.degradePolicy.failureThreshold }} 次失败后冷却
                   {{ item.degradePolicy.cooldownMs / 1000 }}s
                 </td>
-                <td>{{ new Date(item.createdAt).toLocaleString() }}</td>
+                <td>{{ formatDateTime(item.createdAt) }}</td>
                 <td>
                   <div class="row-actions">
                     <button

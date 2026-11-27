@@ -1,13 +1,6 @@
 <script setup lang="ts">
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-redundant-type-constituents, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call */
-import {
-  ArrowLeft,
-  Check,
-  Download,
-  LoaderCircle,
-  Power,
-  TestTube2,
-} from "@lucide/vue";
+import { ArrowLeft, Check, Download, LoaderCircle, Power } from "@lucide/vue";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -35,6 +28,7 @@ const workflowStatus = ref("draft");
 const publishedVersion = ref<number | null>(null);
 const candidateVersion = ref<number | null>(null);
 const busy = ref(false);
+const loadFailed = ref(false);
 const enableBusy = ref(false);
 const message = ref("");
 const messageIsError = ref(false);
@@ -138,6 +132,7 @@ const versionDefinition = async () => {
 
 async function load() {
   busy.value = true;
+  loadFailed.value = false;
   try {
     const [actionBlocks, aiRoutes, chats] = await Promise.all([
       apiRequest<any[]>("/api/v1/workflows/action-blocks"),
@@ -155,6 +150,8 @@ async function load() {
       await versionDefinition();
     }
   } catch (cause) {
+    // Never render an editable empty canvas that would save to a missing id.
+    loadFailed.value = true;
     message.value = errorMessage(cause);
     messageIsError.value = true;
   } finally {
@@ -275,11 +272,6 @@ async function toggleEnabled(approved = false) {
   }
 }
 
-function testWorkflow() {
-  message.value =
-    "测试执行面板将在下一步接入真实节点模拟器。当前可先保存并启用后用测试消息验证。";
-  messageIsError.value = false;
-}
 function markDirty() {
   if (saveState.value !== "saving") saveState.value = "dirty";
 }
@@ -361,9 +353,6 @@ onMounted(load);
         >
           <Download :size="16" />导出当前版本
         </button>
-        <button class="button secondary" type="button" @click="testWorkflow">
-          <TestTube2 :size="16" />测试执行
-        </button>
         <button
           class="button secondary"
           type="button"
@@ -407,7 +396,24 @@ onMounted(load);
         </button>
       </div>
     </AdminDetailDialog>
-    <section v-if="!busy" class="workflow-canvas-main">
+    <section v-if="loadFailed && !busy" class="workflow-canvas-main">
+      <div class="load-error-state" role="alert">
+        <h2>无法加载工作流</h2>
+        <p>{{ message || "工作流不存在、已删除或服务暂不可用。" }}</p>
+        <div class="row-actions">
+          <button
+            class="button secondary"
+            type="button"
+            @click="router.push('/automation')"
+          >
+            返回工作流列表</button
+          ><button class="button primary" type="button" @click="load">
+            重试
+          </button>
+        </div>
+      </div>
+    </section>
+    <section v-else-if="!busy" class="workflow-canvas-main">
       <WorkflowEditor
         :blocks="blocks"
         :workflow-name="workflowName"

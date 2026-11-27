@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { partialFailureMessage, settleAll } from "../utils/settle";
+import { formatDateTime } from "../utils/format";
+import StatusBadge from "../components/StatusBadge.vue";
 import MemeDeliveries from "../components/MemeDeliveries.vue";
 import {
   AlertTriangle,
@@ -14,7 +17,13 @@ import { onMounted, reactive, ref } from "vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { apiAllPages, apiRequest, errorMessage } from "../services/api";
 
-const counts = reactive({
+const counts = reactive<{
+  chats: number;
+  workflows: number;
+  providers: number;
+  /** "100+" when the last 24h exceed one page of executions. */
+  executions: number | string;
+}>({
   chats: 0,
   workflows: 0,
   providers: 0,
@@ -76,14 +85,22 @@ const operations = ref<{
   alerts: Array<{ code: string; severity: string; count: number }>;
 } | null>(null);
 const busy = ref(false);
+const loaded = ref(false);
 const message = ref("");
 
 async function loadRecentExecutions() {
   try {
-    recent.value = await apiRequest<typeof recent.value>(
-      "/api/v1/executions?limit=8",
+    // The list API has no time filter: count the last 24h from one page.
+    const page = await apiRequest<typeof recent.value>(
+      "/api/v1/executions?limit=100",
     );
-    counts.executions = recent.value.length;
+    recent.value = page.slice(0, 8);
+    const since = Date.now() - 24 * 60 * 60 * 1000;
+    const day = page.filter(
+      (item) => Date.parse(item.createdAt) >= since,
+    ).length;
+    counts.executions =
+      day >= page.length && page.length === 100 ? "100+" : day;
   } catch (cause) {
     message.value = errorMessage(cause);
   }
@@ -93,27 +110,39 @@ async function load() {
   busy.value = true;
   message.value = "";
   try {
-    const [chats, workflows, providers, runtime, events] = await Promise.all([
-      apiAllPages<unknown>("/api/v1/chats?limit=100"),
-      apiRequest<unknown[]>("/api/v1/workflows"),
-      apiRequest<unknown[]>("/api/v1/ai/providers"),
-      apiRequest<NonNullable<typeof operations.value>>(
-        "/api/v1/operations/status",
-      ),
-      apiRequest<InboundEvent[]>("/api/v1/inbound-events?limit=8"),
-    ]);
-    Object.assign(counts, {
-      chats: chats.length,
-      workflows: workflows.length,
-      providers: providers.length,
-      executions: counts.executions,
+    const { values, failed } = await settleAll({
+      chats: () => apiAllPages<{ enabled: boolean }>("/api/v1/chats?limit=100"),
+      workflows: () => apiRequest<unknown[]>("/api/v1/workflows"),
+      providers: () => apiRequest<unknown[]>("/api/v1/ai/providers"),
+      runtime: () =>
+        apiRequest<NonNullable<typeof operations.value>>(
+          "/api/v1/operations/status",
+        ),
+      events: () =>
+        apiRequest<InboundEvent[]>("/api/v1/inbound-events?limit=8"),
     });
-    operations.value = runtime;
-    inboundEvents.value = events;
+    if (values.chats)
+      counts.chats = values.chats.filter((chat) => chat.enabled).length;
+    if (values.workflows) counts.workflows = values.workflows.length;
+    if (values.providers) counts.providers = values.providers.length;
+    if (values.runtime) operations.value = values.runtime;
+    if (values.events) inboundEvents.value = values.events;
+    message.value = partialFailureMessage(
+      failed,
+      {
+        chats: "聊天统计",
+        workflows: "工作流统计",
+        providers: "AI Provider 统计",
+        runtime: "运行可靠性",
+        events: "入站事件",
+      },
+      errorMessage,
+    );
   } catch (cause) {
     message.value = errorMessage(cause);
   } finally {
     busy.value = false;
+    loaded.value = true;
   }
   await loadRecentExecutions();
 }
@@ -194,7 +223,7 @@ onMounted(load);
         ><em>Retry、Fallback 与降级</em></RouterLink
       >
       <RouterLink to="/executions#executions" class="metric-card tone-mint"
-        ><PlayCircle :size="23" /><span>最近执行</span
+        ><PlayCircle :size="23" /><span>24 小时执行</span
         ><strong>{{ counts.executions }}</strong
         ><em>节点与发送轨迹</em></RouterLink
       >
@@ -224,7 +253,9 @@ onMounted(load);
           </thead>
           <tbody>
             <tr v-if="!inboundEvents.length">
-              <td colspan="5" class="empty-cell">暂无入站事件</td>
+              <td colspan="5" class="empty-cell">
+                {{ loaded ? "暂无入站事件" : "正在加载…" }}
+              </td>
             </tr>
             <tr v-for="event in inboundEvents" :key="event.id">
               <td>
@@ -250,7 +281,7 @@ onMounted(load);
                 >
               </td>
               <td>{{ event.eventType }}</td>
-              <td>{{ new Date(event.receivedAt).toLocaleString() }}</td>
+              <td>{{ formatDateTime(event.receivedAt) }}</td>
               <td class="mono decision-identifiers">
                 <span>{{ event.eventId }}</span>
                 <small>{{ event.correlationId }}</small>
@@ -332,7 +363,7 @@ onMounted(load);
         </span>
       </div>
     </section>
-    <section class="panel"><MemeDeliveries /></section>
+    <section class="admin-panel"><MemeDeliveries /></section>
     <section class="admin-panel">
       <div class="panel-head">
         <div>
@@ -355,16 +386,16 @@ onMounted(load);
           </thead>
           <tbody>
             <tr v-if="!recent.length">
-              <td colspan="4" class="empty-cell">暂无执行记录</td>
+              <td colspan="4" class="empty-cell">
+                {{ loaded ? "暂无执行记录" : "正在加载…" }}
+              </td>
             </tr>
             <tr v-for="item in recent" :key="item.id">
               <td>{{ item.workflowName }}</td>
               <td>
-                <span class="table-status" :class="item.status">{{
-                  item.status
-                }}</span>
+                <StatusBadge domain="execution" :status="item.status" />
               </td>
-              <td>{{ new Date(item.createdAt).toLocaleString() }}</td>
+              <td>{{ formatDateTime(item.createdAt) }}</td>
               <td class="mono">{{ item.id.slice(0, 8) }}</td>
             </tr>
           </tbody>

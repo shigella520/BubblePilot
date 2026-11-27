@@ -1,4 +1,8 @@
-import { ApiError } from "../services/api.js";
+import {
+  ApiError,
+  diagnosticSeparator,
+  errorMessage,
+} from "../services/api.js";
 const messages: Record<string, string> = {
   PLUGIN_SCHEMA_UNSUPPORTED:
     "MCP 工具的 JSON Schema 无法安全校验（可能包含未支持的关键字或外部引用），未批准该工具。",
@@ -16,10 +20,11 @@ const messages: Record<string, string> = {
   PLUGIN_BILLING_REQUIRED: "MCP 服务要求付费或补充额度。",
   PLUGIN_RATE_LIMITED: "MCP 服务限制了请求频率，请稍后重试。",
   PLUGIN_MCP_TASK_REQUIRED: "该 MCP 工具要求任务式执行，目前客户端尚不支持。",
-  SENSITIVE_AUTH_REQUIRED: "此操作需要敏感验证，请在顶栏解锁后重试。",
+  SENSITIVE_AUTH_REQUIRED:
+    "此操作需要敏感操作授权，请在顶栏解锁（钥匙图标）后重试。",
   UNAUTHORIZED: "管理会话已失效，请重新登录。",
   IMPORT_FAILED:
-    "插件导入失败，未能取得具体原因。请检查仓库和分支，或上传仅含插件目录的 ZIP 包。此错误不表示敏感验证失败。",
+    "插件导入失败，未能取得具体原因。请检查仓库和分支，或上传仅含插件目录的 ZIP 包。此错误不表示敏感操作授权失败。",
   INTERRUPTED: "导入因服务重启而中断，请重新导入。",
   PLUGIN_GIT_FAILED:
     "无法读取 Git 仓库。请检查公开 HTTPS 地址、分支及服务器网络，或改用插件 ZIP 包。",
@@ -49,10 +54,20 @@ export function pluginErrorMessage(cause: unknown): string {
       : cause instanceof Error
         ? cause.message
         : "";
-  return (
-    messages[code] ??
-    (cause instanceof Error ? cause.message : "操作失败，请刷新状态后重试。")
-  );
+  const known = messages[code];
+  if (known && cause instanceof ApiError) {
+    // Same diagnostics format as errorMessage(): code and request id last.
+    const diagnostic = [cause.code, cause.correlationId]
+      .filter(Boolean)
+      .join(" · ");
+    return `${known}${diagnosticSeparator}${diagnostic}`;
+  }
+  if (known) return known;
+  return cause instanceof ApiError
+    ? errorMessage(cause)
+    : cause instanceof Error
+      ? cause.message
+      : "操作失败，请刷新状态后重试。";
 }
 export function canInspectPlugin(
   task: { state: string; directories: string[] } | null,

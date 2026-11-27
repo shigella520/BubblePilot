@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { formatDateTime } from "../utils/format";
+import StatusBadge from "./StatusBadge.vue";
 import AdminFormDialog from "./AdminFormDialog.vue";
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
@@ -221,7 +223,7 @@ function stateName(value: string) {
   return stateNames[value] ?? value;
 }
 function localTime(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "不限";
+  return value ? formatDateTime(value) : "不限";
 }
 function remainingTime(seconds: number) {
   const minutes = Math.ceil(seconds / 60);
@@ -773,16 +775,17 @@ onBeforeUnmount(() => {
                 }}<small>{{ jobKind(job) }} · {{ job.model }}</small>
               </td>
               <td>
-                <span class="state-badge">{{
-                  stateName(
-                    job.status === "queued" &&
-                      ["available", "warming", "stalled"].includes(
-                        job.progress?.estimate.status ?? "",
-                      )
-                      ? "running"
-                      : job.status,
-                  )
-                }}</span>
+                <StatusBadge
+                  domain="memoryJob"
+                  :status="
+                    job.status === 'queued' &&
+                    ['available', 'warming', 'stalled'].includes(
+                      job.progress?.estimate.status ?? '',
+                    )
+                      ? 'running'
+                      : job.status
+                  "
+                />
               </td>
               <td v-if="job.progress?.scope">
                 {{ job.progress.processed }} / {{ job.progress.total }} 条 ·
@@ -986,7 +989,7 @@ onBeforeUnmount(() => {
 .memory-panel:not(.admin-panel) {
   background: rgba(255, 255, 255, 0.72);
   padding: 1rem;
-  border: 1px solid var(--border-color, #ddd);
+  border: 1px solid var(--bubblepilot-line, #ddd);
   border-radius: 12px;
   margin-block: 1rem;
   grid-column: 1/-1;

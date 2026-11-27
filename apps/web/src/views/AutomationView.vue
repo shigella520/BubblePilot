@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { partialFailureMessage, settleAll } from "../utils/settle";
+import { formatDateTime } from "../utils/format";
+import StatusBadge from "../components/StatusBadge.vue";
 import { executionPolicy } from "../../../../modules/ai/execution-policy";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
 import {
@@ -118,6 +121,9 @@ const aiRoutes = ref<AiRoute[]>([]);
 const actionBlocks = ref<any[]>([]);
 const selectedWorkflowId = ref("");
 const busy = ref(false);
+/** First load finished; before that the list shows “加载中”, not “暂无”. */
+const loaded = ref(false);
+const workflowsFailed = ref(false);
 const message = ref("");
 const messageIsError = ref(false);
 const workflowCreateBusy = ref(false);
@@ -481,25 +487,42 @@ async function load() {
   message.value = "";
   messageIsError.value = false;
   try {
-    [
-      workflows.value,
-      triggers.value,
-      aiRoutes.value,
-      actionBlocks.value,
-      chats.value,
-      roleStatus.value,
-    ] = await Promise.all([
-      apiRequest<Workflow[]>("/api/v1/workflows"),
-      apiRequest<Trigger[]>("/api/v1/triggers"),
-      apiRequest<AiRoute[]>("/api/v1/ai/routes"),
-      apiRequest<any[]>("/api/v1/workflows/action-blocks"),
-      apiAllPages<{ providerChatId: string; displayName: string }>(
-        "/api/v1/chats?limit=100",
-      ),
-      apiRequest<{
-        workflows: Array<{ workflowId: string; nickname: string | null }>;
-      }>("/api/v1/bot-attributions"),
-    ]);
+    const { values, failed } = await settleAll({
+      workflows: () => apiRequest<Workflow[]>("/api/v1/workflows"),
+      triggers: () => apiRequest<Trigger[]>("/api/v1/triggers"),
+      aiRoutes: () => apiRequest<AiRoute[]>("/api/v1/ai/routes"),
+      actionBlocks: () => apiRequest<any[]>("/api/v1/workflows/action-blocks"),
+      chats: () =>
+        apiAllPages<{ providerChatId: string; displayName: string }>(
+          "/api/v1/chats?limit=100",
+        ),
+      roleStatus: () =>
+        apiRequest<{
+          workflows: Array<{ workflowId: string; nickname: string | null }>;
+        }>("/api/v1/bot-attributions"),
+    });
+    workflowsFailed.value = !values.workflows;
+    if (values.workflows) workflows.value = values.workflows;
+    if (values.triggers) triggers.value = values.triggers;
+    if (values.aiRoutes) aiRoutes.value = values.aiRoutes;
+    if (values.actionBlocks) actionBlocks.value = values.actionBlocks;
+    if (values.chats) chats.value = values.chats;
+    if (values.roleStatus) roleStatus.value = values.roleStatus;
+    if (failed.length) {
+      message.value = partialFailureMessage(
+        failed,
+        {
+          workflows: "工作流列表",
+          triggers: "触发器",
+          aiRoutes: "AI 路由",
+          actionBlocks: "动作块",
+          chats: "聊天列表",
+          roleStatus: "角色信息",
+        },
+        errorMessage,
+      );
+      messageIsError.value = true;
+    }
     actionBlocks.value = actionBlocks.value.map((block) =>
       block.type === "ai-chat" || block.type === "load-context"
         ? {
@@ -533,6 +556,7 @@ async function load() {
     messageIsError.value = true;
   } finally {
     busy.value = false;
+    loaded.value = true;
   }
 }
 
@@ -1168,7 +1192,15 @@ onMounted(load);
             </thead>
             <tbody>
               <tr v-if="!workflows.length">
-                <td colspan="7" class="empty-cell">暂无工作流</td>
+                <td colspan="7" class="empty-cell">
+                  {{
+                    !loaded
+                      ? "正在加载工作流…"
+                      : workflowsFailed
+                        ? "工作流列表加载失败，请点击刷新重试。"
+                        : "暂无工作流"
+                  }}
+                </td>
               </tr>
               <tr v-for="workflow in workflows" :key="workflow.id">
                 <td>
@@ -1180,9 +1212,7 @@ onMounted(load);
                   ><span class="keyline">{{ workflow.id }}</span>
                 </td>
                 <td>
-                  <span class="table-status" :class="workflow.status">{{
-                    workflow.status
-                  }}</span>
+                  <StatusBadge domain="workflow" :status="workflow.status" />
                 </td>
                 <td>
                   {{
@@ -1221,7 +1251,7 @@ onMounted(load);
                   </div>
                   <span v-else>—</span>
                 </td>
-                <td>{{ new Date(workflow.updatedAt).toLocaleString() }}</td>
+                <td>{{ formatDateTime(workflow.updatedAt) }}</td>
                 <td>
                   <div class="workflow-row-actions">
                     <button
@@ -1640,7 +1670,7 @@ onMounted(load);
                           编辑
                         </button>
                         <button
-                          class="button tiny danger"
+                          class="button tiny danger-ghost"
                           type="button"
                           :disabled="triggerDeleteBusyIds.has(trigger.id)"
                           @click="deleteTrigger(trigger)"

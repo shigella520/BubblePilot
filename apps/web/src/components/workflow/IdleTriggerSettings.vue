@@ -220,7 +220,7 @@ function period(
   display: grid;
   gap: 12px;
   padding: 16px 0;
-  border-top: 1px solid var(--border-color, #ddd);
+  border-top: 1px solid var(--bubblepilot-line, #ddd);
 }
 .idle-settings label {
   display: grid;
@@ -230,7 +230,7 @@ function period(
   min-width: 0;
   display: grid;
   gap: 8px;
-  border: 1px solid var(--border-color, #ddd);
+  border: 1px solid var(--bubblepilot-line, #ddd);
   border-radius: 8px;
 }
 .idle-settings fieldset label:has(input[type="checkbox"]),

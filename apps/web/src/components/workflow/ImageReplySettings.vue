@@ -179,7 +179,7 @@ function choose(value: string) {
 .image-reply-settings {
   display: grid;
   gap: 10px;
-  border-top: 1px solid var(--bubblepilot-border, #dbe3ec);
+  border-top: 1px solid var(--bubblepilot-line, #dbe3ec);
   padding-top: 16px;
   min-width: 0;
 }
@@ -212,7 +212,7 @@ select {
   flex-wrap: wrap;
   gap: 10px 18px;
   min-width: 0;
-  border: 1px solid var(--bubblepilot-border, #dbe3ec);
+  border: 1px solid var(--bubblepilot-line, #dbe3ec);
   border-radius: 10px;
   padding: 12px;
 }

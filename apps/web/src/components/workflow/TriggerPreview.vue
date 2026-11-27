@@ -134,7 +134,7 @@ async function preview() {
 .trigger-sample {
   margin: 16px 0;
   padding: 12px;
-  border: 1px solid var(--border-color, #ddd);
+  border: 1px solid var(--bubblepilot-line, #ddd);
   border-radius: 10px;
 }
 .trigger-sample summary {
@@ -143,7 +143,7 @@ async function preview() {
 }
 .trigger-sample p {
   font-size: 13px;
-  color: var(--text-secondary, #666);
+  color: var(--bubblepilot-muted, #666);
 }
 .trigger-sample label {
   display: grid;

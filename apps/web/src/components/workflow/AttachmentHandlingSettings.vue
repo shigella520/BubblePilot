@@ -186,13 +186,13 @@ function applyLimits() {
 .attachment-settings {
   display: grid;
   gap: 12px;
-  border-top: 1px solid var(--border-color, #e5e7eb);
+  border-top: 1px solid var(--bubblepilot-line, #e5e7eb);
   padding-top: 16px;
   margin-top: 16px;
 }
 .attachment-settings p {
   font-size: 13px;
-  color: var(--text-muted, #64748b);
+  color: var(--bubblepilot-muted, #64748b);
   line-height: 1.6;
 }
 .attachment-settings label,

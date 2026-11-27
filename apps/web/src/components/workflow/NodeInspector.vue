@@ -472,7 +472,7 @@ function configVisible(item: any): boolean {
       v-if="node.data.block.type === 'message-trigger'"
       :config="props.config"
     />
-    <button class="button danger" type="button" @click="emit('remove')">
+    <button class="button danger-ghost" type="button" @click="emit('remove')">
       删除动作块
     </button>
   </aside>
@@ -497,12 +497,12 @@ function configVisible(item: any): boolean {
   gap: 10px;
   max-height: 260px;
   overflow: auto;
-  border: 1px solid var(--border-color, #ddd);
+  border: 1px solid var(--bubblepilot-line, #ddd);
   border-radius: 12px;
   padding: 12px;
 }
 .chat-scope-settings p {
   font-size: 13px;
-  color: var(--text-secondary, #666);
+  color: var(--bubblepilot-muted, #666);
 }
 </style>

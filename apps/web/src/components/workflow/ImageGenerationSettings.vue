@@ -150,7 +150,7 @@ function choose(value: string) {
 .image-generation-settings {
   display: grid;
   gap: 10px;
-  border-top: 1px solid var(--bubblepilot-border, #dbe3ec);
+  border-top: 1px solid var(--bubblepilot-line, #dbe3ec);
   padding-top: 16px;
   min-width: 0;
 }

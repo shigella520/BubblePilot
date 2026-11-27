@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from "../utils/format";
 import {
   Eye,
   EyeOff,
@@ -137,7 +138,7 @@ onBeforeUnmount(conceal);
       <SensitiveUnlock v-if="unlocking && !session.sensitiveActive" />
       <div v-if="message && session.sensitiveActive" class="source-content">
         <div class="source-metadata">
-          <span>{{ new Date(message.sentAt).toLocaleString() }}</span>
+          <span>{{ formatDateTime(message.sentAt) }}</span>
           <span>发送者：{{ message.senderId ?? "未知" }}</span>
           <span v-if="message.editedAt" class="status-badge">已编辑</span>
           <span

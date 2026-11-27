@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from "../utils/format";
 import ToggleSwitch from "../components/ToggleSwitch.vue";
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import {
@@ -898,7 +899,7 @@ onUnmounted(() => {
             >
               停用</button
             ><button
-              class="button secondary meme-delete"
+              class="button danger-ghost meme-delete"
               :disabled="
                 bulkBusy ||
                 !selected.size ||
@@ -1077,7 +1078,7 @@ onUnmounted(() => {
             <button
               v-if="collectionEditing"
               type="button"
-              class="button secondary meme-delete"
+              class="button danger-ghost meme-delete"
               :disabled="busy"
               @click="deleteCollection"
             >
@@ -1296,8 +1297,7 @@ onUnmounted(() => {
                 editing.usageCount === 0
                   ? "尚未使用"
                   : editing.lastUsedAt
-                    ? "最近使用：" +
-                      new Date(editing.lastUsedAt).toLocaleString()
+                    ? "最近使用：" + formatDateTime(editing.lastUsedAt)
                     : "未记录使用时间"
               }}
             </p>
@@ -1371,7 +1371,7 @@ onUnmounted(() => {
           <footer class="meme-dialog-actions">
             <button
               v-if="editing"
-              class="button secondary meme-delete"
+              class="button danger-ghost meme-delete"
               type="button"
               :disabled="busy"
               @click="remove"
@@ -1440,9 +1440,9 @@ onUnmounted(() => {
   align-items: start;
   gap: 8px;
   padding: 14px;
-  border: 1px solid var(--border, #ddd);
+  border: 1px solid var(--bubblepilot-line, #ddd);
   border-radius: 16px;
-  background: var(--surface, #fff);
+  background: var(--bubblepilot-surface, #fff);
   color: inherit;
   text-align: left;
 }
@@ -1465,8 +1465,8 @@ onUnmounted(() => {
   padding: 20px;
 }
 .meme-dialog {
-  background: var(--surface, #fff);
-  color: var(--text, #222);
+  background: var(--bubblepilot-surface, #fff);
+  color: var(--bubblepilot-text, #222);
   border-radius: 18px;
   padding: 24px;
   width: 600px;
@@ -1544,7 +1544,7 @@ onUnmounted(() => {
   text-align: center;
 }
 .meme-drop.is-dragging {
-  border-color: #2563eb;
+  border-color: var(--bubblepilot-accent);
   background: #eff6ff;
 }
 .meme-upload-icon {
@@ -1553,7 +1553,7 @@ onUnmounted(() => {
   width: 60px;
   height: 60px;
   border-radius: 18px;
-  color: #2563eb;
+  color: var(--bubblepilot-accent);
   background: #eaf1ff;
 }
 .meme-drop-subtitle,
@@ -1606,7 +1606,7 @@ onUnmounted(() => {
 }
 .meme-upload-progress progress {
   width: 100%;
-  accent-color: #2563eb;
+  accent-color: var(--bubblepilot-accent);
 }
 .meme-field-hint {
   color: #9ca3af;
@@ -1770,12 +1770,9 @@ onUnmounted(() => {
 }
 .meme-dialog-actions .meme-delete {
   margin-right: auto;
-  color: #b24444;
-  background: transparent;
-  box-shadow: none;
 }
 .meme-dialog button:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--bubblepilot-accent);
   outline-offset: 3px;
 }
 @media (max-width: 700px) {
@@ -1963,10 +1960,7 @@ onUnmounted(() => {
   width: 16px;
   height: 16px;
   margin: 0;
-  accent-color: #2563eb;
-}
-.meme-delete {
-  color: #b24444 !important;
+  accent-color: var(--bubblepilot-accent);
 }
 @media (max-width: 760px) {
   .meme-library-layout {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from "../utils/format";
 import { retainedApprovals } from "../utils/plugin-tool-approval";
 import PluginOverviewCard from "../components/PluginOverviewCard.vue";
 import type { PluginListItem } from "../utils/plugin-overview";
@@ -428,9 +429,9 @@ async function remove() {
         </p>
       </div>
       <div class="plugin-actions">
-        <button :disabled="busy" @click="action(load)">
+        <button class="button secondary" :disabled="busy" @click="action(load)">
           <RefreshCw :size="16" />刷新</button
-        ><button :disabled="busy" @click="reset">
+        ><button class="button primary" :disabled="busy" @click="reset">
           <Plus :size="16" />安装插件
         </button>
       </div>
@@ -504,7 +505,12 @@ async function remove() {
                 placeholder="普通仓库链接可填，例如 plugins/firecrawl"
             /></label>
           </details>
-          <button :disabled="!url.trim()" @click="stage()">读取插件</button
+          <button
+            class="button secondary"
+            :disabled="!url.trim()"
+            @click="stage()"
+          >
+            读取插件</button
           ><label class="plugin-upload">
             <UploadCloud :size="28" /><strong>选择 ZIP 插件包</strong>
             <span>仅打包插件目录 · 最大 10 MiB</span>
@@ -526,6 +532,7 @@ async function remove() {
                 <option v-for="d in task.directories" :key="d">{{ d }}</option>
               </select></label
             ><button
+              class="button secondary"
               :disabled="!canInspectPlugin(task, directory)"
               @click="inspect"
             >
@@ -581,7 +588,11 @@ async function remove() {
                 "
                 @input="tested = false" /></label
           ></template>
-          <button v-if="Object.keys(connections).length" @click="test">
+          <button
+            v-if="Object.keys(connections).length"
+            class="button secondary"
+            @click="test"
+          >
             测试连接并发现工具
           </button>
           <section v-if="selected && !preview" class="tool-sync-panel">
@@ -597,9 +608,7 @@ async function remove() {
               保存后生效。每小时检查，仅自动接收格式变化和明确兼容的可选参数新增；不新增工具、不改变服务地址或授权范围。
             </p>
             <p v-if="selected.toolSyncLastCheck">
-              最近检查：{{
-                new Date(selected.toolSyncLastCheck).toLocaleString()
-              }}
+              最近检查：{{ formatDateTime(selected.toolSyncLastCheck) }}
             </p>
             <p v-if="selected.pendingReview?.length" class="tool-sync-warning">
               待审核：{{
@@ -615,7 +624,7 @@ async function remove() {
               >
                 <strong>{{ syncStatus[record.status] }}</strong>
                 <small
-                  >{{ new Date(record.checkedAt).toLocaleString() }} ·
+                  >{{ formatDateTime(record.checkedAt) }} ·
                   {{
                     record.source === "scheduled" ? "定时检查" : "调用前检查"
                   }}</small
@@ -685,10 +694,12 @@ async function remove() {
                   type="checkbox"
                   :value="skill.id"
                 />停用</label
-              ><button @click="view(skill.file)">查看指令</button
+              ><button class="button secondary tiny" @click="view(skill.file)">
+                查看指令</button
               ><button
                 v-for="file in skill.references"
                 :key="file"
+                class="button secondary tiny"
                 @click="view(file)"
               >
                 {{ file }}
@@ -696,13 +707,24 @@ async function remove() {
             >
           </article>
           <div class="plugin-actions">
-            <button v-if="preview" :disabled="!tested" @click="install">
+            <button
+              v-if="preview"
+              class="button primary"
+              :disabled="!tested"
+              @click="install"
+            >
               确认安装</button
             ><template v-if="selected"
-              ><button :disabled="!tested" @click="save">保存配置与授权</button
-              ><button @click="update({ enabled: !selected.enabled })">
+              ><button class="button primary" :disabled="!tested" @click="save">
+                保存配置与授权</button
+              ><button
+                class="button secondary"
+                @click="update({ enabled: !selected.enabled })"
+              >
                 {{ selected.enabled ? "停用插件" : "启用插件" }}</button
-              ><button @click="remove">卸载</button></template
+              ><button class="button danger-ghost" @click="remove">
+                卸载
+              </button></template
             >
           </div>
           <details v-if="selected">
@@ -710,6 +732,7 @@ async function remove() {
             <p v-for="v in selected.versions" :key="v.hash">
               {{ v.package_version }}
               <button
+                class="button secondary tiny"
                 :disabled="v.hash === selected.revision"
                 @click="update({ revision: v.hash })"
               >
@@ -744,7 +767,7 @@ async function remove() {
 }
 .plugin-heading p,
 .plugin-panel p {
-  color: var(--text-muted, #64748b);
+  color: var(--bubblepilot-muted, #64748b);
 }
 .plugin-status {
   min-height: 44px;
@@ -756,9 +779,9 @@ async function remove() {
   gap: 16px;
 }
 .plugin-panel {
-  border: 1px solid var(--border-color, #dce2ea);
+  border: 1px solid var(--bubblepilot-line, #dce2ea);
   border-radius: 16px;
-  background: var(--surface, #fff);
+  background: var(--bubblepilot-surface, #fff);
   padding: 22px;
 }
 .plugin-panel {
@@ -786,13 +809,6 @@ async function remove() {
   max-width: 100%;
   flex: 1;
 }
-.plugin-panel button:not(.toggle-switch),
-.plugin-heading button {
-  padding: 9px 14px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  cursor: pointer;
-}
 .plugin-upload {
   padding: 24px;
   border: 2px dashed #b9c8dd;
@@ -805,7 +821,7 @@ async function remove() {
   color: var(--bubblepilot-muted);
 }
 .plugin-upload strong {
-  color: var(--bubblepilot-ink);
+  color: var(--bubblepilot-text);
 }
 .plugin-upload span {
   font-size: 12px;
@@ -837,7 +853,7 @@ async function remove() {
 }
 .reference-panel,
 .skill-card {
-  border: 1px solid var(--border-color, #dce2ea);
+  border: 1px solid var(--bubblepilot-line, #dce2ea);
   border-radius: 12px;
   padding: 16px;
   min-width: 0;
@@ -876,13 +892,6 @@ async function remove() {
   overflow-wrap: anywhere;
   text-align: left;
 }
-.plugin-panel .danger-button {
-  color: #b42318;
-}
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 @media (max-width: 640px) {
   .plugins-page {
     padding: 14px;
@@ -904,7 +913,7 @@ button:disabled {
 .tool-sync-panel {
   min-width: 0;
   padding: 1rem;
-  border: 1px solid var(--border-color, #ddd);
+  border: 1px solid var(--bubblepilot-line, #ddd);
   border-radius: 12px;
   overflow-wrap: anywhere;
 }
@@ -924,7 +933,7 @@ button:disabled {
   color: #9a5700;
 }
 .tool-sync-record {
-  border-top: 1px solid var(--border-color, #ddd);
+  border-top: 1px solid var(--bubblepilot-line, #ddd);
   padding-block: 0.75rem;
 }
 .tool-sync-record small,

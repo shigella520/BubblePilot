@@ -132,6 +132,25 @@ export function parseJsonObject(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+/** Separates the readable message from "CODE · request id" diagnostics. */
+export const diagnosticSeparator = "\n诊断：";
+
+const hasChinese = (text: string) => /[\u3400-\u9fff]/u.test(text);
+
+/** Readable fallback when the server message is not user-facing Chinese. */
+function statusMessage(status: number): string {
+  if (status === 401) return "登录已过期，请重新登录。";
+  if (status === 403) return "需要敏感操作授权或没有权限执行该操作。";
+  if (status === 404) return "对象不存在或已被删除，请刷新后重试。";
+  if (status === 409) return "数据已被其他操作修改，请刷新后重试。";
+  if (status === 413) return "提交的内容过大。";
+  if (status === 400 || status === 422)
+    return "提交的内容不符合要求，请检查后重试。";
+  if (status === 429) return "操作太频繁，请稍后再试。";
+  if (status >= 500) return "服务暂时不可用，请稍后重试。";
+  return "请求未能完成。";
+}
+
 export function errorMessage(cause: unknown): string {
   if (cause instanceof ApiError) {
     const knownMessages: Record<string, string> = {
@@ -147,10 +166,23 @@ export function errorMessage(cause: unknown): string {
       CHAT_PARTICIPANT_NOT_DISCOVERED:
         "成员映射中包含尚未在该聊天历史出现的发送者 ID。",
     };
-    const message = knownMessages[cause.code] ?? cause.message;
-    return cause.correlationId === null
-      ? message
-      : `${message}（${cause.code} · ${cause.correlationId}）`;
+    const known = knownMessages[cause.code];
+    const message =
+      known ??
+      (hasChinese(cause.message) ? cause.message : statusMessage(cause.status));
+    // Codes, request ids and untranslated server text are diagnostics only.
+    const diagnostic = [
+      cause.code,
+      cause.correlationId,
+      !known && !hasChinese(cause.message) && cause.message
+        ? cause.message
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    return diagnostic
+      ? `${message}${diagnosticSeparator}${diagnostic}`
+      : message;
   }
   return cause instanceof Error ? cause.message : "请求未能完成。";
 }

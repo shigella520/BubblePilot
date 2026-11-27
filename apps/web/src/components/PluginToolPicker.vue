@@ -161,7 +161,7 @@ function toggle(tool: Tool, event: Event) {
   border: 1px solid #cbd5e1;
   border-radius: 9px;
   padding: 9px 12px;
-  background: var(--surface, #fff);
+  background: var(--bubblepilot-surface, #fff);
   color: inherit;
   font: inherit;
   min-width: 0;
@@ -183,11 +183,11 @@ function toggle(tool: Tool, event: Event) {
   margin: 14px 0;
 }
 .tool-item {
-  border: 1px solid var(--border-color, #dce2ea);
+  border: 1px solid var(--bubblepilot-line, #dce2ea);
   border-radius: 12px;
   padding: 14px;
   min-width: 0;
-  background: var(--surface, #fff);
+  background: var(--bubblepilot-surface, #fff);
 }
 .tool-item.is-selected {
   border-color: #9fbeda;

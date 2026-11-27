@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { formatDateTime, formatTime } from "../utils/format";
+import StatusBadge from "../components/StatusBadge.vue";
 import AdminFormDialog from "../components/AdminFormDialog.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
@@ -967,7 +969,7 @@ onBeforeUnmount(() =>
                 </td>
                 <td>{{ chat.type }}</td>
                 <td>{{ chat.messageCount }}</td>
-                <td>{{ new Date(chat.updatedAt).toLocaleString() }}</td>
+                <td>{{ formatDateTime(chat.updatedAt) }}</td>
                 <td>
                   <button
                     class="button secondary tiny"
@@ -1052,7 +1054,7 @@ onBeforeUnmount(() =>
                     </button>
 
                     <button
-                      class="button tiny secondary"
+                      class="button tiny danger-ghost"
                       type="button"
                       :disabled="
                         chat.enabled ||
@@ -1111,9 +1113,7 @@ onBeforeUnmount(() =>
                   <td>
                     <strong class="mono">{{ participant.senderId }}</strong>
                     <span class="keyline">
-                      最后出现：{{
-                        new Date(participant.lastSeenAt).toLocaleString()
-                      }}
+                      最后出现：{{ formatDateTime(participant.lastSeenAt) }}
                     </span>
                   </td>
                   <td>{{ participant.messageCount }} 条</td>
@@ -1245,13 +1245,13 @@ onBeforeUnmount(() =>
           <article v-for="item in messages" :key="item.id">
             <header>
               <strong>{{ item.chatDisplayName || item.providerChatId }}</strong
-              ><span>{{ new Date(item.sentAt).toLocaleString() }}</span>
+              ><span>{{ formatDateTime(item.sentAt) }}</span>
             </header>
             <p
               v-if="item.editedAt && item.revisionState === 'active'"
               class="muted"
             >
-              已编辑 · {{ new Date(item.editedAt).toLocaleString() }}
+              已编辑 · {{ formatDateTime(item.editedAt) }}
             </p>
             <blockquote
               v-if="item.replyTo && !item.contentRedactedAt"
@@ -1475,9 +1475,7 @@ onBeforeUnmount(() =>
         <article v-if="exportPreview" class="export-preview">
           <header>
             <div>
-              <span class="table-status" :class="exportPreview.status">{{
-                exportPreview.status
-              }}</span>
+              <StatusBadge domain="dataExport" :status="exportPreview.status" />
               <h3>确认冻结范围</h3>
             </div>
             <button
@@ -1517,9 +1515,9 @@ onBeforeUnmount(() =>
             </div>
           </div>
           <p>
-            快照时间 {{ new Date(exportPreview.snapshotAt).toLocaleString() }} ·
+            快照时间 {{ formatDateTime(exportPreview.snapshotAt) }} ·
             当前阶段有效至
-            {{ new Date(exportPreview.expiresAt).toLocaleTimeString() }}
+            {{ formatTime(exportPreview.expiresAt) }}
           </p>
           <label
             v-if="exportPreview.status === 'awaiting-confirmation'"
@@ -1580,19 +1578,17 @@ onBeforeUnmount(() =>
                 <td colspan="5" class="empty-cell">暂无导出任务</td>
               </tr>
               <tr v-for="job in exportJobs" :key="job.id">
-                <td>{{ new Date(job.createdAt).toLocaleString() }}</td>
+                <td>{{ formatDateTime(job.createdAt) }}</td>
                 <td>
                   {{ job.scope.types.join(" + ") }}
                   <span class="keyline"
-                    >{{ new Date(job.scope.sentFrom).toLocaleString() }} —
-                    {{ new Date(job.scope.sentTo).toLocaleString() }}</span
+                    >{{ formatDateTime(job.scope.sentFrom) }} —
+                    {{ formatDateTime(job.scope.sentTo) }}</span
                   >
                 </td>
                 <td>{{ job.recordCount }}</td>
                 <td>
-                  <span class="table-status" :class="job.status">{{
-                    job.status
-                  }}</span>
+                  <StatusBadge domain="dataExport" :status="job.status" />
                 </td>
                 <td>
                   <button
@@ -1633,7 +1629,7 @@ onBeforeUnmount(() =>
     <template v-else-if="quotedMessage">
       <p class="muted">
         {{ quotedMessage.senderId || "未知发送者" }} ·
-        {{ new Date(quotedMessage.sentAt).toLocaleString() }}
+        {{ formatDateTime(quotedMessage.sentAt) }}
       </p>
       <p v-if="quotedMessage.contentRedactedAt">内容已按保留策略清理</p>
       <div
@@ -1681,7 +1677,7 @@ onBeforeUnmount(() =>
             <h2 id="message-media-title">图片与 AI 摘要</h2>
             <span>
               {{ mediaMessage.chatDisplayName || mediaMessage.providerChatId }}
-              · {{ new Date(mediaMessage.sentAt).toLocaleString() }}
+              · {{ formatDateTime(mediaMessage.sentAt) }}
             </span>
           </div>
           <div class="message-media-dialog-actions">
@@ -1813,11 +1809,11 @@ onBeforeUnmount(() =>
                           : "生成时间"
                       }}
                     </dt>
-                    <dd>{{ new Date(item.generatedAt).toLocaleString() }}</dd>
+                    <dd>{{ formatDateTime(item.generatedAt) }}</dd>
                   </div>
                   <div v-if="item.reusedAt">
                     <dt>复用时间</dt>
-                    <dd>{{ new Date(item.reusedAt).toLocaleString() }}</dd>
+                    <dd>{{ formatDateTime(item.reusedAt) }}</dd>
                   </div>
                 </dl>
                 <div
@@ -1900,7 +1896,7 @@ onBeforeUnmount(() =>
   padding: 3px 9px;
   border: 1px solid currentColor;
   border-radius: 999px;
-  color: var(--color-text-muted, #776d60);
+  color: var(--bubblepilot-muted, #776d60);
   font-size: 12px;
   line-height: 1.5;
 }

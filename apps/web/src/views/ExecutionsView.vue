@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from "../utils/format";
 import {
   pluginToolPresentation,
   pluginDeliveryLabel,
@@ -1145,7 +1146,7 @@ function contextSnapshotValue(
             <p>自然日、ISO 周和自然月，按实际 Provider 请求汇总。</p>
           </div>
           <span v-if="usage" class="keyline">
-            更新于 {{ new Date(usage.generatedAt).toLocaleString() }}
+            更新于 {{ formatDateTime(usage.generatedAt) }}
           </span>
         </div>
         <div v-if="usagePeriodRows.length" class="table-shell usage-table">
@@ -1425,7 +1426,7 @@ function contextSnapshotValue(
                     compact
                   />
                 </td>
-                <td>{{ new Date(item.createdAt).toLocaleString() }}</td>
+                <td>{{ formatDateTime(item.createdAt) }}</td>
                 <td>
                   <button
                     class="button tiny secondary"
@@ -1485,7 +1486,7 @@ function contextSnapshotValue(
                 <td colspan="6" class="empty-cell">暂无审计事件</td>
               </tr>
               <tr v-for="item in audits" :key="item.id">
-                <td>{{ new Date(item.occurredAt).toLocaleString() }}</td>
+                <td>{{ formatDateTime(item.occurredAt) }}</td>
                 <td>{{ item.actorType }}</td>
                 <td>{{ item.action }}</td>
                 <td>
@@ -1726,7 +1727,7 @@ function contextSnapshotValue(
             <p>{{ detail.startupClosure.reason }}</p>
             <p>
               原状态：{{ detail.startupClosure.previousStatus }} ·
-              {{ new Date(detail.startupClosure.closedAt).toLocaleString() }}
+              {{ formatDateTime(detail.startupClosure.closedAt) }}
             </p>
           </section>
           <section

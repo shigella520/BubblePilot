@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from "../utils/format";
 import { onMounted, reactive, ref } from "vue";
 import { apiRequest, errorMessage, jsonBody } from "../services/api";
 import DismissibleMessage from "./DismissibleMessage.vue";
@@ -86,9 +87,7 @@ onMounted(load);
     <p v-if="settings" class="muted">
       配置来源：{{ settings.source === "database" ? "已保存配置" : "默认值" }} ·
       版本 {{ settings.version }} · 更新时间：{{
-        settings.updatedAt
-          ? new Date(settings.updatedAt).toLocaleString()
-          : "尚未保存"
+        settings.updatedAt ? formatDateTime(settings.updatedAt) : "尚未保存"
       }}
     </p>
     <form @submit.prevent="save">

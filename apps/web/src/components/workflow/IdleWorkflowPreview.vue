@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from "../../utils/format";
 import { computed, ref, watch, onBeforeUnmount } from "vue";
 import { Search } from "@lucide/vue";
 import { apiRequest, errorMessage } from "../../services/api";
@@ -83,7 +84,7 @@ function outcome(a: Attempt) {
     : (states[a.status] ?? a.status);
 }
 function time(value: string | null) {
-  return value ? new Date(value).toLocaleString() : "—";
+  return value ? formatDateTime(value) : "—";
 }
 function duration(a: Attempt) {
   return a.completedAt
@@ -408,7 +409,7 @@ onBeforeUnmount(() => {
 .idle-dashboard {
   display: grid;
   gap: 20px;
-  color: var(--text-primary, #252a31);
+  color: var(--bubblepilot-text, #252a31);
 }
 .idle-heading {
   display: flex;
@@ -431,7 +432,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 .idle-table-panel {
-  background: var(--surface, #fff);
+  background: var(--bubblepilot-surface, #fff);
   border: 1px solid #e6e7e9;
   border-radius: 20px;
   padding: 24px;
@@ -590,7 +591,7 @@ footer button {
   padding: 20px;
   border: 1px solid #e6e7e9;
   border-radius: 16px;
-  background: var(--surface, #fff);
+  background: var(--bubblepilot-surface, #fff);
 }
 .idle-shared-filters label,
 .idle-shared-filters :deep(label) {

@@ -19,4 +19,40 @@
   --bubblepilot-radius-xl: 38px;
   --bubblepilot-font:
     "Avenir Next", "SF Pro Display", "Helvetica Neue", "PingFang SC", sans-serif;
+  --bubblepilot-font-mono:
+    ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* Semantic status colours: text, background and border per tone. */
+  --bubblepilot-warning: #b45309;
+  --bubblepilot-info: var(--bubblepilot-accent);
+  --bubblepilot-neutral: #5f5b56;
+  --bubblepilot-success-bg: rgba(19, 164, 116, 0.1);
+  --bubblepilot-success-line: rgba(19, 164, 116, 0.24);
+  --bubblepilot-danger-bg: rgba(227, 75, 67, 0.09);
+  --bubblepilot-danger-line: rgba(227, 75, 67, 0.26);
+  --bubblepilot-warning-bg: rgba(245, 158, 11, 0.13);
+  --bubblepilot-warning-line: rgba(180, 83, 9, 0.26);
+  --bubblepilot-info-bg: rgba(10, 132, 255, 0.09);
+  --bubblepilot-info-line: rgba(10, 132, 255, 0.24);
+  --bubblepilot-neutral-bg: rgba(24, 24, 24, 0.05);
+  --bubblepilot-neutral-line: rgba(24, 24, 24, 0.12);
+  --bubblepilot-line-strong: rgba(24, 24, 24, 0.12);
+  --bubblepilot-surface-subtle: #f8f7f4;
+  --bubblepilot-focus-ring:
+    0 0 0 2px var(--bubblepilot-surface), 0 0 0 4px var(--bubblepilot-accent);
+
+  /* Type scale: nothing smaller than 11px. */
+  --bubblepilot-text-xs: 11px;
+  --bubblepilot-text-sm: 12px;
+  --bubblepilot-text-md: 14px;
+  --bubblepilot-text-lg: 16px;
+  --bubblepilot-text-xl: 20px;
+
+  /* Spacing scale. */
+  --bubblepilot-space-1: 4px;
+  --bubblepilot-space-2: 8px;
+  --bubblepilot-space-3: 12px;
+  --bubblepilot-space-4: 16px;
+  --bubblepilot-space-5: 24px;
+  --bubblepilot-space-6: 32px;
 }

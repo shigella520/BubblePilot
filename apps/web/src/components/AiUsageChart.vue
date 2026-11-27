@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from "../utils/format";
 import {
   computed,
   nextTick,
@@ -255,7 +256,7 @@ onBeforeUnmount(() => {
         top: `${tooltipPosition?.top ?? tooltipAnchor.y}px`,
       }"
     >
-      <time>{{ new Date(hoverPoint.bucketStart).toLocaleString() }}</time>
+      <time>{{ formatDateTime(hoverPoint.bucketStart) }}</time>
       <span
         v-for="provider in hoverProviders"
         :key="provider.id"
@@ -344,7 +345,7 @@ onBeforeUnmount(() => {
   background: var(--bubblepilot-surface);
   box-shadow: 0 10px 28px rgba(31, 35, 41, 0.16);
   color: var(--bubblepilot-muted);
-  font-size: 10px;
+  font-size: var(--bubblepilot-text-xs);
   line-height: 1.5;
   pointer-events: none;
 }

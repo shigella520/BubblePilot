@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateTime } from "../../utils/format";
 import { computed, ref, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { Bot, RefreshCw } from "@lucide/vue";
@@ -175,9 +176,7 @@ const stateLabel = (s: string) =>
       <small
         >版本 {{ identity.version }} ·
         {{
-          identity.updatedAt
-            ? new Date(identity.updatedAt).toLocaleString()
-            : "尚未配置"
+          identity.updatedAt ? formatDateTime(identity.updatedAt) : "尚未配置"
         }}</small
       >
     </form>
