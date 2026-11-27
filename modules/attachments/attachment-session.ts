@@ -100,6 +100,12 @@ export interface AttachmentRunInput {
   scope: ChatImageScope;
   current: AttachmentContextMessage;
   history?: readonly AttachmentContextMessage[];
+  /** Provider ID of the message the trigger quotes, when it has attachments. */
+  quotedMessageId?: string;
+  /** Chat timezone for model-facing times of resolved entries. */
+  timeZone?: string;
+  /** Resolved by AttachmentService from quotedMessageId; never model input. */
+  quoted?: AttachmentContextMessage;
 }
 export class AttachmentSession {
   private candidates = new Map<string, Candidate>();
@@ -286,7 +292,11 @@ export class AttachmentSession {
   async initialCatalogue(maxBytes: number) {
     const stage = this.stageCatalogue();
     const prepared = await initialAttachmentCatalogue(
-      { current: this.input.current, history: this.input.history ?? [] },
+      {
+        current: this.input.current,
+        history: this.input.history ?? [],
+        quoted: this.input.quoted ?? null,
+      },
       maxBytes,
       async (message, current) => {
         // Historical references require explicit archive authorization. No permissive

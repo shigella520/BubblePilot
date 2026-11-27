@@ -435,6 +435,78 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     expect(literal.rows).toHaveLength(0);
   });
 
+  it("loads quoted attachments only for earlier, active, readable same-chat messages", async () => {
+    const id = await chat();
+    const other = await chat();
+    const photo = await message(id, "虚构图片");
+    const plain = await message(id, "虚构纯文本");
+    const hidden = await message(id, "虚构已清理图片");
+    const edited = await message(id, "虚构编辑中图片");
+    const foreign = await message(other, "虚构他群图片");
+    const current = await message(id, "改一下这张");
+    const future = await message(id, "虚构之后图片");
+    const file = {
+      providerAttachmentId: randomUUID(),
+      fileName: "fictional-photo.jpeg",
+      mimeType: "image/jpeg",
+      sizeBytes: 12,
+    };
+    await repo.pool.query(
+      "UPDATE messages SET attachments=$2 WHERE id=ANY($1::uuid[])",
+      [[photo, hidden, edited, foreign, future], JSON.stringify([file])],
+    );
+    await repo.pool.query(
+      "UPDATE messages SET content_redacted_at=now() WHERE id=$1",
+      [hidden],
+    );
+    await repo.pool.query(
+      "UPDATE messages SET revision_state='partial' WHERE id=$1",
+      [edited],
+    );
+    const attachmentService = new AttachmentService(
+      repo.pool,
+      {} as BlueBubblesSettingsService,
+      new AttachmentStore("/unused-fictional-attachment-directory"),
+    );
+    const pluginSession = {
+      attachmentChannel: () => ({}),
+    } as unknown as PluginSession;
+    const quotedOf = async (quotedMessageId: string) =>
+      (
+        await attachmentService.create(
+          {
+            config: {
+              enabled: true,
+              pluginId: randomUUID(),
+              server: "sandbox",
+              limits: attachmentLimitsSchema.parse({}),
+            },
+            scope: {
+              provider: "bluebubbles",
+              providerChatId: id,
+              triggerMessageId: current,
+            },
+            current: { providerMessageId: current, attachments: [] },
+            quotedMessageId,
+            timeZone: "Asia/Shanghai",
+          },
+          pluginSession,
+        )
+      ).input.quoted;
+    const quoted = await quotedOf(photo);
+    expect(quoted?.localSentAt).toMatch(/\+08:00$/u);
+    expect(quoted).toMatchObject({
+      providerMessageId: photo,
+      attachments: [
+        expect.objectContaining({ fileName: "fictional-photo.jpeg" }),
+      ],
+    });
+    for (const rejected of [plain, hidden, edited, foreign, future, current])
+      expect(await quotedOf(rejected)).toBeUndefined();
+    // Leave no queued index jobs for later bounded drains.
+    await drain();
+  });
+
   it("expands actual readable rows across gaps, preserves source and fits whole messages", async () => {
     const id = await chat();
     const ids: string[] = [];

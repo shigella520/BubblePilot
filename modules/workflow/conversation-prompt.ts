@@ -8,6 +8,7 @@ import {
 } from "../ai/image-reference.js";
 import { sha256 } from "../../app/canonical-json.js";
 import { modelTimestamp } from "./context-time.js";
+import { replyForModel } from "../archive/message-revision.js";
 
 export function conversationMessageContent(
   message: ContextMessage,
@@ -20,6 +21,9 @@ export function conversationMessageContent(
     id: message.providerMessageId,
     text: message.body,
     sentAt: modelTimestamp(message.sentAt, timeZone),
+    ...(message.replyTo
+      ? { replyTo: replyForModel(message.replyTo, timeZone) }
+      : {}),
     author: messageAuthor(message),
     attachments,
   });

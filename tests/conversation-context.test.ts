@@ -400,3 +400,32 @@ it("rejects explicit retired summary ports with the offending node", () => {
   };
   expect(() => parseWorkflowDefinition(retired)).toThrow(/render.*summary/);
 });
+describe("quoted message projection", () => {
+  it("renders the quoted message time locally and lists its files", () => {
+    const [message] = conversationHistoryMessages(
+      [
+        {
+          ...contextMessage("2"),
+          replyTo: {
+            status: "available",
+            message_id: "quoted-guid",
+            sent_at: "2026-11-18T11:34:10.000Z",
+            attachments: [
+              { index: 0, file_name: "IMG_0001.HEIC", mime_type: "image/heic" },
+            ],
+            attachment_count: 1,
+          },
+        },
+      ],
+      {},
+      [],
+      "Asia/Shanghai",
+    );
+    expect(message?.content).toContain(
+      "<sent_at>2026-11-18T19:34:10+08:00</sent_at>",
+    );
+    expect(message?.content).toContain(
+      '<attachments count="1"><attachment index="0" file_name="IMG_0001.HEIC" mime_type="image/heic">',
+    );
+  });
+});

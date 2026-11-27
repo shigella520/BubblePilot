@@ -27,6 +27,17 @@ export interface RevisionIngestion {
   ): Promise<ReplyPreview | null>;
 }
 
+/**
+ * Trigger quote preview. With long-term history access the whole earlier
+ * archive is readable (as history tools are); otherwise only the loaded
+ * context window. $1 trigger provider message ID, $2 window lower index.
+ */
+export const triggerReplySql = `SELECT CASE
+    WHEN chat_history_authorized(m.chat_id) THEN message_reply_preview(m.id,0,m.message_index)
+    WHEN $2::bigint IS NULL THEN '{"status":"unresolved"}'::jsonb
+    ELSE message_reply_preview(m.id,$2,m.message_index) END reply
+  FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.provider='bluebubbles' AND m.provider_message_id=$1
+  AND c.enabled AND c.deleted_at IS NULL`;
 export class MessageRevisionService implements RevisionIngestion {
   private timer: NodeJS.Timeout | undefined;
   private running: Promise<void> | undefined;
@@ -144,11 +155,11 @@ export class MessageRevisionService implements RevisionIngestion {
         /* The durable job retries; normal message dispatch continues. */
       }
     }
-    if (afterMessageIndex === null) return { status: "unresolved" };
+    // Quotes follow the chat's read scope: with long-term history access the
+    // whole earlier archive is readable (as history tools are); otherwise only
+    // the loaded context window. Unknown windows without history stay unresolved.
     const result = await this.pool.query<{ reply: ReplyPreview | null }>(
-      `SELECT message_reply_preview(m.id,$2,m.message_index) reply
-      FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.provider='bluebubbles' AND m.provider_message_id=$1
-      AND c.enabled AND c.deleted_at IS NULL`,
+      triggerReplySql,
       [envelope.message.providerMessageId, afterMessageIndex],
     );
     return result.rows[0]?.reply ?? { status: "unavailable" };

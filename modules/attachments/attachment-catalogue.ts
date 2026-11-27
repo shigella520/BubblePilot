@@ -22,10 +22,19 @@ const timestampCharge = "0000-00-00T00:00:00.000+00:00";
 export interface AttachmentContext {
   current: AttachmentContextMessage | null;
   history: readonly AttachmentContextMessage[];
+  /** The message the current message quotes; listed right after current. */
+  quoted?: AttachmentContextMessage | null;
 }
 
 export function attachmentContextMessage(
-  message: ContextMessage,
+  message: Pick<
+    ContextMessage,
+    | "providerMessageId"
+    | "sentAt"
+    | "senderId"
+    | "attachments"
+    | "revisionState"
+  >,
   timeZone?: string,
 ): AttachmentContextMessage {
   return {
@@ -71,6 +80,8 @@ type InitialListing = AttachmentListing & {
   archived: true;
   contentRead: false;
   importUnavailableReason?: string;
+  /** The current message quotes this one (reply_to.message_id). */
+  quoted?: true;
 };
 export interface InitialAttachmentCatalogue extends InitialListing {
   history: InitialListing[];
@@ -103,19 +114,31 @@ export async function initialAttachmentCatalogue(
     omitted: message?.attachments.length ?? 0,
     nextOffset: null,
   });
-  const history = context.history
-    .filter(
-      (m) =>
-        m.providerMessageId !== context.current?.providerMessageId &&
-        m.attachments.length > 0,
-    )
-    .map((message, index) => ({ message, index }))
-    .sort(
-      (a, b) =>
-        (b.message.sentAt ?? "").localeCompare(a.message.sentAt ?? "") ||
-        b.index - a.index,
-    )
-    .map(({ message }) => message);
+  const quoted =
+    context.quoted &&
+    context.quoted.attachments.length > 0 &&
+    context.quoted.providerMessageId !== context.current?.providerMessageId
+      ? context.quoted
+      : null;
+  // The quoted message is listed first so an older quoted file is not
+  // displaced by newer history when the directory budget is tight.
+  const history = [
+    ...(quoted ? [quoted] : []),
+    ...context.history
+      .filter(
+        (m) =>
+          m.providerMessageId !== context.current?.providerMessageId &&
+          m.providerMessageId !== quoted?.providerMessageId &&
+          m.attachments.length > 0,
+      )
+      .map((message, index) => ({ message, index }))
+      .sort(
+        (a, b) =>
+          (b.message.sentAt ?? "").localeCompare(a.message.sentAt ?? "") ||
+          b.index - a.index,
+      )
+      .map(({ message }) => message),
+  ];
   const result: InitialAttachmentCatalogue = {
     ...empty(context.current, true),
     currentMessagePresent: context.current !== null,
@@ -152,6 +175,7 @@ export async function initialAttachmentCatalogue(
         : null;
     const listing: InitialListing = {
       ...empty(message, current),
+      ...(!current && message === quoted ? { quoted: true as const } : {}),
       ...(issued ?? {}),
       total: message.attachments.length,
       entries: issued?.entries ?? snapshot.attachments.map(attachmentEntry),

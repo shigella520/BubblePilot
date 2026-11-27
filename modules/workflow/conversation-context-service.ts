@@ -513,7 +513,7 @@ export class ConversationContextService {
       const rows =
         snapshot.contract === "raw-context-v2"
           ? await db.query<MessageRow>(
-              `SELECT m.revision_state,m.edited_at,execution_reply_preview(m.id,$5,0,$6,true) AS reply_to,
+              `SELECT m.revision_state,m.edited_at,execution_reply_preview(m.id,$5,0,$6,NOT chat_history_authorized(m.chat_id)) AS reply_to,
          m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,
          m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code
          FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.id=ANY($4::uuid[])
@@ -529,7 +529,7 @@ export class ConversationContextService {
               ],
             )
           : await db.query<MessageRow>(
-              `SELECT m.revision_state,m.edited_at,message_reply_preview(m.id,$4,LEAST(m.message_index,$2)) AS reply_to,m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()} ORDER BY m.message_index`,
+              `SELECT m.revision_state,m.edited_at,message_reply_preview(m.id,CASE WHEN chat_history_authorized(m.chat_id) THEN 0 ELSE $4 END,LEAST(m.message_index,$2)) AS reply_to,m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()} ORDER BY m.message_index`,
               values,
             );
       const windowEvicted =

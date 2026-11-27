@@ -1,3 +1,4 @@
+import { modelTimestamp } from "../shared/local-time.js";
 import type { MessageAttachment } from "../ingestion/message-envelope.js";
 
 export type RevisionState = "active" | "retracted" | "partial" | "unresolved";
@@ -15,6 +16,23 @@ export interface ReplyPreview {
   part_id?: string;
   text_preview?: string;
   truncated?: boolean;
+  /** Stored UTC instant; model projections render it in the chat timezone. */
+  sent_at?: string;
+  /** Message-level metadata (first 10); never gateway identifiers. */
+  attachments?: Array<{
+    index: number;
+    file_name?: string;
+    mime_type?: string;
+  }>;
+  attachment_count?: number;
+}
+/** Model-facing reply preview: sent_at in the chat timezone like other times. */
+export function replyForModel(
+  reply: ReplyPreview,
+  timeZone: string,
+): ReplyPreview {
+  if (!reply.sent_at) return reply;
+  return { ...reply, sent_at: modelTimestamp(reply.sent_at, timeZone) };
 }
 export interface RevisionNotification {
   schemaVersion: "message-revision-v1";

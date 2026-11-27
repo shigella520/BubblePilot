@@ -8,7 +8,6 @@ import type {
   AttachmentContextMessage,
   InitialAttachmentCatalogue,
 } from "../modules/attachments/attachment-catalogue.js";
-import { emptyLinkPreview } from "../modules/ingestion/link-preview.js";
 const file = (fileName: string) => ({
   providerAttachmentId: "private-gateway-id",
   fileName,
@@ -103,9 +102,6 @@ it.each(["retracted", "partial", "unresolved"] as const)(
       ...message("withdrawn", ["secret.pdf"]),
       senderId: null,
       sentAt: "2026-01-01T00:00:00Z",
-      body: "",
-      isFromMe: false,
-      linkPreview: emptyLinkPreview(),
       revisionState: state,
     });
     expect(m.attachments).toEqual([]);
@@ -149,10 +145,8 @@ it("shows chat-local sentAt to the model while ordering by stored instants", asy
         providerMessageId: id,
         senderId: "fictional-user",
         sentAt,
-        body: "",
         attachments: [file(`${id}.pdf`)],
-        linkPreview: emptyLinkPreview(),
-      } as unknown as Parameters<typeof attachmentContextMessage>[0],
+      },
       "Asia/Shanghai",
     );
   const current = contextMessage("current", "2026-11-16T16:00:00.000Z");
@@ -179,4 +173,25 @@ it("shows chat-local sentAt to the model while ordering by stored instants", asy
       sentAt: "2026-11-16T16:00:00.123Z",
     }),
   );
+});
+it("lists the quoted message right after the current one, before newer history", async () => {
+  const quoted = message("quoted", ["IMG_0001.jpeg"], "2025-11-18T11:34:10Z");
+  const newer = Array.from({ length: 6 }, (_, i) =>
+    message(`newer-${i}`, [`file-${i}.pdf`], `2026-11-27T0${i}:00:00Z`),
+  );
+  const c = parse(
+    (
+      await initialAttachmentCatalogue(
+        {
+          current: message("current", []),
+          history: [...newer, quoted],
+          quoted,
+        },
+        10000,
+      )
+    ).text,
+  );
+  expect(c.history[0]).toMatchObject({ messageId: "quoted", quoted: true });
+  expect(c.history.filter((h) => h.messageId === "quoted")).toHaveLength(1);
+  expect(c.history.slice(1).every((h) => !("quoted" in h))).toBe(true);
 });

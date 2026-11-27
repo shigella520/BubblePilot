@@ -505,6 +505,14 @@ export class MemorySession {
               ...m,
               id: m.providerMessageId ?? m.id,
               sentAt: this.localTime(m.sentAt),
+              ...(m.replyTo?.sent_at
+                ? {
+                    replyTo: {
+                      ...m.replyTo,
+                      sent_at: this.localTime(m.replyTo.sent_at),
+                    },
+                  }
+                : {}),
               author:
                 m.author ??
                 (m.role === "assistant"

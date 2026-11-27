@@ -9,7 +9,10 @@ import {
   it,
   vi,
 } from "vitest";
-import { MessageRevisionService } from "../modules/archive/message-revision-service.js";
+import {
+  MessageRevisionService,
+  triggerReplySql,
+} from "../modules/archive/message-revision-service.js";
 import { PostgresArchiveRepository } from "../modules/archive/postgres-archive-repository.js";
 import { BlueBubblesWebhookAdapter } from "../modules/integrations/bluebubbles/webhook-adapter.js";
 import { parseMessageDetail } from "../modules/integrations/bluebubbles/message-detail.js";
@@ -374,11 +377,27 @@ describe.runIf(!!url)("archive-only message revisions", () => {
       });
       await db.query("UPDATE messages SET attachments=$2::jsonb WHERE id=$1", [
         f.id,
-        JSON.stringify([{ providerAttachmentId: "fictional-attachment" }]),
+        JSON.stringify([
+          {
+            providerAttachmentId: "fictional-attachment",
+            fileName: "photo.jpeg",
+            mimeType: "image/jpeg",
+          },
+        ]),
       ]);
-      expect(
-        (await archive.findMessage(saved.messageId!))?.replyTo?.status,
-      ).toBe("unresolved");
+      // Quoted files are described at message level; gateway IDs never leak.
+      const withFile = (await archive.findMessage(saved.messageId!))?.replyTo;
+      expect(withFile).toMatchObject({
+        status: "available",
+        message_id: f.guid,
+        text_preview: "更新后的原文",
+        attachments: [
+          { index: 0, file_name: "photo.jpeg", mime_type: "image/jpeg" },
+        ],
+        attachment_count: 1,
+      });
+      expect(withFile?.sent_at).toBeTruthy();
+      expect(JSON.stringify(withFile)).not.toContain("fictional-attachment");
     },
   );
   it.each([
@@ -409,6 +428,84 @@ describe.runIf(!!url)("archive-only message revisions", () => {
       });
     },
   );
+  it("resolves quotes outside the context window only for chats with history access", async () => {
+    const f = await fixture();
+    const replyInput = newMessageWebhook({
+      chatGuid: f.chat,
+      messageGuid: `quote-${randomUUID()}`,
+      text: "把这张图P一下",
+    });
+    const n = adapter.normalize(
+      {
+        ...replyInput,
+        data: {
+          ...replyInput.data,
+          threadOriginatorGuid: f.guid,
+          threadOriginatorPart: "1:0:1",
+        },
+      },
+      randomUUID(),
+    );
+    if (n.kind !== "message") throw new Error("fixture");
+    testGuids.add(n.envelope.message.providerMessageId);
+    await archive.ingestMessage(n.envelope, true);
+    await db.query("UPDATE messages SET attachments=$2::jsonb WHERE id=$1", [
+      f.id,
+      JSON.stringify([
+        {
+          providerAttachmentId: "fictional-photo",
+          fileName: "IMG_0001.HEIC",
+          mimeType: "image/heic",
+        },
+      ]),
+    ]);
+    // A window starting after the target hides it without identifiers.
+    const window = String(Number.MAX_SAFE_INTEGER - 1);
+    expect(await service.attachReply(n.envelope, window)).toEqual({
+      status: "unavailable",
+    });
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "INSERT INTO memory_settings(id,enabled,config) VALUES(1,true,'{}') ON CONFLICT(id) DO UPDATE SET enabled=true",
+      );
+      await client.query(
+        "INSERT INTO memory_chats(chat_id,enabled,from_index) SELECT chat_id,true,1 FROM messages WHERE id=$1",
+        [f.id],
+      );
+      const authorized = (
+        await client.query<{ reply: Record<string, unknown> }>(
+          triggerReplySql,
+          [n.envelope.message.providerMessageId, window],
+        )
+      ).rows[0]?.reply;
+      // Non-text part: file metadata without a guessed text preview.
+      expect(authorized).toMatchObject({
+        status: "available",
+        message_id: f.guid,
+        attachments: [
+          { index: 0, file_name: "IMG_0001.HEIC", mime_type: "image/heic" },
+        ],
+      });
+      expect(authorized).not.toHaveProperty("text_preview");
+      // Without a known window the authorized archive is still readable.
+      expect(
+        (
+          await client.query<{ reply: { status: string } }>(triggerReplySql, [
+            n.envelope.message.providerMessageId,
+            null,
+          ])
+        ).rows[0]?.reply.status,
+      ).toBe("available");
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+    expect(await service.attachReply(n.envelope, null)).toEqual({
+      status: "unresolved",
+    });
+  });
   it("does not expose cross-chat targets and hides ambiguous partial content", async () => {
     const f = await fixture();
     const other = await fixture();

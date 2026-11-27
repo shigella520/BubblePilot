@@ -239,6 +239,35 @@
             },
             "truncated": {
               "type": "boolean"
+            },
+            "sent_at": {
+              "type": "string"
+            },
+            "attachments": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "required": ["index"],
+                "properties": {
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "file_name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "mime_type": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "attachment_count": {
+              "type": "integer",
+              "minimum": 1
             }
           },
           "additionalProperties": false

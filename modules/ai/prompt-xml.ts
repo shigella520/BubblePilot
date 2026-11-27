@@ -159,6 +159,27 @@ export function promptMessage(
                 ...(reply.truncated === undefined
                   ? {}
                   : { truncated: String(reply.truncated) }),
+                ...(reply.sent_at === undefined
+                  ? {}
+                  : { sent_at: reply.sent_at }),
+                ...(reply.attachments?.length
+                  ? {
+                      attachments: {
+                        "@count": String(
+                          reply.attachment_count ?? reply.attachments.length,
+                        ),
+                        attachment: reply.attachments.map((a) => ({
+                          "@index": String(a.index),
+                          ...(a.file_name === undefined
+                            ? {}
+                            : { "@file_name": a.file_name }),
+                          ...(a.mime_type === undefined
+                            ? {}
+                            : { "@mime_type": a.mime_type }),
+                        })),
+                      },
+                    }
+                  : {}),
               },
             }
           : {}),
