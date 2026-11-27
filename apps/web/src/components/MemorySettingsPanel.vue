@@ -440,7 +440,7 @@ onBeforeUnmount(() => {
               </option>
             </select></label
           >
-          <label class="wide-field"
+          <label class="memory-url-field"
             ><span>服务地址</span
             ><input v-model="form.baseUrl" type="url" required
           /></label>
@@ -448,14 +448,14 @@ onBeforeUnmount(() => {
             ><span>模型</span><input v-model="form.model" required
           /></label>
           <label
-            ><span
-              >凭据（{{
-                settings.secretConfigured ? "已配置，留空保留" : "未配置"
-              }}）</span
+            ><span>凭据</span
             ><input
               v-model="secret"
               type="password"
               autocomplete="new-password"
+              :placeholder="
+                settings.secretConfigured ? '已配置，留空则保留' : '未配置'
+              "
           /></label>
           <label
             ><span>请求超时（秒）</span
@@ -466,9 +466,7 @@ onBeforeUnmount(() => {
               max="120"
               step="1"
               required
-            /><small
-              >索引、检索与测试连接共用；只改超时不会重建索引。</small
-            ></label
+            /><small>只改超时不会重建索引。</small></label
           >
           <label
             ><span>维度</span
@@ -485,19 +483,18 @@ onBeforeUnmount(() => {
               class="memory-field-error"
               role="alert"
               >{{ dimensionError }}</small
-            ><small v-else>请求模型输出恰好这么多维的向量。</small></label
+            ><small v-else>模型按此维度输出向量。</small></label
           >
           <label
             ><span>精度</span
             ><select v-model="form.precision">
               <option value="float32">
-                float32「单精度，最多 {{ precisionLimits.float32 }} 维」
+                单精度 float32（≤ {{ precisionLimits.float32 }} 维）
               </option>
               <option value="float16">
-                float16「半精度，最多
-                {{ precisionLimits.float16 }} 维，占用减半」
-              </option>
-            </select></label
+                半精度 float16（≤ {{ precisionLimits.float16 }} 维）
+              </option></select
+            ><small>半精度占用空间减半，检索效果基本一致。</small></label
           >
         </div>
         <p v-if="mismatch" class="memory-warning" role="status">
@@ -671,6 +668,16 @@ onBeforeUnmount(() => {
 }
 .memory-toggle .panel-description {
   margin: 4px 0 0;
+}
+/* Protocol and address share the first row. */
+.memory-url-field {
+  grid-column: span 2;
+}
+/* Two- and one-column layouts: the address takes its own full row. */
+@media (max-width: 1180px) {
+  .memory-url-field {
+    grid-column: 1 / -1;
+  }
 }
 .memory-field-error {
   color: var(--bubblepilot-danger);

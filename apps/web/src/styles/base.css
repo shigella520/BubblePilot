@@ -1598,8 +1598,17 @@ td .keyline {
 }
 label {
   display: grid;
+  /* A taller neighbour in the same grid row must not stretch this field's
+     caption or control; keep caption, control and hint packed at the top. */
+  align-content: start;
   min-width: 0;
   gap: 7px;
+}
+/* Field hints: secondary text under the control. */
+label > small {
+  color: var(--bubblepilot-muted);
+  font-size: var(--bubblepilot-text-xs);
+  line-height: 1.5;
 }
 label > span,
 legend {
