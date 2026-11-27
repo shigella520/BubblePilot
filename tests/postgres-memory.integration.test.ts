@@ -2371,6 +2371,48 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     await workChat(service, id);
     expect(await healthOf(id)).toMatchObject({ state: "healthy", indexed: 1 });
   });
+  it("keeps a backfill's speed estimate while new-message jobs run in between", async () => {
+    const id = randomUUID();
+    await repo.pool.query(
+      "INSERT INTO chats(id,provider,provider_chat_id,type,enabled) VALUES($1::uuid,'bluebubbles',$1::text,'group',TRUE)",
+      [id],
+    );
+    // Enough history for several batches (6000 characters each).
+    for (let i = 0; i < 6; i++)
+      await message(id, `虚构长历史 ${i} ${"字".repeat(5000)}`);
+    const [backfill] = await repo.authorize(id, true, 0);
+    const state = async () =>
+      (
+        await repo.pool.query<{ worker: string | null; samples: number }>(
+          "SELECT progress_worker AS worker,jsonb_array_length(progress_samples) AS samples FROM memory_jobs WHERE id=$1",
+          [backfill],
+        )
+      ).rows[0]!;
+    await workChat(service, id, 1);
+    await workChat(service, id, 1);
+    const before = await state();
+    expect(before.worker).toBe(repo.workerId);
+    expect(before.samples).toBe(2);
+    // A new message arrives; its job runs before the next backfill batch.
+    await message(id, "虚构插队新消息");
+    await repo.pool.query(
+      "UPDATE memory_jobs SET next_attempt_at=CASE WHEN reason='incremental' AND chat_id=$1 THEN now() ELSE now()+interval '1 hour' END WHERE status='queued'",
+      [id],
+    );
+    await service.work();
+    expect(
+      (
+        await repo.pool.query(
+          "SELECT 1 FROM memory_jobs WHERE chat_id=$1 AND reason='incremental' AND status='succeeded'",
+          [id],
+        )
+      ).rowCount,
+    ).toBe(1);
+    expect(await state()).toEqual(before);
+    const job = (await repo.jobs(id)).find((j) => j.id === backfill)!;
+    expect(job.progress.estimate.status).not.toBe("waiting");
+    await workChat(service, id);
+  });
   it("enabling a chat backfills its whole history once and re-enabling reuses it", async () => {
     const id = randomUUID();
     await repo.pool.query(

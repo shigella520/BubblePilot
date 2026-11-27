@@ -427,7 +427,17 @@ onBeforeUnmount(() => {
             </p>
             <small>根据近期速度估算，会随模型负载变化。</small>
           </template>
-          <small v-else-if="progressError">连接异常，预估暂不可用</small>
+          <template v-else-if="['queued', 'running'].includes(job.status)">
+            <!-- Same two lines as above so the dialog does not change height. -->
+            <p>
+              最近速度与预计剩余：{{
+                progressError
+                  ? "连接异常，暂不可用"
+                  : (estimateNames[job.progress.estimate.status] ?? "等待处理")
+              }}
+            </p>
+            <small>根据近期速度估算，会随模型负载变化。</small>
+          </template>
         </template>
         <p v-else>
           {{
