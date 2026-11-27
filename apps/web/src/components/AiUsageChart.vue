@@ -235,7 +235,8 @@ onBeforeUnmount(() => {
     <div
       ref="host"
       class="ai-usage-chart"
-      aria-label="AI Provider 用量趋势"
+      role="img"
+      aria-label="AI Provider 用量趋势图；各 Provider 明细见下方图例与长周期统计表"
     ></div>
     <div class="usage-series-legend" aria-label="图例">
       <span

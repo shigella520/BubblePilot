@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ExtensionTabs from "../components/ExtensionTabs.vue";
 import ModalShell from "../components/ModalShell.vue";
 import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
@@ -679,6 +680,8 @@ onMounted(() => {
   window.addEventListener("beforeunload", protectBatch);
   timer = setInterval(() => {
     if (
+      // Background tabs do not poll; the next visible tick catches up.
+      document.visibilityState === "visible" &&
       !modal.value &&
       !collectionModal.value &&
       !busy.value &&
@@ -690,7 +693,7 @@ onMounted(() => {
       void load(true);
       void loadCollections();
     }
-  }, 5000);
+  }, 15000);
 });
 onUnmounted(() => {
   window.removeEventListener("beforeunload", protectBatch);
@@ -701,6 +704,7 @@ onUnmounted(() => {
 </script>
 <template>
   <main class="meme-page">
+    <ExtensionTabs />
     <header class="meme-heading">
       <div>
         <h1>表情包</h1>

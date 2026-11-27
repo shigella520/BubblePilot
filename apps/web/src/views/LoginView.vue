@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ArrowRight, LockKeyhole } from "@lucide/vue";
 import { ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
+import { safeRedirect } from "../utils/login-redirect";
 
 import { errorMessage } from "../services/api";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
@@ -9,6 +10,7 @@ import { useSessionStore } from "../stores/session";
 
 const session = useSessionStore();
 const router = useRouter();
+const route = useRoute();
 const password = ref("");
 const busy = ref(false);
 const message = ref("");
@@ -19,7 +21,8 @@ async function login() {
   try {
     await session.login(password.value);
     password.value = "";
-    await router.replace("/");
+    // Return to the page that required login.
+    await router.replace(safeRedirect(route.query.redirect));
   } catch (cause) {
     message.value = errorMessage(cause);
   } finally {
@@ -32,7 +35,7 @@ async function login() {
   <main class="login-page page-container reveal">
     <section class="login-card">
       <img src="/bubblepilot-icon.png" alt="BubblePilot" />
-      <p class="eyebrow">SELF-HOSTED AUTOMATION</p>
+      <p class="eyebrow">自托管自动化</p>
       <h1>欢迎回到 BubblePilot</h1>
       <p>登录只建立管理会话；正文和生产配置仍由短时效的敏感操作授权保护。</p>
       <form @submit.prevent="login">

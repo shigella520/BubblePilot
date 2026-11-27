@@ -4,6 +4,7 @@ import {
   diagnosticSeparator,
   errorMessage,
 } from "../apps/web/src/services/api.js";
+import { safeRedirect } from "../apps/web/src/utils/login-redirect.js";
 import {
   auditActionLabel,
   enumLabel,
@@ -138,5 +139,15 @@ describe("web UI foundations", () => {
       label: "需关注",
       tone: "warning",
     });
+  });
+
+  it("only redirects to in-app paths after login", () => {
+    expect(safeRedirect("/executions?executionId=x")).toBe(
+      "/executions?executionId=x",
+    );
+    expect(safeRedirect("//evil.example.test")).toBe("/");
+    expect(safeRedirect("https://evil.example.test")).toBe("/");
+    expect(safeRedirect("/login")).toBe("/");
+    expect(safeRedirect(undefined)).toBe("/");
   });
 });

@@ -180,6 +180,13 @@ window.fetch = (input, init) => {
       sensitiveUntil: new Date(Date.now() + 3600000).toISOString(),
     };
   else if (path === "/api/v1/plugins") data = listed;
+  else if (path === "/api/v1/settings/plugins")
+    data = {
+      catalogueCharacters: 64000,
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      usage: { characters: 0, sharedCharacters: 0, toolCount: 0, plugins: [] },
+    };
   else if (listed.some((p) => path === `/api/v1/plugins/${p.id}`)) {
     const selected = listed.find((p) => path === `/api/v1/plugins/${p.id}`)!;
     data = {

@@ -189,7 +189,14 @@ function configVisible(item: any): boolean {
         <small>动作块</small>
         <h3>{{ node.data.label }}</h3>
       </div>
-      <button type="button" @click="emit('close')">×</button>
+      <button
+        type="button"
+        aria-label="关闭节点设置"
+        title="关闭节点设置"
+        @click="emit('close')"
+      >
+        ×
+      </button>
     </div>
     <section
       v-if="node.data.block.type === 'message-trigger'"

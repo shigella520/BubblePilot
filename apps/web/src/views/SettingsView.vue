@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import ScheduledTaskSettingsPanel from "../components/ScheduledTaskSettingsPanel.vue";
-import PluginSettingsPanel from "../components/PluginSettingsPanel.vue";
 import NetworkSettingsPanel from "../components/NetworkSettingsPanel.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import {
-  CalendarClock,
   Cable,
   CheckCircle2,
   RefreshCw,
@@ -143,19 +140,13 @@ onMounted(load);
   <main class="page-container split-admin-page reveal">
     <aside class="admin-sidebar">
       <div>
-        <p class="eyebrow">SETTINGS</p>
-        <h2>系统设置</h2>
+        <p class="eyebrow">设置</p>
+        <h1>系统设置</h1>
       </div>
       <SectionNavigation
         :items="[
           { id: 'bluebubbles', label: 'BlueBubbles', icon: Cable },
           { id: 'network', label: '外部网络', icon: ShieldCheck },
-          { id: 'plugin-budget', label: '插件工具预算', icon: Settings2 },
-          {
-            id: 'scheduled-task-settings',
-            label: '定时任务',
-            icon: CalendarClock,
-          },
         ]"
       />
       <div class="sidebar-note">
@@ -174,8 +165,8 @@ onMounted(load);
       <section id="bluebubbles" class="admin-panel">
         <div class="panel-head">
           <div>
-            <p class="card-kicker">MESSAGE GATEWAY</p>
-            <h1>BlueBubbles 服务</h1>
+            <p class="card-kicker">消息网关</p>
+            <h2>BlueBubbles 服务</h2>
           </div>
           <button class="button secondary" :disabled="busy" @click="load">
             <RefreshCw :size="16" />{{ busy ? "刷新中…" : "刷新" }}
@@ -333,8 +324,6 @@ onMounted(load);
         </form>
       </section>
       <NetworkSettingsPanel />
-      <PluginSettingsPanel />
-      <ScheduledTaskSettingsPanel />
     </div>
   </main>
 </template>

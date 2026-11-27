@@ -73,7 +73,7 @@ onMounted(load);
   <section id="plugin-budget" class="admin-panel">
     <div class="panel-head">
       <div>
-        <p class="card-kicker">PLUGINS</p>
+        <p class="card-kicker">插件</p>
         <h2>插件工具预算</h2>
       </div>
       <button class="button secondary" :disabled="busy" @click="load">

@@ -61,7 +61,7 @@ onMounted(load);
   <section id="network" class="admin-panel">
     <div class="panel-head">
       <div>
-        <p class="card-kicker">NETWORK</p>
+        <p class="card-kicker">网络</p>
         <h2>外部网络</h2>
       </div>
       <button class="button secondary" :disabled="busy" @click="load">

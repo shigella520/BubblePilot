@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AiUsagePanel from "../components/AiUsagePanel.vue";
 import { enumLabel } from "../utils/status-labels";
 import { confirmAction } from "../services/confirm";
 import { partialFailureMessage, settleAll } from "../utils/settle";
@@ -10,10 +11,14 @@ import MemoryPanel from "../components/MemoryPanel.vue";
 import {
   Activity,
   Bot,
+  ChartColumn,
   ChevronDown,
   ChevronUp,
+  Cpu,
+  Globe,
   GripVertical,
   Image,
+  ListChecks,
   MessageCircle,
   Pencil,
   Plus,
@@ -851,18 +856,20 @@ onMounted(async () => {
   <main class="page-container split-admin-page reveal">
     <aside class="admin-sidebar">
       <div>
-        <p class="eyebrow">AI ROUTING</p>
-        <h2>Provider 管理</h2>
+        <p class="eyebrow">路由</p>
+        <h1>AI 服务</h1>
       </div>
       <SectionNavigation
         :items="[
-          { id: 'agent-settings', label: 'Agent 执行配置', icon: Bot },
-          { id: 'memory-settings', label: '长期聊天检索', icon: Search },
-          { id: 'search-settings', label: '联网搜索', icon: Search },
+          { id: 'agent-settings', label: 'Agent 执行配置', icon: Cpu },
+          { id: 'memory-settings', label: '长期检索', icon: Search },
+          { id: 'memory-jobs', label: '索引任务', icon: ListChecks },
+          { id: 'search-settings', label: '联网搜索', icon: Globe },
           { id: 'context-settings', label: '聊天上下文', icon: MessageCircle },
           { id: 'image-input-settings', label: '原生图片输入', icon: Image },
           { id: 'providers', label: 'Provider', icon: Bot },
           { id: 'routes', label: '路由策略', icon: Route },
+          { id: 'ai-usage', label: '用量与缓存', icon: ChartColumn },
         ]"
       />
       <div class="sidebar-note">
@@ -872,6 +879,7 @@ onMounted(async () => {
     <div class="admin-workspace">
       <AgentSettingsPanel />
       <MemoryPanel id="memory-settings" mode="settings" embedded />
+      <MemoryPanel id="memory-jobs" mode="jobs" embedded />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"
@@ -881,8 +889,8 @@ onMounted(async () => {
       <section id="search-settings" class="admin-panel">
         <div class="panel-head">
           <div>
-            <p class="card-kicker">WEB SEARCH</p>
-            <h1>联网搜索全局配置</h1>
+            <p class="card-kicker">联网搜索</p>
+            <h2>联网搜索全局配置</h2>
           </div>
           <button class="button secondary" :disabled="busy" @click="load">
             <RefreshCw :size="16" />刷新
@@ -984,7 +992,7 @@ onMounted(async () => {
       <section id="context-settings" class="admin-panel">
         <div class="panel-head">
           <div>
-            <p class="card-kicker">CHAT CONTEXT</p>
+            <p class="card-kicker">上下文</p>
             <h2>聊天上下文配置</h2>
           </div>
           <span class="state-badge">全局配置</span>
@@ -1074,7 +1082,7 @@ onMounted(async () => {
       <section id="image-input-settings" class="admin-panel">
         <div class="panel-head">
           <div>
-            <p class="card-kicker">NATIVE MULTIMODAL INPUT</p>
+            <p class="card-kicker">图片输入</p>
             <h2>原生图片输入</h2>
           </div>
           <span class="state-badge">全局配置</span>
@@ -1120,7 +1128,10 @@ onMounted(async () => {
           </div>
           <p class="panel-description">
             图片与插件共用可信 Fake-IP 域名，请前往
-            <a href="/#/settings#network">系统设置 → 外部网络</a> 管理。
+            <RouterLink :to="{ path: '/settings', hash: '#network' }"
+              >系统设置 → 外部网络</RouterLink
+            >
+            管理。
           </p>
           <details class="advanced-settings">
             <summary>高级限制（通常无需修改）</summary>
@@ -1203,8 +1214,8 @@ onMounted(async () => {
       <section id="providers" class="admin-panel">
         <div class="panel-head">
           <div>
-            <p class="card-kicker">PROVIDERS</p>
-            <h1>AI Provider</h1>
+            <p class="card-kicker">模型服务</p>
+            <h2>AI Provider</h2>
           </div>
           <button class="button secondary" :disabled="busy" @click="load">
             <RefreshCw :size="16" />刷新
@@ -1509,7 +1520,7 @@ onMounted(async () => {
       <section id="routes" class="admin-panel">
         <div class="panel-head">
           <div>
-            <p class="card-kicker">RETRY · FALLBACK · DEGRADE</p>
+            <p class="card-kicker">重试 · 回退 · 降级</p>
             <h2>Provider 路由</h2>
           </div>
           <span class="state-badge">运行策略</span>
@@ -1731,6 +1742,7 @@ onMounted(async () => {
           </form>
         </AdminFormDialog>
       </section>
+      <AiUsagePanel id="ai-usage" />
     </div>
   </main>
 </template>

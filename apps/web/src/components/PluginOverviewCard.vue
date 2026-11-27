@@ -53,7 +53,7 @@ const checkLabel = computed(() => {
   <button
     class="plugin-overview-card"
     :disabled="disabled"
-    :aria-label="`查看与管理 ${item.name}`"
+    :title="`查看与管理 ${item.name}`"
     @click="$emit('open', item.id)"
   >
     <span class="card-topline">

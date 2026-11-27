@@ -388,10 +388,10 @@ onBeforeUnmount(() => generation++);
     <p v-if="notice" role="status">{{ notice }}</p>
     <header class="scheduled-tasks-heading">
       <div>
-        <p class="eyebrow">SCHEDULED TASKS</p>
+        <p class="eyebrow">定时任务</p>
         <h2>定时任务</h2>
         <p>
-          按创建时间从新到旧排列，默认显示待执行任务。修改、暂停、跳过、取消和删除需要敏感操作授权。已结束任务按系统设置中的保留天数自动清理。
+          按创建时间从新到旧排列，默认显示待执行任务。修改、暂停、跳过、取消和删除需要敏感操作授权。已结束任务按下方「定时任务全局设置」中的保留天数自动清理。
         </p>
       </div>
       <button
@@ -773,11 +773,14 @@ onBeforeUnmount(() => generation++);
                     >
                   </td>
                   <td>
-                    <a
+                    <RouterLink
                       v-if="o.execution_id"
-                      :href="`#/executions?executionId=${encodeURIComponent(o.execution_id)}`"
+                      :to="{
+                        path: '/executions',
+                        query: { executionId: o.execution_id },
+                      }"
                       @click="detail = null"
-                      >详情</a
+                      >详情</RouterLink
                     ><span v-else>—</span>
                   </td>
                 </tr>
@@ -838,11 +841,14 @@ onBeforeUnmount(() => generation++);
             <p v-if="run.reason_code" class="task-help diagnostic-code">
               诊断：{{ run.reason_code }}
             </p>
-            <a
+            <RouterLink
               class="task-execution-link"
-              :href="`#/executions?executionId=${encodeURIComponent(run.execution_id)}`"
+              :to="{
+                path: '/executions',
+                query: { executionId: run.execution_id },
+              }"
               @click="detail = null"
-              >查看执行详情 →</a
+              >查看执行详情 →</RouterLink
             >
           </article>
         </section>

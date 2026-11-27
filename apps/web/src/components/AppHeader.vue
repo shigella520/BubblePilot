@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import {
   Bot,
-  Boxes,
-  LayoutDashboard,
   KeyRound,
+  LayoutDashboard,
   LogOut,
   MessagesSquare,
+  Puzzle,
+  ScrollText,
   Settings,
   ShieldCheck,
+  Workflow,
 } from "@lucide/vue";
 import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -21,11 +23,49 @@ import SensitiveUnlock from "./SensitiveUnlock.vue";
 
 const session = useSessionStore();
 const router = useRouter();
+/** One entry per area; sub-pages (canvas, memes) highlight their parent. */
+const navItems = [
+  { to: "/", label: "概览", icon: LayoutDashboard, prefixes: [] as string[] },
+  {
+    to: "/messages",
+    label: "消息",
+    icon: MessagesSquare,
+    prefixes: ["/messages"],
+  },
+  {
+    to: "/automation",
+    label: "自动化",
+    icon: Workflow,
+    prefixes: ["/automation"],
+  },
+  { to: "/ai", label: "AI 服务", icon: Bot, prefixes: ["/ai"] },
+  {
+    to: "/plugins",
+    label: "插件与表情包",
+    icon: Puzzle,
+    prefixes: ["/plugins", "/memes"],
+  },
+  {
+    to: "/executions",
+    label: "执行与审计",
+    icon: ScrollText,
+    prefixes: ["/executions"],
+  },
+  { to: "/settings", label: "设置", icon: Settings, prefixes: ["/settings"] },
+];
+function isCurrent(item: (typeof navItems)[number]) {
+  const path = router.currentRoute.value.path;
+  return item.prefixes.length
+    ? item.prefixes.some(
+        (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+      )
+    : path === item.to;
+}
 const navigation = ref<HTMLElement | null>(null);
 // Scroll only the navigation strip; changing routes must not move page content.
 function revealCurrentNavigation() {
   const nav = navigation.value;
-  const active = nav?.querySelector<HTMLElement>(".router-link-exact-active");
+  const active = nav?.querySelector<HTMLElement>(".is-current");
   if (!nav || !active || nav.scrollWidth <= nav.clientWidth) return;
   const container = nav.getBoundingClientRect();
   const item = active.getBoundingClientRect();
@@ -96,16 +136,14 @@ async function logout() {
       <span class="brand-text">BubblePilot</span>
     </RouterLink>
     <nav ref="navigation" class="primary-nav" aria-label="主导航">
-      <RouterLink to="/"><LayoutDashboard :size="16" />概览</RouterLink>
-      <RouterLink to="/messages"><MessagesSquare :size="16" />消息</RouterLink>
-      <RouterLink to="/automation"><Boxes :size="16" />自动化</RouterLink>
-      <RouterLink to="/plugins"><Boxes :size="16" />插件</RouterLink>
-      <RouterLink to="/memes"><Boxes :size="16" />表情包</RouterLink>
-      <RouterLink to="/ai"><Bot :size="16" />AI 服务</RouterLink>
-      <RouterLink to="/executions"
-        ><ShieldCheck :size="16" />执行与审计</RouterLink
+      <RouterLink
+        v-for="item in navItems"
+        :key="item.to"
+        :to="item.to"
+        :class="{ 'is-current': isCurrent(item) }"
+        :aria-current="isCurrent(item) ? 'page' : undefined"
+        ><component :is="item.icon" :size="16" />{{ item.label }}</RouterLink
       >
-      <RouterLink to="/settings"><Settings :size="16" />设置</RouterLink>
     </nav>
     <div class="topbar-meta">
       <span

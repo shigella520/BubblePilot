@@ -174,7 +174,7 @@ a {
   transition: 0.18s ease;
 }
 .primary-nav a:hover,
-.primary-nav a.router-link-exact-active {
+.primary-nav a.is-current {
   color: var(--bubblepilot-text);
   background: #fff;
   box-shadow: 0 7px 18px rgba(16, 19, 23, 0.07);
@@ -279,6 +279,7 @@ a {
   box-shadow: var(--bubblepilot-shadow-soft);
   backdrop-filter: blur(24px);
 }
+.admin-sidebar h1,
 .admin-sidebar h2 {
   margin: 0;
   font-size: 23px;
@@ -888,6 +889,7 @@ td .keyline {
 }
 .workflow-canvas-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   min-height: 74px;
@@ -2747,6 +2749,19 @@ legend {
   background: var(--bubblepilot-surface-subtle);
 }
 
+.workflow-ai-tools > summary {
+  display: inline-flex;
+  flex-basis: 100%;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--bubblepilot-muted);
+  font-size: var(--bubblepilot-text-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+.workflow-ai-tools:not([open]) {
+  padding-block: 0.5rem;
+}
 .workflow-ai-tools > span {
   display: inline-flex;
   align-items: center;
@@ -3665,4 +3680,24 @@ legend {
 }
 .test-failed {
   color: #ae3029;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .workflow-canvas-title {
+    min-width: 0;
+    flex: 1 1 200px;
+  }
+  .workflow-canvas-actions {
+    flex-wrap: wrap;
+    margin-left: 0;
+  }
 }

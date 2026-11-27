@@ -38,6 +38,8 @@ const edgeClass = computed(
     <button
       class="workflow-edge-delete"
       type="button"
+      aria-label="删除这条连线"
+      title="删除这条连线"
       :style="{
         transform: `translate(-50%, -50%) translate(${pathData[1]}px,${pathData[2] + 16}px)`,
       }"

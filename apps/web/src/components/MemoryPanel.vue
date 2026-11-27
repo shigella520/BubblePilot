@@ -98,7 +98,7 @@ interface Job {
   };
 }
 function jobKind(job: Job) {
-  if (job.reason === "rebuild") return "角色历史索引重建";
+  if (job.reason === "rebuild") return "角色归属索引重建";
   return job.request_key || job.reason !== "incremental"
     ? "历史补建"
     : "新增消息索引";
@@ -524,15 +524,15 @@ onBeforeUnmount(() => {
     <div v-if="embedded" class="panel-head">
       <div>
         <p class="card-kicker">
-          {{ mode === "jobs" ? "HISTORY INDEX" : "CHAT MEMORY" }}
+          {{ mode === "jobs" ? "索引任务" : "长期检索" }}
         </p>
         <h2>
           {{
             mode === "settings"
-              ? "长期聊天检索设置"
+              ? "长期检索设置"
               : mode === "chat"
-                ? "聊天长期记忆"
-                : "历史索引任务"
+                ? "本聊天的长期检索"
+                : "索引任务"
           }}
         </h2>
       </div>
@@ -548,10 +548,10 @@ onBeforeUnmount(() => {
     <summary v-if="!embedded">
       {{
         mode === "settings"
-          ? "长期聊天检索设置"
+          ? "长期检索设置"
           : mode === "chat"
-            ? "聊天长期记忆"
-            : "历史索引任务"
+            ? "本聊天的长期检索"
+            : "索引任务"
       }}
     </summary>
     <p>
@@ -875,7 +875,7 @@ onBeforeUnmount(() => {
       />
       <AdminDetailDialog
         v-if="selectedJob"
-        title="历史索引任务详情"
+        title="索引任务详情"
         :return-focus="jobTrigger"
         @close="closeJob"
       >

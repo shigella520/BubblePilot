@@ -46,9 +46,22 @@ const filtered = computed(() =>
   >
     <div class="workflow-node-creator-head">
       <strong>添加动作</strong
-      ><button type="button" @click="emit('close')">×</button>
+      ><button
+        type="button"
+        aria-label="关闭添加动作"
+        title="关闭（Esc）"
+        @click="emit('close')"
+      >
+        ×
+      </button>
     </div>
-    <input v-model="query" autofocus placeholder="搜索动作名称或类别…" />
+    <input
+      v-model="query"
+      autofocus
+      aria-label="搜索动作"
+      placeholder="搜索动作名称或类别…"
+      @keydown.esc="emit('close')"
+    />
     <button
       v-for="block in filtered"
       :key="`${block.type}@${(block as any).version ?? 1}`"

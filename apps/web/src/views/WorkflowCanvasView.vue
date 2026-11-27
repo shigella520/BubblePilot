@@ -319,19 +319,22 @@ onMounted(load);
 
 <template>
   <main class="workflow-canvas-page">
+    <h1 class="sr-only">工作流编辑器：{{ workflowName || "未命名工作流" }}</h1>
     <header class="workflow-canvas-header">
       <button
         class="icon-button"
         type="button"
         title="返回工作流列表"
+        aria-label="返回工作流列表"
         @click="router.push('/automation')"
       >
         <ArrowLeft :size="18" />
       </button>
       <div class="workflow-canvas-title">
-        <span class="eyebrow">WORKFLOW EDITOR</span>
+        <span class="eyebrow">工作流编辑器</span>
         <input
           v-model="workflowName"
+          aria-label="工作流名称"
           maxlength="120"
           placeholder="未命名工作流"
           @input="markDirty"

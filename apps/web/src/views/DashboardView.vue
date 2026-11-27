@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CopyableId from "../components/CopyableId.vue";
 import { enumLabel } from "../utils/status-labels";
 import { partialFailureMessage, settleAll } from "../utils/settle";
 import { formatDateTime } from "../utils/format";
@@ -191,7 +192,7 @@ onMounted(load);
   <main class="page-container admin-workspace reveal">
     <section class="hero-panel compact-hero">
       <div>
-        <p class="eyebrow">CONTROL CENTER</p>
+        <p class="eyebrow">控制台</p>
         <h1>让每条消息按计划流动。</h1>
         <p>在一个界面中管理监听范围、工作流、AI 路由和可解释执行轨迹。</p>
       </div>
@@ -232,7 +233,7 @@ onMounted(load);
     <section class="admin-panel">
       <div class="panel-head">
         <div>
-          <p class="card-kicker">MESSAGE DECISIONS</p>
+          <p class="card-kicker">消息处理</p>
           <h2>消息处理判定</h2>
         </div>
         <span class="state-badge">仅安全元数据</span>
@@ -297,7 +298,7 @@ onMounted(load);
     <section class="admin-panel">
       <div class="panel-head">
         <div>
-          <p class="card-kicker">RUNTIME HEALTH</p>
+          <p class="card-kicker">运行状态</p>
           <h2>运行可靠性</h2>
         </div>
         <StatusBadge
@@ -373,7 +374,7 @@ onMounted(load);
     <section class="admin-panel">
       <div class="panel-head">
         <div>
-          <p class="card-kicker">RECENT RUNS</p>
+          <p class="card-kicker">最近执行</p>
           <h2>最近执行</h2>
         </div>
         <RouterLink class="state-badge" to="/executions#executions"
@@ -397,12 +398,18 @@ onMounted(load);
               </td>
             </tr>
             <tr v-for="item in recent" :key="item.id">
-              <td>{{ item.workflowName }}</td>
+              <td>
+                <RouterLink
+                  :to="{ path: '/executions', query: { executionId: item.id } }"
+                  :title="`查看执行详情 ${item.id}`"
+                  >{{ item.workflowName }}</RouterLink
+                >
+              </td>
               <td>
                 <StatusBadge domain="execution" :status="item.status" />
               </td>
               <td>{{ formatDateTime(item.createdAt) }}</td>
-              <td class="mono">{{ item.id.slice(0, 8) }}</td>
+              <td><CopyableId :value="item.id" /></td>
             </tr>
           </tbody>
         </table>

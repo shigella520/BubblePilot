@@ -97,7 +97,7 @@ async function rebuildChat(chat: Chat, target: "memory") {
       { method: "POST", body: JSON.stringify({ target }) },
     );
     message.value = result[target]
-      ? `「${chat.displayName || chat.providerChatId}」${label}重建已启动，请到执行与审计的历史索引查看进度。`
+      ? `「${chat.displayName || chat.providerChatId}」${label}重建已启动，请到「AI 服务 → 索引任务」查看进度。`
       : `未启动${label}重建，请检查对应服务配置及聊天授权。`;
     await loadRebuildStatus();
   } catch (cause) {
@@ -715,8 +715,11 @@ async function saveParticipants() {
   }
 }
 
+/** True once a search has run; before that the list is not "empty". */
+const searched = ref(false);
 async function search() {
   if (!session.sensitiveActive) return;
+  searched.value = true;
   busy.value = true;
   message.value = "";
   messageIsError.value = false;
@@ -891,6 +894,8 @@ watch(
 onMounted(() => {
   document.addEventListener("keydown", handleMediaKeydown);
   void Promise.all([loadChats(true), loadExports(true)]);
+  // Already authorized when the page opens: show results right away.
+  if (session.sensitiveActive) void search();
 });
 onBeforeUnmount(() =>
   document.removeEventListener("keydown", handleMediaKeydown),
@@ -901,8 +906,8 @@ onBeforeUnmount(() =>
   <main class="page-container split-admin-page reveal">
     <aside class="admin-sidebar">
       <div>
-        <p class="eyebrow">MESSAGES</p>
-        <h2>聊天与归档</h2>
+        <p class="eyebrow">消息</p>
+        <h1>消息</h1>
       </div>
       <SectionNavigation
         :items="[
@@ -925,8 +930,8 @@ onBeforeUnmount(() =>
       <section id="monitoring" class="admin-panel">
         <div class="panel-head">
           <div>
-            <p class="card-kicker">MONITORING</p>
-            <h1>聊天监听配置</h1>
+            <p class="card-kicker">监听</p>
+            <h2>聊天监听配置</h2>
           </div>
           <button
             class="button secondary"
@@ -939,7 +944,8 @@ onBeforeUnmount(() =>
         <p class="panel-description">
           这里列出 Webhook
           已发现的聊天。启停操作需要敏感操作授权，并使用版本号防止并发覆盖。
-          长期记忆授权独立于聊天监听；已授权不代表全局服务已开启或索引已完成，可点击对应聊天的“配置”调整。角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建需要敏感操作授权，会更新聊天共享历史并产生模型用量；索引记录在“历史索引”。
+          长期检索授权独立于聊天监听；已授权不代表全局服务已开启或索引已完成，可点击对应聊天的“配置”调整。角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建需要敏感操作授权，会更新聊天共享历史并产生模型用量；进度见「AI
+          服务 → 索引任务」。
         </p>
         <div class="table-shell">
           <table>
@@ -951,7 +957,7 @@ onBeforeUnmount(() =>
                 <th>最后发现</th>
                 <th>成员身份</th>
                 <th>监听</th>
-                <th>长期记忆授权</th>
+                <th>长期检索授权</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -1034,7 +1040,7 @@ onBeforeUnmount(() =>
                   <button
                     class="button secondary tiny"
                     type="button"
-                    :aria-label="`配置 ${chat.displayName || chat.providerChatId} 的长期记忆`"
+                    :aria-label="`配置 ${chat.displayName || chat.providerChatId} 的长期检索`"
                     @click="openChatMemory(chat, $event)"
                   >
                     配置
@@ -1176,7 +1182,7 @@ onBeforeUnmount(() =>
       </section>
       <AdminDetailDialog
         v-if="memoryChat"
-        :title="`长期记忆 · ${memoryChat.displayName || memoryChat.providerChatId}`"
+        :title="`长期检索 · ${memoryChat.displayName || memoryChat.providerChatId}`"
         :return-focus="memoryTrigger"
         @close="memoryChat = null"
       >
@@ -1191,7 +1197,7 @@ onBeforeUnmount(() =>
       <section id="search" class="admin-panel">
         <div class="panel-head">
           <div>
-            <p class="card-kicker">ARCHIVE SEARCH</p>
+            <p class="card-kicker">归档搜索</p>
             <h2>消息搜索</h2>
           </div>
           <span class="state-badge">仅已监听范围</span>
@@ -1402,8 +1408,12 @@ onBeforeUnmount(() =>
             </footer>
           </article>
           <div v-if="!messages.length" class="empty-panel">
-            <MessageCircle :size="28" /><strong>没有搜索结果</strong
-            ><span>调整聊天、关键词、发送者或时间范围后重试。</span>
+            <MessageCircle :size="28" /><strong>{{
+              searched ? "没有搜索结果" : "正在加载…"
+            }}</strong
+            ><span v-if="searched"
+              >调整聊天、关键词、发送者或时间范围后重试。</span
+            >
           </div>
         </div>
         <CursorPagination
@@ -1420,7 +1430,7 @@ onBeforeUnmount(() =>
       <section id="export" class="admin-panel">
         <div class="panel-head">
           <div>
-            <p class="card-kicker">BOUNDED EXPORT</p>
+            <p class="card-kicker">数据导出</p>
             <h2>受控数据导出</h2>
           </div>
           <span class="state-badge">JSON Lines · 最长 31 天</span>
@@ -1683,7 +1693,7 @@ onBeforeUnmount(() =>
       <section class="message-media-dialog">
         <header class="message-media-dialog-head">
           <div>
-            <p class="card-kicker">IMAGE ARCHIVE</p>
+            <p class="card-kicker">图片归档</p>
             <h2 id="message-media-title">图片与 AI 摘要</h2>
             <span>
               {{ mediaMessage.chatDisplayName || mediaMessage.providerChatId }}

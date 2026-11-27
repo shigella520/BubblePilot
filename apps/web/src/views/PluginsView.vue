@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PluginSettingsPanel from "../components/PluginSettingsPanel.vue";
+import ExtensionTabs from "../components/ExtensionTabs.vue";
 import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
 import { retainedApprovals } from "../utils/plugin-tool-approval";
@@ -7,7 +9,7 @@ import type { PluginListItem } from "../utils/plugin-overview";
 import ToggleSwitch from "../components/ToggleSwitch.vue";
 import AdminFormDialog from "../components/AdminFormDialog.vue";
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
-import { Boxes, Plus, RefreshCw, UploadCloud } from "@lucide/vue";
+import { Plus, Puzzle, RefreshCw, UploadCloud } from "@lucide/vue";
 import PluginToolPicker from "../components/PluginToolPicker.vue";
 import DismissibleMessage from "../components/DismissibleMessage.vue";
 import { pluginErrorMessage, canInspectPlugin } from "../utils/plugin-feedback";
@@ -449,9 +451,10 @@ async function remove() {
 </script>
 <template>
   <main class="plugins-page">
+    <ExtensionTabs />
     <header class="plugin-heading">
       <div>
-        <h1><Boxes :size="28" /> 插件</h1>
+        <h1><Puzzle :size="28" /> 插件</h1>
         <p>
           按需扩展外部能力，支持声明式 Skill 与 HTTP
           MCP；执行类工具须由管理员明确授权。
@@ -792,6 +795,7 @@ async function remove() {
         <pre v-if="content" class="plugin-content">{{ content }}</pre>
       </section></AdminFormDialog
     >
+    <PluginSettingsPanel />
   </main>
 </template>
 <style scoped>

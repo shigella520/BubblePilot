@@ -89,7 +89,7 @@ onBeforeUnmount(() => generation++);
   >
     <div class="panel-head">
       <div>
-        <p class="card-kicker">SCHEDULED TASKS</p>
+        <p class="card-kicker">定时任务</p>
         <h2>定时任务</h2>
       </div>
       <div class="settings-actions">
@@ -110,7 +110,7 @@ onBeforeUnmount(() => generation++);
       </div>
     </div>
     <p class="panel-description">
-      统一管理提醒调度、实例容量和历史任务保留期限。任务列表和执行详情仍在“执行与审计”中查看。
+      统一管理提醒调度、实例容量和历史任务保留期限。任务列表见上方「定时任务」，执行详情在「执行与审计」。
     </p>
     <DismissibleMessage
       v-if="message && !draft"

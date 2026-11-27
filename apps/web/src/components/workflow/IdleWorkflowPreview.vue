@@ -317,10 +317,10 @@ onBeforeUnmount(() => {
                     {{ a.provider || "未调用模型" }} · {{ a.model }}
                   </p>
                   <p>耗时：{{ duration(a) }}</p>
-                  <a
+                  <RouterLink
                     class="button tiny secondary"
-                    :href="`/#/executions?executionId=${encodeURIComponent(a.id)}`"
-                    ><Search :size="14" />详情</a
+                    :to="{ path: '/executions', query: { executionId: a.id } }"
+                    ><Search :size="14" />详情</RouterLink
                   >
                 </details>
               </td>
@@ -362,10 +362,10 @@ onBeforeUnmount(() => {
               </td>
               <td>{{ duration(a) }}</td>
               <td>
-                <a
+                <RouterLink
                   class="button tiny secondary"
-                  :href="`/#/executions?executionId=${encodeURIComponent(a.id)}`"
-                  ><Search :size="14" />详情</a
+                  :to="{ path: '/executions', query: { executionId: a.id } }"
+                  ><Search :size="14" />详情</RouterLink
                 >
               </td>
             </tr>

@@ -117,6 +117,8 @@ function branchClass(name: string): string {
           <button
             type="button"
             class="workflow-port-add"
+            :aria-label="`从分支「${branch.name}」添加下一个动作`"
+            :title="`从分支「${branch.name}」添加下一个动作`"
             @click.stop="emit('add', branchHandle(branch.name))"
           >
             ＋
@@ -135,6 +137,8 @@ function branchClass(name: string): string {
           <button
             type="button"
             class="workflow-port-add"
+            aria-label="成功后添加下一个动作"
+            title="成功后添加下一个动作"
             @click.stop="emit('add', 'success')"
           >
             ＋
@@ -154,6 +158,8 @@ function branchClass(name: string): string {
           <button
             type="button"
             class="workflow-port-add"
+            aria-label="失败后添加下一个动作"
+            title="失败后添加下一个动作"
             @click.stop="emit('add', 'failure')"
           >
             ＋
