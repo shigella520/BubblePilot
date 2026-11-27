@@ -18,8 +18,11 @@ import type { PluginSession } from "../plugins/plugin-session.js";
 import type { MemoryMessage } from "../memory/chunking.js";
 import type { ChatMessageQuery } from "../memory/chat-query-types.js";
 import {
-  attachmentFilename,
   generatorImportPlan,
+  heifFallbackPlan,
+  heifProneExtensions,
+  isHeifFile,
+  sandboxImportPlan,
   validateAttachmentFile,
 } from "./attachment-format.js";
 import type { ImageGeneratorBinding } from "../generated-images/image-policy.js";
@@ -522,21 +525,38 @@ export class AttachmentSession {
       );
       if (maximum <= 0 || (candidate.attachment.sizeBytes ?? 0) > maximum)
         throw new AttachmentError("ATTACHMENT_TOO_LARGE");
-      const plan =
+      let plan =
         target === "image_generator"
           ? generatorImportPlan(candidate.attachment, channel.mimeTypes ?? [])
-          : { ...attachmentFilename(candidate.attachment), original: true };
-      const { filename, extension } = plan;
+          : sandboxImportPlan(candidate.attachment);
       const downloadStarted = Date.now();
-      stage = await this.storage.stage(
-        await this.downloader.download(
-          candidate.attachment.providerAttachmentId,
-          signal,
-          plan.original ? {} : { original: false },
-        ),
-        maximum,
-        signal,
-      );
+      const fetchStage = (original: boolean) =>
+        this.downloader
+          .download(
+            candidate.attachment.providerAttachmentId,
+            signal,
+            original ? {} : { original: false },
+          )
+          .then((response) => this.storage.stage(response, maximum, signal));
+      stage = await fetchStage(plan.original);
+      if (
+        plan.original &&
+        heifProneExtensions.has(plan.extension) &&
+        (await isHeifFile(stage.file))
+      ) {
+        // The gateway original of an iPhone photo labelled JPEG/PNG can be
+        // HEIC; use its JPEG rendition instead of failing the type check.
+        if (
+          target === "image_generator" &&
+          !(channel.mimeTypes ?? []).includes("image/jpeg")
+        )
+          throw new AttachmentError("ATTACHMENT_TYPE_UNSUPPORTED_FOR_TARGET");
+        await stage.dispose();
+        stage = undefined;
+        plan = heifFallbackPlan(candidate.attachment);
+        stage = await fetchStage(false);
+      }
+      const { filename, extension } = plan;
       const downloadMs = Date.now() - downloadStarted;
       const validationStarted = Date.now();
       await validateAttachmentFile(stage.file, extension, signal);

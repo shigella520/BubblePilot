@@ -64,6 +64,63 @@ function safeBaseName(raw: string) {
       .replace(/\.[^.]*$/u, "") || "image"
   );
 }
+/** Gateway JPEG rendition of a HEIC/HEIF photo. */
+function jpegRendition(raw: string) {
+  return {
+    filename: `${safeBaseName(raw)}.jpeg`,
+    extension: "jpeg",
+    original: false,
+  };
+}
+/** Raster types whose gateway original may really be a HEIF container. */
+export const heifProneExtensions = new Set(["jpg", "jpeg", "png", "webp"]);
+const heifBrands = new Set([
+  "heic",
+  "heix",
+  "heim",
+  "heis",
+  "hevc",
+  "hevx",
+  "hevm",
+  "hevs",
+  "mif1",
+  "msf1",
+]);
+/**
+ * iPhone photos can be labelled JPEG while the gateway original is HEIC.
+ * Detects the HEIF container by its ftyp box, regardless of the name.
+ */
+export async function isHeifFile(file: string): Promise<boolean> {
+  const fd = await open(file, "r");
+  const bytes = Buffer.alloc(12);
+  try {
+    await fd.read(bytes, 0, bytes.length, 0);
+  } finally {
+    await fd.close();
+  }
+  return (
+    bytes.subarray(4, 8).toString("latin1") === "ftyp" &&
+    heifBrands.has(bytes.subarray(8, 12).toString("latin1"))
+  );
+}
+/** Re-plans a HEIF original as the gateway JPEG rendition. */
+export function heifFallbackPlan(attachment: MessageAttachment) {
+  return jpegRendition(attachment.fileName ?? "image");
+}
+/** Sandbox imports: originals, except HEIC/HEIF photos as gateway JPEG. */
+export function sandboxImportPlan(attachment: MessageAttachment) {
+  const raw = attachment.fileName ?? "";
+  const extension = raw.split(".").at(-1)?.toLowerCase() ?? "";
+  const mime = attachment.mimeType?.split(";")[0]?.trim().toLowerCase();
+  if (
+    generatorConvertible[extension] &&
+    (!mime ||
+      mime === "application/octet-stream" ||
+      generatorConvertible[extension].includes(mime))
+  )
+    return jpegRendition(raw);
+  return { ...attachmentFilename(attachment), original: true };
+}
 /**
  * Image generators accept only the declared image types. Accepted originals
  * are imported as-is; HEIC/HEIF photos use the gateway's JPEG rendition.
@@ -93,11 +150,7 @@ export function generatorImportPlan(
       mime === "application/octet-stream" ||
       generatorConvertible[extension].includes(mime));
   if (convertible && mimeTypes.includes("image/jpeg"))
-    return {
-      filename: `${safeBaseName(raw)}.jpeg`,
-      extension: "jpeg",
-      original: false,
-    };
+    return jpegRendition(raw);
   throw new AttachmentError("ATTACHMENT_TYPE_UNSUPPORTED_FOR_TARGET");
 }
 export function attachmentFilename(attachment: MessageAttachment) {

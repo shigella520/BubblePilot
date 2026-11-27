@@ -111,9 +111,36 @@ async function attachmentFixture(withSandbox: boolean) {
       mimeType: "text/csv",
       sizeBytes: null,
     },
+    // iPhone photo labelled JPEG whose gateway original is HEIC.
+    {
+      providerAttachmentId: "labelled",
+      fileName: "IMG_0002.jpeg",
+      mimeType: "image/jpeg",
+      sizeBytes: null,
+    },
+    {
+      providerAttachmentId: "real",
+      fileName: "real.jpeg",
+      mimeType: "image/jpeg",
+      sizeBytes: null,
+    },
   ];
-  const download = vi.fn((id: string) =>
-    Promise.resolve(new Response(id === "photo" ? jpeg : csv)),
+  const heif = Buffer.concat([
+    Buffer.from([0, 0, 0, 0x18]),
+    Buffer.from("ftypheic\0\0\0\0mif1heic", "latin1"),
+    Buffer.alloc(64),
+  ]);
+  const download = vi.fn(
+    (id: string, _signal: AbortSignal, options?: { original?: boolean }) =>
+      Promise.resolve(
+        new Response(
+          id === "sheet"
+            ? csv
+            : id === "labelled" && options?.original !== false
+              ? heif
+              : jpeg,
+        ),
+      ),
   );
   const channel = (server: string, prefix: string) => ({
     metadata: { pluginId: randomUUID(), server },
@@ -225,6 +252,44 @@ describe("multi-target attachment import", () => {
     const sheet = await f.call({ attachment_ref: f.refs[1] });
     expect(sheet).toMatchObject({ status: "imported", target: "sandbox" });
     expect(f.download).toHaveBeenLastCalledWith("sheet", expect.anything(), {});
+  });
+  it("falls back to the gateway JPEG when a photo labelled JPEG is HEIC", async () => {
+    const f = await attachmentFixture(true);
+    for (const target of ["image_generator", "sandbox"]) {
+      f.download.mockClear();
+      const imported = await f.call({ attachment_ref: f.refs[2], target });
+      expect(imported).toMatchObject({
+        status: "imported",
+        target,
+        filename: "IMG_0002.jpeg",
+        converted: "gateway-jpeg",
+      });
+      expect(f.download.mock.calls.map((c) => c[2])).toEqual([
+        {},
+        { original: false },
+      ]);
+    }
+    // A genuine JPEG keeps the original with a single download.
+    f.download.mockClear();
+    expect(
+      await f.call({ attachment_ref: f.refs[3], target: "image_generator" }),
+    ).toMatchObject({ status: "imported", filename: "real.jpeg" });
+    expect(f.download).toHaveBeenCalledTimes(1);
+    expect(f.download).toHaveBeenLastCalledWith("real", expect.anything(), {});
+  });
+  it("imports HEIC photos into the sandbox as the gateway JPEG", async () => {
+    const f = await attachmentFixture(true);
+    expect(
+      await f.call({ attachment_ref: f.refs[0], target: "sandbox" }),
+    ).toMatchObject({
+      status: "imported",
+      target: "sandbox",
+      filename: "IMG_0001.jpeg",
+      converted: "gateway-jpeg",
+    });
+    expect(f.download).toHaveBeenLastCalledWith("photo", expect.anything(), {
+      original: false,
+    });
   });
   it("rejects non-images for the generator before downloading", async () => {
     const f = await attachmentFixture(true);
