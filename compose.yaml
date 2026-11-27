@@ -3,6 +3,24 @@ name: bubblepilot
 services:
   postgres:
     image: pgvector/pgvector:0.8.0-pg16
+    # Tuned for a small dedicated host (SSD, several GB of RAM). Override with
+    # POSTGRES_* variables; defaults follow doc/迭代需求-性能优化.md (P0-1).
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-8GB}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:-16MB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-256MB}
+      - -c
+      - random_page_cost=${POSTGRES_RANDOM_PAGE_COST:-1.1}
+      - -c
+      - jit=off
+    # Docker's default 64 MB /dev/shm is too small for parallel queries.
+    shm_size: 256mb
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-bubblepilot}
       POSTGRES_USER: ${POSTGRES_USER:-bubblepilot}

@@ -582,16 +582,14 @@ export class PostgresArchiveRepository implements ArchiveRepository {
          c.id, c.provider_chat_id, c.type, ${chatDisplayNameSql("c")} AS display_name, c.enabled, c.version,
          EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
          c.updated_at,
-         COUNT(m.id)::text AS message_count
+         (c.next_message_index - 1)::text AS message_count
        FROM chats c
-       LEFT JOIN messages m ON m.chat_id = c.id
        WHERE c.enabled = TRUE
          AND c.deleted_at IS NULL
          AND (
            $1::timestamptz IS NULL
            OR (c.updated_at, c.id) < ($1::timestamptz, $2::uuid)
          )
-       GROUP BY c.id
        ORDER BY c.updated_at DESC, c.id DESC
        LIMIT $3`,
       [
@@ -611,15 +609,13 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       `SELECT
          c.id, c.provider_chat_id, c.type, ${chatDisplayNameSql("c")} AS display_name, c.enabled, c.version,
          EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
-         c.updated_at, COUNT(m.id)::text AS message_count
+         c.updated_at, (c.next_message_index - 1)::text AS message_count
        FROM chats c
-       LEFT JOIN messages m ON m.chat_id = c.id
        WHERE c.deleted_at IS NULL
          AND (
            $1::timestamptz IS NULL
            OR (c.updated_at, c.id) < ($1::timestamptz, $2::uuid)
          )
-       GROUP BY c.id
        ORDER BY c.updated_at DESC, c.id DESC
        LIMIT $3`,
       [
@@ -1212,11 +1208,9 @@ export class PostgresArchiveRepository implements ArchiveRepository {
       `SELECT
          c.id, c.provider_chat_id, c.type, ${chatDisplayNameSql("c")} AS display_name, c.enabled, c.version,
          EXISTS (SELECT 1 FROM memory_chats mc WHERE mc.chat_id = c.id AND mc.enabled) AS memory_authorized,
-         c.updated_at, COUNT(m.id)::text AS message_count
+         c.updated_at, (c.next_message_index - 1)::text AS message_count
        FROM chats c
-       LEFT JOIN messages m ON m.chat_id = c.id
-       WHERE c.id = $1
-       GROUP BY c.id`,
+       WHERE c.id = $1`,
       [chatId],
     );
     const row = result.rows[0];

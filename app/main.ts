@@ -56,6 +56,7 @@ import {
 } from "../modules/archive/message-retention-service.js";
 import { ManagedBlueBubblesReplyGateway } from "../modules/integrations/bluebubbles/managed-reply-gateway.js";
 import { PostgresBlueBubblesSettingsRepository } from "../modules/integrations/bluebubbles/postgres-settings-repository.js";
+import { DataHousekeeping } from "../modules/maintenance/data-housekeeping.js";
 import { SettingsCipher } from "../modules/integrations/bluebubbles/settings-cipher.js";
 import { BlueBubblesSettingsService } from "../modules/integrations/bluebubbles/settings-service.js";
 import { ManagedLinkPreviewEnricher } from "../modules/integrations/bluebubbles/link-preview-enricher.js";
@@ -433,8 +434,15 @@ const application = buildApplication(config, repository, {
   },
 });
 
+// Bounded cleanup of derived and diagnostic data (every 10 minutes).
+const housekeeping = new DataHousekeeping(
+  memoryService.repository.pool,
+  (results) => application.log.info({ results }, "Data housekeeping"),
+);
+
 const shutdown = async (signal: string) => {
   application.log.info({ signal }, "Shutting down BubblePilot");
+  await housekeeping.stop();
   await taskScheduler.close();
   await idleScheduler.close();
   await application.close();
@@ -454,6 +462,7 @@ try {
   await application.listen({ host: config.host, port: config.port });
   idleScheduler.start();
   taskScheduler.start();
+  housekeeping.start();
 } catch (error) {
   application.log.fatal({ err: error }, "BubblePilot failed to start");
   await application.close();

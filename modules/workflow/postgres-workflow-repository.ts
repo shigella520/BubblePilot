@@ -1554,17 +1554,24 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     if (providerMessageIds.length === 0) return [];
     const result = await this.pool.query<ExecutionRow>(
       `${executionSelect}
-       WHERE COALESCE(
-         e.source_message_id,
-         (SELECT m.id
-          FROM inbound_events i
-          INNER JOIN messages m ON m.source_event_id = i.id
-          WHERE i.provider = e.provider
-            AND i.external_event_id = e.external_event_id)
-       ) IN (
-         SELECT m.id FROM messages m
-         WHERE m.provider = 'bluebubbles'
-           AND m.provider_message_id = ANY($1::text[])
+       -- Start from the few requested messages and follow two indexed paths:
+       -- source_message_id (0082 index) and, for legacy rows without it, the
+       -- inbound event → (provider, external_event_id) unique index. Avoids
+       -- evaluating a fallback subquery for every execution row.
+       WHERE e.id IN (
+         WITH target AS (
+           SELECT m.id, m.source_event_id FROM messages m
+           WHERE m.provider = 'bluebubbles'
+             AND m.provider_message_id = ANY($1::text[])
+         )
+         SELECT x.id FROM workflow_executions x
+         JOIN target t ON x.source_message_id = t.id
+         UNION
+         SELECT x.id FROM target t
+         JOIN inbound_events i ON i.id = t.source_event_id
+         JOIN workflow_executions x
+           ON x.provider = i.provider AND x.external_event_id = i.external_event_id
+         WHERE x.source_message_id IS NULL
        )
        ORDER BY e.created_at, e.id`,
       [providerMessageIds],

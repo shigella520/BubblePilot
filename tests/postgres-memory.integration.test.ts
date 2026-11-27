@@ -36,6 +36,7 @@ import {
   type EmbeddingFailureEvent,
 } from "../modules/memory/memory-service.js";
 import { EmbeddingError } from "../modules/memory/embedding-client.js";
+import { DataHousekeeping } from "../modules/maintenance/data-housekeeping.js";
 import { defaultMemoryConfig } from "../modules/memory/memory-types.js";
 import type { EmbeddingClient } from "../modules/memory/embedding-client.js";
 
@@ -610,6 +611,61 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     expect((await repo.indexedMessageIds(generationId, [gap])).has(gap)).toBe(
       true,
     );
+  });
+
+  it("housekeeping removes invalid chunks and stale retrievals, keeping current data", async () => {
+    const id = await chat();
+    await drain();
+    await message(id, "虚构整理消息一");
+    await message(id, "虚构整理消息二");
+    await drain();
+    const chunks = (
+      await repo.pool.query<{ id: string }>(
+        "SELECT id FROM memory_chunks WHERE chat_id=$1 AND valid ORDER BY from_index",
+        [id],
+      )
+    ).rows;
+    expect(chunks.length).toBeGreaterThan(0);
+    const stale = chunks[0]!.id;
+    await repo.pool.query("UPDATE memory_chunks SET valid=FALSE WHERE id=$1", [
+      stale,
+    ]);
+    const old = randomUUID(),
+      recent = randomUUID();
+    for (const [retrieval, age] of [
+      [old, "2 hours"],
+      [recent, "1 minute"],
+    ] as const)
+      await repo.pool.query(
+        `INSERT INTO memory_retrievals(id,chat_id,generation_id,upper_index,created_at)
+         VALUES($1,$2,$3,1,now()-$4::interval)`,
+        [retrieval, id, generationId, age],
+      );
+    const results = await new DataHousekeeping(repo.pool).runOnce();
+    // Every step is valid SQL against the real schema.
+    expect(results.filter((r) => r.rows < 0)).toEqual([]);
+    const left = await repo.pool.query<{ id: string }>(
+      "SELECT id FROM memory_retrievals WHERE id = ANY($1::uuid[])",
+      [[old, recent]],
+    );
+    expect(left.rows.map((r) => r.id)).toEqual([recent]);
+    expect(
+      (
+        await repo.pool.query(
+          "SELECT 1 FROM memory_chunks WHERE id=$1 UNION ALL SELECT 1 FROM memory_embeddings WHERE chunk_id=$1",
+          [stale],
+        )
+      ).rowCount,
+    ).toBe(0);
+    // Valid chunks and their vectors stay.
+    expect(
+      (
+        await repo.pool.query(
+          "SELECT 1 FROM memory_chunks c JOIN memory_embeddings e ON e.chunk_id=c.id WHERE c.chat_id=$1 AND c.valid",
+          [id],
+        )
+      ).rowCount,
+    ).toBe(chunks.length - 1);
   });
 
   it("records sanitized embedding failure detail on the job and operator log", async () => {

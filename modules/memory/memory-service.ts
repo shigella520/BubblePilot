@@ -351,9 +351,8 @@ export class MemoryService {
   }
   async work() {
     if (!(await this.repository.ready())) return;
-    await this.repository.pool.query(
-      "DELETE FROM memory_embeddings e USING memory_chunks c WHERE e.chunk_id=c.id AND NOT c.valid",
-    );
+    // Invalid chunks are excluded from every search by `c.valid`; their rows
+    // (and cascading vectors) are removed by DataHousekeeping, not each tick.
     const job = await this.repository.claim();
     if (!job) return;
     const heartbeat = setInterval(() => {
