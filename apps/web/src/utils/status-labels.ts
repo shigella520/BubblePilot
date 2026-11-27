@@ -32,6 +32,22 @@ const domains = {
     failed: { label: "失败", tone: "danger" },
     cancelled: { label: "已取消", tone: "neutral" },
     superseded: { label: "已被替代", tone: "neutral" },
+    "waiting-retry": { label: "等待重试", tone: "warning" },
+  },
+  memoryHealth: {
+    healthy: { label: "正常", tone: "success" },
+    indexing: { label: "索引中", tone: "info" },
+    missing: { label: "有缺失", tone: "warning" },
+    "rebuild-required": { label: "需重建", tone: "warning" },
+    "service-error": { label: "服务异常", tone: "danger" },
+    disabled: { label: "未启用", tone: "neutral" },
+    "global-off": { label: "全局已关闭", tone: "neutral" },
+  },
+  memoryGeneration: {
+    active: { label: "当前", tone: "success" },
+    retired: { label: "已停用", tone: "neutral" },
+    building: { label: "旧版构建中", tone: "info" },
+    purged: { label: "已清理", tone: "neutral" },
   },
   dataExport: {
     "awaiting-confirmation": { label: "待确认", tone: "warning" },
@@ -137,6 +153,15 @@ const plainLabels = {
     reply: "发送回复",
     log: "日志记录",
     end: "结束",
+  },
+  memoryJobKind: {
+    backfill: "补全历史",
+    rebuild: "归属重建",
+    incremental: "新消息",
+  },
+  embeddingPrecision: {
+    float32: "单精度",
+    float16: "半精度",
   },
   chatType: {
     group: "群聊",
@@ -247,6 +272,10 @@ const auditWords: Record<string, string> = {
   import: "导入",
   download: "下载",
   backfill: "回填",
+  repair: "修复",
+  all: "全部",
+  purge: "清理",
+  "data-retention": "数据保留",
 };
 /** "ai.provider.create" → "AI Provider · 创建"; unknown words stay as-is. */
 export function auditActionLabel(action: string): string {

@@ -32,6 +32,7 @@ import {
 import type { AgentSettingsService } from "../modules/ai/agent-settings-service.js";
 import { agentSettingsUpdateSchema } from "../modules/ai/agent-settings-types.js";
 import type { MemoryService } from "../modules/memory/memory-service.js";
+import type { DataRetentionSettingsRepository } from "../modules/maintenance/data-retention-settings.js";
 import { memorySearchSchema } from "../modules/memory/memory-types.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -379,6 +380,7 @@ export interface ApplicationOptions {
   imageDelivery?: GeneratedImageDelivery;
   botIdentity?: BotIdentityService;
   memory?: MemoryService;
+  dataRetention?: DataRetentionSettingsRepository;
   logger?: boolean;
   webRoot?: string | false;
   auth?: AuthService;
@@ -1519,13 +1521,92 @@ export function buildApplication(
           expectedVersion: z.number().int().min(0),
         })
         .parse(request.body);
-      await memory().repository.authorize(
+      // Enabling queues a gap-only backfill of the whole history.
+      const backfillJobIds = await memory().repository.authorize(
         chatId,
         body.enabled,
         body.expectedVersion,
       );
-      return { data: await memory().repository.chatView(chatId) };
+      memory().invalidateHealth();
+      return {
+        data: {
+          ...(await memory().repository.chatView(chatId)),
+          backfillJobIds,
+        },
+      };
     },
+  );
+  const repairChatMemory = async (chatId: string, serviceTested = false) => {
+    const result = await memory().repair(chatId, serviceTested);
+    if (result.action === "rebuild") {
+      if (!options.botIdentity)
+        throw new ApplicationError(
+          "BOT_IDENTITY_UNAVAILABLE",
+          "Bot identity service unavailable.",
+          503,
+        );
+      await options.botIdentity.rebuild(chatId);
+      memory().invalidateHealth();
+    }
+    return result;
+  };
+  const dataRetention = (): DataRetentionSettingsRepository => {
+    if (!options.dataRetention)
+      throw new ApplicationError(
+        "DATA_RETENTION_UNAVAILABLE",
+        "Data retention settings unavailable.",
+        503,
+      );
+    return options.dataRetention;
+  };
+  application.get(
+    "/api/v1/system/data-retention",
+    { preHandler: requireAdmin },
+    async () => ({ data: await dataRetention().view() }),
+  );
+  application.put(
+    "/api/v1/system/data-retention",
+    { preHandler: requireSensitive("data-retention.update", "settings") },
+    async (request) => ({ data: await dataRetention().update(request.body) }),
+  );
+  application.get(
+    "/api/v1/memory/health",
+    { preHandler: requireAdmin },
+    async () => ({ data: await memory().health() }),
+  );
+  application.post(
+    "/api/v1/chats/:chatId/memory/repair",
+    { preHandler: requireSensitive("memory.repair", "chat") },
+    async (request) => {
+      const { chatId } = chatParametersSchema.parse(request.params);
+      return { data: await repairChatMemory(chatId) };
+    },
+  );
+  application.post(
+    "/api/v1/memory/repair",
+    { preHandler: requireSensitive("memory.repair.all", "memory") },
+    async () => {
+      const health = await memory().health(true);
+      const repairable = health.chats.filter((c) =>
+        ["missing", "service-error", "rebuild-required"].includes(c.state),
+      );
+      // A still-failing service is reported once instead of per chat.
+      const tested = repairable.some((c) => c.state === "service-error");
+      if (tested) await memory().testActive();
+      const repaired: { chatId: string; action: string; jobIds: string[] }[] =
+        [];
+      for (const chat of repairable)
+        repaired.push({
+          chatId: chat.chatId,
+          ...(await repairChatMemory(chat.chatId, tested)),
+        });
+      return { data: { repaired } };
+    },
+  );
+  application.post(
+    "/api/v1/ai/memory/purge",
+    { preHandler: requireSensitive("memory.purge", "memory") },
+    async () => ({ data: await memory().purgeHistory() }),
   );
   application.post(
     "/api/v1/chats/:chatId/memory/search",

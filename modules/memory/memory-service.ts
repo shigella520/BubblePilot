@@ -57,12 +57,17 @@ import {
   type MemoryFailureDiagnostic,
   type MemoryToolDiagnostic,
 } from "./memory-diagnostics.js";
-import type { MemoryRepository } from "./memory-repository.js";
+import type {
+  MemoryHealthView,
+  MemoryJob,
+  MemoryRepository,
+} from "./memory-repository.js";
 import {
   chatExcerptSchema,
   memorySettingsSchema,
   memorySearchSchema,
   defaultEmbeddingTimeoutSeconds,
+  defaultGenerationRetentionDays,
   type MemoryScope,
   type MemorySearch,
   type Evidence,
@@ -238,13 +243,76 @@ export class MemoryService {
         s.request_timeout_seconds ?? defaultEmbeddingTimeoutSeconds,
       secretConfigured: !!s.encrypted_secret,
       databaseReady: await this.repository.ready(),
+      retentionDays:
+        s.generation_retention_days ?? defaultGenerationRetentionDays,
       generations: (await this.repository.generations()).map((g) => ({
         id: g.id,
         model: g.config.model,
         dimensions: g.config.dimensions,
+        precision: g.config.precision ?? "float32",
         status: g.status,
+        createdAt: g.created_at ?? null,
+        retiredAt: g.retired_at ?? null,
       })),
     };
+  }
+  private healthCache: { at: number; value: MemoryHealthView } | null = null;
+  /** All chats' retrieval health; cached briefly for list polling. */
+  async health(fresh = false): Promise<MemoryHealthView> {
+    if (!fresh && this.healthCache && Date.now() - this.healthCache.at < 10_000)
+      return this.healthCache.value;
+    const value = await this.repository.health();
+    this.healthCache = { at: Date.now(), value };
+    return value;
+  }
+  invalidateHealth() {
+    this.healthCache = null;
+  }
+  /**
+   * One-click repair for a chat. When indexing failed on the embedding
+   * service, the current model is tested first so a still-broken service is
+   * reported instead of queueing more failing work.
+   */
+  async repair(chatId: string, serviceTested = false) {
+    const health = (await this.repository.health(chatId)).chats[0];
+    if (!serviceTested && health?.state === "service-error")
+      await this.testActive();
+    const result = await this.repository.repair(chatId);
+    this.invalidateHealth();
+    return result;
+  }
+  /** Encodes a fictional probe text with the active generation. */
+  async testActive() {
+    const generation = (await this.repository.generations()).find(
+      (g) => g.status === "active",
+    );
+    if (!generation)
+      throw new ApplicationError(
+        "MEMORY_GENERATION_UNAVAILABLE",
+        "Configure the embedding model first.",
+        409,
+      );
+    const secret = generation.encrypted_secret
+      ? this.repository.cipher.decrypt(generation.encrypted_secret)
+      : null;
+    try {
+      await this.embedding.encode(
+        generation.config,
+        secret,
+        ["虚构测试：林晓决定使用旧电脑备份。"],
+        await this.requestTimeoutMs(),
+      );
+    } catch (error) {
+      this.reportEmbeddingFailure("probe", generation.config, error);
+      throw error;
+    }
+    await this.repository.wakeRetries().catch(() => undefined);
+  }
+  /** Removes vectors of replaced models now ("清理历史向量数据"). */
+  async purgeHistory() {
+    const result = await this.repository.purgeRetired(true);
+    this.invalidateHealth();
+    return result;
   }
   /** Saved embedding request timeout in milliseconds. */
   async requestTimeoutMs() {
@@ -284,6 +352,8 @@ export class MemoryService {
       this.reportEmbeddingFailure("probe", parsed, error);
       throw error;
     }
+    // The service answers again: jobs waiting on an upstream retry run now.
+    await this.repository.wakeRetries().catch(() => undefined);
     return {
       identity,
       dimensions: vectors[0]?.length,
@@ -291,8 +361,14 @@ export class MemoryService {
     };
   }
   async update(input: unknown) {
-    const { enabled, expectedVersion, secret, timeoutSeconds, ...config } =
-      memorySettingsSchema.parse(input);
+    const {
+      enabled,
+      expectedVersion,
+      secret,
+      timeoutSeconds,
+      retentionDays,
+      ...config
+    } = memorySettingsSchema.parse(input);
     if (enabled && !(await this.repository.ready()))
       throw new ApplicationError(
         "MEMORY_DATABASE_NOT_READY",
@@ -314,15 +390,17 @@ export class MemoryService {
       (!enabled || (enabled === old.enabled && secret === undefined))
         ? existing.identity
         : (await this.probe(input)).identity;
-    await this.repository.saveSettings(
+    const saved = await this.repository.saveSettings(
       config,
       enabled,
       expectedVersion,
       secret,
       identity,
       timeoutSeconds,
+      retentionDays,
     );
-    return this.view();
+    this.invalidateHealth();
+    return { ...(await this.view()), switched: saved.switched };
   }
   async session(scope: MemoryScope): Promise<MemorySession> {
     const session = new MemorySession(this, scope);
@@ -331,6 +409,8 @@ export class MemoryService {
   }
   start() {
     if (this.timer) return;
+    // An upgraded installation gets the active generation's HNSW index.
+    void this.repository.ensureActiveVectorIndex().catch(() => undefined);
     this.timer = setInterval(() => this.trigger(), 1000);
     this.timer.unref();
     this.trigger();
@@ -353,8 +433,9 @@ export class MemoryService {
     if (!(await this.repository.ready())) return;
     // Invalid chunks are excluded from every search by `c.valid`; their rows
     // (and cascading vectors) are removed by DataHousekeeping, not each tick.
-    const job = await this.repository.claim();
-    if (!job) return;
+    const claimed = await this.repository.claim();
+    if (!claimed) return;
+    let job: MemoryJob = claimed;
     const heartbeat = setInterval(() => {
       void this.repository.pool
         .query(
@@ -368,6 +449,20 @@ export class MemoryService {
       generation = await this.repository.generation(job.generation_id);
       if (!generation)
         throw new EmbeddingError("MEMORY_GENERATION_UNAVAILABLE");
+      // Jump over indexed history: only unindexed messages are read.
+      const next = await this.repository.nextUnindexed(job);
+      if (next === null) {
+        await this.repository.publish(
+          job,
+          [],
+          [],
+          [],
+          Number(job.through_index),
+        );
+        return;
+      }
+      if (next - 1 > Number(job.cursor_index))
+        job = { ...job, cursor_index: String(next - 1) };
       const secret = generation.encrypted_secret
         ? this.repository.cipher.decrypt(generation.encrypted_secret)
         : null;

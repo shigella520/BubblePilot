@@ -870,9 +870,14 @@ export class PostgresArchiveRepository implements ArchiveRepository {
        INNER JOIN chats c ON c.id = m.chat_id
        WHERE c.enabled = TRUE
          AND ($1::uuid IS NULL OR c.id = $1)
+         -- Substring match served by messages_body_trgm_idx. Redacted rows have
+         -- a NULL body, so the redaction filter only lets the partial index apply.
          AND (
            $2::text IS NULL
-           OR POSITION(LOWER($2) IN LOWER(COALESCE(m.body, ''))) > 0
+           OR (
+             m.content_redacted_at IS NULL
+             AND LOWER(m.body) LIKE '%' || REPLACE(REPLACE(REPLACE(LOWER($2), '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%' ESCAPE '\\'
+           )
          )
          AND ($3::text IS NULL OR m.sender_id = $3)
          AND ($4::timestamptz IS NULL OR m.sent_at >= $4)
@@ -885,7 +890,9 @@ export class PostgresArchiveRepository implements ArchiveRepository {
        LIMIT $8`,
       [
         options.chatId,
-        options.keyword,
+        // An empty substring matches every row (including NULL bodies), which is
+        // the same as no keyword filter.
+        options.keyword === "" ? null : options.keyword,
         options.senderId,
         options.sentFrom?.toISOString() ?? null,
         options.sentTo?.toISOString() ?? null,

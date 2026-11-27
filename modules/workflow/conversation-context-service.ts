@@ -22,6 +22,11 @@ import {
 } from "../ingestion/link-preview.js";
 import { createPostgresPool } from "../shared/postgres-pool.js";
 import type { ContextRuntimeSettings } from "./context-settings-types.js";
+import {
+  readExecutionHistoryBoundary,
+  withExecutionHistory,
+  type ExecutionHistoryBoundary,
+} from "./execution-history-filter.js";
 interface MessageRow {
   revision_state: RevisionState;
   edited_at: Date | null;
@@ -304,22 +309,26 @@ export class ConversationContextService {
         previous.settings.includeFromMe === settings.includeFromMe;
       const after = same ? previous.afterMessageIndex : "0";
       const values = [chat.id, trigger, settings.includeFromMe, after];
-      const count = Number(
-        (
-          await db.query<{ count: string }>(
-            `SELECT count(*)::text FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()}`,
-            values,
-          )
-        ).rows[0]?.count ?? 0,
-      );
+      // A fresh window keeps min(count, base) rows, and OFFSET past the end
+      // returns no row, so OFFSET base alone gives the same answer without
+      // counting the whole history. A continued window starts from the
+      // previous boundary, so its count stays small.
       const keep = same
         ? retainedWindowCount(
-            count,
+            Number(
+              (
+                await db.query<{ count: string }>(
+                  `SELECT count(*)::text FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()}`,
+                  values,
+                )
+              ).rows[0]?.count ?? 0,
+            ),
             settings.baseMessageWindow,
             settings.redundancyMessageWindow,
           )
-        : Math.min(count, settings.baseMessageWindow);
+        : settings.baseMessageWindow;
       // Find the last omitted actual row, rather than treating index gaps as messages.
+      // Backward scan of (chat_id, message_index) from the trigger, stopping at keep+1.
       const omitted = (
         await db.query<{ message_index: string }>(
           `SELECT m.message_index::text FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()} ORDER BY m.message_index DESC OFFSET $5 LIMIT 1`,
@@ -410,6 +419,11 @@ export class ConversationContextService {
               })
             ).contextSnapshot;
     const db = await this.pool.connect();
+    // Read once per load; queries over many rows inline it instead of calling
+    // execution_history_allows() per row. Only read after the freeze below.
+    let history: ExecutionHistoryBoundary | undefined;
+    const historyBoundary = async () =>
+      (history ??= await readExecutionHistoryBoundary(db, input.executionId));
     try {
       // Freeze once at the first read, not when the webhook creates its trigger.
       // The short transaction also persists window membership before returning it.
@@ -446,15 +460,16 @@ export class ConversationContextService {
               snapshot.triggerMessageIndex,
               snapshot.settings.includeFromMe,
               snapshot.afterMessageIndex,
-              input.executionId,
             ];
+            const boundaryFilter = await historyBoundary();
+            const counted = withExecutionHistory(values, boundaryFilter);
             const count = Number(
               (
                 await db.query<{ n: string }>(
                   `SELECT count(*)::text AS n FROM messages m JOIN chats c ON c.id=m.chat_id
-               WHERE m.chat_id=$1 AND m.message_index>$4 AND execution_history_allows($5,m.id)
+               WHERE m.chat_id=$1 AND m.message_index>$4 AND ${counted.sql}
                AND $2::bigint IS NOT NULL AND ${this.eligible()}`,
-                  values,
+                  counted.values,
                 )
               ).rows[0]?.n ?? 0,
             );
@@ -463,11 +478,15 @@ export class ConversationContextService {
               snapshot.settings.baseMessageWindow,
               snapshot.settings.redundancyMessageWindow,
             );
+            const chosen = withExecutionHistory(
+              [...values, keep],
+              boundaryFilter,
+            );
             const members = await db.query<{ id: string }>(
               `SELECT m.id FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1
-               AND execution_history_allows($5,m.id) AND $2::bigint IS NOT NULL AND $4::bigint IS NOT NULL
-               AND ${this.eligible()} ORDER BY m.sent_at DESC,m.message_index DESC LIMIT $6`,
-              [...values, keep],
+               AND ${chosen.sql} AND $2::bigint IS NOT NULL AND $4::bigint IS NOT NULL
+               AND ${this.eligible()} ORDER BY m.sent_at DESC,m.message_index DESC LIMIT $5`,
+              chosen.values,
             );
             snapshot = {
               ...snapshot,
@@ -510,15 +529,9 @@ export class ConversationContextService {
         snapshot.settings.includeFromMe,
         snapshot.afterMessageIndex,
       ];
-      const rows =
+      const windowRows =
         snapshot.contract === "raw-context-v2"
-          ? await db.query<MessageRow>(
-              `SELECT m.revision_state,m.edited_at,execution_reply_preview(m.id,$5,0,$6,NOT chat_history_authorized(m.chat_id)) AS reply_to,
-         m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,
-         m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code
-         FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.id=ANY($4::uuid[])
-         AND $2::bigint IS NOT NULL AND execution_history_allows($5,m.id) AND ${this.eligible()}
-         ORDER BY m.sent_at,m.message_index`,
+          ? withExecutionHistory(
               [
                 snapshot.chatId,
                 snapshot.triggerMessageIndex,
@@ -527,14 +540,30 @@ export class ConversationContextService {
                 input.executionId,
                 snapshot.historyUpperIndex,
               ],
+              await historyBoundary(),
             )
-          : await db.query<MessageRow>(
-              `SELECT m.revision_state,m.edited_at,message_reply_preview(m.id,CASE WHEN chat_history_authorized(m.chat_id) THEN 0 ELSE $4 END,LEAST(m.message_index,$2)) AS reply_to,m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()} ORDER BY m.message_index`,
-              values,
-            );
+          : null;
+      const rows = windowRows
+        ? await db.query<MessageRow>(
+            `SELECT m.revision_state,m.edited_at,execution_reply_preview(m.id,$5,0,$6,NOT chat_history_authorized(m.chat_id)) AS reply_to,
+         m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,
+         m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code
+         FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.id=ANY($4::uuid[])
+         AND $2::bigint IS NOT NULL AND ${windowRows.sql} AND ${this.eligible()}
+         ORDER BY m.sent_at,m.message_index`,
+            windowRows.values,
+          )
+        : await db.query<MessageRow>(
+            `SELECT m.revision_state,m.edited_at,message_reply_preview(m.id,CASE WHEN chat_history_authorized(m.chat_id) THEN 0 ELSE $4 END,LEAST(m.message_index,$2)) AS reply_to,m.message_index::text,m.provider_message_id,m.sender_id,m.sent_at,COALESCE(m.body,'') AS body,m.is_from_me,bot_message_author(m.id) AS author,m.attachments,m.link_preview_status,m.link_previews,m.link_preview_error_code FROM messages m JOIN chats c ON c.id=m.chat_id WHERE m.chat_id=$1 AND m.message_index<$2 AND m.message_index>$4 AND ${this.eligible()} ORDER BY m.message_index`,
+            values,
+          );
       const windowEvicted =
         snapshot.contract === "raw-context-v2"
-          ? await this.sentTimeEvictedRange(db, snapshot, input.executionId!)
+          ? await this.sentTimeEvictedRange(
+              db,
+              snapshot,
+              await historyBoundary(),
+            )
           : await this.evictedRange(db, values);
       await db.query("COMMIT");
       const raw = rows.rows.map(contextMessage);
@@ -584,8 +613,19 @@ export class ConversationContextService {
   private async sentTimeEvictedRange(
     db: PoolClient,
     snapshot: ConversationContextSnapshot,
-    executionId: string,
+    boundary: ExecutionHistoryBoundary,
   ): Promise<HistoryMessageRange | null> {
+    // With a frozen boundary the predicate includes message_index<upperIndex,
+    // so this is a bounded (chat_id, message_index) range scan.
+    const evicted = withExecutionHistory(
+      [
+        snapshot.chatId,
+        snapshot.triggerMessageIndex,
+        snapshot.settings.includeFromMe,
+        snapshot.messageIds,
+      ],
+      boundary,
+    );
     const row = (
       await db.query<{
         count: string;
@@ -597,14 +637,8 @@ export class ConversationContextService {
         `SELECT count(*)::text AS count,min(m.message_index)::text AS first,max(m.message_index)::text AS last,
        min(m.sent_at) AS earliest,max(m.sent_at) AS latest FROM messages m JOIN chats c ON c.id=m.chat_id
        WHERE m.chat_id=$1 AND $2::bigint IS NOT NULL AND ${this.eligible()}
-       AND execution_history_allows($5,m.id) AND NOT(m.id=ANY($4::uuid[]))`,
-        [
-          snapshot.chatId,
-          snapshot.triggerMessageIndex,
-          snapshot.settings.includeFromMe,
-          snapshot.messageIds,
-          executionId,
-        ],
+       AND ${evicted.sql} AND NOT(m.id=ANY($4::uuid[]))`,
+        evicted.values,
       )
     ).rows[0];
     return row?.first && row.last && row.earliest && row.latest

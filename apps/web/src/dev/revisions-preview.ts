@@ -167,6 +167,36 @@ window.fetch = (input, init) => {
     };
   } else if (path === "/api/v1/bot-attributions")
     data = { chats: [], jobs: [] };
+  else if (path === "/api/v1/memory/health")
+    data = {
+      globalEnabled: true,
+      generation: {
+        id: "fictional-generation",
+        model: "fictional-embedding",
+        dimensions: 1024,
+        precision: "float32",
+      },
+      chats: [
+        {
+          chatId: chat.id,
+          enabled: true,
+          state: "missing",
+          total: 23,
+          indexed: 20,
+          missing: 3,
+          progress: null,
+          retryAt: null,
+          error: null,
+        },
+      ],
+    };
+  else if (path === `/api/v1/chats/${chat.id}/memory`)
+    data = {
+      enabled: true,
+      version: 1,
+      upperIndex: 24,
+      coverage: { total: 23, indexed: 20, pending: 3, failed: 0 },
+    };
   else if (path === "/api/v1/messages/search") {
     const query = url.searchParams.get("q") ?? "";
     const matching = messages.filter((message) =>

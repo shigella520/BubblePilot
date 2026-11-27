@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import NetworkSettingsPanel from "../components/NetworkSettingsPanel.vue";
+import DataRetentionPanel from "../components/DataRetentionPanel.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import {
+  Archive,
   Cable,
   CheckCircle2,
   RefreshCw,
@@ -147,6 +149,7 @@ onMounted(load);
         :items="[
           { id: 'bluebubbles', label: 'BlueBubbles', icon: Cable },
           { id: 'network', label: '外部网络', icon: ShieldCheck },
+          { id: 'data-retention', label: '数据保留', icon: Archive },
         ]"
       />
       <div class="sidebar-note">
@@ -324,6 +327,7 @@ onMounted(load);
         </form>
       </section>
       <NetworkSettingsPanel />
+      <DataRetentionPanel />
     </div>
   </main>
 </template>

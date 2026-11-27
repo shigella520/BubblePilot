@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { memoryEmbeddingsDdl } from "../modules/memory/memory-embeddings-ddl.js";
 import { readFile, readdir } from "node:fs/promises";
 import { Client, Pool } from "pg";
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
@@ -52,9 +53,7 @@ describe.runIf(!!url)(
           ),
         );
       await db.query("CREATE EXTENSION vector");
-      await db.query(
-        "CREATE TABLE memory_embeddings(chunk_id UUID PRIMARY KEY REFERENCES memory_chunks(id) ON DELETE CASCADE,dimensions INTEGER NOT NULL,embedding vector NOT NULL)",
-      );
+      for (const statement of memoryEmbeddingsDdl) await db.query(statement);
       archive = new PostgresArchiveRepository(connection);
       context = new ConversationContextService(connection);
       memory = new MemoryRepository(connection, "fictional-sent-time-key");

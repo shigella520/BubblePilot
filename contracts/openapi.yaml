@@ -1403,6 +1403,126 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/MemorySettingsInput"
+  /api/v1/ai/memory/purge:
+    post:
+      operationId: postapiv1aimemorypurge
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 清理历史向量数据：立即删除已被替换模型的向量、分块与索引标记，代次记录保留为“已清理”。需要敏感操作二次验证并记录审计。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /api/v1/memory/health:
+    get:
+      operationId: getapiv1memoryhealth
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 所有已配置聊天的长期检索健康状态（未启用、全局已关闭、需重建、索引中、服务异常、有缺失、正常），一次查询返回。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /api/v1/memory/repair:
+    post:
+      operationId: postapiv1memoryrepair
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 修复全部：对所有有缺失、服务异常或需重建的聊天执行一键修复；服务异常时先测试连接。需要敏感操作二次验证并记录审计。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /api/v1/chats/{chatId}/memory/repair:
+    parameters:
+      - name: chatId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: postapiv1chatschatIdmemoryrepair
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 一键修复：重排等待重试的任务，替换失败与暂停的任务为只补缺口的补建；需重建时启动归属重建。需要敏感操作二次验证并记录审计。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /api/v1/system/data-retention:
+    get:
+      operationId: getapiv1systemdataretention
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 执行明细保留天数。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putapiv1systemdataretention
+      security:
+        - sessionAuth: []
+        - bearerAuth: []
+      description: 修改执行明细保留天数；超过期限的节点、工具、路由与图片输入明细会被清理。需要敏感操作二次验证并记录审计。
+      responses:
+        "200":
+          description: 操作成功。
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DataRetentionInput"
   /api/v1/chats/{chatId}/memory:
     parameters:
       - name: chatId
@@ -4071,6 +4191,20 @@ components:
             - conflict
             - missing
         version: *a1
+    DataRetentionInput:
+      type: object
+      additionalProperties: false
+      required:
+        - executionDetailDays
+        - expectedVersion
+      properties:
+        executionDetailDays:
+          type: integer
+          minimum: 7
+          maximum: 3650
+        expectedVersion:
+          type: integer
+          minimum: 1
     MemorySettingsInput:
       type: object
       required:
@@ -4098,7 +4232,19 @@ components:
         dimensions:
           type: integer
           minimum: 1
-          maximum: 16000
+          maximum: 4000
+          description: 请求模型按此维度输出；float32 最多 2000，float16 最多 4000（pgvector 可建索引的上限）。
+        precision:
+          enum:
+            - float32
+            - float16
+          default: float32
+          description: 向量存储精度。修改精度、维度或模型即切换代次，立即生效并从零重建索引。
+        retentionDays:
+          type: integer
+          minimum: 1
+          maximum: 90
+          description: 被替换模型的向量保留天数（默认 3），期间改回该模型可直接恢复。
         modelVersion:
           type: string
           maxLength: 200
@@ -4194,6 +4340,17 @@ components:
         cursor_index:
           { type: string, description: "诊断游标，不是已处理数量。" }
         through_index: { type: string }
+        auto_retries:
+          {
+            type: integer,
+            description: "上游错误的自动重试轮数；>0 且状态为 queued 表示等待重试。",
+          }
+        next_attempt_at:
+          {
+            type: string,
+            format: date-time,
+            description: "下次可执行时间（等待重试时为下次重试时间）。",
+          }
         error_code:
           {
             type: [string, "null"],

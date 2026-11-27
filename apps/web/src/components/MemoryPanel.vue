@@ -1,278 +1,103 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { RefreshCw, Search, Wrench } from "@lucide/vue";
 import { confirmAction } from "../services/confirm";
-import { formatDateTime } from "../utils/format";
-import StatusBadge from "./StatusBadge.vue";
-import AdminFormDialog from "./AdminFormDialog.vue";
-import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import {
-  apiRequest,
-  apiPageRequest,
-  errorMessage,
-  jsonBody,
-} from "../services/api";
-import { useSessionStore } from "../stores/session";
-import { embeddingFailureSummary } from "../utils/memory-tool-diagnostics";
+import { apiRequest, errorMessage, jsonBody } from "../services/api";
 import { ProgressPoller } from "../services/progress-poller";
+import { useSessionStore } from "../stores/session";
+import { formatDateTime } from "../utils/format";
+import {
+  chatHealth,
+  isRepairable,
+  memoryErrorText,
+  memoryHealthPath,
+  repairErrorMessage,
+  repairNotice,
+  type MemoryChatHealth,
+  type MemoryHealthView,
+} from "../utils/memory-health";
+import { memorySearchWarningLabels } from "../utils/memory-tool-diagnostics";
 import AdminDetailDialog from "./AdminDetailDialog.vue";
-import CursorPagination from "./CursorPagination.vue";
 import DismissibleMessage from "./DismissibleMessage.vue";
-import { RefreshCw } from "@lucide/vue";
+import LockedHint from "./LockedHint.vue";
+import MemoryHealthBadge from "./MemoryHealthBadge.vue";
+import MemoryJobsPanel from "./MemoryJobsPanel.vue";
+import ToggleSwitch from "./ToggleSwitch.vue";
+
+/** One chat's long-term retrieval (R2): status, 启用 / 修复, test, jobs. */
 const props = defineProps<{
-  mode: "settings" | "chat" | "jobs";
-  embedded?: boolean;
-  fixedChatId?: string;
-  chats?: readonly {
-    id: string;
-    displayName?: string | null;
-    providerChatId?: string;
-  }[];
+  chatId: string;
+  /** Archived message count from the chat list, for the enable estimate. */
+  messageCount?: number;
 }>();
 const emit = defineEmits<{
-  authorizationChanged: [state: { chatId: string; enabled: boolean }];
+  changed: [state: { chatId: string; enabled: boolean }];
 }>();
-const session = useSessionStore();
-const backfillDialog = ref(false);
-const busy = ref(false);
-const error = ref("");
-const notice = ref("");
-const chatId = ref(props.fixedChatId ?? "");
-const query = ref("");
-const from = ref("");
-const to = ref("");
-const searchFrom = ref("");
-const searchTo = ref("");
-interface Generation {
-  id: string;
-  model: string;
-  dimensions: number;
-  status: string;
-}
-interface Settings {
+interface ChatMemoryView {
   enabled: boolean;
-  protocol: "ollama" | "openai-compatible";
-  baseUrl: string;
-  model: string;
-  dimensions: number;
-  modelVersion: string;
-  queryPrefix: string;
-  timeoutSeconds: number;
   version: number;
-  secretConfigured: boolean;
-  databaseReady: boolean;
-  generations: Generation[];
-}
-interface Job {
-  reason: string;
-  id: string;
-  created_at: string;
-  updated_at: string;
-  attempts: number;
-  chat_id: string;
-  generation_id: string;
-  status: string;
-  version: number;
-  cursor_index: string;
-  through_index: string;
-  error_code: string | null;
-  error_detail?: Record<string, unknown> | null;
-  request_key: string | null;
-  chat_name: string | null;
-  model: string;
-  range_from: string | null;
-  range_to: string | null;
-  progress?: {
-    scope: string | null;
-    total: number;
-    processed: number;
-    removed: number;
-    remaining: number;
-    percent: number | null;
-    lastProgressAt: string | null;
-    generatedAt: string;
-    estimate: {
-      status: string;
-      messagesPerMinute: number | null;
-      remainingSeconds: number | null;
-      estimatedCompletionAt: string | null;
-    };
-  };
-}
-function jobKind(job: Job) {
-  if (job.reason === "rebuild") return "角色归属索引重建";
-  return job.request_key || job.reason !== "incremental"
-    ? "历史补建"
-    : "新增消息索引";
-}
-interface SearchResult {
-  status: string;
-  retrievalMode: string;
-  retrievalId: string;
-  coverage: { total: number; indexed: number; pending: number };
-  evidence: { ref: string; text: string }[];
-}
-const settings = ref<Settings | null>(null);
-const secret = ref("");
-const generationId = ref("");
-const jobs = ref<Job[]>([]);
-const selectedJob = ref<Job | null>(null);
-const jobTrigger = ref<HTMLElement | null>(null);
-const jobPage = ref(1);
-const jobCursors = ref<Array<string | null>>([null]);
-const nextJobCursor = ref<string | null>(null);
-function resetJobPage() {
-  jobPage.value = 1;
-  jobCursors.value = [null];
-  nextJobCursor.value = null;
-  selectedJob.value = null;
-}
-function jobsPath() {
-  const base =
-    props.mode === "chat"
-      ? `/api/v1/chats/${chatId.value}/memory/jobs`
-      : "/api/v1/memory/jobs";
-  const params = new URLSearchParams({ limit: "10" });
-  const cursor = jobCursors.value[jobPage.value - 1];
-  if (cursor) params.set("cursor", cursor);
-  return `${base}?${params}`;
-}
-async function loadJobPage() {
-  const token = epoch;
-  const page = await apiPageRequest<Job[]>(jobsPath());
-  const detail = selectedJob.value
-    ? await apiRequest<Job>(`/api/v1/memory/jobs/${selectedJob.value.id}`)
-    : null;
-  if (alive && token === epoch) {
-    jobs.value = page.data;
-    nextJobCursor.value = page.page.nextCursor;
-    selectedJob.value = detail;
-    progressError.value = false;
-  }
-}
-async function turnJobPage(direction: number) {
-  const previousPage = jobPage.value;
-  const previousCursors = [...jobCursors.value];
-  const token = epoch;
-  if (direction > 0 && nextJobCursor.value) {
-    jobCursors.value = jobCursors.value.slice(0, jobPage.value);
-    jobCursors.value.push(nextJobCursor.value);
-    jobPage.value++;
-  } else if (direction < 0 && jobPage.value > 1) jobPage.value--;
-  selectedJob.value = null;
-  try {
-    await loadJobPage();
-  } catch (error) {
-    if (alive && token === epoch) {
-      jobPage.value = previousPage;
-      jobCursors.value = previousCursors;
-    }
-    throw error;
-  }
-}
-async function showJob(job: Job, trigger: EventTarget | null) {
-  jobTrigger.value = trigger instanceof HTMLElement ? trigger : null;
-  const token = epoch;
-  const detail = await apiRequest<Job>(`/api/v1/memory/jobs/${job.id}`);
-  if (alive && token === epoch) selectedJob.value = detail;
-}
-function closeJob() {
-  epoch++;
-  selectedJob.value = null;
-  poller.invalidate();
-}
-const result = ref<SearchResult | null>(null);
-const source = ref("");
-const chat = reactive({
-  enabled: false,
-  version: null as number | null,
-  coverage: null as {
+  coverage: {
     total: number;
     indexed: number;
     pending: number;
     failed?: number;
-  } | null,
-});
-const progressError = ref(false);
-let panelOpen = !!props.embedded;
-
-const stateNames: Record<string, string> = {
-  queued: "等待处理",
-  running: "处理中",
-  paused: "已暂停",
-  succeeded: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-  superseded: "已替代",
-  waiting: "等待处理",
-  warming: "估算中",
-  stalled: "暂未取得新进度",
-  active: "可用",
-  building: "构建中",
-  retired: "已退役",
-};
-function resultLabel(value: string) {
-  const names: Record<string, string> = {
-    succeeded: "检索成功",
-    partial: "部分覆盖",
-    unavailable: "暂不可用",
-    empty: "没有结果",
-    hybrid: "混合检索",
-    keyword: "关键词检索",
-  };
-  return names[value] ?? value;
+  } | null;
 }
-function stateName(value: string) {
-  return stateNames[value] ?? value;
+interface SearchResult {
+  status: string;
+  retrievalMode: "hybrid" | "keyword-only";
+  retrievalId: string;
+  reason?: string;
+  warnings?: { component: string; code: string; httpStatus?: number }[];
+  coverage: { total: number; indexed: number; pending: number };
+  evidence: { ref: string; text: string }[];
 }
-function localTime(value: string | null) {
-  return value ? formatDateTime(value) : "不限";
-}
-function remainingTime(seconds: number) {
-  const minutes = Math.ceil(seconds / 60);
-  return minutes < 60
-    ? `${minutes} 分钟`
-    : `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
-}
-const poller = new ProgressPoller({
-  enabled: () =>
-    alive &&
-    panelOpen &&
-    !document.hidden &&
-    !busy.value &&
-    props.mode !== "settings" &&
-    (props.mode !== "chat" || !!chatId.value) &&
-    jobs.value.some((j) => ["queued", "running"].includes(j.status)),
-  load: async () => {
-    const path =
-      props.mode === "chat"
-        ? `/api/v1/chats/${chatId.value}/memory`
-        : "/api/v1/memory";
-    const [page, state, detail] = await Promise.all([
-      apiPageRequest<Job[]>(jobsPath()),
-      props.mode === "chat"
-        ? apiRequest<typeof chat>(path)
-        : Promise.resolve(null),
-      selectedJob.value
-        ? apiRequest<Job>(`/api/v1/memory/jobs/${selectedJob.value.id}`)
-        : Promise.resolve(null),
-    ]);
-    return { page, state, detail };
-  },
-  apply: ({ page, state, detail }) => {
-    jobs.value = page.data;
-    nextJobCursor.value = page.page.nextCursor;
-    selectedJob.value = detail;
-    if (state) Object.assign(chat, state);
-    progressError.value = false;
-  },
-  failed: () => {
-    progressError.value = true;
-  },
-});
+const session = useSessionStore();
+const busy = ref(false);
+const error = ref("");
+const notice = ref("");
+const chat = ref<ChatMemoryView | null>(null);
+const healthView = ref<MemoryHealthView | null>(null);
+const health = computed<MemoryChatHealth | null>(() =>
+  chatHealth(healthView.value, props.chatId),
+);
+const query = ref("");
+const result = ref<SearchResult | null>(null);
+const source = ref("");
+const jobsOpen = ref(false);
+const jobsReload = ref(0);
 let epoch = 0;
 let alive = true;
-let pendingChatRefresh = false;
-let requestKey = crypto.randomUUID();
-async function run(action: () => Promise<void>) {
+
+const enabled = computed(() => chat.value?.enabled ?? false);
+const totals = computed(() => {
+  const h = health.value;
+  if (h && h.enabled && h.state !== "global-off")
+    return { total: h.total, indexed: h.indexed, missing: h.missing };
+  const c = chat.value?.coverage;
+  return c ? { total: c.total, indexed: c.indexed, missing: c.pending } : null;
+});
+const resultNames: Record<string, string> = {
+  succeeded: "检索成功",
+  partial: "索引覆盖不完整",
+  "no-results": "没有找到匹配结果",
+  unavailable: "检索暂不可用",
+};
+const searchWarnings = computed(() =>
+  memorySearchWarningLabels(result.value?.warnings),
+);
+
+async function load() {
+  const token = epoch;
+  const [view, state] = await Promise.all([
+    apiRequest<MemoryHealthView>(memoryHealthPath),
+    apiRequest<ChatMemoryView>(`/api/v1/chats/${props.chatId}/memory`),
+  ]);
+  if (!alive || token !== epoch) return;
+  healthView.value = view;
+  chat.value = state;
+}
+async function run(action: () => Promise<void>, mapError = errorMessage) {
   if (busy.value) return;
   epoch++;
   poller.invalidate();
@@ -281,170 +106,83 @@ async function run(action: () => Promise<void>) {
   const token = epoch;
   try {
     await action();
-  } catch (e) {
-    if (alive && token === epoch) error.value = errorMessage(e);
+  } catch (cause) {
+    if (alive && token === epoch) error.value = mapError(cause);
   } finally {
-    if (alive) {
-      busy.value = false;
-      if (pendingChatRefresh) {
-        pendingChatRefresh = false;
-        void run(refresh);
-      }
-    }
+    if (alive) busy.value = false;
   }
 }
-async function refresh() {
-  const token = epoch;
-  if (props.mode === "chat") chat.version = null;
-  const value = await apiRequest<Settings>("/api/v1/ai/memory/settings");
-  if (!alive || token !== epoch) return;
-  settings.value = value;
-  generationId.value =
-    value.generations.find((g) => g.status === "building")?.id ??
-    value.generations.find((g) => g.status === "active")?.id ??
-    "";
-  if (props.mode === "jobs" || (props.mode === "chat" && chatId.value)) {
-    await loadJobPage();
-    if (props.mode === "chat") {
-      const state = await apiRequest<typeof chat>(
-        `/api/v1/chats/${chatId.value}/memory`,
+const poller = new ProgressPoller({
+  enabled: () =>
+    alive &&
+    !document.hidden &&
+    !busy.value &&
+    ["indexing", "service-error"].includes(health.value?.state ?? ""),
+  load: () => apiRequest<MemoryHealthView>(memoryHealthPath),
+  apply: (view) => {
+    healthView.value = view;
+  },
+  failed: () => undefined,
+  intervalMs: 10_000,
+});
+
+async function toggle() {
+  if (!session.sensitiveActive) return session.requestUnlock();
+  if (!chat.value) return;
+  const next = !chat.value.enabled;
+  const count = chat.value.coverage?.total ?? props.messageCount;
+  const ok = next
+    ? await confirmAction(
+        `启用后将自动为该聊天的全部历史建立索引（约 ${count ?? "未知"} 条消息，会产生向量调用）。${
+          healthView.value?.globalEnabled === false
+            ? "全局长期检索当前已关闭，开启后才会开始建立索引。"
+            : ""
+        }`,
+        {
+          title: "启用此聊天的长期检索？",
+          confirmText: "启用并建立索引",
+          danger: false,
+        },
+      )
+    : await confirmAction(
+        "停用后模型不能再检索这个聊天的长期历史。已建立的索引保留，可随时重新启用。",
+        { title: "停用此聊天的长期检索？", confirmText: "停用检索" },
       );
-      if (alive && token === epoch) Object.assign(chat, state);
-    }
-  }
-}
-function payload() {
-  if (!settings.value) throw new Error("配置尚未加载");
-  const {
-    version,
-    enabled,
-    protocol,
-    baseUrl,
-    model,
-    dimensions,
-    modelVersion,
-    queryPrefix,
-    timeoutSeconds,
-  } = settings.value;
-  return {
-    enabled,
-    protocol,
-    baseUrl,
-    model,
-    dimensions,
-    modelVersion,
-    queryPrefix,
-    ...(Number.isInteger(timeoutSeconds) ? { timeoutSeconds } : {}),
-    expectedVersion: version,
-    ...(secret.value ? { secret: secret.value } : {}),
-  };
-}
-async function save() {
-  if (!session.sensitiveActive) return;
-  await apiRequest("/api/v1/ai/memory/settings", {
+  if (!ok) return;
+  const saved = await apiRequest<
+    ChatMemoryView & { backfillJobIds?: string[] }
+  >(`/api/v1/chats/${props.chatId}/memory`, {
     method: "PUT",
-    body: jsonBody(payload()),
+    body: jsonBody({ enabled: next, expectedVersion: chat.value.version }),
   });
-  secret.value = "";
-  notice.value = "配置已保存；历史记录不会自动补建。";
-  await refresh();
+  chat.value = saved;
+  notice.value = next
+    ? saved.backfillJobIds?.length
+      ? "已启用长期检索，正在后台为全部历史建立索引。"
+      : "已启用长期检索，已有索引直接复用。"
+    : "已停用长期检索，已建立的索引保留。";
+  emit("changed", { chatId: props.chatId, enabled: next });
+  jobsReload.value++;
+  await load();
 }
-async function probe() {
-  if (!session.sensitiveActive) return;
-  await apiRequest("/api/v1/ai/memory/probe", {
-    method: "POST",
-    body: jsonBody(payload()),
-  });
-  notice.value = "连接与输出维度验证通过。";
-}
-async function authorize() {
-  if (!session.sensitiveActive || chat.version === null) return;
-  const id = chatId.value;
-  const enabled = !chat.enabled;
-  if (
-    !enabled &&
-    !(await confirmAction(
-      "停用后模型不能再检索这个聊天的长期历史，已建立的索引保留，可随时重新授权。",
-      { title: "停用此聊天的长期检索？", confirmText: "停用检索" },
-    ))
-  )
-    return;
-  await apiRequest(`/api/v1/chats/${id}/memory`, {
-    method: "PUT",
-    body: jsonBody({ enabled, expectedVersion: chat.version }),
-  });
-  emit("authorizationChanged", { chatId: id, enabled });
-  await refresh();
+async function repair() {
+  if (!session.sensitiveActive) return session.requestUnlock();
+  const value = await apiRequest<{
+    action: "backfill" | "rebuild";
+    jobIds: string[];
+  }>(`/api/v1/chats/${props.chatId}/memory/repair`, { method: "POST" });
+  notice.value = repairNotice(value);
+  jobsReload.value++;
+  await load();
 }
 async function search() {
-  if (!session.sensitiveActive) return;
+  if (!session.sensitiveActive) return session.requestUnlock();
   const token = epoch;
   const value = await apiRequest<SearchResult>(
-    `/api/v1/chats/${chatId.value}/memory/search`,
-    {
-      method: "POST",
-      body: jsonBody({
-        query: query.value,
-        ...(searchFrom.value
-          ? { from: new Date(searchFrom.value).toISOString() }
-          : {}),
-        ...(searchTo.value
-          ? { to: new Date(searchTo.value).toISOString() }
-          : {}),
-      }),
-    },
+    `/api/v1/chats/${props.chatId}/memory/search`,
+    { method: "POST", body: jsonBody({ query: query.value }) },
   );
   if (alive && token === epoch && session.sensitiveActive) result.value = value;
-}
-async function backfill() {
-  if (!session.sensitiveActive) return;
-  await apiRequest(`/api/v1/chats/${chatId.value}/memory/jobs`, {
-    method: "POST",
-    body: jsonBody({
-      generationId: generationId.value,
-      requestKey,
-      ...(from.value ? { from: new Date(from.value).toISOString() } : {}),
-      ...(to.value ? { to: new Date(to.value).toISOString() } : {}),
-    }),
-  });
-  requestKey = crypto.randomUUID();
-  backfillDialog.value = false;
-  resetJobPage();
-  notice.value = "补建任务已创建，可在下方任务列表查看进度。";
-  await refresh();
-}
-const jobActionConfirmations: Record<
-  string,
-  { title: string; message: string; confirmText: string; danger: boolean }
-> = {
-  cancel: {
-    title: "取消索引任务？",
-    message: "已写入的向量保留，未处理的部分不会继续；需要时可重新发起补建。",
-    confirmText: "取消任务",
-    danger: true,
-  },
-  activate: {
-    title: "启用此索引代次？",
-    message:
-      "启用后长期检索立即改用该代次的向量，旧代次退役。请确认覆盖范围已满足需要。",
-    confirmText: "启用代次",
-    danger: false,
-  },
-};
-async function action(job: Job, name: string) {
-  if (!session.sensitiveActive) return;
-  const confirmation = jobActionConfirmations[name];
-  if (
-    confirmation &&
-    !(await confirmAction(confirmation.message, confirmation))
-  )
-    return;
-  await apiRequest(`/api/v1/memory/jobs/${job.id}/actions`, {
-    method: "POST",
-    body: jsonBody({ action: name, expectedVersion: job.version }),
-  });
-  notice.value = "任务操作已完成。";
-  await refresh();
 }
 async function viewSource(ref: string) {
   if (!session.sensitiveActive || !result.value) return;
@@ -454,26 +192,14 @@ async function viewSource(ref: string) {
   }>(`/api/v1/memory/retrievals/${result.value.retrievalId}/sources/${ref}`);
   if (alive && token === epoch && session.sensitiveActive)
     source.value = value.messages
-      .map((m) => `${m.sentAt} ${m.senderId}\n${m.text}`)
+      .map((m) => `${formatDateTime(m.sentAt)} ${m.senderId}\n${m.text}`)
       .join("\n\n");
 }
-watch(chatId, () => {
-  resetJobPage();
-  jobs.value = [];
-  chat.coverage = null;
-  chat.enabled = false;
-  chat.version = null;
-  epoch++;
-  poller.invalidate();
-  result.value = null;
-  source.value = "";
-  query.value = "";
-  searchFrom.value = "";
-  searchTo.value = "";
-  requestKey = crypto.randomUUID();
-  if (busy.value) pendingChatRefresh = true;
-  else void run(refresh);
-});
+function onJobsToggle(event: Event) {
+  jobsOpen.value =
+    event.target instanceof HTMLDetailsElement && event.target.open;
+}
+
 watch(
   () => session.sensitiveActive,
   (active) => {
@@ -483,604 +209,313 @@ watch(
       result.value = null;
       source.value = "";
       query.value = "";
-      secret.value = "";
     }
   },
 );
-function onToggle(event: Event) {
-  panelOpen = event.target instanceof HTMLDetailsElement && event.target.open;
-  if (panelOpen) void poller.tick();
-  if (event.target instanceof HTMLDetailsElement && !event.target.open) {
-    epoch++;
-    poller.invalidate();
-    result.value = null;
-    source.value = "";
-    query.value = "";
-    secret.value = "";
-  }
-}
 onMounted(() => {
-  void run(refresh);
+  void run(load);
   poller.start();
 });
 onBeforeUnmount(() => {
   alive = false;
   poller.stop();
-  epoch++;
-  poller.invalidate();
   result.value = null;
   source.value = "";
-  secret.value = "";
 });
 </script>
+
 <template>
-  <component
-    :is="embedded ? 'section' : 'details'"
-    class="memory-panel"
-    :class="{ 'admin-panel': embedded }"
-    :open="!embedded && mode === 'settings'"
-    @toggle="onToggle"
-  >
-    <div v-if="embedded" class="panel-head">
-      <div>
-        <p class="card-kicker">
-          {{ mode === "jobs" ? "索引任务" : "长期检索" }}
-        </p>
-        <h2>
-          {{
-            mode === "settings"
-              ? "长期检索设置"
-              : mode === "chat"
-                ? "本聊天的长期检索"
-                : "索引任务"
-          }}
-        </h2>
+  <section class="memory-panel">
+    <DismissibleMessage v-if="error" error inline @close="error = ''">{{
+      error
+    }}</DismissibleMessage>
+    <DismissibleMessage v-else-if="notice" inline @close="notice = ''">{{
+      notice
+    }}</DismissibleMessage>
+
+    <article class="memory-status-card" aria-label="长期检索状态">
+      <header>
+        <MemoryHealthBadge :health="chat ? health : undefined" />
+        <button
+          class="button secondary tiny"
+          type="button"
+          :disabled="busy"
+          @click="run(load)"
+        >
+          <RefreshCw :size="14" />{{ busy ? "刷新中…" : "刷新" }}
+        </button>
+      </header>
+      <dl v-if="totals" class="memory-status-figures">
+        <div>
+          <dt>已索引 / 总数</dt>
+          <dd>{{ totals.indexed }} / {{ totals.total }} 条</dd>
+        </div>
+        <div>
+          <dt>缺失</dt>
+          <dd>{{ totals.missing }} 条</dd>
+        </div>
+        <div v-if="health?.progress">
+          <dt>进行中任务</dt>
+          <dd>
+            {{ health.progress.done }} / {{ health.progress.total }} 条 ·
+            {{ health.progress.percent }}%
+          </dd>
+        </div>
+      </dl>
+      <progress
+        v-if="health?.progress"
+        :value="health.progress.percent"
+        max="100"
+        aria-label="索引进度"
+      ></progress>
+      <p v-if="health?.error" class="memory-status-error">
+        最近错误：{{
+          memoryErrorText(
+            health.error.code,
+            health.error.detail,
+            health.error.at,
+          )
+        }}
+      </p>
+      <p v-if="health?.retryAt" class="panel-description">
+        下次自动重试：{{ formatDateTime(health.retryAt) }}
+      </p>
+      <p v-if="health?.state === 'global-off'" class="panel-description">
+        全局长期检索已关闭，请到
+        <RouterLink :to="{ path: '/ai', hash: '#memory-settings' }"
+          >AI 服务 → 长期检索</RouterLink
+        >
+        开启。
+      </p>
+      <p
+        v-else-if="health?.state === 'rebuild-required'"
+        class="panel-description"
+      >
+        角色昵称或归属已变化，需要重建该聊天的索引；点击“修复”启动归属重建（会产生模型用量）。
+      </p>
+      <p
+        v-else-if="health?.state === 'service-error'"
+        class="panel-description"
+      >
+        向量服务最近一次索引失败，系统会自动重试；点击“修复”会先测试连接，成功后立即重试。
+      </p>
+    </article>
+
+    <div class="memory-main-actions">
+      <div class="memory-enable">
+        <div>
+          <strong>启用长期检索</strong>
+          <p class="panel-description">
+            {{
+              enabled
+                ? "AI 可按问题检索该聊天的历史。停用后已建立的索引保留，可随时重新启用。"
+                : "启用后自动为全部历史建立索引，AI 才能检索该聊天的历史。"
+            }}
+          </p>
+        </div>
+        <ToggleSwitch
+          :model-value="enabled"
+          label="启用长期检索"
+          :disabled="busy || !chat"
+          @update:model-value="run(toggle)"
+        />
       </div>
       <button
-        class="button secondary"
+        v-if="isRepairable(health)"
+        class="button primary"
         type="button"
         :disabled="busy"
-        @click="run(refresh)"
+        @click="run(repair, repairErrorMessage)"
       >
-        <RefreshCw :size="18" />{{ busy ? "刷新中…" : "刷新" }}
+        <Wrench :size="16" />{{ busy ? "处理中…" : "修复" }}
       </button>
+      <LockedHint compact reason="启用、修复和检索测试需要敏感操作授权" />
     </div>
-    <summary v-if="!embedded">
-      {{
-        mode === "settings"
-          ? "长期检索设置"
-          : mode === "chat"
-            ? "本聊天的长期检索"
-            : "索引任务"
-      }}
-    </summary>
-    <p>
-      AI
-      根据问题自行查找已授权聊天中的历史记录，无需添加工作流节点。可检索范围受消息保留期限限制。
-    </p>
-    <DismissibleMessage
-      v-if="error && !selectedJob"
-      error
-      @close="error = ''"
-      >{{ error }}</DismissibleMessage
-    >
-    <DismissibleMessage
-      v-else-if="notice && !selectedJob"
-      @close="notice = ''"
-      >{{ notice }}</DismissibleMessage
-    >
-    <button
-      v-if="!embedded"
-      class="button secondary"
-      :disabled="busy"
-      @click="run(refresh)"
-    >
-      {{ busy ? "处理中…" : "刷新状态" }}
-    </button>
-    <form v-if="mode === 'settings' && settings" @submit.prevent="run(save)">
-      <p>
-        数据库：{{
-          settings.databaseReady ? "已准备" : "需要安装 pgvector"
-        }}；凭据：{{ settings.secretConfigured ? "已配置" : "未配置" }}
-      </p>
-      <fieldset :disabled="busy || !session.sensitiveActive">
+
+    <section class="memory-search">
+      <h3>检索测试</h3>
+      <form class="memory-search-form" @submit.prevent="run(search)">
         <label
+          ><span>测试问题</span
           ><input
-            v-model="settings.enabled"
-            type="checkbox"
-          />启用长期检索</label
-        >
-        <label
-          >服务协议<select v-model="settings.protocol">
-            <option value="ollama">Ollama</option>
-            <option value="openai-compatible">OpenAI 兼容 Embedding API</option>
-          </select></label
-        >
-        <label
-          >服务地址<input v-model="settings.baseUrl" type="url" required
+            v-model="query"
+            maxlength="500"
+            placeholder="例如：上次聚会定在哪里？"
+            :disabled="busy || !enabled || !session.sensitiveActive"
         /></label>
-        <label>模型<input v-model="settings.model" required /></label>
-        <label
-          >向量维度<input
-            v-model.number="settings.dimensions"
-            type="number"
-            min="1"
-            max="16000"
-            required
-        /></label>
-        <label
-          >模型版本标识<input v-model="settings.modelVersion" required
-        /></label>
-        <label>问题编码前缀<textarea v-model="settings.queryPrefix" /></label>
-        <label
-          >请求超时（秒）<input
-            v-model.number="settings.timeoutSeconds"
-            type="number"
-            min="5"
-            max="120"
-            step="1"
-            required
-          /><small
-            >索引、检索与测试连接共用，范围 5～120
-            秒；检索时仍受工具剩余时间限制。只改超时不会重建索引。</small
-          ></label
-        >
-        <label
-          >更新凭据（留空保留）<input
-            v-model="secret"
-            type="password"
-            autocomplete="new-password"
-        /></label>
-        <p>
-          索引文本会发送到上述服务；检索出的证据会发送到当前对话
-          Provider。模型变化需要补建新代次并显式切换。
-        </p>
-        <button class="button" type="button" @click="run(probe)">
-          测试连接
-        </button>
-        <button class="button primary" type="submit">保存配置</button>
-      </fieldset>
-    </form>
-    <div v-if="mode === 'chat'">
-      <label v-if="!fixedChatId"
-        >聊天<select v-model="chatId" :disabled="busy">
-          <option value="">选择聊天</option>
-          <option v-for="item in chats" :key="item.id" :value="item.id">
-            {{ item.displayName || item.providerChatId || item.id }}
-          </option>
-        </select></label
-      >
-      <template v-if="chatId">
-        <p>
-          {{
-            !settings?.enabled
-              ? "全局检索尚未启用"
-              : chat.enabled
-                ? "检索已启用"
-                : "聊天检索未启用"
-          }}；已索引 {{ chat.coverage?.indexed ?? 0 }} /
-          {{ chat.coverage?.total ?? 0 }} 条保留消息。尚未完成
-          {{ chat.coverage?.pending ?? 0 }} 条，其中失败缺口
-          {{ chat.coverage?.failed ?? 0 }} 条。
-        </p>
-        <button
-          class="button"
-          :disabled="busy || !session.sensitiveActive || chat.version === null"
-          @click="run(authorize)"
-        >
-          {{ chat.enabled ? "停用检索" : "授权此聊天检索" }}
-        </button>
         <button
           class="button secondary"
-          type="button"
-          :disabled="busy || !chat.enabled || !settings?.enabled"
-          @click="
-            from = '';
-            to = '';
-            backfillDialog = true;
-          "
-        >
-          新建历史补建任务
-        </button>
-        <AdminFormDialog
-          v-if="backfillDialog"
-          :sensitive-required="true"
-          title="新建历史补建任务"
-          :busy="busy"
-          @close="backfillDialog = false"
-        >
-          <p v-if="error" role="alert">{{ error }}</p>
-          <p v-if="notice" role="status">{{ notice }}</p>
-
-          <fieldset
-            :disabled="
-              busy ||
-              !session.sensitiveActive ||
-              !chat.enabled ||
-              !settings?.enabled
-            "
-          >
-            <label
-              >开始时间（本地时区）<input
-                v-model="from"
-                type="datetime-local" /></label
-            ><label
-              >结束时间（本地时区）<input v-model="to" type="datetime-local"
-            /></label>
-            <label
-              >索引代次<select v-model="generationId">
-                <option
-                  v-for="g in settings?.generations"
-                  :key="g.id"
-                  :value="g.id"
-                >
-                  {{ g.model }} · {{ stateName(g.status) }}
-                </option>
-              </select></label
-            >
-            <button
-              class="button"
-              :disabled="!generationId"
-              @click="run(backfill)"
-            >
-              补建所选范围（留空表示全部保留记录）
-            </button>
-          </fieldset>
-        </AdminFormDialog>
-        <h3>检索测试</h3>
-        <fieldset
+          type="submit"
           :disabled="
-            busy ||
-            !session.sensitiveActive ||
-            !chat.enabled ||
-            !settings?.enabled
+            busy || !enabled || !query.trim() || !session.sensitiveActive
           "
         >
-          <label
-            >检索开始时间（可选）<input
-              v-model="searchFrom"
-              type="datetime-local"
-          /></label>
-          <label
-            >检索结束时间（可选）<input
-              v-model="searchTo"
-              type="datetime-local"
-          /></label>
-          <label>测试问题<input v-model="query" maxlength="500" /></label
-          ><button
-            class="button"
-            :disabled="!query.trim()"
-            @click="run(search)"
-          >
-            测试检索
-          </button>
-        </fieldset>
-        <div v-if="result && session.sensitiveActive">
-          <h3>检索测试结果</h3>
-          <p>
-            {{ resultLabel(result.status) }} ·
-            {{ resultLabel(result.retrievalMode) }}
-          </p>
-          <p v-if="!result.evidence.length">没有找到匹配的历史来源。</p>
-          <article v-for="item in result.evidence" :key="item.ref">
-            <button
-              class="button"
-              :disabled="busy"
-              @click="run(() => viewSource(item.ref))"
-            >
-              查看来源 {{ item.ref }}
-            </button>
-            <p>
-              {{ item.text.slice(0, 200)
-              }}{{ item.text.length > 200 ? "…" : "" }}
-            </p>
-          </article>
-        </div>
-        <AdminDetailDialog
-          v-if="source && session.sensitiveActive"
-          title="历史来源原文"
-          @close="source = ''"
-        >
-          <pre>{{ source }}</pre>
-        </AdminDetailDialog>
-      </template>
-    </div>
-    <div v-if="mode !== 'settings'" class="memory-jobs">
-      <p v-if="progressError" role="status">
-        连接异常，显示最后一次获取的进度，将自动重试。
-      </p>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>聊天 / 任务</th>
-              <th>状态</th>
-              <th>处理进度</th>
-              <th>预计完成</th>
-              <th>创建时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="job in jobs" :key="job.id">
-              <td>
-                {{ job.chat_name || job.chat_id
-                }}<small>{{ jobKind(job) }} · {{ job.model }}</small>
-              </td>
-              <td>
-                <StatusBadge
-                  domain="memoryJob"
-                  :status="
-                    job.status === 'queued' &&
-                    ['available', 'warming', 'stalled'].includes(
-                      job.progress?.estimate.status ?? '',
-                    )
-                      ? 'running'
-                      : job.status
-                  "
-                />
-              </td>
-              <td v-if="job.progress?.scope">
-                {{ job.progress.processed }} / {{ job.progress.total }} 条 ·
-                {{ job.progress.percent?.toFixed(1) }}%<small
-                  v-if="job.progress.removed"
-                  >已移除 {{ job.progress.removed }} 条</small
-                >
-              </td>
-              <td v-else>
-                {{
-                  job.reason === "incremental" && !job.request_key
-                    ? "增量任务，不统计百分比"
-                    : "未记录进度统计"
-                }}
-              </td>
-              <td>
-                {{
-                  !progressError &&
-                  job.progress?.estimate.status === "available"
-                    ? localTime(job.progress.estimate.estimatedCompletionAt)
-                    : stateName(job.progress?.estimate.status ?? job.status)
-                }}
-              </td>
-              <td>{{ localTime(job.created_at) }}</td>
-              <td>
-                <button
-                  class="button tiny secondary"
-                  :disabled="busy"
-                  @click="
-                    ((event) => {
-                      const trigger = event.currentTarget;
-                      run(() => showJob(job, trigger));
-                    })($event)
-                  "
-                >
-                  详情
-                </button>
-              </td>
-            </tr>
-            <tr v-if="!jobs.length">
-              <td colspan="6">{{ busy ? "正在加载任务…" : "暂无索引任务" }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <CursorPagination
-        :page="jobPage"
-        :item-count="jobs.length"
-        :busy="busy"
-        :has-previous="jobPage > 1"
-        :has-next="!!nextJobCursor"
-        @previous="run(() => turnJobPage(-1))"
-        @next="run(() => turnJobPage(1))"
-      />
-      <AdminDetailDialog
-        v-if="selectedJob"
-        title="索引任务详情"
-        :return-focus="jobTrigger"
-        @close="closeJob"
+          <Search :size="16" />测试检索
+        </button>
+      </form>
+      <p v-if="!enabled" class="panel-description">启用后才能测试检索。</p>
+      <div
+        v-if="result && session.sensitiveActive"
+        class="memory-search-result"
       >
-        <DismissibleMessage v-if="error" error inline @close="error = ''">{{
-          error
-        }}</DismissibleMessage>
-        <DismissibleMessage v-else-if="notice" inline @close="notice = ''">{{
-          notice
-        }}</DismissibleMessage>
-        <article v-for="job in selectedJob ? [selectedJob] : []" :key="job.id">
-          <h4>
-            {{ job.chat_name || "聊天" }} · {{ jobKind(job) }} ·
-            {{
-              stateName(
-                job.status === "queued" &&
-                  ["available", "warming", "stalled"].includes(
-                    job.progress?.estimate.status ?? "",
-                  )
-                  ? "running"
-                  : job.status,
-              )
-            }}
-          </h4>
+        <p>
+          <strong>{{ resultNames[result.status] ?? result.status }}</strong> ·
+          检索方式：{{
+            result.retrievalMode === "hybrid" ? "向量 + 关键词" : "仅关键词"
+          }}
+          · 命中 {{ result.evidence.length }} 条
+        </p>
+        <p
+          v-for="item in searchWarnings"
+          :key="item"
+          class="memory-status-error"
+        >
+          {{ item }}
+        </p>
+        <p
+          v-if="result.reason === 'retrieval-unavailable'"
+          class="panel-description"
+        >
+          向量和关键词检索都未完成，不能据此判断没有相关历史。
+        </p>
+        <p v-if="result.coverage.pending" class="panel-description">
+          还有
+          {{ result.coverage.pending }} 条消息尚未建立索引，结果可能不完整。
+        </p>
+        <article v-for="item in result.evidence" :key="item.ref">
           <p>
-            {{ job.model }} · {{ localTime(job.range_from) }} —
-            {{ localTime(job.range_to) }}
+            {{ item.text.slice(0, 200) }}{{ item.text.length > 200 ? "…" : "" }}
           </p>
-          <template v-if="job.progress?.scope">
-            <p v-if="job.progress.scope === 'remaining'">升级后剩余任务进度</p>
-            <progress
-              :value="job.progress.percent ?? 0"
-              max="100"
-              aria-label="任务处理进度"
-            ></progress>
-            <p>
-              已处理 {{ job.progress.processed }} / {{ job.progress.total }} 条
-              · {{ (job.progress.percent ?? 0).toFixed(1) }}%
-            </p>
-            <p>
-              剩余 {{ job.progress.remaining }} 条<span
-                v-if="job.progress.removed"
-              >
-                · 已移除 {{ job.progress.removed }} 条（不计为索引成功）</span
-              >
-            </p>
-            <template
-              v-if="
-                job.progress.estimate.status === 'available' && !progressError
-              "
-            >
-              <p>
-                最近速度约
-                {{ job.progress.estimate.messagesPerMinute?.toFixed(1) }}
-                条/分钟
-              </p>
-              <p>
-                预计剩余约
-                {{ remainingTime(job.progress.estimate.remainingSeconds ?? 0) }}
-                · 预计完成
-                {{ localTime(job.progress.estimate.estimatedCompletionAt) }}
-              </p>
-              <small>根据近期速度估算，会随模型负载变化。</small>
-            </template>
-            <p v-else>
-              {{
-                progressError
-                  ? "连接异常，预估暂不可用"
-                  : stateName(job.progress.estimate.status)
-              }}
-            </p>
-            <small>更新于 {{ localTime(job.progress.generatedAt) }}</small>
-          </template>
-          <p v-else>
-            {{
-              job.reason !== "incremental" || job.request_key
-                ? "未记录进度统计"
-                : "增量任务，不统计百分比"
-            }}
-          </p>
-          <p>任务 ID：{{ job.id }}</p>
-          <p>
-            创建于 {{ localTime(job.created_at) }} · 更新于
-            {{ localTime(job.updated_at) }} · 当前批次尝试 {{ job.attempts }} 次
-          </p>
-          <p>索引代次：{{ job.generation_id }}</p>
-          <p v-if="job.error_code">
-            最近错误：{{ job.error_code
-            }}<template v-if="embeddingFailureSummary(job.error_detail)">
-              （{{ embeddingFailureSummary(job.error_detail) }}）</template
-            ><template v-if="typeof job.error_detail?.at === 'string'">
-              · {{ localTime(job.error_detail.at) }}</template
-            >
-          </p>
-          <details>
-            <summary>诊断信息</summary>
-            处理游标 {{ job.cursor_index }} /
-            {{ job.through_index }}（不是消息数量）
-          </details>
           <button
-            v-if="['queued', 'running'].includes(job.status)"
-            class="button"
-            :disabled="busy || !session.sensitiveActive"
-            @click="run(() => action(job, 'pause'))"
+            class="button tiny secondary"
+            type="button"
+            :disabled="busy"
+            @click="run(() => viewSource(item.ref))"
           >
-            暂停
-          </button>
-          <button
-            v-if="['paused', 'failed'].includes(job.status)"
-            class="button"
-            :disabled="busy || !session.sensitiveActive"
-            @click="run(() => action(job, 'resume'))"
-          >
-            恢复
-          </button>
-          <button
-            v-if="
-              ['queued', 'running', 'paused', 'failed'].includes(job.status)
-            "
-            class="button"
-            :disabled="busy || !session.sensitiveActive"
-            @click="run(() => action(job, 'cancel'))"
-          >
-            取消
-          </button>
-          <button
-            v-if="
-              job.status === 'succeeded' &&
-              settings?.generations.some(
-                (g) => g.id === job.generation_id && g.status === 'building',
-              )
-            "
-            class="button"
-            :disabled="busy || !session.sensitiveActive"
-            @click="run(() => action(job, 'activate'))"
-          >
-            验证覆盖并启用此代次
+            查看来源 {{ item.ref }}
           </button>
         </article>
+      </div>
+      <AdminDetailDialog
+        v-if="source && session.sensitiveActive"
+        title="历史来源原文"
+        size="md"
+        @close="source = ''"
+      >
+        <pre class="memory-source">{{ source }}</pre>
       </AdminDetailDialog>
-    </div>
-  </component>
+    </section>
+
+    <details class="advanced-settings" @toggle="onJobsToggle">
+      <summary>最近任务</summary>
+      <MemoryJobsPanel
+        v-if="jobsOpen"
+        :chat-id="chatId"
+        :reload-token="jobsReload"
+      />
+    </details>
+  </section>
 </template>
+
 <style scoped>
-.memory-panel:not(.admin-panel) {
-  background: rgba(255, 255, 255, 0.72);
-  padding: 1rem;
-  border: 1px solid var(--bubblepilot-line, #ddd);
-  border-radius: 12px;
-  margin-block: 1rem;
-  grid-column: 1/-1;
-}
-.memory-panel summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-.memory-panel fieldset {
-  border: 0;
-  padding: 0;
+.memory-panel {
   display: grid;
-  gap: 0.75rem;
+  gap: 16px;
+  min-width: 0;
 }
-.memory-panel label {
+.memory-status-card {
   display: grid;
-  gap: 0.35rem;
-  margin-block: 0.5rem;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--bubblepilot-line);
+  border-radius: 16px;
+  background: var(--bubblepilot-surface-subtle);
 }
-.memory-panel pre {
+.memory-status-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.memory-status-card .memory-health {
+  font-size: var(--bubblepilot-text-lg);
+}
+.memory-status-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 10px;
+  margin: 0;
+}
+.memory-status-figures dt {
+  color: var(--bubblepilot-muted);
+  font-size: var(--bubblepilot-text-sm);
+}
+.memory-status-figures dd {
+  margin: 4px 0 0;
+  font-weight: 700;
+}
+.memory-status-card progress {
+  width: 100%;
+  height: 0.6rem;
+  accent-color: var(--bubblepilot-accent);
+}
+.memory-status-card p,
+.memory-search p {
+  margin: 0;
+}
+.memory-status-error {
+  color: var(--bubblepilot-danger);
+  overflow-wrap: anywhere;
+}
+.memory-main-actions {
+  display: grid;
+  gap: 10px;
+}
+.memory-main-actions > .button {
+  justify-self: start;
+}
+.memory-enable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.memory-enable .panel-description {
+  margin: 4px 0 0;
+}
+.memory-search {
+  display: grid;
+  gap: 10px;
+}
+.memory-search h3 {
+  margin: 0;
+}
+.memory-search-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+.memory-search-result {
+  display: grid;
+  gap: 8px;
+}
+.memory-search-result article {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--bubblepilot-line);
+}
+.memory-search-result article .button {
+  justify-self: start;
+}
+.memory-source {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.memory-jobs {
-  min-width: 0;
-}
-.memory-jobs td small {
-  display: block;
-  color: #64748b;
-  margin-top: 0.35rem;
-}
-.memory-jobs .table-scroll {
-  overflow-x: auto;
-}
-.memory-jobs progress {
-  width: min(100%, 36rem);
-  height: 0.75rem;
-  accent-color: #3279c4;
-}
-.memory-jobs article {
-  border-top: 1px solid #ddd;
-  padding: 0.5rem;
-}
-
-.memory-panel .button {
-  width: fit-content;
-  justify-self: start;
-}
-.memory-panel [role="alert"] {
-  color: #a32929;
-}
-@media (min-width: 760px) {
-  .memory-panel fieldset {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .memory-panel fieldset > p,
-  .memory-panel label:has(textarea) {
-    grid-column: 1 / -1;
+@media (max-width: 680px) {
+  .memory-search-form {
+    grid-template-columns: 1fr;
   }
 }
 </style>

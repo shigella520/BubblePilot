@@ -88,15 +88,19 @@ describe("memory foundations", () => {
     );
   });
   it.each([
-    { embeddings: [[1]] },
-    { embeddings: [[0, 0]] },
-    {
-      embeddings: [
-        [1, 2],
-        [3, 4],
-      ],
-    },
-  ])("rejects invalid vector batches", async (payload) => {
+    // A different length names the length the service returned.
+    [{ embeddings: [[1]] }, "MEMORY_EMBEDDING_DIMENSION_MISMATCH"],
+    [{ embeddings: [[0, 0]] }, "MEMORY_EMBEDDING_INVALID_OUTPUT"],
+    [
+      {
+        embeddings: [
+          [1, 2],
+          [3, 4],
+        ],
+      },
+      "MEMORY_EMBEDDING_INVALID_OUTPUT",
+    ],
+  ] as const)("rejects invalid vector batches", async (payload, code) => {
     const client = new HttpEmbeddingClient(
       vi
         .fn<typeof fetch>()
@@ -104,7 +108,7 @@ describe("memory foundations", () => {
     );
     await expect(
       client.encode({ ...defaultMemoryConfig, dimensions: 2 }, null, ["x"]),
-    ).rejects.toMatchObject({ code: "MEMORY_EMBEDDING_INVALID_OUTPUT" });
+    ).rejects.toMatchObject({ code });
   });
   it("does not expose a provider error body", async () => {
     const client = new HttpEmbeddingClient(

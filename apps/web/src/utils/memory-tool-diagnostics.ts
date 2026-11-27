@@ -45,6 +45,42 @@ const issues: Record<string, string> = {
   other: "不符合要求",
 };
 
+const embeddingErrorMessages: Record<string, string> = {
+  MEMORY_MODEL_CHANGED: "向量模型与索引代次不一致",
+  MEMORY_MODEL_IDENTITY_UNAVAILABLE: "无法确认向量模型身份",
+  MEMORY_EMBEDDING_HTTP_ERROR: "向量服务返回 HTTP 错误",
+  MEMORY_EMBEDDING_UNAVAILABLE: "向量服务连接失败",
+  MEMORY_EMBEDDING_TIMEOUT: "向量服务响应超时",
+  MEMORY_EMBEDDING_EMPTY: "向量服务返回空响应",
+  MEMORY_EMBEDDING_TOO_LARGE: "向量服务响应过大",
+  MEMORY_EMBEDDING_INPUT_INVALID: "向量输入不符合要求",
+  MEMORY_EMBEDDING_INVALID_OUTPUT: "向量格式或维度不符合要求",
+  MEMORY_EMBEDDING_INVALID_ORDER: "向量返回顺序不符合要求",
+  MEMORY_EMBEDDING_DIMENSION_MISMATCH: "向量维度与配置不一致",
+  EMBEDDING_UNAVAILABLE: "向量服务不可用",
+};
+/** Chinese name of an embedding / index error code; unknown codes unchanged. */
+export function embeddingErrorLabel(code: string): string {
+  return embeddingErrorMessages[code] ?? code;
+}
+
+/**
+ * Fallback reasons of an admin search test (MemorySearchResult.warnings):
+ * why vector search was skipped, or keyword search failed.
+ */
+export function memorySearchWarningLabels(
+  warnings:
+    | readonly { component: string; code: string; httpStatus?: number }[]
+    | undefined,
+): string[] {
+  return (warnings ?? []).map((w) => {
+    if (w.component === "keyword")
+      return "关键词检索失败，结果可能漏掉精确匹配";
+    const name = embeddingErrorMessages[w.code] ?? "向量服务不可用或返回异常";
+    return `向量检索已降级：${name}${w.httpStatus ? `（HTTP ${w.httpStatus}）` : ""}`;
+  });
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -74,24 +110,12 @@ function failureLabel(value: unknown): string | null {
     return `${stage}：参数不符合要求${detail ? `（${detail}）` : ""}`;
   }
   if (category === "embedding-error") {
-    const messages: Record<string, string> = {
-      MEMORY_MODEL_CHANGED: "向量模型与索引代次不一致",
-      MEMORY_MODEL_IDENTITY_UNAVAILABLE: "无法确认向量模型身份",
-      MEMORY_EMBEDDING_HTTP_ERROR: "向量服务返回 HTTP 错误",
-      MEMORY_EMBEDDING_UNAVAILABLE: "向量服务连接失败",
-      MEMORY_EMBEDDING_TIMEOUT: "向量服务响应超时",
-      MEMORY_EMBEDDING_EMPTY: "向量服务返回空响应",
-      MEMORY_EMBEDDING_TOO_LARGE: "向量服务响应过大",
-      MEMORY_EMBEDDING_INPUT_INVALID: "向量输入不符合要求",
-      MEMORY_EMBEDDING_INVALID_OUTPUT: "向量格式或维度不符合要求",
-      MEMORY_EMBEDDING_INVALID_ORDER: "向量返回顺序不符合要求",
-    };
     const summary = embeddingFailureSummary({
       httpStatus: failure.httpStatus,
       upstreamCode: failure.upstreamCode,
       upstreamRequestId: failure.upstreamRequestId,
     });
-    return `${stage}：${messages[String(failure.errorCode)] ?? "向量服务不可用或返回异常"}${summary ? `（${summary}）` : ""}`;
+    return `${stage}：${embeddingErrorMessages[String(failure.errorCode)] ?? "向量服务不可用或返回异常"}${summary ? `（${summary}）` : ""}`;
   }
   if (category === "database-error") {
     const code = failure.errorCode;

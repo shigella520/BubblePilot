@@ -158,6 +158,8 @@ interface Execution {
   cacheEligiblePromptTokens: number;
   cacheHitRate: number | null;
   contextSnapshot: Record<string, unknown> | null;
+  /** Node / tool / route / image-input details removed by retention. */
+  detailsPurgedAt?: string | null;
   botIdentity?: {
     workflowId: string;
     nickname: string | null;
@@ -1456,6 +1458,15 @@ function contextSnapshotValue(
               }}。本轮到期重新生成提醒，没有新的用户消息。
             </p>
           </section>
+          <p
+            v-if="detail.detailsPurgedAt"
+            class="empty-panel compact"
+            role="status"
+          >
+            节点与工具明细已按保留期清理（{{
+              formatDateTime(detail.detailsPurgedAt)
+            }}）；执行记录、出站发送和用量统计仍保留。
+          </p>
           <div class="trace-columns">
             <section>
               <h3>节点轨迹</h3>
@@ -1497,6 +1508,12 @@ function contextSnapshotValue(
                   </details>
                 </div>
               </article>
+              <div
+                v-if="!detail.nodes.length && detail.detailsPurgedAt"
+                class="empty-panel compact"
+              >
+                节点明细已按保留期清理。
+              </div>
             </section>
             <section>
               <h3>AI 路由决策</h3>
@@ -1576,7 +1593,11 @@ function contextSnapshotValue(
                 </div>
               </article>
               <p v-if="!detail.aiRouteTraces.length" class="keyline">
-                历史执行未记录路由决策，不使用当前配置反推。
+                {{
+                  detail.detailsPurgedAt
+                    ? "路由决策明细已按保留期清理。"
+                    : "历史执行未记录路由决策，不使用当前配置反推。"
+                }}
               </p>
             </section>
             <section class="provider-attempt-section">
@@ -1983,7 +2004,11 @@ function contextSnapshotValue(
                 v-if="!detail.aiImageInputs.length"
                 class="empty-panel compact"
               >
-                本次执行没有图片输入。
+                {{
+                  detail.detailsPurgedAt
+                    ? "图片输入明细已按保留期清理。"
+                    : "本次执行没有图片输入。"
+                }}
               </div>
             </section>
             <section>
@@ -2194,7 +2219,11 @@ function contextSnapshotValue(
                 v-if="!detail.aiToolExecutions.length"
                 class="empty-panel compact"
               >
-                本次执行没有工具调用。
+                {{
+                  detail.detailsPurgedAt
+                    ? "工具调用明细已按保留期清理。"
+                    : "本次执行没有工具调用。"
+                }}
               </div>
             </section>
             <section id="execution-outbound">

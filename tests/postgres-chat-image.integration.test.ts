@@ -1,4 +1,5 @@
 import { AttachmentSession } from "../modules/attachments/attachment-session.js";
+import { memoryEmbeddingsDdl } from "../modules/memory/memory-embeddings-ddl.js";
 import { AttachmentStore } from "../modules/attachments/attachment-store.js";
 import { attachmentLimitsSchema } from "../modules/attachments/attachment-policy.js";
 import type { PluginSession } from "../modules/plugins/plugin-session.js";
@@ -35,9 +36,7 @@ describe.runIf(!!url)("chat image archive authorization", () => {
         ),
       );
     await pool.query("CREATE EXTENSION vector");
-    await pool.query(
-      "CREATE TABLE memory_embeddings(chunk_id UUID PRIMARY KEY REFERENCES memory_chunks(id) ON DELETE CASCADE,dimensions INTEGER NOT NULL,embedding vector NOT NULL)",
-    );
+    for (const statement of memoryEmbeddingsDdl) await pool.query(statement);
     sources = new ChatImageSourceRepository(pool);
     memory = new MemoryRepository(connection.toString(), "fictional-image-key");
     const current = await memory.settings();

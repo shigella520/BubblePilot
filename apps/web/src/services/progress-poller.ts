@@ -10,6 +10,8 @@ export class ProgressPoller<T> {
       load: () => Promise<T>;
       apply: (result: T) => void;
       failed: () => void;
+      /** Poll interval; defaults to five seconds. */
+      intervalMs?: number;
     },
   ) {}
   invalidate() {
@@ -17,7 +19,10 @@ export class ProgressPoller<T> {
   }
   start() {
     if (this.timer) return;
-    this.timer = setInterval(() => void this.tick(), 5000);
+    this.timer = setInterval(
+      () => void this.tick(),
+      this.options.intervalMs ?? 5000,
+    );
   }
   async tick() {
     if (this.stopped || this.pending || !this.options.enabled()) return;

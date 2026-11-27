@@ -117,8 +117,10 @@ const records = [
             previousStatus: "running",
           }
         : null,
+    // The closed record shows details removed by the retention period.
+    detailsPurgedAt: status === "closed" ? stamp(0) : null,
     nodes:
-      index === 5
+      index === 5 || status === "closed"
         ? []
         : Array.from({ length: 20 }, (_, i) => ({
             id: `node-${i}`,

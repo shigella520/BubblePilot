@@ -566,7 +566,7 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     await drain();
   });
 
-  it("backfills only gaps: indexed messages are skipped yet counted as processed", async () => {
+  it("backfills only gaps: progress counts the gap and indexed history is not re-embedded", async () => {
     const id = await chat();
     await drain();
     for (let i = 0; i < 4; i++) await message(id, `虚构已索引消息 ${i}`);
@@ -603,7 +603,9 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     }
     const done = (await repo.jobs(id)).find((j) => j.id === job.id)!;
     expect(done.status).toBe("succeeded");
-    expect(done.progress.processed).toBe(5);
+    // Only the unindexed message is a job item (R7).
+    expect(done.progress.total).toBe(1);
+    expect(done.progress.processed).toBe(1);
     expect(done.progress.percent).toBe(100);
     const embedded = encode.mock.calls.flatMap((call) => call[2]);
     expect(embedded.join("\n")).toContain("虚构缺口消息");
@@ -2270,6 +2272,233 @@ describe.runIf(!!url)("PostgreSQL memory lifecycle", () => {
     ).toBe(ids[124]);
     expect(await repo.jobs(await chat(), { limit: 1, id: ids[124]! })).toEqual(
       [],
+    );
+  });
+  async function healthOf(chatId: string) {
+    return (await repo.health(chatId)).chats[0]!;
+  }
+  /** Runs the worker for one chat only, keeping other queued jobs aside. */
+  async function workChat(svc: MemoryService, chatId: string, rounds = 20) {
+    for (let i = 0; i < rounds; i++) {
+      await repo.pool.query(
+        "UPDATE memory_jobs SET next_attempt_at=CASE WHEN chat_id=$1 THEN now() ELSE now()+interval '1 hour' END WHERE status='queued'",
+        [chatId],
+      );
+      await svc.work();
+      if (
+        !(
+          await repo.pool.query(
+            "SELECT 1 FROM memory_jobs WHERE chat_id=$1 AND status IN ('queued','running') AND auto_retries=0",
+            [chatId],
+          )
+        ).rowCount
+      )
+        return;
+    }
+  }
+  it("keeps retrying upstream failures with backoff, reports health and repairs after recovery", async () => {
+    const id = await chat();
+    await message(id, "虚构自动重试消息");
+    const failing = new MemoryService(repo, {
+      identity: () => Promise.resolve("fixture-v1"),
+      encode: () =>
+        Promise.reject(
+          new EmbeddingError("MEMORY_EMBEDDING_HTTP_ERROR", 502, {
+            kind: "http",
+            httpStatus: 502,
+          }),
+        ),
+    });
+    for (let i = 0; i < 3; i++) await workChat(failing, id, 1);
+    const waiting = (
+      await repo.pool.query<{
+        status: string;
+        auto_retries: number;
+        attempts: number;
+        wait: number;
+      }>(
+        "SELECT status,auto_retries,attempts,extract(epoch FROM next_attempt_at-now())::int AS wait FROM memory_jobs WHERE chat_id=$1",
+        [id],
+      )
+    ).rows;
+    expect(waiting).toHaveLength(1);
+    // After three quick attempts the job waits five minutes instead of failing.
+    expect(waiting[0]).toMatchObject({
+      status: "queued",
+      auto_retries: 1,
+      attempts: 0,
+    });
+    expect(waiting[0]!.wait).toBeGreaterThan(240);
+    const broken = await healthOf(id);
+    expect(broken).toMatchObject({
+      state: "service-error",
+      total: 1,
+      indexed: 0,
+      error: { code: "MEMORY_EMBEDDING_HTTP_ERROR" },
+    });
+    expect(broken.retryAt).not.toBeNull();
+    // Repair tests the service first; a still-broken service is reported.
+    await expect(failing.repair(id)).rejects.toMatchObject({
+      code: "MEMORY_EMBEDDING_HTTP_ERROR",
+    });
+    const repaired = await service.repair(id);
+    expect(repaired.action).toBe("backfill");
+    expect(repaired.jobIds).toHaveLength(1);
+    await workChat(service, id);
+    expect(await healthOf(id)).toMatchObject({
+      state: "healthy",
+      indexed: 1,
+      missing: 0,
+      error: null,
+    });
+  });
+  it("stops retrying client errors and offers a gap-only repair", async () => {
+    const id = await chat();
+    await message(id, "虚构配置错误消息");
+    const rejecting = new MemoryService(repo, {
+      identity: () => Promise.resolve("fixture-v1"),
+      encode: () =>
+        Promise.reject(
+          new EmbeddingError("MEMORY_EMBEDDING_HTTP_ERROR", 400, {
+            kind: "http",
+            httpStatus: 400,
+          }),
+        ),
+    });
+    for (let i = 0; i < 3; i++) await workChat(rejecting, id, 1);
+    expect(await healthOf(id)).toMatchObject({ state: "missing", missing: 1 });
+    await service.repair(id);
+    await workChat(service, id);
+    expect(await healthOf(id)).toMatchObject({ state: "healthy", indexed: 1 });
+  });
+  it("enabling a chat backfills its whole history once and re-enabling reuses it", async () => {
+    const id = randomUUID();
+    await repo.pool.query(
+      "INSERT INTO chats(id,provider,provider_chat_id,type,enabled) VALUES($1::uuid,'bluebubbles',$1::text,'group',TRUE)",
+      [id],
+    );
+    await message(id, "虚构启用前消息一");
+    await message(id, "虚构启用前消息二");
+    const created = await repo.authorize(id, true, 0);
+    expect(created).toHaveLength(1);
+    expect(await healthOf(id)).toMatchObject({ state: "indexing", total: 2 });
+    // A second enable while the backfill is pending does not stack jobs.
+    expect(await repo.authorize(id, false, 1)).toEqual([]);
+    expect(await repo.authorize(id, true, 2)).toEqual([]);
+    await workChat(service, id);
+    expect(await healthOf(id)).toMatchObject({
+      state: "healthy",
+      total: 2,
+      indexed: 2,
+    });
+    await repo.authorize(id, false, 3);
+    expect(await healthOf(id)).toMatchObject({ state: "disabled" });
+    await repo.authorize(id, true, 4);
+    await workChat(service, id);
+    expect(await healthOf(id)).toMatchObject({ state: "healthy", indexed: 2 });
+  });
+  it("switches models at once, restores a retired model and purges replaced vectors", async () => {
+    const id = await chat();
+    await message(id, "虚构切换模型备份消息");
+    await workChat(service, id);
+    const v2 = {
+      ...config,
+      model: "fictional-embedding-v2",
+      dimensions: 3,
+      precision: "float16" as const,
+    };
+    const v2Embedding: EmbeddingClient = {
+      identity: () => Promise.resolve("fixture-v2"),
+      encode: (_c, _s, texts) =>
+        Promise.resolve(
+          texts.map((t) => (t.includes("备份") ? [1, 0, 0] : [0, 1, 0])),
+        ),
+    };
+    const v2Service = new MemoryService(repo, v2Embedding);
+    const switched = await repo.saveSettings(
+      v2,
+      true,
+      (await repo.settings()).version,
+      undefined,
+      "fixture-v2",
+    );
+    expect(switched.switched).toBe(true);
+    const generations = await repo.generations();
+    expect(generations.find((g) => g.id === generationId)).toMatchObject({
+      status: "retired",
+    });
+    expect(
+      generations.find((g) => g.id === generationId)?.retired_at,
+    ).toBeTruthy();
+    expect(generations.find((g) => g.status === "active")?.id).toBe(
+      switched.generationId,
+    );
+    const indexes = async () =>
+      (
+        await repo.pool.query<{ indexname: string }>(
+          "SELECT indexname FROM pg_indexes WHERE tablename='memory_embeddings' AND indexname LIKE 'memory_embeddings_hnsw%' ORDER BY 1",
+        )
+      ).rows.map((r) => r.indexname);
+    expect(await indexes()).toEqual(
+      expect.arrayContaining([
+        "memory_embeddings_hnsw_f16_3",
+        "memory_embeddings_hnsw_f32_2",
+      ]),
+    );
+    // The new model indexes from zero into float16 storage.
+    expect(await healthOf(id)).toMatchObject({ state: "indexing" });
+    await workChat(v2Service, id);
+    expect(await healthOf(id)).toMatchObject({ state: "healthy", indexed: 1 });
+    const stored = (
+      await repo.pool.query<{ half: number; full: number }>(
+        "SELECT count(embedding_half)::int AS half,count(embedding)::int AS full FROM memory_embeddings WHERE generation_id=$1 AND chat_id=$2",
+        [switched.generationId, id],
+      )
+    ).rows[0];
+    expect(stored).toEqual({ half: 1, full: 0 });
+    const session = await v2Service.session(
+      (await repo.scope(id, 999999, null))!,
+    );
+    expect(JSON.stringify(await session.search({ query: "备份" }))).toContain(
+      "虚构切换模型备份消息",
+    );
+    // Messages arriving now are only indexed by the new model.
+    await message(id, "虚构切换期间消息");
+    await workChat(v2Service, id);
+    const restored = await repo.saveSettings(
+      config,
+      true,
+      (await repo.settings()).version,
+      undefined,
+      "fixture-v1",
+    );
+    expect(restored).toEqual({ switched: true, generationId });
+    expect(await healthOf(id)).toMatchObject({ state: "indexing" });
+    await workChat(service, id);
+    expect(await healthOf(id)).toMatchObject({ state: "healthy", indexed: 2 });
+    // Purging removes the replaced model's data and index, not the current one.
+    const purge = await service.purgeHistory();
+    expect(purge.generations).toBe(1);
+    expect(purge.chunks).toBeGreaterThan(0);
+    expect(
+      (await repo.generations()).find((g) => g.id === switched.generationId)
+        ?.status,
+    ).toBe("purged");
+    expect(
+      (
+        await repo.pool.query(
+          "SELECT 1 FROM memory_chunks WHERE generation_id=$1",
+          [switched.generationId],
+        )
+      ).rowCount,
+    ).toBe(0);
+    expect(await indexes()).not.toContain("memory_embeddings_hnsw_f16_3");
+    expect(await indexes()).toContain("memory_embeddings_hnsw_f32_2");
+    expect(await healthOf(id)).toMatchObject({ state: "healthy", indexed: 2 });
+    // Each switch queued backfills for every enabled chat in this shared
+    // database; leave none behind for later runs.
+    await repo.pool.query(
+      "UPDATE memory_jobs SET status='superseded' WHERE status='queued' AND reason='backfill' AND request_key IS NULL",
     );
   });
 });

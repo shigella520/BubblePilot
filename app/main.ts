@@ -57,6 +57,7 @@ import {
 import { ManagedBlueBubblesReplyGateway } from "../modules/integrations/bluebubbles/managed-reply-gateway.js";
 import { PostgresBlueBubblesSettingsRepository } from "../modules/integrations/bluebubbles/postgres-settings-repository.js";
 import { DataHousekeeping } from "../modules/maintenance/data-housekeeping.js";
+import { DataRetentionSettingsRepository } from "../modules/maintenance/data-retention-settings.js";
 import { SettingsCipher } from "../modules/integrations/bluebubbles/settings-cipher.js";
 import { BlueBubblesSettingsService } from "../modules/integrations/bluebubbles/settings-service.js";
 import { ManagedLinkPreviewEnricher } from "../modules/integrations/bluebubbles/link-preview-enricher.js";
@@ -392,6 +393,9 @@ const application = buildApplication(config, repository, {
   memeDelivery,
   imageDelivery,
   memory: memoryService,
+  dataRetention: new DataRetentionSettingsRepository(
+    memoryService.repository.pool,
+  ),
   botIdentity,
   ai: {
     repository: aiRepository,
@@ -438,6 +442,17 @@ const application = buildApplication(config, repository, {
 const housekeeping = new DataHousekeeping(
   memoryService.repository.pool,
   (results) => application.log.info({ results }, "Data housekeeping"),
+  undefined,
+  [
+    {
+      // Replaced embedding generations expire after their retention days.
+      step: "retired-memory-generations",
+      run: async () =>
+        (await memoryService.repository.ready())
+          ? (await memoryService.repository.purgeRetired(false)).chunks
+          : 0,
+    },
+  ],
 );
 
 const shutdown = async (signal: string) => {

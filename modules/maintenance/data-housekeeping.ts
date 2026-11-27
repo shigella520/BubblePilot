@@ -73,7 +73,30 @@ export const housekeepingSteps: ReadonlyArray<{ step: string; sql: string }> = [
           AND created_at < now() - interval '30 days'
         LIMIT 500)`,
   },
+  {
+    // Finished executions keep their row, deliveries, attributions and usage
+    // counts; node / tool / route / image-input details expire with the
+    // configured execution detail retention (default 90 days).
+    step: "old-execution-details",
+    sql: `WITH target AS (
+        SELECT id FROM workflow_executions
+        WHERE details_purged_at IS NULL AND completed_at IS NOT NULL
+          AND completed_at < now() - make_interval(days => COALESCE(
+            (SELECT execution_detail_days FROM data_retention_settings WHERE id = 1), 90))
+        ORDER BY completed_at LIMIT 200),
+      nodes AS (DELETE FROM node_executions WHERE execution_id IN (SELECT id FROM target)),
+      tools AS (DELETE FROM ai_tool_executions WHERE execution_id IN (SELECT id FROM target)),
+      routes AS (DELETE FROM ai_route_traces WHERE execution_id IN (SELECT id FROM target)),
+      images AS (DELETE FROM ai_image_inputs WHERE execution_id IN (SELECT id FROM target))
+      UPDATE workflow_executions SET details_purged_at = now() WHERE id IN (SELECT id FROM target)`,
+  },
 ];
+
+/** Housekeeping work that needs application code rather than one statement. */
+export interface HousekeepingTask {
+  step: string;
+  run: () => Promise<number>;
+}
 
 export class DataHousekeeping {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -83,6 +106,7 @@ export class DataHousekeeping {
     private readonly report: (results: HousekeepingResult[]) => void = () =>
       undefined,
     private readonly intervalMs = 10 * 60 * 1000,
+    private readonly tasks: readonly HousekeepingTask[] = [],
   ) {}
 
   async runOnce(): Promise<HousekeepingResult[]> {
@@ -94,6 +118,13 @@ export class DataHousekeeping {
       } catch {
         // Missing optional tables (memory not prepared) or a transient error
         // must not stop the remaining steps; the next run retries.
+        results.push({ step, rows: -1 });
+      }
+    }
+    for (const { step, run } of this.tasks) {
+      try {
+        results.push({ step, rows: await run() });
+      } catch {
         results.push({ step, rows: -1 });
       }
     }

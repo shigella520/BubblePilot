@@ -165,6 +165,13 @@ export function errorMessage(cause: unknown): string {
         "成员映射已被其他操作更新，请重新打开后再保存。",
       CHAT_PARTICIPANT_NOT_DISCOVERED:
         "成员映射中包含尚未在该聊天历史出现的发送者 ID。",
+      MEMORY_CHAT_UNAVAILABLE: "请先启用该聊天的监听，再启用长期检索。",
+      MEMORY_DISABLED: "该聊天未启用长期检索，或全局长期检索已关闭。",
+      MEMORY_DATABASE_NOT_READY:
+        "数据库尚未安装 pgvector，暂不能启用长期检索。",
+      MEMORY_GENERATION_UNAVAILABLE: "请先配置并保存向量模型。",
+      DATA_RETENTION_VERSION_CONFLICT:
+        "数据保留设置已被其他操作修改，请刷新后重试。",
     };
     const known = knownMessages[cause.code];
     const message =

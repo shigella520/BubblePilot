@@ -402,6 +402,92 @@ function usageMetrics(row: UsageRow | UsageSeriesRow): AiUsageMetrics {
   };
 }
 
+const usagePeriods = [
+  ["today", 1],
+  ["week", 2],
+  ["month", 3],
+] as const;
+const cacheEligible =
+  "a.cached_prompt_tokens IS NOT NULL AND a.prompt_tokens IS NOT NULL";
+// Same metrics as the per-bucket series; `filter` narrows within a period.
+const usageMetricColumns: readonly {
+  name: string;
+  sql: string;
+  filter?: string;
+}[] = [
+  { name: "request_count", sql: "COUNT(*)" },
+  {
+    name: "succeeded_request_count",
+    sql: "COUNT(*)",
+    filter: "a.status = 'succeeded'",
+  },
+  {
+    name: "failed_request_count",
+    sql: "COUNT(*)",
+    filter: "a.status = 'failed'",
+  },
+  { name: "prompt_tokens", sql: "SUM(a.prompt_tokens)" },
+  { name: "completion_tokens", sql: "SUM(a.completion_tokens)" },
+  { name: "reasoning_tokens", sql: "SUM(a.reasoning_tokens)" },
+  {
+    name: "total_tokens",
+    sql: "SUM(COALESCE(a.total_tokens, COALESCE(a.prompt_tokens, 0) + COALESCE(a.completion_tokens, 0)))",
+  },
+  {
+    name: "cached_prompt_tokens",
+    sql: "SUM(a.cached_prompt_tokens)",
+    filter: cacheEligible,
+  },
+  {
+    name: "cache_eligible_prompt_tokens",
+    sql: "SUM(a.prompt_tokens)",
+    filter: cacheEligible,
+  },
+  { name: "all_prompt_tokens", sql: "SUM(a.prompt_tokens)" },
+];
+
+/**
+ * Today/week/month totals per provider ($1 = now, $2 = time zone). One range
+ * scan from the earliest period start (a week can start before the month),
+ * split into periods with FILTER, then one row per provider and period. Rows,
+ * order and values match the former three-way join of periods × attempts.
+ */
+export const aiUsagePeriodSql = `WITH bounds AS (
+  SELECT
+    date_trunc('day', $1::timestamptz AT TIME ZONE $2) AT TIME ZONE $2 AS today_start,
+    date_trunc('week', $1::timestamptz AT TIME ZONE $2) AT TIME ZONE $2 AS week_start,
+    date_trunc('month', $1::timestamptz AT TIME ZONE $2) AT TIME ZONE $2 AS month_start
+), totals AS (
+  SELECT a.provider_id,
+    ${usagePeriods
+      .flatMap(([period]) =>
+        usageMetricColumns.map(
+          (metric) =>
+            `${metric.sql} FILTER (WHERE a.created_at >= b.${period}_start${metric.filter ? ` AND ${metric.filter}` : ""}) AS ${period}_${metric.name}`,
+        ),
+      )
+      .join(",\n    ")}
+  FROM bounds b
+  JOIN ai_provider_attempts a
+    ON a.created_at >= LEAST(b.today_start, b.week_start, b.month_start)
+   AND a.created_at <= $1::timestamptz
+  GROUP BY a.provider_id
+)
+SELECT p.id AS provider_id, p.name AS provider_name, v.period,
+  ${usageMetricColumns.map((metric) => `v.${metric.name}::text AS ${metric.name}`).join(", ")}
+FROM ai_providers p
+LEFT JOIN totals t ON t.provider_id = p.id
+CROSS JOIN LATERAL (VALUES
+  ${usagePeriods
+    .map(
+      ([period, order]) =>
+        `('${period}', ${order}, ${usageMetricColumns.map((metric) => `COALESCE(t.${period}_${metric.name}, 0)`).join(", ")})`,
+    )
+    .join(",\n  ")}
+) AS v(period, period_order, ${usageMetricColumns.map((metric) => metric.name).join(", ")})
+WHERE p.deleted_at IS NULL
+ORDER BY p.sort_order, p.id, v.period_order`;
+
 function usageBucketMinutes(hours: AiUsageHours): 1 | 5 | 15 | 30 {
   if (hours === 1) return 1;
   if (hours === 6) return 5;
@@ -1326,59 +1412,7 @@ export class PostgresAiRepository implements AiRepository {
   }): Promise<AiUsageReport> {
     const bucketMinutes = usageBucketMinutes(input.hours);
     const [periodResult, seriesResult] = await Promise.all([
-      this.pool.query<UsageRow>(
-        `WITH bounds AS (
-           SELECT
-             date_trunc('day', $1::timestamptz AT TIME ZONE $2)
-               AT TIME ZONE $2 AS today_start,
-             date_trunc('week', $1::timestamptz AT TIME ZONE $2)
-               AT TIME ZONE $2 AS week_start,
-             date_trunc('month', $1::timestamptz AT TIME ZONE $2)
-               AT TIME ZONE $2 AS month_start
-         ), periods(period, starts_at) AS (
-           SELECT 'today', today_start FROM bounds
-           UNION ALL SELECT 'week', week_start FROM bounds
-           UNION ALL SELECT 'month', month_start FROM bounds
-         )
-         SELECT
-           p.id AS provider_id,
-           p.name AS provider_name,
-           periods.period,
-           COUNT(a.id)::text AS request_count,
-           COUNT(a.id) FILTER (WHERE a.status = 'succeeded')::text
-             AS succeeded_request_count,
-           COUNT(a.id) FILTER (WHERE a.status = 'failed')::text
-             AS failed_request_count,
-           COALESCE(SUM(a.prompt_tokens), 0)::text AS prompt_tokens,
-           COALESCE(SUM(a.completion_tokens), 0)::text AS completion_tokens,
-           COALESCE(SUM(a.reasoning_tokens), 0)::text AS reasoning_tokens,
-           COALESCE(SUM(COALESCE(
-             a.total_tokens,
-             COALESCE(a.prompt_tokens, 0) + COALESCE(a.completion_tokens, 0)
-           )), 0)::text AS total_tokens,
-           COALESCE(SUM(a.cached_prompt_tokens)
-             FILTER (WHERE a.cached_prompt_tokens IS NOT NULL
-               AND a.prompt_tokens IS NOT NULL), 0)::text
-             AS cached_prompt_tokens,
-           COALESCE(SUM(a.prompt_tokens)
-             FILTER (WHERE a.cached_prompt_tokens IS NOT NULL
-               AND a.prompt_tokens IS NOT NULL), 0)::text
-             AS cache_eligible_prompt_tokens,
-           COALESCE(SUM(a.prompt_tokens), 0)::text AS all_prompt_tokens
-         FROM ai_providers p
-         CROSS JOIN periods
-         LEFT JOIN ai_provider_attempts a
-           ON a.provider_id = p.id
-          AND a.created_at >= periods.starts_at
-          AND a.created_at <= $1::timestamptz
-         WHERE p.deleted_at IS NULL
-         GROUP BY p.id, p.name, p.sort_order, periods.period
-         ORDER BY p.sort_order, p.id,
-           CASE periods.period
-             WHEN 'today' THEN 1 WHEN 'week' THEN 2 ELSE 3
-           END`,
-        [input.now, input.timeZone],
-      ),
+      this.pool.query<UsageRow>(aiUsagePeriodSql, [input.now, input.timeZone]),
       this.pool.query<UsageSeriesRow>(
         `WITH settings AS (
            SELECT

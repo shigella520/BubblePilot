@@ -6,7 +6,8 @@ import { formatDateTime } from "../utils/format";
 import AdminFormDialog from "../components/AdminFormDialog.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import AgentSettingsPanel from "../components/AgentSettingsPanel.vue";
-import MemoryPanel from "../components/MemoryPanel.vue";
+import MemorySettingsPanel from "../components/MemorySettingsPanel.vue";
+import MemoryJobsPanel from "../components/MemoryJobsPanel.vue";
 import {
   Activity,
   Bot,
@@ -875,8 +876,8 @@ onMounted(async () => {
     </aside>
     <div class="admin-workspace">
       <AgentSettingsPanel />
-      <MemoryPanel id="memory-settings" mode="settings" embedded />
-      <MemoryPanel id="memory-jobs" mode="jobs" embedded />
+      <MemorySettingsPanel />
+      <MemoryJobsPanel id="memory-jobs" embedded />
       <DismissibleMessage
         v-if="message"
         :error="messageIsError"

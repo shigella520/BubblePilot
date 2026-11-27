@@ -106,6 +106,8 @@ export interface WorkflowExecutionRecord {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  /** Node, tool and route details were removed by the retention policy. */
+  detailsPurgedAt?: string | null;
   cachedPromptTokens: number | null;
   cacheEligiblePromptTokens: number;
   cacheHitRate: number | null;

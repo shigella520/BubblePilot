@@ -8,6 +8,16 @@ import StatusBadge from "../components/StatusBadge.vue";
 import AdminFormDialog from "../components/AdminFormDialog.vue";
 import SectionNavigation from "../components/SectionNavigation.vue";
 import MemoryPanel from "../components/MemoryPanel.vue";
+import MemoryHealthBadge from "../components/MemoryHealthBadge.vue";
+import { ProgressPoller } from "../services/progress-poller";
+import {
+  chatHealth,
+  isRepairable,
+  memoryHealthPath,
+  repairErrorMessage,
+  repairNotice,
+  type MemoryHealthView,
+} from "../utils/memory-health";
 import AdminDetailDialog from "../components/AdminDetailDialog.vue";
 import {
   Download,
@@ -20,6 +30,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Users,
+  Wrench,
   X,
 } from "@lucide/vue";
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
@@ -58,53 +69,54 @@ function openChatMemory(chat: Chat, event: MouseEvent) {
   memoryChat.value = chat;
 }
 
-interface RebuildStatus {
-  chats: Array<{
-    id: string;
-    bot_memory_rebuild_required: boolean;
-  }>;
+// Long-term retrieval health for every chat in one request (R1 / R8).
+const memoryHealth = ref<MemoryHealthView | null>(null);
+const memoryHealthFailed = ref(false);
+const repairBusyIds = reactive(new Set<string>());
+async function loadMemoryHealth() {
+  try {
+    memoryHealth.value = await apiRequest<MemoryHealthView>(memoryHealthPath);
+    memoryHealthFailed.value = false;
+  } catch {
+    memoryHealthFailed.value = true;
+  }
 }
-const rebuildStatus = ref<RebuildStatus | null>(null);
-const rebuildBusyIds = reactive(new Set<string>());
-function needsRebuild(id: string, _target: "memory") {
-  void _target;
-  return (
-    rebuildStatus.value?.chats.find((c) => c.id === id)
-      ?.bot_memory_rebuild_required === true
-  );
+const memoryHealthPoller = new ProgressPoller({
+  enabled: () => !document.hidden && chats.value.length > 0,
+  load: () => apiRequest<MemoryHealthView>(memoryHealthPath),
+  apply: (value) => {
+    memoryHealth.value = value;
+    memoryHealthFailed.value = false;
+  },
+  failed: () => {
+    memoryHealthFailed.value = true;
+  },
+  intervalMs: 20_000,
+});
+function healthFor(chat: Chat) {
+  return memoryHealthFailed.value && !memoryHealth.value
+    ? null
+    : chatHealth(memoryHealth.value, chat.id);
 }
-async function loadRebuildStatus() {
-  rebuildStatus.value = null;
-  rebuildStatus.value = await apiRequest<RebuildStatus>(
-    "/api/v1/bot-attributions",
-  );
-}
-async function rebuildChat(chat: Chat, target: "memory") {
-  if (
-    !session.sensitiveActive ||
-    !needsRebuild(chat.id, target) ||
-    rebuildBusyIds.has(chat.id) ||
-    !chat.enabled
-  )
-    return;
-  rebuildBusyIds.add(chat.id);
+async function repairChatMemory(chat: Chat) {
+  if (!session.sensitiveActive) return session.requestUnlock();
+  if (repairBusyIds.has(chat.id)) return;
+  repairBusyIds.add(chat.id);
   message.value = "";
   messageIsError.value = false;
-  const label = "索引";
   try {
-    const result = await apiRequest<{ memory: boolean }>(
-      `/api/v1/chats/${chat.id}/bot-identity/rebuild`,
-      { method: "POST", body: JSON.stringify({ target }) },
-    );
-    message.value = result[target]
-      ? `「${chat.displayName || chat.providerChatId}」${label}重建已启动，请到「AI 服务 → 索引任务」查看进度。`
-      : `未启动${label}重建，请检查对应服务配置及聊天授权。`;
-    await loadRebuildStatus();
+    const result = await apiRequest<{
+      action: "backfill" | "rebuild";
+      jobIds: string[];
+    }>(`/api/v1/chats/${chat.id}/memory/repair`, { method: "POST" });
+    message.value = `「${chat.displayName || chat.providerChatId}」${repairNotice(result)}`;
   } catch (cause) {
-    message.value = errorMessage(cause);
+    message.value = repairErrorMessage(cause);
     messageIsError.value = true;
   } finally {
-    rebuildBusyIds.delete(chat.id);
+    repairBusyIds.delete(chat.id);
+    memoryHealthPoller.invalidate();
+    await loadMemoryHealth();
   }
 }
 
@@ -517,6 +529,13 @@ function updateMemoryAuthorization(state: {
       if (chat.id === state.chatId) chat.memoryAuthorized = state.enabled;
     }
   }
+  memoryHealthPoller.invalidate();
+  void loadMemoryHealth();
+}
+function closeChatMemory() {
+  memoryChat.value = null;
+  memoryHealthPoller.invalidate();
+  void loadMemoryHealth();
 }
 
 async function loadChats(reset = false) {
@@ -527,7 +546,7 @@ async function loadChats(reset = false) {
     await Promise.all([
       reset ? chatPager.first() : chatPager.refresh(),
       loadChatOptions(),
-      loadRebuildStatus(),
+      loadMemoryHealth(),
     ]);
   } catch (cause) {
     message.value = errorMessage(cause);
@@ -894,12 +913,14 @@ watch(
 onMounted(() => {
   document.addEventListener("keydown", handleMediaKeydown);
   void Promise.all([loadChats(true), loadExports(true)]);
+  memoryHealthPoller.start();
   // Already authorized when the page opens: show results right away.
   if (session.sensitiveActive) void search();
 });
-onBeforeUnmount(() =>
-  document.removeEventListener("keydown", handleMediaKeydown),
-);
+onBeforeUnmount(() => {
+  document.removeEventListener("keydown", handleMediaKeydown);
+  memoryHealthPoller.stop();
+});
 </script>
 
 <template>
@@ -944,7 +965,7 @@ onBeforeUnmount(() =>
         <p class="panel-description">
           这里列出 Webhook
           已发现的聊天。启停操作需要敏感操作授权，并使用版本号防止并发覆盖。
-          长期检索授权独立于聊天监听；已授权不代表全局服务已开启或索引已完成，可点击对应聊天的“配置”调整。角色昵称和归属回填完成后，需要重建的聊天会显示重建按钮。重建需要敏感操作授权，会更新聊天共享历史并产生模型用量；进度见「AI
+          “长期检索”列显示每个聊天的索引状态，点击状态或“配置”可启用、停用并查看详情；启用后自动为全部历史建立索引。出现缺失、服务异常或需重建时可点击“修复”（需要敏感操作授权；归属重建会产生模型用量），进度见「AI
           服务 → 索引任务」。
         </p>
         <div class="table-shell">
@@ -957,7 +978,7 @@ onBeforeUnmount(() =>
                 <th>最后发现</th>
                 <th>成员身份</th>
                 <th>监听</th>
-                <th>长期检索授权</th>
+                <th>长期检索</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -1030,43 +1051,44 @@ onBeforeUnmount(() =>
                   </button>
                 </td>
                 <td>
-                  <span class="state-badge">{{
-                    chat.memoryAuthorized === true
-                      ? "已授权"
-                      : chat.memoryAuthorized === false
-                        ? "未授权"
-                        : "状态未知"
-                  }}</span>
-                  <button
-                    class="button secondary tiny"
-                    type="button"
-                    :aria-label="`配置 ${chat.displayName || chat.providerChatId} 的长期检索`"
-                    @click="openChatMemory(chat, $event)"
-                  >
-                    配置
-                  </button>
+                  <div class="memory-health-cell">
+                    <button
+                      class="memory-health-trigger"
+                      type="button"
+                      :aria-label="`查看 ${chat.displayName || chat.providerChatId} 的长期检索`"
+                      @click="openChatMemory(chat, $event)"
+                    >
+                      <MemoryHealthBadge :health="healthFor(chat)" />
+                    </button>
+                    <button
+                      v-if="isRepairable(healthFor(chat))"
+                      class="button tiny secondary"
+                      type="button"
+                      :disabled="repairBusyIds.has(chat.id)"
+                      :aria-busy="repairBusyIds.has(chat.id)"
+                      :title="
+                        session.sensitiveActive
+                          ? '修复该聊天的长期检索'
+                          : '需要敏感操作授权，点击解锁'
+                      "
+                      @click="repairChatMemory(chat)"
+                    >
+                      <Wrench :size="14" />{{
+                        repairBusyIds.has(chat.id) ? "修复中…" : "修复"
+                      }}
+                    </button>
+                    <button
+                      class="button secondary tiny"
+                      type="button"
+                      :aria-label="`配置 ${chat.displayName || chat.providerChatId} 的长期检索`"
+                      @click="openChatMemory(chat, $event)"
+                    >
+                      配置
+                    </button>
+                  </div>
                 </td>
                 <td>
                   <div class="row-actions">
-                    <button
-                      v-if="needsRebuild(chat.id, 'memory')"
-                      class="button tiny secondary"
-                      :disabled="
-                        !session.sensitiveActive ||
-                        !chat.enabled ||
-                        rebuildBusyIds.has(chat.id) ||
-                        busy
-                      "
-                      :title="
-                        !session.sensitiveActive
-                          ? '请先解锁敏感操作'
-                          : undefined
-                      "
-                      @click="rebuildChat(chat, 'memory')"
-                    >
-                      {{ rebuildBusyIds.has(chat.id) ? "处理中…" : "重建索引" }}
-                    </button>
-
                     <button
                       class="button tiny danger-ghost"
                       type="button"
@@ -1184,14 +1206,13 @@ onBeforeUnmount(() =>
         v-if="memoryChat"
         :title="`长期检索 · ${memoryChat.displayName || memoryChat.providerChatId}`"
         :return-focus="memoryTrigger"
-        @close="memoryChat = null"
+        @close="closeChatMemory"
       >
         <MemoryPanel
           :key="memoryChat.id"
-          mode="chat"
-          :fixed-chat-id="memoryChat.id"
-          embedded
-          @authorization-changed="updateMemoryAuthorization"
+          :chat-id="memoryChat.id"
+          :message-count="memoryChat.messageCount"
+          @changed="updateMemoryAuthorization"
         />
       </AdminDetailDialog>
       <section id="search" class="admin-panel">
@@ -1886,6 +1907,26 @@ onBeforeUnmount(() =>
 </template>
 
 <style scoped>
+.memory-health-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.memory-health-trigger {
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+.memory-health-trigger:hover {
+  background: var(--bubblepilot-neutral-bg);
+}
+.memory-health-trigger:focus-visible {
+  outline: 2px solid var(--bubblepilot-accent);
+  outline-offset: 2px;
+}
 .message-quote,
 .message-revision-body {
   margin: 12px 0;

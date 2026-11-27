@@ -2,24 +2,32 @@ import type { AttachmentListing } from "../attachments/attachment-policy.js";
 import { executionPolicy } from "../ai/execution-policy.js";
 import { z } from "zod";
 import {
-  embeddingConfigSchema,
+  embeddingConfigShape,
+  indexLimitIssue,
+  withinIndexLimit,
   type EmbeddingConfig,
 } from "./embedding-client.js";
 export const defaultEmbeddingTimeoutSeconds = 15;
 export const minEmbeddingTimeoutSeconds = 5;
 export const maxEmbeddingTimeoutSeconds = 120;
-export const memorySettingsSchema = embeddingConfigSchema.extend({
-  enabled: z.boolean(),
-  expectedVersion: z.number().int().min(0),
-  secret: z.string().max(8192).optional(),
-  /** Request timeout; stored apart from the generation config. */
-  timeoutSeconds: z
-    .number()
-    .int()
-    .min(minEmbeddingTimeoutSeconds)
-    .max(maxEmbeddingTimeoutSeconds)
-    .optional(),
-});
+/** Days a replaced generation's vectors are kept before automatic purge. */
+export const defaultGenerationRetentionDays = 3;
+export const memorySettingsSchema = embeddingConfigShape
+  .extend({
+    enabled: z.boolean(),
+    expectedVersion: z.number().int().min(0),
+    secret: z.string().max(8192).optional(),
+    /** Request timeout; stored apart from the generation config. */
+    timeoutSeconds: z
+      .number()
+      .int()
+      .min(minEmbeddingTimeoutSeconds)
+      .max(maxEmbeddingTimeoutSeconds)
+      .optional(),
+    /** Days before a replaced generation's vectors are purged. */
+    retentionDays: z.number().int().min(1).max(90).optional(),
+  })
+  .refine(withinIndexLimit, indexLimitIssue);
 export const memorySearchValidationRules = [
   "Use either senderId or botWorkflowId, not both.",
   "from must be no later than to.",
@@ -70,6 +78,8 @@ export interface Generation {
   encrypted_secret: string | null;
   identity: string;
   status: string;
+  created_at?: Date;
+  retired_at?: Date | null;
 }
 export interface MemoryScope {
   timeZone?: string;
@@ -123,6 +133,7 @@ export const defaultMemoryConfig: EmbeddingConfig = {
   baseUrl: "http://localhost:11434",
   model: "qwen3-embedding:0.6b",
   dimensions: 1024,
+  precision: "float32",
   modelVersion: "1",
   queryPrefix:
     "Instruct: Retrieve historical chat passages relevant to the user's question.\nQuery: ",

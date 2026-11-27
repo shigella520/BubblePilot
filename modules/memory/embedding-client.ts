@@ -1,7 +1,14 @@
 import { ApplicationError } from "../../app/errors.js";
 import { z } from "zod";
 
-export const embeddingConfigSchema = z.object({
+/** pgvector HNSW limits: vector ≤ 2000 dimensions, halfvec ≤ 4000. */
+export const embeddingPrecisionLimits = {
+  float32: 2000,
+  float16: 4000,
+} as const;
+export type EmbeddingPrecision = keyof typeof embeddingPrecisionLimits;
+
+export const embeddingConfigShape = z.object({
   protocol: z.enum(["ollama", "openai-compatible"]),
   baseUrl: z
     .string()
@@ -18,10 +25,25 @@ export const embeddingConfigSchema = z.object({
       );
     }, "Use an HTTP(S) endpoint without embedded credentials or query parameters"),
   model: z.string().trim().min(1).max(200),
-  dimensions: z.number().int().min(1).max(16000),
+  dimensions: z.number().int().min(1).max(4000),
+  /** Storage precision; decides the vector type and the indexable maximum. */
+  precision: z.enum(["float32", "float16"]).default("float32"),
   modelVersion: z.string().trim().min(1).max(200),
   queryPrefix: z.string().max(1000).default(""),
 });
+export const withinIndexLimit = (config: {
+  dimensions: number;
+  precision: EmbeddingPrecision;
+}) => config.dimensions <= embeddingPrecisionLimits[config.precision];
+export const indexLimitIssue = {
+  message:
+    "Dimensions exceed the indexable limit for this precision (float32 ≤ 2000, float16 ≤ 4000).",
+  path: ["dimensions"],
+};
+export const embeddingConfigSchema = embeddingConfigShape.refine(
+  withinIndexLimit,
+  indexLimitIssue,
+);
 export type EmbeddingConfig = z.infer<typeof embeddingConfigSchema>;
 /**
  * Sanitized failure facts for operators. Never holds the provider body,
@@ -36,6 +58,8 @@ export interface EmbeddingFailureDetail {
   upstreamCode?: string;
   elapsedMs?: number;
   timeoutMs?: number;
+  /** Vector length the service returned when it differs from the config. */
+  returnedDimensions?: number;
 }
 const requestIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{3,127}$/u;
 const upstreamCodePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
@@ -49,6 +73,9 @@ export function embeddingFailureText(detail?: EmbeddingFailureDetail): string {
         ? "连接失败"
         : undefined,
     detail.httpStatus ? `HTTP ${detail.httpStatus}` : undefined,
+    detail.returnedDimensions
+      ? `返回 ${detail.returnedDimensions} 维，与配置不一致`
+      : undefined,
     detail.upstreamCode,
     detail.upstreamRequestId
       ? `上游请求 ID ${detail.upstreamRequestId}`
@@ -71,6 +98,28 @@ export class EmbeddingError extends ApplicationError {
     );
     if (detail) this.detail = detail;
   }
+}
+
+/**
+ * Transient service-side failures (HTTP 5xx / 429, timeout, connection or
+ * malformed transport) that are worth retrying later without operator action.
+ * Client errors (4xx) and contract violations need a configuration change.
+ */
+export function isUpstreamFailure(
+  code: string,
+  detail?: EmbeddingFailureDetail | null,
+): boolean {
+  if (code === "MEMORY_EMBEDDING_HTTP_ERROR")
+    return (
+      !!detail?.httpStatus &&
+      (detail.httpStatus >= 500 || detail.httpStatus === 429)
+    );
+  return [
+    "MEMORY_EMBEDDING_TIMEOUT",
+    "MEMORY_EMBEDDING_UNAVAILABLE",
+    "MEMORY_EMBEDDING_EMPTY",
+    "MEMORY_MODEL_IDENTITY_UNAVAILABLE",
+  ].includes(code);
 }
 
 /** Pulls only identifier-shaped tokens out of an error response. */
@@ -241,21 +290,45 @@ export class HttpEmbeddingClient implements EmbeddingClient {
       secret,
       config.protocol === "ollama" ? "api/embed" : "embeddings",
       config.protocol === "ollama"
-        ? { model: config.model, input, truncate: false, keep_alive: -1 }
-        : { model: config.model, input, encoding_format: "float" },
+        ? {
+            model: config.model,
+            input,
+            truncate: false,
+            keep_alive: -1,
+            dimensions: config.dimensions,
+          }
+        : {
+            model: config.model,
+            input,
+            encoding_format: "float",
+            // Fix the output length to the configured (indexable) dimension.
+            dimensions: config.dimensions,
+          },
       timeoutMs,
     );
     const vector = z
       .array(z.number().finite())
-      .length(config.dimensions)
+      .min(1)
       .refine((values) => values.some((v) => v !== 0));
+    // The request fixes the output length; a service that ignores it is
+    // reported with the length it returned so the configuration can be fixed.
+    const checkLength = (vectors: number[][]) => {
+      const wrong = vectors.find((v) => v.length !== config.dimensions);
+      if (wrong)
+        throw new EmbeddingError(
+          "MEMORY_EMBEDDING_DIMENSION_MISMATCH",
+          undefined,
+          { kind: "response", returnedDimensions: wrong.length },
+        );
+      return vectors;
+    };
     if (config.protocol === "ollama") {
       const parsed = z
         .object({ embeddings: z.array(vector).length(input.length) })
         .safeParse(data);
       if (!parsed.success)
         throw new EmbeddingError("MEMORY_EMBEDDING_INVALID_OUTPUT");
-      return parsed.data.embeddings;
+      return checkLength(parsed.data.embeddings);
     }
     const parsed = z
       .object({
@@ -271,7 +344,7 @@ export class HttpEmbeddingClient implements EmbeddingClient {
     const sorted = parsed.data.data.sort((a, b) => a.index - b.index);
     if (sorted.some((row, i) => row.index !== i))
       throw new EmbeddingError("MEMORY_EMBEDDING_INVALID_ORDER");
-    return sorted.map((row) => row.embedding);
+    return checkLength(sorted.map((row) => row.embedding));
   }
   async identity(
     config: EmbeddingConfig,

@@ -126,6 +126,7 @@ interface ExecutionRow {
   cache_eligible_prompt_tokens: string | null;
   trigger_message_index: string | null;
   context_snapshot: Record<string, unknown> | null;
+  details_purged_at?: Date | null;
 }
 
 interface RecoveryEnvelopeRow {
@@ -219,7 +220,7 @@ const executionSelect = `SELECT
   e.status, e.current_node_id, e.error_code, e.error_summary, e.next_retry_at,
   e.started_at, e.completed_at, e.created_at,
   cache_usage.cached_prompt_tokens, cache_usage.cache_eligible_prompt_tokens,
-  e.trigger_message_index, e.context_snapshot
+  e.trigger_message_index, e.context_snapshot, e.details_purged_at
 FROM workflow_executions e
 INNER JOIN bot_triggers t ON t.id = e.trigger_id
 INNER JOIN workflow_versions v ON v.id = e.workflow_version_id
@@ -314,6 +315,7 @@ function executionRecord(row: ExecutionRow): WorkflowExecutionRecord {
     startedAt: row.started_at?.toISOString() ?? null,
     completedAt: row.completed_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
+    detailsPurgedAt: row.details_purged_at?.toISOString() ?? null,
     cachedPromptTokens,
     cacheEligiblePromptTokens,
     cacheHitRate:
@@ -1631,20 +1633,21 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         stale_retrying: string;
         oldest_dead_letter_at: Date | null;
       }>(
+        // One index range per status on workflow_executions_status_idx
+        // (status, created_at DESC) instead of a sequential scan of every
+        // execution row. Terminal totals stay exact: their counts are
+        // index-only scans, and the oldest dead letter is the index endpoint.
         `SELECT
-           COUNT(*) FILTER (WHERE status = 'created') AS created,
-           COUNT(*) FILTER (WHERE status = 'running') AS running,
-           COUNT(*) FILTER (WHERE status = 'retrying') AS retrying,
-           COUNT(*) FILTER (WHERE status = 'failed') AS failed,
-           COUNT(*) FILTER (WHERE status = 'dead-lettered') AS dead_lettered,
-           COUNT(*) FILTER (WHERE status = 'closed') AS closed,
-           COUNT(*) FILTER (
-             WHERE status = 'retrying' AND next_retry_at <= $1
-           ) AS stale_retrying,
-           MIN(created_at) FILTER (
-             WHERE status = 'dead-lettered'
-           ) AS oldest_dead_letter_at
-         FROM workflow_executions`,
+           (SELECT COUNT(*) FROM workflow_executions WHERE status = 'created') AS created,
+           (SELECT COUNT(*) FROM workflow_executions WHERE status = 'running') AS running,
+           (SELECT COUNT(*) FROM workflow_executions WHERE status = 'retrying') AS retrying,
+           (SELECT COUNT(*) FROM workflow_executions WHERE status = 'failed') AS failed,
+           (SELECT COUNT(*) FROM workflow_executions WHERE status = 'dead-lettered') AS dead_lettered,
+           (SELECT COUNT(*) FROM workflow_executions WHERE status = 'closed') AS closed,
+           (SELECT COUNT(*) FROM workflow_executions
+             WHERE status = 'retrying' AND next_retry_at <= $1) AS stale_retrying,
+           (SELECT MIN(created_at) FROM workflow_executions
+             WHERE status = 'dead-lettered') AS oldest_dead_letter_at`,
         [staleRetryBefore.toISOString()],
       ),
       this.pool.query<{ sending: string; unknown: string }>(
@@ -1652,7 +1655,9 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
            COUNT(*) FILTER (WHERE d.status = 'sending') AS sending,
            COUNT(*) FILTER (WHERE d.status = 'unknown' AND d.closed_at IS NULL AND d.kind IN ('text','generated_image') AND (e.status IS DISTINCT FROM 'closed' OR e.startup_closure IS NOT NULL)) AS unknown
          FROM outbound_deliveries d
-         LEFT JOIN workflow_executions e ON e.id = d.execution_id`,
+         LEFT JOIN workflow_executions e ON e.id = d.execution_id
+         -- Both counters only see these statuses (outbound_deliveries_attention_idx).
+         WHERE d.status IN ('sending', 'unknown')`,
       ),
     ]);
     const execution = executions.rows[0];
