@@ -253,7 +253,8 @@ const stateLabel = (s: string) =>
         <summary>近期归属任务</summary>
         <p v-for="job in status.jobs" :key="job.id">
           {{ stateLabel(job.status) }} · 已扫描 {{ job.processed }} 条
-          <span v-if="job.error_code">{{ job.error_code }}</span
+          <span v-if="job.error_code" class="diagnostic-code"
+            >诊断：{{ job.error_code }}</span
           ><button
             v-if="job.status === 'failed'"
             class="button secondary"

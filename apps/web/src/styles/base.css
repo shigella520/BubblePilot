@@ -911,8 +911,9 @@ td .keyline {
   font-weight: 700;
 }
 .workflow-canvas-title input:focus {
-  border-bottom-color: #0a84ff;
+  border-bottom-color: var(--bubblepilot-accent);
   outline: 0;
+  box-shadow: 0 2px 0 0 var(--bubblepilot-accent);
 }
 .workflow-save-state {
   display: inline-flex;
@@ -1664,8 +1665,8 @@ textarea {
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: rgba(10, 132, 255, 0.36);
-  box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.08);
+  border-color: var(--bubblepilot-accent);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.22);
 }
 .wide-field {
   grid-column: 1 / -1;
@@ -2005,17 +2006,6 @@ legend {
 .message-body-details p {
   margin-bottom: 0;
   color: var(--bubblepilot-text);
-}
-.message-media-backdrop {
-  position: fixed;
-  z-index: 940;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(15, 23, 42, 0.44);
-  backdrop-filter: blur(8px);
-  animation: execution-detail-backdrop-in 0.16s ease-out;
 }
 .message-media-dialog {
   display: flex;
@@ -3473,9 +3463,6 @@ legend {
   .message-footer-actions {
     justify-content: flex-start;
   }
-  .message-media-backdrop {
-    padding: 10px;
-  }
   .message-media-dialog {
     width: 100%;
     max-height: calc(100dvh - 20px);
@@ -3664,4 +3651,18 @@ legend {
   color: var(--bubblepilot-muted);
   font-size: var(--bubblepilot-text-xs);
   white-space: nowrap;
+}
+
+/* Error/reason codes kept for diagnosis, visually secondary. */
+.diagnostic-code {
+  color: var(--bubblepilot-muted);
+  font-family: var(--bubblepilot-font-mono);
+  font-size: var(--bubblepilot-text-xs);
+}
+
+.test-ok {
+  color: #08785b;
+}
+.test-failed {
+  color: #ae3029;
 }

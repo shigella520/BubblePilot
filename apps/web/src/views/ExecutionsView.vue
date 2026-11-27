@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import StatusBadge from "../components/StatusBadge.vue";
+import { auditActionLabel, enumLabel } from "../utils/status-labels";
 import LockedHint from "../components/LockedHint.vue";
 import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
@@ -1489,16 +1491,16 @@ function contextSnapshotValue(
               </tr>
               <tr v-for="item in audits" :key="item.id">
                 <td>{{ formatDateTime(item.occurredAt) }}</td>
-                <td>{{ item.actorType }}</td>
-                <td>{{ item.action }}</td>
+                <td>{{ enumLabel("actorType", item.actorType) }}</td>
+                <td :title="item.action">
+                  {{ auditActionLabel(item.action) }}
+                </td>
                 <td>
-                  {{ item.targetType
+                  {{ enumLabel("auditTarget", item.targetType)
                   }}<span class="keyline">{{ item.targetId || "—" }}</span>
                 </td>
                 <td>
-                  <span class="table-status" :class="item.outcome">{{
-                    item.outcome
-                  }}</span>
+                  <StatusBadge domain="auditOutcome" :status="item.outcome" />
                 </td>
                 <td class="mono">{{ item.correlationId.slice(0, 8) }}</td>
               </tr>
@@ -1768,7 +1770,10 @@ function contextSnapshotValue(
               >
                 <span class="trace-dot" :class="node.status"></span>
                 <div>
-                  <strong>{{ node.nodeId }} · {{ node.nodeType }}</strong>
+                  <strong :title="node.nodeType"
+                    >{{ node.nodeId }} ·
+                    {{ enumLabel("nodeType", node.nodeType) }}</strong
+                  >
                   <p v-if="idleReasonText(node.outputSummary)">
                     {{ idleReasonText(node.outputSummary) }}
                   </p>
@@ -2432,7 +2437,8 @@ function contextSnapshotValue(
                   <span
                     v-else-if="item.responseDetails?.outcome === 'no_results'"
                     class="table-status warning"
-                    >AI_WEB_SEARCH_NO_RESULTS</span
+                    title="AI_WEB_SEARCH_NO_RESULTS"
+                    >搜索无结果</span
                   >
                   <MemorySources
                     v-if="

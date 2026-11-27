@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { enumLabel } from "../utils/status-labels";
 import { partialFailureMessage, settleAll } from "../utils/settle";
 import { formatDateTime } from "../utils/format";
 import StatusBadge from "../components/StatusBadge.vue";
@@ -273,14 +274,16 @@ onMounted(load);
                 >
               </td>
               <td>
-                {{ event.ingestionStatus
+                {{ enumLabel("ingestion", event.ingestionStatus)
                 }}<small v-if="event.archiveUpdate" class="muted"
                   ><br />归档修订：{{ event.archiveUpdate.status }}<br />{{
                     event.archiveUpdate.reason
                   }}</small
                 >
               </td>
-              <td>{{ event.eventType }}</td>
+              <td :title="event.eventType">
+                {{ enumLabel("eventType", event.eventType) }}
+              </td>
               <td>{{ formatDateTime(event.receivedAt) }}</td>
               <td class="mono decision-identifiers">
                 <span>{{ event.eventId }}</span>
@@ -297,16 +300,16 @@ onMounted(load);
           <p class="card-kicker">RUNTIME HEALTH</p>
           <h2>运行可靠性</h2>
         </div>
-        <span
-          class="table-status"
-          :class="operations?.status === 'healthy' ? 'succeeded' : 'danger'"
+        <StatusBadge
+          domain="operations"
+          :status="operations?.status ?? (loaded ? 'unknown' : '')"
+          :label="!operations && !loaded ? '检查中…' : undefined"
         >
           <CheckCircle2
             v-if="operations?.status === 'healthy'"
             :size="14"
-          /><AlertTriangle v-else :size="14" />
-          {{ operations?.status || "unknown" }}
-        </span>
+          /><AlertTriangle v-else-if="operations" :size="14" />
+        </StatusBadge>
       </div>
       <div v-if="operations" class="runtime-summary-grid">
         <RouterLink
@@ -359,7 +362,10 @@ onMounted(load);
       </div>
       <div v-if="operations?.alerts.length" class="runtime-alert-list">
         <span v-for="alert in operations.alerts" :key="alert.code">
-          {{ alert.code }} · {{ alert.count }}
+          <span :title="alert.code">{{
+            enumLabel("operationsAlert", alert.code)
+          }}</span>
+          · {{ alert.count }}
         </span>
       </div>
     </section>

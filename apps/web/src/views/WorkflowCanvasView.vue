@@ -402,6 +402,7 @@ onMounted(load);
     <AdminDetailDialog
       v-if="idleConfirmation"
       title="确认允许角色主动发言"
+      size="md"
       @close="idleConfirmation = null"
     >
       <p>
@@ -413,10 +414,15 @@ onMounted(load);
         <li v-for="chat in idleConfirmation.chats" :key="chat">{{ chat }}</li>
       </ul>
       <div class="row-actions">
-        <button class="button secondary" @click="idleConfirmation = null">
+        <button
+          class="button secondary"
+          type="button"
+          @click="idleConfirmation = null"
+        >
           取消</button
         ><button
-          class="button"
+          class="button primary"
+          type="button"
           :disabled="!idleConfirmation.chats.length"
           @click="approveIdle"
         >

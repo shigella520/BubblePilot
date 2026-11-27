@@ -164,6 +164,7 @@ async function logout() {
     <AdminDetailDialog
       v-if="unlockOpen"
       title="敏感操作授权"
+      size="md"
       :return-focus="unlockTrigger"
       @close="unlockOpen = false"
     >

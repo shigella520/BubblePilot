@@ -193,15 +193,26 @@ onMounted(load);
             :disabled="!session.sensitiveActive || testBusy"
             @click="testConnection"
           >
-            <Cable :size="16" />{{ testBusy ? "验证中…" : "验证服务连接" }}
+            <Cable :size="16" />{{ testBusy ? "验证中…" : "测试已保存的配置" }}
           </button>
-          <span v-if="testResult" class="panel-description">
+          <span v-if="!testResult" class="panel-description"
+            >测试使用已保存的配置；修改后请先保存再测试。</span
+          >
+          <span
+            v-if="testResult"
+            class="panel-description"
+            role="status"
+            :class="
+              testResult.status === 'connected' ? 'test-ok' : 'test-failed'
+            "
+          >
             <CheckCircle2 v-if="testResult.status === 'connected'" :size="15" />
             <XCircle v-else :size="15" />
-            {{ testResult.message }}（{{ testResult.durationMs }} ms<span
+            {{ testResult.message }}（{{ testResult.durationMs }} ms）<small
               v-if="testResult.code"
-              >，{{ testResult.code }}</span
-            >）
+              class="diagnostic-code"
+              >诊断：{{ testResult.code }}</small
+            >
           </span>
         </div>
 

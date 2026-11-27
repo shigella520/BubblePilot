@@ -661,7 +661,9 @@ async function remove() {
                     record.source === "scheduled" ? "定时检查" : "调用前检查"
                   }}</small
                 >
-                <p v-if="record.errorCode">{{ record.errorCode }}</p>
+                <p v-if="record.errorCode" class="diagnostic-code">
+                  诊断：{{ record.errorCode }}
+                </p>
                 <ul v-if="record.changes.length">
                   <li v-for="change in record.changes" :key="change.tool">
                     {{ change.tool }} ·

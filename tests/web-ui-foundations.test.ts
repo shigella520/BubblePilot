@@ -4,7 +4,11 @@ import {
   diagnosticSeparator,
   errorMessage,
 } from "../apps/web/src/services/api.js";
-import { statusLabel } from "../apps/web/src/utils/status-labels.js";
+import {
+  auditActionLabel,
+  enumLabel,
+  statusLabel,
+} from "../apps/web/src/utils/status-labels.js";
 import {
   confirmAction,
   confirmState,
@@ -115,5 +119,24 @@ describe("web UI foundations", () => {
     await expect(first).resolves.toBe(false);
     confirmState.current!.resolve(false);
     await expect(second).resolves.toBe(false);
+  });
+
+  it("translates enums and audit actions, keeping unknown values visible", () => {
+    expect(enumLabel("eventType", "new-message")).toBe("新消息");
+    expect(enumLabel("operationsAlert", "WORKFLOW_QUEUE_SATURATED")).toBe(
+      "工作流队列已满",
+    );
+    expect(enumLabel("nodeType", "ai-chat")).toBe("AI 对话");
+    expect(enumLabel("chatType", "fictional")).toBe("fictional");
+    expect(enumLabel("chatType", null)).toBe("—");
+    expect(auditActionLabel("ai.provider.create")).toBe("AI Provider · 创建");
+    expect(auditActionLabel("scheduled-task.skip")).toBe("定时任务 · 跳过");
+    expect(auditActionLabel("fictional.unknown-verb")).toBe(
+      "fictional · unknown-verb",
+    );
+    expect(statusLabel("operations", "attention")).toEqual({
+      label: "需关注",
+      tone: "warning",
+    });
   });
 });

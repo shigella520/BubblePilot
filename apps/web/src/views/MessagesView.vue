@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ModalShell from "../components/ModalShell.vue";
+import { enumLabel } from "../utils/status-labels";
 import LockedHint from "../components/LockedHint.vue";
 import { confirmAction } from "../services/confirm";
 import { formatDateTime, formatTime } from "../utils/format";
@@ -971,7 +973,7 @@ onBeforeUnmount(() =>
                   <strong>{{ chat.displayName || "未命名聊天" }}</strong
                   ><span class="keyline">{{ chat.providerChatId }}</span>
                 </td>
-                <td>{{ chat.type }}</td>
+                <td>{{ enumLabel("chatType", chat.type) }}</td>
                 <td>{{ chat.messageCount }}</td>
                 <td>{{ formatDateTime(chat.updatedAt) }}</td>
                 <td>
@@ -1322,7 +1324,11 @@ onBeforeUnmount(() =>
                 <p>{{ item.body }}</p>
               </details>
             </template>
-            <p v-else>{{ item.body || `【${item.contentType}】` }}</p>
+            <p v-else>
+              {{
+                item.body || `【${enumLabel("contentType", item.contentType)}】`
+              }}
+            </p>
             <div
               v-if="item.linkPreview.status !== 'not-requested'"
               class="message-link-preview"
@@ -1586,7 +1592,11 @@ onBeforeUnmount(() =>
               <tr v-for="job in exportJobs" :key="job.id">
                 <td>{{ formatDateTime(job.createdAt) }}</td>
                 <td>
-                  {{ job.scope.types.join(" + ") }}
+                  {{
+                    job.scope.types
+                      .map((type) => enumLabel("exportType", type))
+                      .join("、")
+                  }}
                   <span class="keyline"
                     >{{ formatDateTime(job.scope.sentFrom) }} —
                     {{ formatDateTime(job.scope.sentTo) }}</span
@@ -1665,18 +1675,12 @@ onBeforeUnmount(() =>
     </template>
   </AdminDetailDialog>
   <Teleport to="body">
-    <div
+    <ModalShell
       v-if="mediaMessage"
-      class="message-media-backdrop"
-      @click.self="closeMessageMedia"
-      @keyup.esc="closeMessageMedia"
+      labelledby="message-media-title"
+      @close="closeMessageMedia"
     >
-      <section
-        class="message-media-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="message-media-title"
-      >
+      <section class="message-media-dialog">
         <header class="message-media-dialog-head">
           <div>
             <p class="card-kicker">IMAGE ARCHIVE</p>
@@ -1745,7 +1749,7 @@ onBeforeUnmount(() =>
               <div class="message-media-copy">
                 <header>
                   <div>
-                    <span>{{ item.sourceType }}</span>
+                    <span>{{ enumLabel("mediaSource", item.sourceType) }}</span>
                     <h3>{{ item.fileName || item.label }}</h3>
                   </div>
                   <span class="summary-state" :class="item.summaryStatus">{{
@@ -1867,7 +1871,7 @@ onBeforeUnmount(() =>
           </div>
         </div>
       </section>
-    </div>
+    </ModalShell>
   </Teleport>
 </template>
 

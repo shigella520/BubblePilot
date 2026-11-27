@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, useId } from "vue";
 import { X } from "@lucide/vue";
-const props = defineProps<{
-  title: string;
-  returnFocus?: HTMLElement | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    title: string;
+    returnFocus?: HTMLElement | null;
+    /** md 640px · lg 900px (default) · xl 1180px. */
+    size?: "md" | "lg" | "xl";
+  }>(),
+  { returnFocus: null, size: "lg" },
+);
 const emit = defineEmits<{ close: [] }>();
 const dialog = ref<HTMLDialogElement | null>(null);
 const titleId = useId();
@@ -27,6 +32,7 @@ onBeforeUnmount(() => {
     <dialog
       ref="dialog"
       class="admin-detail-dialog"
+      :class="`size-${size}`"
       :aria-labelledby="titleId"
       @cancel.prevent="emit('close')"
       @click.self="emit('close')"
@@ -37,7 +43,7 @@ onBeforeUnmount(() => {
           <button
             class="button secondary"
             type="button"
-            aria-label="关闭详情"
+            :aria-label="`关闭「${title}」`"
             @click="emit('close')"
           >
             <X :size="18" />关闭
@@ -54,6 +60,14 @@ onBeforeUnmount(() => {
   border-radius: 20px;
   padding: 0;
   width: min(900px, calc(100vw - 32px));
+}
+.admin-detail-dialog.size-md {
+  width: min(640px, calc(100vw - 32px));
+}
+.admin-detail-dialog.size-xl {
+  width: min(1180px, calc(100vw - 32px));
+}
+.admin-detail-dialog {
   max-height: calc(100dvh - 48px);
   background: #fafbfc;
   color: inherit;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ModalShell from "../components/ModalShell.vue";
 import { confirmAction } from "../services/confirm";
 import { formatDateTime } from "../utils/format";
 import ToggleSwitch from "../components/ToggleSwitch.vue";
@@ -551,18 +552,36 @@ async function save() {
     modal.value = false;
   });
 }
+function editorDirty() {
+  const item = editing.value;
+  if (!item) return false;
+  return (
+    name.value !== item.name ||
+    description.value !== item.description ||
+    summary.value !== (item.summary ?? "") ||
+    tags.value !== item.tags.join("，") ||
+    active.value !== item.enabled ||
+    assetCollection.value !== (item.collectionId ?? "")
+  );
+}
+/** Esc, backdrop and the close button must not silently drop edits. */
+async function requestCloseEditor() {
+  if (busy.value) return;
+  if (
+    editorDirty() &&
+    !(await confirmAction("有尚未保存的修改，关闭后将丢弃。", {
+      title: "关闭编辑？",
+      confirmText: "放弃修改并关闭",
+      danger: true,
+    }))
+  )
+    return;
+  modal.value = false;
+}
 async function refreshEditing() {
   const item = editing.value;
   if (!item) return;
-  if (
-    (name.value !== item.name ||
-      description.value !== item.description ||
-      summary.value !== (item.summary ?? "") ||
-      tags.value !== item.tags.join("，") ||
-      active.value !== item.enabled ||
-      assetCollection.value !== (item.collectionId ?? "")) &&
-    !(await confirmAction("刷新会丢弃未保存的修改，继续？"))
-  )
+  if (editorDirty() && !(await confirmAction("刷新会丢弃未保存的修改，继续？")))
     return;
   await perform(async () => {
     open(await apiRequest<Meme>(`/api/v1/memes/${item.id}`));
@@ -1021,17 +1040,12 @@ onUnmounted(() => {
         </footer>
       </section>
     </div>
-    <div
+    <ModalShell
       v-if="collectionModal"
-      class="meme-overlay"
-      @click.self="!busy && (collectionModal = false)"
+      labelledby="collection-title"
+      @close="!busy && (collectionModal = false)"
     >
-      <section
-        class="meme-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="collection-title"
-      >
+      <section class="meme-dialog">
         <header class="meme-dialog-heading">
           <div>
             <h2 id="collection-title">
@@ -1100,19 +1114,13 @@ onUnmounted(() => {
           </footer>
         </form>
       </section>
-    </div>
-    <div
+    </ModalShell>
+    <ModalShell
       v-if="modal"
-      class="meme-overlay"
-      @click.self="!busy && (modal = false)"
+      labelledby="meme-title"
+      @close="requestCloseEditor"
     >
-      <section
-        class="meme-dialog"
-        :class="{ 'is-editing': editing }"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="meme-title"
-      >
+      <section class="meme-dialog" :class="{ 'is-editing': editing }">
         <header class="meme-dialog-heading">
           <div>
             <h2 id="meme-title">{{ editing ? "编辑表情" : "上传表情" }}</h2>
@@ -1129,7 +1137,7 @@ onUnmounted(() => {
             class="meme-close"
             aria-label="关闭表情弹窗"
             :disabled="busy"
-            @click="modal = false"
+            @click="requestCloseEditor"
           >
             <X :size="20" />
           </button>
@@ -1386,7 +1394,7 @@ onUnmounted(() => {
               class="button secondary"
               type="button"
               :disabled="busy"
-              @click="modal = false"
+              @click="requestCloseEditor"
             >
               取消</button
             ><button
@@ -1405,7 +1413,7 @@ onUnmounted(() => {
           </footer>
         </form>
       </section>
-    </div>
+    </ModalShell>
   </main>
 </template>
 <style scoped>
@@ -1457,16 +1465,6 @@ onUnmounted(() => {
 }
 .meme-card span {
   overflow-wrap: anywhere;
-}
-.meme-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: #0007;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
 }
 .meme-dialog {
   background: var(--bubblepilot-surface, #fff);
@@ -1641,9 +1639,6 @@ onUnmounted(() => {
 @media (max-width: 600px) {
   .meme-dialog {
     padding: 20px;
-  }
-  .meme-overlay {
-    padding: 12px;
   }
   .meme-drop {
     padding: 20px 12px;

@@ -768,7 +768,9 @@ onBeforeUnmount(() => generation++);
                   </td>
                   <td>
                     {{ labels[o.status] ?? o.status
-                    }}<small v-if="o.reason_code"> · {{ o.reason_code }}</small>
+                    }}<small v-if="o.reason_code" class="diagnostic-code">
+                      · 诊断：{{ o.reason_code }}</small
+                    >
                   </td>
                   <td>
                     <a
@@ -833,8 +835,8 @@ onBeforeUnmount(() => generation++);
                 timeZone: detail.task.timezone,
               })
             }}</time>
-            <p v-if="run.reason_code" class="task-help">
-              {{ run.reason_code }}
+            <p v-if="run.reason_code" class="task-help diagnostic-code">
+              诊断：{{ run.reason_code }}
             </p>
             <a
               class="task-execution-link"
@@ -860,8 +862,8 @@ onBeforeUnmount(() => generation++);
                   })
                 }}</time>
               </div>
-              <p v-if="event.reason_code" class="task-help">
-                {{ event.reason_code }}
+              <p v-if="event.reason_code" class="task-help diagnostic-code">
+                诊断：{{ event.reason_code }}
               </p>
             </li>
           </ol>

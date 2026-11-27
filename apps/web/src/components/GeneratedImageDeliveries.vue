@@ -160,7 +160,9 @@ const states: Record<string, string> = {
           </button>
         </div>
       </div>
-      <p v-if="item.errorCode">{{ item.errorCode }}</p>
+      <p v-if="item.errorCode" class="diagnostic-code">
+        诊断：{{ item.errorCode }}
+      </p>
       <p
         v-if="
           !sensitiveActive && (item.state === 'ready' || item.state === 'bound')

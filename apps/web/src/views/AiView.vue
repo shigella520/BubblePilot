@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { enumLabel } from "../utils/status-labels";
 import { confirmAction } from "../services/confirm";
 import { partialFailureMessage, settleAll } from "../utils/settle";
 import { formatDateTime } from "../utils/format";
@@ -1269,7 +1270,9 @@ onMounted(async () => {
                   >已停用</span
                 >
               </header>
-              <p>{{ item.baseUrl }} · {{ item.apiKind }}</p>
+              <p>
+                {{ item.baseUrl }} · {{ enumLabel("apiKind", item.apiKind) }}
+              </p>
               <footer>
                 <span>{{ item.model }}</span
                 ><span>{{ item.requestTimeoutMs / 1000 }}s</span
@@ -1277,15 +1280,18 @@ onMounted(async () => {
                   v-if="
                     item.reasoningEffort && item.reasoningEffort !== 'default'
                   "
-                  >推理强度：{{ item.reasoningEffort }}</span
+                  >推理强度：{{
+                    enumLabel("reasoningEffort", item.reasoningEffort)
+                  }}</span
                 ><span v-if="item.sessionAffinity === 'session-id-header'"
                   >固定会话与缓存键</span
                 ><span>{{
                   item.secretConfigured ? "API Key 已配置" : "API Key 未配置"
                 }}</span
-                ><span v-if="item.health.lastErrorCode">{{
-                  item.health.lastErrorCode
-                }}</span
+                ><span
+                  v-if="item.health.lastErrorCode"
+                  :title="item.health.lastErrorCode"
+                  >最近有失败记录</span
                 ><span v-if="item.capabilities.functionCalling"
                   >Function Calling：{{
                     probeLabel(item.capabilityProbe.functionCalling)
@@ -1306,6 +1312,7 @@ onMounted(async () => {
                 class="button tiny secondary provider-test-action"
                 :disabled="providerTestBusyIds.has(item.id)"
                 :aria-busy="providerTestBusyIds.has(item.id)"
+                title="使用已保存的配置测试连接与能力"
                 @click="providerAction(item, 'test')"
               >
                 <TestTube2 :size="14" />{{
