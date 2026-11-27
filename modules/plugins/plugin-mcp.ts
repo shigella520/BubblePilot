@@ -88,6 +88,8 @@ async function attachmentFailure(
     "attachment_staging_changed_session_invalidated",
     "attachment_directory_changed_session_invalidated",
     "attachment_failed_session_invalidated_do_not_replay",
+    // Generators verify image bytes; the session stays usable.
+    "attachment_type_unsupported",
   ]);
   pluginError(allowed.has(code) ? code.toUpperCase() : fallback);
 }

@@ -431,7 +431,8 @@ export class AttachmentSession {
               guidance:
                 code === "ATTACHMENT_ARGUMENTS_INVALID"
                   ? `Provide one non-empty attachment_ref supplied in this run${this.channels.size > 1 ? ` and optionally target (${this.targetNames().join(" or ")})` : ""}.`
-                  : code === "ATTACHMENT_TYPE_UNSUPPORTED_FOR_TARGET"
+                  : code === "ATTACHMENT_TYPE_UNSUPPORTED_FOR_TARGET" ||
+                      code === "PLUGIN_ATTACHMENT_TYPE_UNSUPPORTED"
                     ? "The image generator accepts only PNG, JPEG, WebP or HEIC photos. Do not rename files; explain the limitation or use the sandbox target for other files."
                     : code === "ATTACHMENT_REFERENCE_UNAVAILABLE"
                       ? "No download or import was started. Query the attachment again with query_chat_messages or read_chat_excerpt and use the exact attachment_ref returned in THIS run. Context display IDs, message IDs and references from earlier runs are not import references. If no valid reference is returned, explain the limitation; do not guess a reference or assume the user must resend the file."
