@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "bubblepilot-image-gen",
+  "version": "0.1.0",
+  "description": "按需调用图像模型生成或编辑图片；每次调用计费并受每日额度限制，须由管理员批准。"
+}
