@@ -440,7 +440,7 @@ onBeforeUnmount(() => generation++);
       loadError
     }}</DismissibleMessage>
     <div class="table-shell scheduled-task-table">
-      <table class="sticky-actions">
+      <table>
         <thead>
           <tr>
             <th>任务概要</th>
@@ -928,14 +928,6 @@ footer {
 }
 .scheduled-task-table > table {
   min-width: 1040px;
-}
-/* Chat names, times and states stay readable instead of wrapping per word. */
-.scheduled-task-table td:nth-child(2) {
-  min-width: 150px;
-}
-.scheduled-task-table td:nth-child(4),
-.scheduled-task-table td:nth-child(5) {
-  white-space: nowrap;
 }
 td:first-child {
   min-width: 160px;

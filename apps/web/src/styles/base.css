@@ -756,16 +756,6 @@ tbody tr:last-child td {
 tbody tr:hover {
   background: rgba(255, 255, 255, 0.55);
 }
-/* Wide tables scroll sideways inside .table-shell; macOS hides the
-   scrollbar, so keep the row actions pinned to the visible right edge. */
-table.sticky-actions th:last-child,
-table.sticky-actions td:last-child {
-  position: sticky;
-  right: 0;
-  z-index: 1;
-  background: var(--bubblepilot-surface-subtle);
-  box-shadow: -10px 0 12px -12px rgba(15, 23, 42, 0.35);
-}
 td strong,
 td .keyline {
   display: block;
@@ -3545,29 +3535,29 @@ legend {
 }
 
 .execution-list-table {
-  min-width: 1040px;
+  min-width: 1120px;
   table-layout: fixed;
 }
 .execution-list-table th:nth-child(1) {
-  width: 200px;
+  width: 220px;
 }
 .execution-list-table th:nth-child(2) {
-  width: 140px;
+  width: 150px;
 }
 .execution-list-table th:nth-child(3) {
-  width: 150px;
+  width: 160px;
 }
 .execution-list-table th:nth-child(4) {
-  width: 110px;
+  width: 120px;
 }
 .execution-list-table th:nth-child(5) {
-  width: 200px;
+  width: 220px;
 }
 .execution-list-table th:nth-child(6) {
-  width: 150px;
+  width: 155px;
 }
 .execution-list-table th:nth-child(7) {
-  width: 90px;
+  width: 95px;
 }
 .execution-model-list {
   display: grid;

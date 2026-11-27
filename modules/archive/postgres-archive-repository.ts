@@ -1,3 +1,4 @@
+import { keywordCondition, trigramUsable } from "./keyword-match.js";
 import { chatDisplayNameSql } from "./chat-display-name-sql.js";
 import { messageRevisionNotice } from "./message-revision.js";
 import type { ReplyPreview, RevisionState } from "./message-revision.js";
@@ -856,6 +857,7 @@ export class PostgresArchiveRepository implements ArchiveRepository {
   async searchMessages(
     options: MessageSearchOptions,
   ): Promise<readonly MessageSearchResult[]> {
+    const trigram = trigramUsable(options.keyword ? [options.keyword] : []);
     const result = await this.pool.query<MessageSearchRow>(
       `SELECT
          m.id, m.provider_message_id, m.sender_id, m.sent_at, m.body,
@@ -870,15 +872,9 @@ export class PostgresArchiveRepository implements ArchiveRepository {
        INNER JOIN chats c ON c.id = m.chat_id
        WHERE c.enabled = TRUE
          AND ($1::uuid IS NULL OR c.id = $1)
-         -- Substring match served by messages_body_trgm_idx. Redacted rows have
-         -- a NULL body, so the redaction filter only lets the partial index apply.
-         AND (
-           $2::text IS NULL
-           OR (
-             m.content_redacted_at IS NULL
-             AND LOWER(m.body) LIKE '%' || REPLACE(REPLACE(REPLACE(LOWER($2), '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%' ESCAPE '\\'
-           )
-         )
+         -- Trigram index for 3+ character keywords, recent-first scan
+         -- otherwise (see keyword-match.ts).
+         AND ($2::text IS NULL OR ${keywordCondition("$2", trigram)})
          AND ($3::text IS NULL OR m.sender_id = $3)
          AND ($4::timestamptz IS NULL OR m.sent_at >= $4)
          AND ($5::timestamptz IS NULL OR m.sent_at <= $5)

@@ -1,3 +1,4 @@
+import { keywordCondition, trigramUsable } from "../archive/keyword-match.js";
 import {
   countBuckets,
   countGroupLimit,
@@ -63,12 +64,13 @@ export function chatFilterSql(
       `(${clock}>=${from}::time ${query.dailyTime.from < query.dailyTime.to ? "AND" : "OR"} ${clock}<${to}::time)`,
     );
   }
-  if (query.keywords)
+  if (query.keywords) {
+    // Trigram index for 3+ character keywords, recent-first scan otherwise.
+    const trigram = trigramUsable(query.keywords);
     predicates.push(
-      // Substring match served by messages_body_trgm_idx (redacted rows have
-      // no body, so the redaction check only lets the partial index apply).
-      `(m.content_redacted_at IS NULL AND (${query.keywords.map((word) => `lower(m.body) LIKE '%'||replace(replace(replace(lower(${parameter(word)}::text),'\\','\\\\'),'%','\\%'),'_','\\_')||'%' ESCAPE '\\'`).join(query.keywordMode === "all" ? " AND " : " OR ")}))`,
+      `(${query.keywords.map((word) => keywordCondition(parameter(word), trigram)).join(query.keywordMode === "all" ? " AND " : " OR ")})`,
     );
+  }
   const attachments = `jsonb_array_elements(CASE WHEN jsonb_typeof(m.attachments)='array' THEN m.attachments ELSE '[]'::jsonb END)`;
   const attachmentConditions: string[] = [];
   if (query.attachmentName)
