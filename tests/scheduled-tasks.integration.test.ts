@@ -928,9 +928,11 @@ describe.runIf(!!url)("scheduled tasks with PostgreSQL", () => {
     expect(JSON.stringify(model.mock.calls[0]![0].messages)).toContain(
       "scheduled_task",
     );
+    // Authorised plugins stay available (the task may ask to publish a share
+    // page); memes and web search stay off for unattended runs.
     expect(model.mock.calls[0]![0]).toMatchObject({
       idleDecision: false,
-      pluginIds: [],
+      pluginIds: [expect.any(String)],
       allowMemes: false,
       webSearch: "disabled",
     });

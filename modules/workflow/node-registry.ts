@@ -1232,7 +1232,10 @@ class AiChatNodeHandler extends BaseNodeHandler {
         idleDecision,
         outputFormat: idleDecision ? "json" : node.config.outputFormat,
         allowMemes: !scheduled && (node.config.allowMemes ?? false),
-        pluginIds: scheduled ? [] : (node.config.pluginIds ?? []),
+        // Scheduled runs get the node's authorised plugins too (e.g. a weekly
+        // report published as a share page); the scheduled instruction limits
+        // them to tools the task content explicitly asks for.
+        pluginIds: node.config.pluginIds ?? [],
         ...((node.config.imageReply?.enabled ||
           node.config.imageGeneration?.enabled) &&
         !scheduled &&
